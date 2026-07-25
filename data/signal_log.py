@@ -1,0 +1,103 @@
+"""
+SQLite persistence layer for generated signals (audit trail of every signal the
+system produced, whether or not it triggered a Telegram alert).
+
+Design mirrors data/storage.py's pattern: single table, UTC epoch timestamps,
+idempotent upserts keyed on timestamp_utc so re-running the scheduler for the
+same candle never creates duplicate rows.
+
+This is critical for accountability: the project brief requires transparency into
+WHY a signal was or wasn't sent, not just the alerts that went out. Every row here
+answers "what did the system think at time T", regardless of alert_sent status.
+"""
+import sqlite3
+import os
+import json
+import pandas as pd
+
+TABLE_NAME = "signal_log"
+
+
+def get_connection(db_path: str) -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
+
+
+def init_schema(db_path: str):
+    conn = get_connection(db_path)
+    try:
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+                timestamp_utc INTEGER PRIMARY KEY,
+                generated_at TEXT NOT NULL,
+                bias TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                regime TEXT NOT NULL,
+                session TEXT NOT NULL,
+                entry_zone TEXT,
+                invalidation REAL,
+                targets TEXT,
+                reasoning_summary TEXT,
+                alert_sent INTEGER NOT NULL DEFAULT 0
+            );
+        """)
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_ts ON {TABLE_NAME}(timestamp_utc);")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def log_signal(db_path: str, signal: dict, alert_sent: bool):
+    """
+    Persists one signal dict (the exact JSON shape returned by
+    realtime/pipeline.py::generate_signal) plus whether an alert was actually sent.
+    Uses INSERT OR REPLACE so re-scoring the same candle (e.g. after a restart)
+    is idempotent, not a duplicate audit entry.
+    """
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            f"""INSERT OR REPLACE INTO {TABLE_NAME}
+                (timestamp_utc, generated_at, bias, confidence, regime, session,
+                 entry_zone, invalidation, targets, reasoning_summary, alert_sent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                signal["timestamp_utc"],
+                signal["generated_at"],
+                signal["bias"],
+                signal["confidence"],
+                signal["regime"],
+                signal["session"],
+                json.dumps(signal["entry_zone"]) if signal.get("entry_zone") else None,
+                signal.get("invalidation"),
+                json.dumps(signal["targets"]) if signal.get("targets") else None,
+                signal.get("reasoning_summary", ""),
+                int(alert_sent),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def read_signal_history(db_path: str, start_ts: int = None, end_ts: int = None) -> pd.DataFrame:
+    """Read logged signals for auditing/reporting, sorted ascending by timestamp."""
+    conn = get_connection(db_path)
+    try:
+        query = f"SELECT * FROM {TABLE_NAME}"
+        clauses, params = [], []
+        if start_ts is not None:
+            clauses.append("timestamp_utc >= ?")
+            params.append(start_ts)
+        if end_ts is not None:
+            clauses.append("timestamp_utc <= ?")
+            params.append(end_ts)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY timestamp_utc ASC"
+        df = pd.read_sql_query(query, conn, params=params)
+    finally:
+        conn.close()
+    return df

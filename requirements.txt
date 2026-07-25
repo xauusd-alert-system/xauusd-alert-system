@@ -1,0 +1,10 @@
+pandas
+numpy
+pyyaml
+requests
+pytest
+fastapi
+uvicorn
+python-telegram-bot
+xgboost
+scikit-learn
