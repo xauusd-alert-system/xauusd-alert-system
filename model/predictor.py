@@ -44,8 +44,8 @@ class ModelPredictor:
         if X.isnull().any().any():
             raise ValueError("NaN found in feature inputs at inference time - cannot predict on incomplete data.")
 
-        proba = self.model.predict_proba(X)  # columns: [P(class=0), P(class=1)] = [P(short), P(long)]
         X = X.astype(float)
+        proba = self.model.predict_proba(X)  # columns: [P(class=0), P(class=1)] = [P(short), P(long)]
         return pd.DataFrame({"p_short": proba[:, 0], "p_long": proba[:, 1]}, index=df.index)
 
     def predict_single(self, row: pd.Series) -> dict:
