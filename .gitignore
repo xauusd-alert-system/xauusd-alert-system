@@ -12,3 +12,11 @@ venv/
 
 # Generated logs and results
 logs/*.csv
+
+# Local backups, trained artifacts, and generated analysis output
+backup/
+models/
+output/
+
+# One-off local migration/patch script
+fix_ingestion.py
