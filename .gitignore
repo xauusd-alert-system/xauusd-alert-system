@@ -1,0 +1,14 @@
+﻿# Python bytecode and cache directories
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment secrets
+.env
+
+# Generated logs and results
+logs/*.csv
