@@ -1,0 +1,13 @@
+n_trades,win_rate,profit_factor,sharpe_ratio,sortino_ratio,expectancy,max_drawdown,total_pnl,max_consecutive_losses,window
+126,46.83,0.79,-1.68,-4.86,-0.31,-41.67,-38.75,10,"WalkForwardWindow(train_start_ts=1740658800, train_end_ts=1751026800, test_start_ts=1751026800, test_end_ts=1752754800)"
+91,54.95,1.39,2.36,9.52,0.41,-14.46,36.9,6,"WalkForwardWindow(train_start_ts=1742386800, train_end_ts=1752754800, test_start_ts=1752754800, test_end_ts=1754482800)"
+103,56.31,1.02,0.15,0.39,0.03,-37.61,3.03,6,"WalkForwardWindow(train_start_ts=1744114800, train_end_ts=1754482800, test_start_ts=1754482800, test_end_ts=1756210800)"
+149,42.95,0.71,-2.42,-6.55,-0.45,-83.39,-67.37,10,"WalkForwardWindow(train_start_ts=1745842800, train_end_ts=1756210800, test_start_ts=1756210800, test_end_ts=1757938800)"
+126,42.06,0.78,-1.77,-5.77,-0.39,-59.49,-49.48,5,"WalkForwardWindow(train_start_ts=1747570800, train_end_ts=1757938800, test_start_ts=1757938800, test_end_ts=1759666800)"
+113,60.18,1.48,2.62,5.93,1.34,-42.59,151.7,5,"WalkForwardWindow(train_start_ts=1749298800, train_end_ts=1759666800, test_start_ts=1759666800, test_end_ts=1761394800)"
+34,73.53,3.17,8.63,28.77,3.65,-19.97,123.95,2,"WalkForwardWindow(train_start_ts=1751026800, train_end_ts=1761394800, test_start_ts=1761394800, test_end_ts=1763122800)"
+104,59.62,1.62,3.42,12.29,1.29,-50.26,133.8,5,"WalkForwardWindow(train_start_ts=1752754800, train_end_ts=1763122800, test_start_ts=1763122800, test_end_ts=1764850800)"
+111,46.85,0.79,-1.6,-4.67,-0.48,-84.19,-53.24,7,"WalkForwardWindow(train_start_ts=1754482800, train_end_ts=1764850800, test_start_ts=1764850800, test_end_ts=1766578800)"
+162,45.68,0.91,-0.67,-2.18,-0.3,-151.32,-48.96,7,"WalkForwardWindow(train_start_ts=1756210800, train_end_ts=1766578800, test_start_ts=1766578800, test_end_ts=1768306800)"
+53,52.83,0.99,-0.06,-0.09,-0.09,-184.35,-4.9,4,"WalkForwardWindow(train_start_ts=1757938800, train_end_ts=1768306800, test_start_ts=1768306800, test_end_ts=1770034800)"
+85,50.59,0.9,-0.67,-1.32,-0.58,-136.28,-49.23,7,"WalkForwardWindow(train_start_ts=1759666800, train_end_ts=1770034800, test_start_ts=1770034800, test_end_ts=1771762800)"

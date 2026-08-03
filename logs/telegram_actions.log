@@ -1,0 +1,3 @@
+2026-08-02T16:35:49.076702 | user=5654745424 | action=cmd | python -m scripts.summary_report
+2026-08-02T16:36:58.015109 | user=5654745424 | action=cmd | dir
+2026-08-02T16:37:04.794466 | user=5654745424 | action=read_denied | .env

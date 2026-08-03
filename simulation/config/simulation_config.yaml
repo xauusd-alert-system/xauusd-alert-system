@@ -1,0 +1,83 @@
+# ============================================================
+# Simulation Configuration
+# Defines the virtual limit order book (LOB) market simulation
+# parameters used by MarketSimulator and the MT5 shim.
+# ============================================================
+
+# Starting mid price of the simulated market (XAU/USD level)
+initial_price: 2400.0
+
+# Time each tick represents (seconds). 5s per tick -> ~12 ticks per M1 bar.
+tick_duration_seconds: 5
+
+# Number of ticks that make up one M1 bar. 12 ticks of 5s = 1 M1 bar.
+bar_interval_ticks: 12
+
+# Number of ticks that make up one M5 bar. 60 ticks of 5s = 1 M5 bar
+# (used by run_loop).
+m5_bar_interval_ticks: 60
+
+# Agents population
+num_noise_traders: 300
+num_market_makers: 20
+num_trend_followers: 50
+num_mean_reversion: 50
+num_fundamental: 5
+
+# Noise trader order size distribution (lognormal)
+noise_lambda: 0.3
+noise_lognormal_mu: 1.5
+noise_lognormal_sigma: 0.5
+noise_min_size: 0.01
+noise_max_size: 5.0
+
+# Market maker behaviour
+mm_spread_offset_pct: 0.0003
+mm_max_inventory: 100.0
+
+# Fundamental/rebalance behaviour
+fundamental_impact_factor: 0.5
+
+# News shocks
+news_shock_std: 0.002
+news_mean_arrival_ticks: 500
+
+# Circuit breaker that halts trading below a max daily drawdown threshold
+circuit_breaker_pct: 0.15
+
+# ============================================================
+# Broker shim config
+# ============================================================
+# Around-mid spread offsets in price units (XAU/USD realistic spread)
+spread_ask_offset: 0.30            # ask = mid + 0.30
+spread_bid_offset: 0.30            # bid = mid - 0.30
+
+# Max slippage in points applied on market orders
+slippage_points: 5
+
+# Starting virtual account balance
+virtual_balance: 10000.0
+
+# Virtual account magic number (must match MultiAssetMT5Trader.magic_number = 777111)
+virtual_magic: 777111
+
+# ============================================================
+# Symbol info overrides (per-symbol; matched to mt5_symbol values from config.yaml)
+# ============================================================
+symbol_overrides:
+  XAUUSD:
+    digits: 2
+    point: 0.01
+    trade_stops_level: 50
+    trade_freeze_level: 0
+    trade_contract_size: 100.0
+    volume_min: 0.01
+    volume_step: 0.01
+  BTCUSD:
+    digits: 2
+    point: 0.01
+    trade_stops_level: 100
+    trade_freeze_level: 0
+    trade_contract_size: 1.0
+    volume_min: 0.01
+    volume_step: 0.01
