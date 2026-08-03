@@ -11,23 +11,35 @@ venv/
 .env
 
 # Generated logs and results
+logs/*.csv
 logs/*.log
 logs/backtest_archive/
-logs/*.csv
-*.sqlite
 
 # Local backups, trained artifacts, and generated analysis output
 backup/
 models/
 output/
 
+# Backup / patch files
+*.bak
+
+# Process ID files
+*.pid
+
+# PowerShell $null redirect artefact (literal filename "$null")
+$null
+
+# One-off local scripts
+diag.py
+
+# PDF exports of the codebase
+compact_project_code.pdf
+
+# Version stub files (e.g. "2.4.0" dropped by some package managers)
+[0-9]*.*
+
 # One-off local migration/patch script
 fix_ingestion.py
 
-# Runtime / backup / local-analysis files
-*.bak
-*.pid
-$null
-diag.py
-compact_project_code.pdf
-[0-9]*.*
+# SQLite databases
+*.sqlite

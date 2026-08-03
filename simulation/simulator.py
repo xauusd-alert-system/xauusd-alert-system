@@ -62,18 +62,20 @@ def load_simulation_config(path: Optional[str] = None) -> dict:
 def shutdown_mt5_shim() -> None:
     """Release the injected MT5 shim (called by run_simulation on exit)."""
     try:
-        # Lazy import: the shim package is created under simulation/mt5_shim
-        # and injected onto sys.path by scripts/run_simulation.py.
         from simulation.mt5_shim import MetaTrader5 as _mt5  # type: ignore
-
         _mt5.shutdown()
         logger.info("MT5 shim shut down.")
-    except Exception:  # pragma: no cover - defensive on shutdown
+    except Exception:
         logger.debug("MT5 shim shutdown failed or not injected", exc_info=True)
 
 
 class MarketSimulator:
     """Drives the discrete-event LOB simulation tick by tick."""
+
+    # Reference to the VirtualState injected by run_simulation.py after
+    # _inject() is called.  Used to keep pos.price_current live and to
+    # feed real inventory into the agent context.
+    _virtual_state = None  # set externally via simulator.attach_state(state)
 
     def __init__(
         self,
@@ -85,6 +87,9 @@ class MarketSimulator:
         self.rng = random.Random(seed)
 
         # --- time --------------------------------------------------------
+        # start_timestamp_utc lets the simulation begin at a real calendar
+        # time instead of Unix epoch 0 (1970-01-01).  Default: 2023-11-14.
+        self._start_ts: int = int(self.cfg.get("start_timestamp_utc", 1700000000))
         self.clock = SimClock(0)
         self.tick: int = 0
 
@@ -95,6 +100,7 @@ class MarketSimulator:
             bar_interval_ticks=int(self.cfg.get("bar_interval_ticks", 12)),
             tick_duration_seconds=int(self.cfg.get("tick_duration_seconds", 5)),
             start_tick=int(self.cfg.get("bar_interval_ticks", 12)),
+            start_timestamp=self._start_ts,
         )
         self.engine.on_trade = self._on_trade
 
@@ -138,6 +144,10 @@ class MarketSimulator:
         self.price_history: list[float] = [self.initial_price]
 
         self._seed_initial_quotes()
+
+    def attach_state(self, state) -> None:
+        """Attach a VirtualState so the simulator can keep price_current live."""
+        self._virtual_state = state
 
     # ------------------------------------------------------------------
     # Agent construction
@@ -220,8 +230,12 @@ class MarketSimulator:
         return self.current_mid_price + self.spread_ask_offset
 
     def _on_trade(self, trade) -> None:
-        """Feed matched trades into the OHLCV aggregator."""
+        """Feed matched trades into the OHLCV aggregator and update last_price."""
         self.aggregator.on_tick(trade)
+        # Keep last_price in sync with the most recent execution so agents
+        # and context consumers see a moving reference price, not the initial
+        # price forever.
+        self.last_price = trade.price
 
     # ------------------------------------------------------------------
     # Stepping
@@ -261,6 +275,12 @@ class MarketSimulator:
         if len(self.price_history) > 10_000:
             self.price_history = self.price_history[-5_000:]
 
+        # 7) Update price_current on all open positions so floating PnL is live.
+        if self._virtual_state is not None:
+            mid = self.current_mid_price
+            for pos in self._virtual_state.positions.values():
+                pos.price_current = round(mid, 6)
+
     def _gather_orders(self) -> list[Order]:
         mid = self.current_mid_price
         bid = self.current_bid
@@ -272,12 +292,25 @@ class MarketSimulator:
                 int(self.cfg.get("bar_interval_ticks", 12)), n=30
             )
             closes = [float(x) for x in df["close"].tolist()]
-        except Exception:  # pragma: no cover - defensive
+        except Exception:
             logger.debug("aggregator bars unavailable", exc_info=True)
         if closes:
             closes = closes + [self.last_price]
         else:
             closes = [self.last_price]
+
+        # Compute net inventory across all open virtual positions so that
+        # MarketMaker agents can skew their quotes to shed inventory.
+        # Without this, inventory is always 0.0 and quotes stay symmetric,
+        # which pins the price at the initial_price level.
+        net_inventory: float = 0.0
+        if self._virtual_state is not None:
+            for pos in self._virtual_state.positions.values():
+                # BUY positions contribute positive inventory, SELL negative.
+                if pos.type == 0:  # BUY
+                    net_inventory += pos.volume
+                else:             # SELL
+                    net_inventory -= pos.volume
 
         context = {
             "mid": mid,
@@ -286,7 +319,7 @@ class MarketSimulator:
             "last_price": self.last_price,
             "last_bar": None,
             "recent_closes": closes,
-            "inventory": 0.0,
+            "inventory": net_inventory,
             "news_shock": self.news.news_shock,
         }
 
@@ -298,10 +331,6 @@ class MarketSimulator:
             if order is not None:
                 orders.append(order)
 
-        # Update last_price from the most recent execution (if any).
-        for order in orders:
-            if order.side in ("BUY", "SELL") and order.price is not None:
-                pass
         return orders
 
     def _refresh_stale_quotes(self) -> None:
@@ -357,13 +386,12 @@ class MarketSimulator:
             df = self.aggregator.get_bars_by_interval(
                 self.m5_bar_interval_ticks, n=2
             )
-        except Exception:  # pragma: no cover - defensive
+        except Exception:
             logger.debug("no M5 bars yet", exc_info=True)
             return None
         if df is None or len(df) == 0:
             return None
 
-        # The last row is the bar that just closed at the boundary.
         row = df.iloc[-1]
         return {
             "time": int(row["timestamp"]),

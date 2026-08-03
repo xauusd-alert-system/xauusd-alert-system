@@ -382,6 +382,8 @@ def order_send(request: dict) -> object:
         sl = float(request.get("sl", 0.0) or 0.0)
         tp = float(request.get("tp", 0.0) or 0.0)
         _STATE.modify_sl_tp(pos, sl, tp)
+        # Return the position ticket in the order field so callers that
+        # check res.order after SLTP modification get a meaningful value.
         return VirtualOrderResult(
             retcode=TRADE_RETCODE_DONE,
             order=position_ticket,
@@ -477,11 +479,6 @@ def _result(retcode: int, order: int, comment: str) -> object:
     return VirtualOrderResult(
         retcode=retcode, order=order, comment=comment
     )
-
-
-def result_done(cls, comment: str) -> object:
-    """Construct a DONE result helper (kept here for clarity)."""
-    return cls(retcode=TRADE_RETCODE_DONE, order=0, comment=comment)
 
 
 def positions_total(*args, **kwargs) -> int:

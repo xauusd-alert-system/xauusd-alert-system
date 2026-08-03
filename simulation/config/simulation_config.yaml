@@ -7,6 +7,11 @@
 # Starting mid price of the simulated market (XAU/USD level)
 initial_price: 2400.0
 
+# Simulation start time as a Unix UTC timestamp.
+# 1700000000 = 2023-11-14 22:13:20 UTC — gives realistic bar timestamps
+# instead of 1970-01-01 (Unix epoch 0).
+start_timestamp_utc: 1700000000
+
 # Time each tick represents (seconds). 5s per tick -> ~12 ticks per M1 bar.
 tick_duration_seconds: 5
 
@@ -31,12 +36,13 @@ noise_lognormal_sigma: 0.5
 noise_min_size: 0.01
 noise_max_size: 5.0
 
-# Noise trader directional "tide": BUY probability oscillates as a sine wave in
-# time between 0.5 - amplitude and 0.5 + amplitude (default 45%..55%), giving
-# local buy/sell pressure waves that prevent the price from pinning flat.
-# Period is in ticks; 480 ticks = 8 M1 bars = 40 minutes of simulated time.
-noise_imbalance_amplitude: 0.05
-noise_imbalance_period_ticks: 480.0
+# Noise trader directional "tide": BUY probability oscillates as a sine wave
+# between 0.5 - amplitude and 0.5 + amplitude.
+# amplitude=0.15 -> swing from 35% to 65% buy probability (was 0.05 -> 45-55%).
+# period=240 ticks -> ~20 min cycle (was 480 -> ~40 min), creating more frequent
+# directional waves that move the mid price away from the initial level.
+noise_imbalance_amplitude: 0.15
+noise_imbalance_period_ticks: 240.0
 
 # Market maker behaviour
 mm_spread_offset_pct: 0.0005
@@ -45,9 +51,12 @@ mm_max_inventory: 100.0
 # Fundamental/rebalance behaviour
 fundamental_impact_factor: 0.5
 
-# News shocks
-news_shock_std: 0.002
-news_mean_arrival_ticks: 500
+# News shocks: stronger and more frequent than defaults to generate
+# visible price movement during simulation.
+# news_shock_std=0.004 -> ~$9.60 shock on a $2400 price (was 0.002 -> ~$4.80)
+# news_mean_arrival_ticks=300 -> news fires every ~25 min (was 500 -> ~42 min)
+news_shock_std: 0.004
+news_mean_arrival_ticks: 300
 
 # Circuit breaker that halts trading below a max daily drawdown threshold
 circuit_breaker_pct: 0.15
