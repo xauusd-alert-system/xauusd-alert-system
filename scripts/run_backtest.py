@@ -1,138 +1,169 @@
-﻿"""
-CLI entry point for walk-forward backtest + model training.
-For each walk-forward fold:
-  1. Trains an XGBoost model on the train window
-  2. Evaluates the ensemble (rule-based + ML) on the test window
-  3. Logs per-fold metrics to stdout and saves a summary CSV
-
-Usage:
-    python scripts/run_backtest.py                   # uses config.yaml walk_forward settings
-    python scripts/run_backtest.py --timeframe M15   # override timeframe
-    python scripts/run_backtest.py --mock            # use mock data (no API key needed)
-
-Saves trained model to: models/model_latest.joblib
-Saves metrics CSV to:   logs/backtest_results.csv
-"""
+﻿import argparse
 import os
+import sqlite3
 import sys
-import argparse
+import copy
+
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
-from data.ingestion import fetch_candles
 from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
+from features.structure import detect_structure
+from features.mtf_confluence import compute_confluence_score
 from regime.classifier import add_regime_indicators, classify_regime_series
 from labeling.label_generator import generate_labels_from_config
-from model.trainer import build_training_matrix, time_ordered_split, train_model, calibrate_model, save_model
+from data.storage import read_candles
+from model.trainer import (
+    build_training_matrix,
+    train_model,
+    calibrate_model,
+    save_model,
+)
 from model.predictor import ModelPredictor
-from model.ensemble import compute_ensemble_signal
-from backtest.engine import EventDrivenBacktester, rule_based_signal
-from backtest.metrics import trades_to_dataframe, compute_metrics
-from backtest.walk_forward import generate_windows, run_walk_forward
+from model.ensemble_backtest import EnsembleBacktester
+from backtest.walk_forward import run_walk_forward
 
 
-MODEL_OUT = "models/model_latest.joblib"
-METRICS_OUT = "logs/backtest_results.csv"
+def load_asset_history(db_path: str, timeframe: str, asset_key: str) -> pd.DataFrame:
+    table = f"ohlcv_{timeframe.lower()}"
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(
+            f"""
+            SELECT
+                timestamp_utc,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                session
+            FROM {table}
+            WHERE symbol = ?
+            ORDER BY timestamp_utc
+            """,
+            conn,
+            params=(asset_key,),
+        )
+    if df.empty:
+        raise ValueError(f"No rows found for {asset_key} in {table}")
+    df["timestamp_utc"] = df["timestamp_utc"].astype("int64")
+    df["timestamp"] = pd.to_datetime(df["timestamp_utc"], unit="s", utc=True)
+    return df
 
 
-def build_full_df(cfg, timeframe, mode, n_candles=5000):
-    sessions_cfg = cfg["sessions"]
-    df = fetch_candles(timeframe, n_candles, sessions_cfg, mode=mode)
+def merge_asset_cfg(cfg: dict, asset_key: str, section: str) -> dict:
+    """Возвращает cfg с объединённым указанным section (ensemble/labeling) из asset_cfg."""
+    asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+    base_section = cfg.get(section, {})
+    asset_section = asset_cfg.get(section)
+    if asset_section:
+        merged = copy.deepcopy(base_section)
+        merged.update(asset_section)
+    else:
+        merged = copy.deepcopy(base_section)
+    cfg_copy = copy.deepcopy(cfg)
+    cfg_copy[section] = merged
+    return cfg_copy
+
+
+def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str) -> pd.DataFrame:
+    cfg = merge_asset_cfg(cfg, asset_key, "labeling")
+    df = raw_df.copy()
     df = build_all_indicators(df, cfg)
     df = candle_anatomy(df)
+    df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
     df = add_regime_indicators(df, cfg)
-    df["mtf_confluence_score"] = 0.0
+
+    htf_frames = {}
+    ref_tfs = cfg.get("features", {}).get("mtf_reference_timeframes", ["M15", "H1"])
+    for htf in ref_tfs:
+        try:
+            raw_htf = read_candles(db_path, htf, asset_key)
+            if not raw_htf.empty:
+                htf_df = build_all_indicators(raw_htf, cfg)
+                htf_frames[htf] = htf_df
+        except Exception:
+            pass
+
+    if htf_frames:
+        df = compute_confluence_score(df, htf_frames, cfg)
+    else:
+        df["mtf_confluence_score"] = 0.0
+
     df["regime"] = classify_regime_series(df, cfg)
     df["label"] = generate_labels_from_config(df, cfg)
     return df
 
 
-def strategy_fn(train_df, test_df, cfg):
-    """Train on train_df, evaluate ensemble on test_df, return metrics dict."""
-    # Train model on train window
-    X, y, cols = build_training_matrix(train_df)
-    model_path = MODEL_OUT
+def strategy_fn_factory(cfg, model_path: str, asset_key: str):
+    def strategy_fn(train_df, test_df, cfg_inner):
+        cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "labeling")
+        cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
 
-    if len(X) >= 30 and y.nunique() >= 2:
-        base = train_model(X, y, cfg)
-        calibrated = calibrate_model(base, X, y, cfg)
-        os.makedirs(os.path.dirname(model_path) or ".", exist_ok=True)
-        save_model(calibrated, cols, model_path)
-        predictor = ModelPredictor(model_path)
-    else:
-        predictor = None
+        X_train, y_train, cols = build_training_matrix(train_df)
+        test_df_eval = test_df.copy()
 
-    # Run ensemble backtest on test window
-    engine = EventDrivenBacktester(cfg)
-    trades = engine.run(test_df.reset_index(drop=True))
-    trades_df = trades_to_dataframe(trades)
-    metrics = compute_metrics(trades_df)
-    return metrics
+        if len(X_train) >= 30 and y_train.nunique() >= 2:
+            base = train_model(X_train, y_train, cfg_inner)
+            calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
+            save_model(calibrated, cols, model_path)
 
+            predictor = ModelPredictor(model_path)
+            try:
+                X_test_feat = test_df_eval[cols].fillna(0.0)
+                preds = predictor.predict_proba(X_test_feat)
+                test_df_eval["ml_p_long"] = preds["p_long"].values
+                test_df_eval["ml_p_short"] = preds["p_short"].values
+            except Exception:
+                test_df_eval["ml_p_long"] = 0.5
+                test_df_eval["ml_p_short"] = 0.5
+        else:
+            test_df_eval["ml_p_long"] = 0.5
+            test_df_eval["ml_p_short"] = 0.5
 
-MOCK_CFG_OVERRIDES = {
-    "labeling": {"target_pips_x": 3.0, "stop_pips_y": 2.0},
-    "backtest": {
-        "spread_points": 30, "slippage_points": 10,
-        "initial_balance": 500.0, "risk_per_trade_pct": 1.0,
-    },
-}
+        from backtest.metrics import trades_to_dataframe, compute_metrics
 
+        engine = EnsembleBacktester(cfg_inner, asset_key=asset_key)
+        trades = engine.run(test_df_eval.reset_index(drop=True))
+        trades_df = trades_to_dataframe(trades)
+        return compute_metrics(trades_df)
 
-def apply_mock_overrides(cfg: dict) -> dict:
-    import copy
-    cfg = copy.deepcopy(cfg)
-    for section, overrides in MOCK_CFG_OVERRIDES.items():
-        cfg[section].update(overrides)
-    return cfg
+    return strategy_fn
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run walk-forward backtest.")
-    parser.add_argument("--timeframe", type=str, default=None)
-    parser.add_argument("--mock", action="store_true", help="Use mock data instead of live API")
-    parser.add_argument("--candles", type=int, default=5000, help="Number of candles to fetch")
+    parser = argparse.ArgumentParser(description="Run walk-forward backtest for one asset from SQLite.")
+    parser.add_argument("--asset", required=True, help="Internal asset key, e.g. XAUUSD")
+    parser.add_argument("--timeframe", default="M5")
+    parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
     args = parser.parse_args()
 
     cfg = load_config()
-    mode = "mock" if args.mock else "live"
-    if args.mock:
-        cfg = apply_mock_overrides(cfg)
-    timeframe = args.timeframe or cfg["labeling"]["labeling_timeframe"]
+    assets = cfg.get("assets", {})
+    if args.asset not in assets:
+        raise SystemExit(f"Unknown asset: {args.asset}")
 
-    print(f"Building full dataset: timeframe={timeframe}, mode={mode}, candles={args.candles}")
-    df = build_full_df(cfg, timeframe, mode, n_candles=args.candles)
-    print(f"Dataset ready: {len(df)} rows, {df['label'].value_counts(dropna=False).to_dict()}")
+    asset_cfg = assets[args.asset]
+    model_path = asset_cfg["model_path"]
 
-    print("\nRunning walk-forward backtest...")
-    results = run_walk_forward(df, cfg, strategy_fn)
+    raw = load_asset_history(args.db_path, args.timeframe, args.asset)
+    df = build_full_df(cfg, raw, db_path=args.db_path, asset_key=args.asset)
 
+    print(f"Loaded {len(df)} rows for {args.asset} from {args.db_path}")
+    print(f"Running Ensemble ML Walk-Forward Backtest...")
+
+    results = run_walk_forward(df, cfg, strategy_fn_factory(cfg, model_path, asset_key=args.asset))
     if not results:
-        print("No walk-forward folds generated - dataset may be too short for configured windows.")
-        return
+        raise SystemExit("No walk-forward folds produced.")
 
-    rows = []
-    for i, r in enumerate(results):
-        w = r.pop("window")
-        print(f"  Fold {i+1}: trades={r.get('n_trades',0)}, "
-              f"win_rate={r.get('win_rate', 'N/A')}, "
-              f"pf={r.get('profit_factor', 'N/A')}, "
-              f"pnl={r.get('total_pnl', 'N/A')}")
-        rows.append(r)
-
-    results_df = pd.DataFrame(rows)
-    os.makedirs(os.path.dirname(METRICS_OUT) or ".", exist_ok=True)
-    results_df.to_csv(METRICS_OUT, index=False)
-    print(f"\nMetrics saved to {METRICS_OUT}")
-    print(f"Model saved to {MODEL_OUT}")
-    print("\nAggregate across all folds:")
-    print(results_df[["n_trades", "win_rate", "profit_factor", "total_pnl"]].describe().to_string())
+    results_df = pd.DataFrame([r for r in results])
+    os.makedirs("logs", exist_ok=True)
+    results_df.to_csv(f"logs/backtest_{args.asset.lower()}.csv", index=False)
+    print(f"Saved metrics to logs/backtest_{args.asset.lower()}.csv")
 
 
 if __name__ == "__main__":
     main()
-
-

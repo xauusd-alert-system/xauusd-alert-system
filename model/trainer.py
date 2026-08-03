@@ -20,20 +20,38 @@ probabilities because tree ensembles are often poorly calibrated out-of-the-box 
 calibration is essential here because the ensemble layer (Step 9) and alert
 thresholds rely on P(long)/P(short) being genuinely interpretable probabilities,
 not just rank-ordered scores.
+
+Now supports multiple model backends:
+- xgboost (default)
+- random_forest
+- lightgbm (optional, if installed)
+- ensemble (soft voting of available models)
 """
+import os
+import logging
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 import joblib
-import os
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("model_trainer")
 
 
 FEATURE_COLUMNS = [
     "ema_9", "ema_21", "ema_50", "ema_200", "rsi", "macd_line", "macd_signal", "macd_hist",
     "atr", "bb_width", "body_ratio", "upper_wick_ratio", "lower_wick_ratio", "candle_direction",
     "adx", "plus_di", "minus_di", "atr_ratio", "mtf_confluence_score",
+    "return_1", "return_4", "volume_ratio", "atr_pct",
+    "dist_asia_high_atr", "dist_asia_low_atr",
+    "garman_klass_vol", "dist_ema50_atr", "dist_ema200_atr", "macd_accel",
+    "sin_hour", "cos_hour", "dist_pdh_atr", "dist_pdl_atr",
+    "obv", "mfi", "rsi_slope", "volume_zscore",
+    "dist_donchian_high_atr", "dist_donchian_low_atr",
+    "bb_width_percentile", "atr_percentile",
 ]
 
 
@@ -66,21 +84,100 @@ def time_ordered_split(X: pd.DataFrame, y: pd.Series, train_ratio: float) -> tup
     return X_train, X_test, y_train, y_test
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
-    """Train raw XGBoost classifier with config-driven hyperparameters/seed."""
-    model_cfg = cfg["model"]
-    clf = xgb.XGBClassifier(
-        n_estimators=200,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=model_cfg["random_seed"],
-        eval_metric="logloss",
-        use_label_encoder=False if hasattr(xgb.XGBClassifier(), "use_label_encoder") else None,
+def _get_xgb_classifier(model_cfg: dict, random_state: int):
+    """Create XGBoost classifier with conservative regularization."""
+    params = {
+        "n_estimators": model_cfg.get("n_estimators", 150),
+        "max_depth": model_cfg.get("max_depth", 3),
+        "learning_rate": model_cfg.get("learning_rate", 0.03),
+        "subsample": model_cfg.get("subsample", 0.7),
+        "colsample_bytree": model_cfg.get("colsample_bytree", 0.7),
+        "reg_alpha": model_cfg.get("reg_alpha", 1.0),
+        "reg_lambda": model_cfg.get("reg_lambda", 5.0),
+        "random_state": random_state,
+        "eval_metric": "logloss",
+    }
+    if hasattr(xgb.XGBClassifier(), "use_label_encoder"):
+        params["use_label_encoder"] = False
+    return xgb.XGBClassifier(**params)
+
+
+def _get_rf_classifier(model_cfg: dict, random_state: int):
+    """Create RandomForest classifier."""
+    return RandomForestClassifier(
+        n_estimators=model_cfg.get("n_estimators_rf", 200),
+        max_depth=model_cfg.get("max_depth_rf", 5),
+        min_samples_leaf=model_cfg.get("min_samples_leaf_rf", 3),
+        random_state=random_state,
+        n_jobs=-1,
     )
-    clf.fit(X_train, y_train)
-    return clf
+
+
+def _get_lightgbm_classifier(model_cfg: dict, random_state: int):
+    """Create LightGBM classifier (if installed)."""
+    try:
+        import lightgbm as lgb
+        return lgb.LGBMClassifier(
+            n_estimators=model_cfg.get("n_estimators_lgb", 200),
+            max_depth=model_cfg.get("max_depth_lgb", 4),
+            learning_rate=model_cfg.get("learning_rate_lgb", 0.05),
+            subsample=model_cfg.get("subsample_lgb", 0.8),
+            colsample_bytree=model_cfg.get("colsample_bytree_lgb", 0.8),
+            random_state=random_state,
+            n_jobs=-1,
+            verbose=-1,
+        )
+    except ImportError:
+        logger.warning("LightGBM not installed, using XGBoost fallback.")
+        return _get_xgb_classifier(model_cfg, random_state)
+
+
+def _create_ensemble_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
+    """Build a soft-voting ensemble of available classifiers."""
+    model_cfg = cfg["model"]
+    random_state = model_cfg.get("random_seed", 42)
+
+    estimators = []
+    # XGBoost always available
+    estimators.append(("xgb", _get_xgb_classifier(model_cfg, random_state)))
+    # LightGBM if available
+    try:
+        import lightgbm as lgb
+        estimators.append(("lgb", _get_lightgbm_classifier(model_cfg, random_state)))
+    except ImportError:
+        pass
+    # RandomForest always available
+    estimators.append(("rf", _get_rf_classifier(model_cfg, random_state)))
+
+    if not estimators:
+        raise ValueError("No classifiers available for ensemble")
+
+    voting = VotingClassifier(
+        estimators=estimators,
+        voting=model_cfg.get("ensemble_method", "soft_voting") if model_cfg.get("ensemble_method") in ("hard", "soft") else "soft",
+    )
+    return voting
+
+
+def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
+    """Train a model according to config 'model.type'."""
+    model_cfg = cfg["model"]
+    random_state = model_cfg.get("random_seed", 42)
+    model_type = model_cfg.get("type", "xgboost").lower()
+
+    logger.info(f"Training model type: {model_type}")
+
+    if model_type == "random_forest":
+        model = _get_rf_classifier(model_cfg, random_state)
+    elif model_type == "lightgbm":
+        model = _get_lightgbm_classifier(model_cfg, random_state)
+    elif model_type == "ensemble":
+        model = _create_ensemble_model(X_train, y_train, cfg)
+    else:
+        model = _get_xgb_classifier(model_cfg, random_state)
+
+    model.fit(X_train, y_train)
+    return model
 
 
 def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
@@ -105,4 +202,3 @@ def save_model(model, feature_cols: list, path: str):
 
 def load_model(path: str):
     return joblib.load(path)
-

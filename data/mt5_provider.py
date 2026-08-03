@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Final
@@ -33,19 +33,22 @@ def shutdown_mt5() -> None:
 
 
 def validate_symbol(symbol: str) -> None:
-    info = mt5.symbol_info(symbol)
+    """Confirm an MT5 symbol exists and enable it in Market Watch."""
+    initialize_mt5()
 
+    info = mt5.symbol_info(symbol)
     if info is None:
         raise MT5ProviderError(
-            f"MT5 symbol '{symbol}' was not found. "
-            "Keep FxPro MT5 open and show it in Market Watch."
+            f"MT5 symbol {symbol!r} was not found. "
+            "Check the exact name in the FxPro MT5 Symbols window."
         )
 
-    if not info.visible and not mt5.symbol_select(symbol, True):
+    if not mt5.symbol_select(symbol, True):
+        code, message = mt5.last_error()
         raise MT5ProviderError(
-            f"Could not select MT5 symbol '{symbol}': {mt5.last_error()}"
+            f"Could not enable MT5 symbol {symbol!r} in Market Watch: "
+            f"{code} {message}"
         )
-
 
 def _normalize_rates(rates) -> pd.DataFrame:
     if rates is None or len(rates) == 0:

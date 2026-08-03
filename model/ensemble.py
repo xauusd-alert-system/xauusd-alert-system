@@ -1,37 +1,24 @@
 """
 Ensemble layer: combines rule-based baseline signal + ML probability + a meta-filter
-that suppresses signals during noisy/choppy regimes.
-
-Design decision - three-stage pipeline:
-  1. Rule-based directional vote (from regime/classifier.py::rule_based_signal logic)
-  2. ML probability (from model/predictor.py::ModelPredictor)
-  3. Meta-filter: regime-aware suppression gate that can force NO_TRADE regardless
-     of what the first two stages say, if the current regime is in the configured
-     suppress_regimes list (config.yaml model.meta_filter.suppress_regimes) AND the
-     rule-based and ML signals disagree, or if ML confidence is below the floor.
-
-Final ensemble confidence is a WEIGHTED BLEND (config.yaml ensemble.weight_rule_based /
-weight_ml_probability), not a simple average - this lets us tune how much we trust
-the rule baseline vs the learned model as more historical data accumulates.
-
-CRITICAL: this module NEVER forces a directional bias when ensemble_confidence is
-below ensemble.min_confidence_to_alert - it explicitly returns bias="no_trade" in
-that case. This satisfies the project's hard constraint that the system must support
-and default to a "no trade" state.
+that suppresses signals during noisy/choppy regimes and off-sessions.
+Supports 24/7 Crypto Trading (BTCUSD) in Asia with Extra-High Confidence Threshold.
 """
+import logging
 from dataclasses import dataclass
 from typing import Optional
 import pandas as pd
-
 from regime.classifier import RegimeLabel
 from backtest.engine import rule_based_signal
+from data.news_filter import is_news_red_zone
+
+logger = logging.getLogger("ensemble")
 
 
 @dataclass
 class EnsembleSignal:
-    bias: str          # "long", "short", or "no_trade"
+    bias: str  # "long", "short", or "no_trade"
     confidence: float  # 0.0 - 1.0, blended confidence score
-    rule_vote: int      # -1, 0, +1
+    rule_vote: int  # -1, 0, +1
     ml_p_long: float
     ml_p_short: float
     regime: str
@@ -40,56 +27,129 @@ class EnsembleSignal:
 
 
 def _rule_confidence_component(rule_vote: int) -> float:
-    """
-    Rule-based confidence is binary by construction: it either has a clear directional
-    vote (confidence=1.0 toward that direction) or no vote at all (confidence=0.0,
-    treated as fully neutral/uncertain in the blend).
-    """
     return 1.0 if rule_vote != 0 else 0.0
 
 
-def compute_ensemble_signal(regime: RegimeLabel, ml_p_long: float, ml_p_short: float,
-                             cfg: dict) -> EnsembleSignal:
+def compute_ensemble_signal(
+    regime: RegimeLabel,
+    ml_p_long: float,
+    ml_p_short: float,
+    cfg: dict,
+    session: str = None,
+    timestamp_utc: int = None,
+    asset_key: str = "XAUUSD",
+) -> EnsembleSignal:
     """
-    Core ensemble logic - pure function, no side effects, fully deterministic given inputs.
-    Called once per row/candle by realtime/pipeline.py and backtest strategy wrappers.
+    Core ensemble logic with Asset-Aware Session Filtering.
+    BTCUSD can trade in Asia Session with elevated confidence threshold (P >= 0.58).
     """
-    ens_cfg = cfg["ensemble"]
-    meta_cfg = cfg["model"]["meta_filter"]
+    ens_cfg = cfg.get("ensemble", {})
+    model_cfg = cfg.get("model", {})
+    meta_cfg = model_cfg.get("meta_filter", ens_cfg)
+
+    # 1. 🚨 НОВОСТНОЙ ЗАЩИТНИК (NEWS GUARD)
+    if timestamp_utc is not None and ens_cfg.get("use_news_guard", False):
+        buf_before = ens_cfg.get("news_buffer_before_min", 30)
+        buf_after = ens_cfg.get("news_buffer_after_min", 30)
+        try:
+            in_red_zone, news_title = is_news_red_zone(timestamp_utc, buf_before, buf_after)
+            if in_red_zone:
+                return EnsembleSignal(
+                    bias="no_trade",
+                    confidence=0.0,
+                    rule_vote=0,
+                    ml_p_long=float(ml_p_long),
+                    ml_p_short=float(ml_p_short),
+                    regime=regime.value if hasattr(regime, "value") else str(regime),
+                    suppressed_by_meta_filter=True,
+                    reasoning_summary=f"Blocked by News Guard -> {news_title}",
+                )
+        except Exception:
+            pass
+
+    is_crypto = "BTC" in asset_key.upper() or "ETH" in asset_key.upper()
+    ml_p_max = max(ml_p_long, ml_p_short)
+
+    # 2. 🚨 УМНЫЙ ФИЛЬТР СЕССИЙ
+    suppress_sessions = ens_cfg.get("suppress_sessions", ["asia", "off_session"])
+    
+    if session and (session in suppress_sessions):
+        if is_crypto and session == "asia":
+            # Для Биткоина в Азию требуем СВЕРХ-ВЫСОКУЮ уверенность P >= 0.58
+            if ml_p_max < 0.58:
+                return EnsembleSignal(
+                    bias="no_trade",
+                    confidence=0.0,
+                    rule_vote=0,
+                    ml_p_long=float(ml_p_long),
+                    ml_p_short=float(ml_p_short),
+                    regime=regime.value if hasattr(regime, "value") else str(regime),
+                    suppressed_by_meta_filter=True,
+                    reasoning_summary=f"Crypto Night Mode: P={ml_p_max:.3f} below night threshold (0.58)",
+                )
+        else:
+            return EnsembleSignal(
+                bias="no_trade",
+                confidence=0.0,
+                rule_vote=0,
+                ml_p_long=float(ml_p_long),
+                ml_p_short=float(ml_p_short),
+                regime=regime.value if hasattr(regime, "value") else str(regime),
+                suppressed_by_meta_filter=True,
+                reasoning_summary=f"Suppressed by session filter ({session})",
+            )
+
+    # 3. Базовый порог для дневных сделок (P >= 0.55)
+    required_p_min = 0.55
+    if ml_p_max < required_p_min:
+        return EnsembleSignal(
+            bias="no_trade",
+            confidence=0.0,
+            rule_vote=0,
+            ml_p_long=float(ml_p_long),
+            ml_p_short=float(ml_p_short),
+            regime=regime.value if hasattr(regime, "value") else str(regime),
+            suppressed_by_meta_filter=False,
+            reasoning_summary=f"Weak ML probability (p_max={ml_p_max:.3f} < {required_p_min})",
+        )
+
+    min_confidence_to_alert = ens_cfg.get("min_confidence_to_alert", 0.65)
+    min_regime_confidence = meta_cfg.get("min_regime_confidence", 0.65)
+    suppress_regimes = meta_cfg.get("suppress_regimes", ["range", "compression", "reversal_watch"])
+    weight_rule = ens_cfg.get("weight_rule_based", 0.20)
+    weight_ml = ens_cfg.get("weight_ml_probability", 0.80)
+
+    if isinstance(regime, str):
+        try:
+            regime = RegimeLabel(regime)
+        except ValueError:
+            regime = RegimeLabel.NO_TRADE
 
     rule_vote = rule_based_signal(regime)
-
-    # ML directional vote and its own confidence (distance from 0.5, rescaled to [0,1])
     ml_vote = 1 if ml_p_long > ml_p_short else (-1 if ml_p_short > ml_p_long else 0)
-    ml_confidence = abs(ml_p_long - 0.5) * 2  # 0.5->0 conf, 0.0 or 1.0 -> full conf
+
+    # Масштабирование: 0.50 -> 0.0, 0.62 -> 1.0
+    ml_confidence = min(1.0, max(0.0, (ml_p_max - 0.50) / 0.12))
 
     rule_conf = _rule_confidence_component(rule_vote)
-
-    # Weighted blend of confidences, direction-aware: only blend confidence towards
-    # a direction if rule and ML AGREE on that direction: otherwise the disagreement
-    # itself is a signal of uncertainty and confidence is heavily penalized.
-    agree = (rule_vote == ml_vote) and rule_vote != 0
+    agree = (rule_vote == ml_vote) and (rule_vote != 0)
 
     if agree:
-        blended_confidence = (ens_cfg["weight_rule_based"] * rule_conf +
-                               ens_cfg["weight_ml_probability"] * ml_confidence)
+        blended_confidence = (weight_rule * rule_conf) + (weight_ml * ml_confidence)
         final_vote = rule_vote
     else:
-        # Disagreement or one side neutral: confidence collapses toward the weaker signal.
-        # This is intentional risk-aversion consistent with "fewer, higher-confidence alerts".
-        blended_confidence = min(rule_conf, ml_confidence) * 0.5
+        blended_confidence = min(rule_conf, ml_confidence) * 0.3
         final_vote = ml_vote if ml_confidence > rule_conf else rule_vote
 
-    # Meta-filter: suppress signals in known choppy/noisy regimes unless confidence is
-    # exceptionally high (>= min_regime_confidence) - protects against overtrading ranges.
     suppressed = False
-    if regime.value in meta_cfg["suppress_regimes"] and blended_confidence < meta_cfg["min_regime_confidence"]:
+    regime_val = regime.value if hasattr(regime, "value") else str(regime)
+
+    if (regime_val in suppress_regimes) and (blended_confidence < min_regime_confidence):
         suppressed = True
         blended_confidence = 0.0
         final_vote = 0
 
-    # No-trade gates: insufficient confidence, neutral vote, or explicit regime no_trade
-    if regime == RegimeLabel.NO_TRADE or final_vote == 0 or blended_confidence < ens_cfg["min_confidence_to_alert"]:
+    if (regime == RegimeLabel.NO_TRADE) or (final_vote == 0) or (blended_confidence < min_confidence_to_alert):
         bias = "no_trade"
     elif final_vote == 1:
         bias = "long"
@@ -97,9 +157,8 @@ def compute_ensemble_signal(regime: RegimeLabel, ml_p_long: float, ml_p_short: f
         bias = "short"
 
     reasoning = (
-        f"regime={regime.value}, rule_vote={rule_vote}, ml_p_long={ml_p_long:.3f}, "
-        f"ml_p_short={ml_p_short:.3f}, agree={agree}, suppressed_by_meta_filter={suppressed}, "
-        f"blended_confidence={blended_confidence:.3f}"
+        f"regime={regime_val}, session={session}, rule_vote={rule_vote}, ml_p_long={ml_p_long:.3f}, "
+        f"ml_p_short={ml_p_short:.3f}, agree={agree}, blended_confidence={blended_confidence:.3f}"
     )
 
     return EnsembleSignal(
@@ -108,7 +167,7 @@ def compute_ensemble_signal(regime: RegimeLabel, ml_p_long: float, ml_p_short: f
         rule_vote=rule_vote,
         ml_p_long=float(ml_p_long),
         ml_p_short=float(ml_p_short),
-        regime=regime.value,
+        regime=regime_val,
         suppressed_by_meta_filter=suppressed,
         reasoning_summary=reasoning,
     )

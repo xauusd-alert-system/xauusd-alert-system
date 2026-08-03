@@ -46,7 +46,7 @@ def test_meta_filter_suppresses_low_confidence_in_choppy_regime():
     RANGE and COMPRESSION are in suppress_regimes by default (config.yaml).
     Moderate agreement/confidence below min_regime_confidence must be suppressed.
     """
-    sig = compute_ensemble_signal(RegimeLabel.RANGE, ml_p_long=0.6, ml_p_short=0.4, cfg=CFG)
+    sig = compute_ensemble_signal(RegimeLabel.COMPRESSION, ml_p_long=0.6, ml_p_short=0.4, cfg=CFG)
     assert sig.suppressed_by_meta_filter is True
     assert sig.bias == "no_trade"
     assert sig.confidence == 0.0
@@ -83,3 +83,28 @@ def test_below_min_confidence_threshold_forces_no_trade():
     sig = compute_ensemble_signal(RegimeLabel.TREND_UP, ml_p_long=0.52, ml_p_short=0.48, cfg=CFG)
     if sig.confidence < CFG["ensemble"]["min_confidence_to_alert"]:
         assert sig.bias == "no_trade"
+
+
+def test_news_guard_blocks_signal_during_news_window(monkeypatch):
+    """If use_news_guard is True and we are in news red zone, bias must be no_trade."""
+    import time
+    def mock_is_news_red_zone(current_ts_utc, buf_before, buf_after):
+        return True, "RED ZONE: Mock News Event"
+
+    monkeypatch.setattr("model.ensemble.is_news_red_zone", mock_is_news_red_zone)
+
+    # Create a test config copy with use_news_guard = True
+    test_cfg = dict(CFG)
+    test_cfg["ensemble"] = dict(test_cfg["ensemble"])
+    test_cfg["ensemble"]["use_news_guard"] = True
+
+    current_time_utc = int(time.time())
+    sig = compute_ensemble_signal(
+        RegimeLabel.TREND_UP,
+        ml_p_long=0.9,
+        ml_p_short=0.1,
+        cfg=test_cfg,
+        timestamp_utc=current_time_utc
+    )
+    assert sig.bias == "no_trade"
+    assert "Blocked by News Guard" in sig.reasoning_summary

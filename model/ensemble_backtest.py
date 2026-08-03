@@ -1,44 +1,70 @@
 """
-Ensemble-aware backtest wrapper: routes the ensemble's bias/confidence through the
-existing EventDrivenBacktester execution logic (same signal-at-close(i) ->
-entry-at-open(i+1) timing, same spread/slippage/one-position-at-a-time rules).
-This is a thin adapter, not a duplicate engine - it reuses backtest/engine.py's
-Trade dataclass and exit logic, only replacing WHICH signal drives entries.
+Ensemble-aware backtest wrapper with Multi-TP (Scale-Out) & Auto-Breakeven support.
+Reads asset-specific spreads and simulates commissions/swaps/slippage.
 """
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from typing import Optional, List
-
 from regime.classifier import RegimeLabel
 from model.ensemble import compute_ensemble_signal
-from backtest.engine import Trade
+
+
+@dataclass
+class Trade:
+    entry_ts: int
+    entry_price: float
+    direction: int  # +1 long, -1 short
+    stop_price: float
+    tp1_price: float
+    tp2_price: float
+    tp3_price: float
+    session: str
+    regime_at_entry: str
+    volume: float
+    commission: float
+    swap: float
+    exit_ts: Optional[int] = None
+    exit_price: Optional[float] = None
+    exit_reason: Optional[str] = None
+    pnl: Optional[float] = None
 
 
 class EnsembleBacktester:
-    """
-    Same execution mechanics as EventDrivenBacktester, but the entry signal comes
-    from the full ensemble (rule + ML + meta-filter) instead of rule_based_signal alone.
-    Requires df to already contain: regime (RegimeLabel), ml_p_long, ml_p_short columns,
-    computed causally upstream (regime/classifier.py + model/predictor.py).
-    """
-
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, asset_key: str = "XAUUSD"):
         self.cfg = cfg
-        bt_cfg = cfg["backtest"]
-        lab_cfg = cfg["labeling"]
-        self.spread = bt_cfg["spread_points"] / 100.0
-        self.slippage = bt_cfg["slippage_points"] / 100.0
-        self.balance = bt_cfg["initial_balance"]
-        self.target_x = lab_cfg["target_pips_x"]
-        self.stop_y = lab_cfg["stop_pips_y"]
-        self.horizon_n = lab_cfg["horizon_candles_n"]
+        bt_cfg = cfg.get("backtest", {})
+        lab_cfg = cfg.get("labeling", {})
+        asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+
+        # Читаем индивидуальный спред для актива (если прописан в assets), иначе общий дефолт
+        self.spread = asset_cfg.get("spread_usd", bt_cfg.get("spread_points", 25) / 100.0)
+        self.slippage = bt_cfg.get("slippage_points", 5) / 100.0
+        self.balance = bt_cfg.get("initial_balance", 100.0)
+        self.volume = bt_cfg.get("volume", 0.01)  # базовый объём для бэктеста
+        self.commission_per_trade = bt_cfg.get("commission_per_trade", 0.07)
+        self.swap_per_night = bt_cfg.get("swap_per_night", 0.0)
+
+        self.atr_col = lab_cfg.get("atr_column", "atr")
+        self.tp1_mult = lab_cfg.get("tp1_atr_multiplier", 1.0)
+        self.tp2_mult = lab_cfg.get("tp2_atr_multiplier", 1.8)
+        self.tp3_mult = lab_cfg.get("tp3_atr_multiplier", 2.8)
+        self.stop_mult = lab_cfg.get("stop_atr_multiplier", 1.0)
+
+        self.horizon_n = lab_cfg.get("horizon_candles_n", 36)
         self.trades: List[Trade] = []
+
+    def _apply_slippage(self, price: float, direction: int) -> float:
+        return price + (self.slippage * direction)
 
     def run(self, df: pd.DataFrame) -> List[Trade]:
         n = len(df)
         open_position: Optional[Trade] = None
         pending_direction: Optional[int] = None
+
+        tp1_hit = False
+        tp2_hit = False
+        remaining_ratio = 1.0
 
         opens = df["open"].values
         highs = df["high"].values
@@ -47,51 +73,124 @@ class EnsembleBacktester:
         timestamps = df["timestamp_utc"].values
         sessions = df["session"].values
         regimes = df["regime"].values
-        p_longs = df["ml_p_long"].values
-        p_shorts = df["ml_p_short"].values
+
+        atrs = df[self.atr_col].values if self.atr_col in df.columns else None
+        p_longs = df.get("ml_p_long", pd.Series(0.5, index=df.index)).values
+        p_shorts = df.get("ml_p_short", pd.Series(0.5, index=df.index)).values
+
+        accumulated_pnl = 0.0
 
         for i in range(n):
             if open_position is None and pending_direction is not None and pending_direction != 0:
                 direction = pending_direction
                 entry_price = opens[i] + (self.spread / 2 if direction == 1 else -self.spread / 2)
-                stop_price = entry_price - direction * self.stop_y
-                target_price = entry_price + direction * self.target_x
+                entry_price = self._apply_slippage(entry_price, direction)
+
+                atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+
+                stop_price = entry_price - direction * (atr_val * self.stop_mult)
+                tp1_price = entry_price + direction * (atr_val * self.tp1_mult)
+                tp2_price = entry_price + direction * (atr_val * self.tp2_mult)
+                tp3_price = entry_price + direction * (atr_val * self.tp3_mult)
+
                 open_position = Trade(
-                    entry_ts=int(timestamps[i]), entry_price=entry_price, direction=direction,
-                    stop_price=stop_price, target_price=target_price, session=str(sessions[i]),
+                    entry_ts=int(timestamps[i]),
+                    entry_price=entry_price,
+                    direction=direction,
+                    stop_price=stop_price,
+                    tp1_price=tp1_price,
+                    tp2_price=tp2_price,
+                    tp3_price=tp3_price,
+                    session=str(sessions[i]),
                     regime_at_entry=str(regimes[i - 1]) if i > 0 else str(regimes[i]),
+                    volume=self.volume,
+                    commission=self.commission_per_trade,
+                    swap=0.0,
                 )
                 pending_direction = None
+                tp1_hit = False
+                tp2_hit = False
+                remaining_ratio = 1.0
+                accumulated_pnl = 0.0
 
             if open_position is not None:
                 direction = open_position.direction
-                hit_target = (highs[i] >= open_position.target_price) if direction == 1 else (lows[i] <= open_position.target_price)
+
+                hit_tp1 = (highs[i] >= open_position.tp1_price) if direction == 1 else (lows[i] <= open_position.tp1_price)
+                hit_tp2 = (highs[i] >= open_position.tp2_price) if direction == 1 else (lows[i] <= open_position.tp2_price)
+                hit_tp3 = (highs[i] >= open_position.tp3_price) if direction == 1 else (lows[i] <= open_position.tp3_price)
                 hit_stop = (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
+
                 step = df["timestamp_utc"].diff().mode().iloc[0] if len(df) > 1 else 1
                 candles_held = int((timestamps[i] - open_position.entry_ts) / step)
 
-                exit_reason, exit_price = None, None
-                if hit_target and hit_stop:
-                    exit_reason, exit_price = "stop", open_position.stop_price
+                # 1. TP1 -> 50% закрываем, Стоп в БЕЗУБЫТОК
+                if not tp1_hit and hit_tp1:
+                    tp1_hit = True
+                    pnl_tp1 = 0.5 * direction * (open_position.tp1_price - open_position.entry_price)
+                    accumulated_pnl += pnl_tp1
+                    remaining_ratio = 0.5
+                    open_position.stop_price = open_position.entry_price  # BREAKEVEN
+
+                # 2. TP2 -> 30% закрываем
+                if tp1_hit and not tp2_hit and hit_tp2:
+                    tp2_hit = True
+                    pnl_tp2 = 0.3 * direction * (open_position.tp2_price - open_position.entry_price)
+                    accumulated_pnl += pnl_tp2
+                    remaining_ratio = 0.2
+
+                # 3. Финальный выход (TP3, Стоп или Таймаут)
+                exit_reason = None
+                exit_price = None
+
+                if hit_tp3:
+                    exit_reason = "tp3_runner"
+                    pnl_tp3 = remaining_ratio * direction * (open_position.tp3_price - open_position.entry_price)
+                    accumulated_pnl += pnl_tp3
+                    exit_price = self._apply_slippage(open_position.tp3_price, -direction)
                 elif hit_stop:
-                    exit_reason, exit_price = "stop", open_position.stop_price
-                elif hit_target:
-                    exit_reason, exit_price = "target", open_position.target_price
+                    exit_reason = "breakeven" if tp1_hit else "stop"
+                    pnl_stop = remaining_ratio * direction * (open_position.stop_price - open_position.entry_price)
+                    accumulated_pnl += pnl_stop
+                    exit_price = self._apply_slippage(open_position.stop_price, -direction)
                 elif candles_held >= self.horizon_n:
-                    exit_reason, exit_price = "timeout", closes[i]
+                    exit_reason = "timeout"
+                    pnl_time = remaining_ratio * direction * (closes[i] - open_position.entry_price)
+                    accumulated_pnl += pnl_time
+                    exit_price = self._apply_slippage(closes[i], -direction)
 
                 if exit_reason is not None:
-                    exit_price += (-self.slippage if direction == 1 else self.slippage)
+                    # Учитываем комиссию и своп
+                    days_held = max(1, (int(timestamps[i]) - open_position.entry_ts) // 86400)
+                    swap = self.swap_per_night * days_held
+                    accumulated_pnl -= open_position.commission + swap
+
                     open_position.exit_ts = int(timestamps[i])
                     open_position.exit_price = exit_price
                     open_position.exit_reason = exit_reason
-                    open_position.pnl = direction * (exit_price - open_position.entry_price)
-                    self.balance += open_position.pnl
+                    open_position.swap = swap
+                    open_position.pnl = accumulated_pnl
+                    self.balance += accumulated_pnl
                     self.trades.append(open_position)
                     open_position = None
 
             if open_position is None:
-                sig = compute_ensemble_signal(regimes[i], p_longs[i], p_shorts[i], self.cfg)
+                reg_val = regimes[i]
+                if not isinstance(reg_val, RegimeLabel):
+                    try:
+                        reg_val = RegimeLabel(reg_val)
+                    except ValueError:
+                        reg_val = RegimeLabel.NO_TRADE
+
+                sig = compute_ensemble_signal(
+                    reg_val,
+                    float(p_longs[i]),
+                    float(p_shorts[i]),
+                    self.cfg,
+                    session=str(sessions[i]),
+                    timestamp_utc=int(timestamps[i]),
+                    asset_key=self.asset_key if hasattr(self, 'asset_key') else "XAUUSD"
+                )
                 pending_direction = {"long": 1, "short": -1, "no_trade": 0}[sig.bias]
 
         return self.trades

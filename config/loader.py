@@ -2,33 +2,34 @@
 Config loader utility - shared across all modules.
 Ensures a single source of truth: config/config.yaml.
 """
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import yaml
 
 _CONFIG_CACHE = None
 
+
 def load_config(path: str = None) -> dict:
     """
-    Load and cache the master YAML config.
-    Path defaults to config/config.yaml relative to project root.
+    Load and cache the master YAML config with explicit UTF-8 encoding.
     """
     global _CONFIG_CACHE
     if _CONFIG_CACHE is not None:
         return _CONFIG_CACHE
 
     if path is None:
-        # Resolve relative to this file's directory (config/)
         path = os.path.join(os.path.dirname(__file__), "config.yaml")
 
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:  # <-- Добавлен encoding="utf-8"
         _CONFIG_CACHE = yaml.safe_load(f)
+
     return _CONFIG_CACHE
 
 
 def get_env(key: str, default=None, required: bool = False):
     """
     Fetch a secret/config value from environment variables.
-    Never hardcode API keys or tokens - always route through this function.
     """
     val = os.environ.get(key, default)
     if required and val is None:

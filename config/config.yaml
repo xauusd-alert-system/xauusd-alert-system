@@ -1,7 +1,25 @@
+﻿ensemble:
+  min_confidence_to_alert: 0.60
+  min_regime_confidence: 0.60
+  use_news_guard: true
+  news_buffer_before_min: 30
+  news_buffer_after_min: 30
+  suppress_regimes:
+    - compression
+    - reversal_watch
+  suppress_sessions:
+    - asia
+    - off_session
+  rule_weight: 0.20
+  ml_weight: 0.80
+
 market_data:
   provider: mt5
-  timeframe: M15
+  timeframe: M5
   closed_candles_only: true
+
+general:
+  db_path: data/market_data_mt5.sqlite
 
 assets:
   XAUUSD:
@@ -9,37 +27,163 @@ assets:
     mt5_symbol: GOLD
     display_name: XAU/USD
     model_path: output/models/xauusd_direction_model.joblib
+    spread_usd: 0.25
+    ensemble:
+      min_confidence_to_alert: 0.70
+      suppress_sessions: [asia, off_session]
+      suppress_regimes: [compression, reversal_watch]
+      rule_weight: 0.15
+      ml_weight: 0.85
 
   XAGUSD:
     enabled: true
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
+    spread_usd: 0.02
+    ensemble:
+      min_confidence_to_alert: 0.75
+      suppress_sessions: [asia, off_session]
+      suppress_regimes: [compression, reversal_watch]
+      rule_weight: 0.15
+      ml_weight: 0.85
 
   BTCUSD:
     enabled: true
     mt5_symbol: BITCOIN
     display_name: BTC/USD
     model_path: output/models/btcusd_direction_model.joblib
-
-  ETHUSD:
-    enabled: true
-    mt5_symbol: ETHEREUM
-    display_name: ETH/USD
-    model_path: output/models/ethusd_direction_model.joblib
+    spread_usd: 3.00
+    ensemble:
+      min_confidence_to_alert: 0.62
+      suppress_sessions: []
+      suppress_regimes: [compression, reversal_watch]
+      rule_weight: 0.20
+      ml_weight: 0.80
 
   EURUSD:
     enabled: true
     mt5_symbol: EURUSD
     display_name: EUR/USD
     model_path: output/models/eurusd_direction_model.joblib
+    spread_usd: 0.00012
+    ensemble:
+      min_confidence_to_alert: 0.85
+      suppress_sessions: [asia, off_session]
+      suppress_regimes: [compression, reversal_watch]
+      rule_weight: 0.10
+      ml_weight: 0.90
+    labeling:
+      horizon_candles_n: 36
+      target_atr_multiplier: 1.2
+      stop_atr_multiplier: 1.0
+      atr_column: atr
+      tp1_atr_multiplier: 1.0
+      tp2_atr_multiplier: 1.8
+      tp3_atr_multiplier: 2.8
 
   GBPUSD:
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
+    spread_usd: 0.00015
+    ensemble:
+      min_confidence_to_alert: 0.85
+      suppress_sessions: [asia, off_session]
+      suppress_regimes: [compression, reversal_watch]
+      rule_weight: 0.10
+      ml_weight: 0.90
+    labeling:
+      horizon_candles_n: 36
+      target_atr_multiplier: 1.2
+      stop_atr_multiplier: 1.0
+      atr_column: atr
+      tp1_atr_multiplier: 1.0
+      tp2_atr_multiplier: 1.8
+      tp3_atr_multiplier: 2.8
 
 alerts:
-  cooldown_minutes: 60
-  max_alerts_per_day: 6
+  cooldown_minutes: 15
+  max_alerts_per_day: 30
+
+features:
+  ema_periods: [9, 21, 50, 200]
+  rsi_period: 14
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  atr_period: 14
+  bollinger:
+    period: 20
+    std_dev: 2.0
+  structure_lookback: 20
+  mtf_reference_timeframes: ["M15", "H1"]
+
+regime:
+  min_candles_for_regime: 50
+  no_trade_volatility_floor: 0.0001
+  atr_spike_multiplier: 1.8
+  bb_width_compression_pctile: 20
+  adx_trend_threshold: 20
+
+model:
+  random_seed: 42
+  calibration_method: sigmoid
+  train_ratio: 0.8
+  type: xgboost          # xgboost | random_forest | lightgbm | ensemble
+  ensemble_method: soft_voting
+
+labeling:
+  method: atr_scaled
+  horizon_candles_n: 36
+  target_atr_multiplier: 1.2
+  stop_atr_multiplier: 1.0
+  atr_column: atr
+  tp1_atr_multiplier: 1.0
+  tp2_atr_multiplier: 1.8
+  tp3_atr_multiplier: 2.8
+
+sessions:
+  asia: {start: 0, end: 8}
+  london: {start: 8, end: 13}
+  newyork: {start: 13, end: 22}
+
+backtest:
+  spread_points: 25
+  slippage_points: 5
+  commission_per_trade: 0.07
+  swap_per_night: 0.0
+  initial_balance: 100.0
+  max_daily_loss_pct: 5.0
+  risk_per_trade_pct: 2.0
+  walk_forward:
+    train_window_days: 300
+    test_window_days: 50
+    step_days: 50
+
+# ===== RETRAINING =====
+retraining:
+  enabled: true
+  retrain_on_startup: false
+  max_age_hours: 24
+  download_data: true
+  lookback_days: 730
+  assets: ["XAUUSD", "XAGUSD", "BTCUSD", "EURUSD", "GBPUSD"]
+  schedule:
+    enabled: true
+    day_of_week: "monday"
+    hour: 3
+    minute: 0
+
+# ===== CORRELATION FILTER (динамический) =====
+correlation_filter:
+  enabled: true
+  # Порог абсолютного значения корреляции. Если |corr| >= threshold,
+  # активы считаются коррелированными.
+  threshold: 0.80
+  # Количество M5-баров для расчёта корреляции (скользящее окно).
+  history_bars: 500
+  # Как часто пересчитывать матрицу корреляций (в минутах).
+  update_interval_minutes: 60
