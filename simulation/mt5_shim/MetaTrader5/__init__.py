@@ -382,7 +382,12 @@ def order_send(request: dict) -> object:
         sl = float(request.get("sl", 0.0) or 0.0)
         tp = float(request.get("tp", 0.0) or 0.0)
         _STATE.modify_sl_tp(pos, sl, tp)
-        return result_done(VirtualOrderResult, comment=f"SL/TP modified for #{position_ticket}")
+        return VirtualOrderResult(
+            retcode=TRADE_RETCODE_DONE,
+            order=position_ticket,
+            deal=0,
+            comment="SL/TP modified",
+        )
 
     if action == TRADE_ACTION_DEAL:
         order_type = int(request.get("type", ORDER_TYPE_BUY))
