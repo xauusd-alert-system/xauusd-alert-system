@@ -72,10 +72,7 @@ def shutdown_mt5_shim() -> None:
 class MarketSimulator:
     """Drives the discrete-event LOB simulation tick by tick."""
 
-    # Reference to the VirtualState injected by run_simulation.py after
-    # _inject() is called.  Used to keep pos.price_current live and to
-    # feed real inventory into the agent context.
-    _virtual_state = None  # set externally via simulator.attach_state(state)
+    _virtual_state = None
 
     def __init__(
         self,
@@ -86,14 +83,10 @@ class MarketSimulator:
         self.seed = seed
         self.rng = random.Random(seed)
 
-        # --- time --------------------------------------------------------
-        # start_timestamp_utc lets the simulation begin at a real calendar
-        # time instead of Unix epoch 0 (1970-01-01).  Default: 2023-11-14.
         self._start_ts: int = int(self.cfg.get("start_timestamp_utc", 1700000000))
         self.clock = SimClock(0)
         self.tick: int = 0
 
-        # --- market microstructure ---------------------------------------
         self.book = OrderBook()
         self.engine = MatchingEngine(self.book)
         self.aggregator = OHLCVAggregator(
@@ -104,116 +97,69 @@ class MarketSimulator:
         )
         self.engine.on_trade = self._on_trade
 
-        # --- news --------------------------------------------------------
         self.news = NewsInjector(self.cfg, rng=self.rng, clock=self.clock)
 
-        # --- account / symbol --------------------------------------------
         self.initial_price: float = float(self.cfg.get("initial_price", 2400.0))
-        self.spread_ask_offset: float = float(
-            self.cfg.get("spread_ask_offset", 0.30)
-        )
-        self.spread_bid_offset: float = float(
-            self.cfg.get("spread_bid_offset", 0.30)
-        )
+        self.spread_ask_offset: float = float(self.cfg.get("spread_ask_offset", 0.30))
+        self.spread_bid_offset: float = float(self.cfg.get("spread_bid_offset", 0.30))
         self.last_price: float = self.initial_price
-        self.m5_bar_interval_ticks: int = int(
-            self.cfg.get("m5_bar_interval_ticks", 60)
-        )
+        self.m5_bar_interval_ticks: int = int(self.cfg.get("m5_bar_interval_ticks", 60))
         self.last_m5_bar_tick: int = 0
 
-        # --- circuit breaker ---------------------------------------------
-        self.circuit_breaker_pct: float = float(
-            self.cfg.get("circuit_breaker_pct", 0.15)
-        )
+        self.circuit_breaker_pct: float = float(self.cfg.get("circuit_breaker_pct", 0.05))
         self.start_equity: float = float(self.cfg.get("virtual_balance", 10000.0))
         self.paused: bool = False
 
-        # --- agents ------------------------------------------------------
+        # Rolling high-water/low-water for circuit breaker.
+        # Tracks from a rolling window anchor (reset after warm_up) so normal
+        # drift during warm-up does NOT trip the breaker in the live run.
+        self._cb_anchor: float = self.initial_price
+
         self._build_agents()
 
-        # --- housekeeping ------------------------------------------------
-        self.quote_refresh_interval: int = int(
-            self.cfg.get("quote_refresh_interval", 12)
-        )
-        self._quote_lifetime: int = int(
-            self.cfg.get("quote_lifetime_ticks", 60)
-        )
-        self.max_ticks_per_step: int = int(
-            self.cfg.get("max_ticks_per_step", 1_000_000)
-        )
+        self.quote_refresh_interval: int = int(self.cfg.get("quote_refresh_interval", 12))
+        self._quote_lifetime: int = int(self.cfg.get("quote_lifetime_ticks", 60))
+        self.max_ticks_per_step: int = int(self.cfg.get("max_ticks_per_step", 1_000_000))
         self.price_history: list[float] = [self.initial_price]
 
         self._seed_initial_quotes()
 
     def attach_state(self, state) -> None:
-        """Attach a VirtualState so the simulator can keep price_current live."""
         self._virtual_state = state
 
-    # ------------------------------------------------------------------
-    # Agent construction
-    # ------------------------------------------------------------------
     def _build_agents(self) -> None:
         cfg = self.cfg
         self.agents: list = []
-        n_noise = int(cfg.get("num_noise_traders", 300))
+        n_noise = int(cfg.get("num_noise_traders", 200))
         n_mm = int(cfg.get("num_market_makers", 20))
-        n_trend = int(cfg.get("num_trend_followers", 50))
-        n_mr = int(cfg.get("num_mean_reversion", 50))
-        n_fund = int(cfg.get("num_fundamental", 5))
+        n_trend = int(cfg.get("num_trend_followers", 150))
+        n_mr = int(cfg.get("num_mean_reversion", 20))
+        n_fund = int(cfg.get("num_fundamental", 20))
 
         for i in range(n_noise):
-            self.agents.append(
-                NoiseTrader(f"noise-{i}", cfg, rng=random.Random(self.rng.random()))
-            )
+            self.agents.append(NoiseTrader(f"noise-{i}", cfg, rng=random.Random(self.rng.random())))
         for i in range(n_mm):
-            self.agents.append(
-                MarketMaker(f"mm-{i}", cfg, rng=random.Random(self.rng.random()))
-            )
+            self.agents.append(MarketMaker(f"mm-{i}", cfg, rng=random.Random(self.rng.random())))
         for i in range(n_trend):
-            self.agents.append(
-                TrendFollower(f"trend-{i}", cfg, rng=random.Random(self.rng.random()))
-            )
+            self.agents.append(TrendFollower(f"trend-{i}", cfg, rng=random.Random(self.rng.random())))
         for i in range(n_mr):
-            self.agents.append(
-                MeanReversion(f"mr-{i}", cfg, rng=random.Random(self.rng.random()))
-            )
+            self.agents.append(MeanReversion(f"mr-{i}", cfg, rng=random.Random(self.rng.random())))
         for i in range(n_fund):
-            self.agents.append(
-                FundamentalAgent(f"fund-{i}", cfg, rng=random.Random(self.rng.random()))
-            )
+            self.agents.append(FundamentalAgent(f"fund-{i}", cfg, rng=random.Random(self.rng.random())))
 
-    # ------------------------------------------------------------------
-    # Initial liquidity
-    # ------------------------------------------------------------------
     def _seed_initial_quotes(self) -> None:
-        """Place a sparse initial two-sided book around the starting price."""
         mid = self.initial_price
         for level in range(1, 6):
             spread = level * max(self.spread_ask_offset, 0.05)
-            self.book.add_limit_order(
-                Order(
-                    agent_id="seed",
-                    side="BUY",
-                    order_type="LIMIT",
-                    price=round(mid - spread, 6),
-                    volume=1.0,
-                    tick=0,
-                )
-            )
-            self.book.add_limit_order(
-                Order(
-                    agent_id="seed",
-                    side="SELL",
-                    order_type="LIMIT",
-                    price=round(mid + spread, 6),
-                    volume=1.0,
-                    tick=0,
-                )
-            )
+            self.book.add_limit_order(Order(
+                agent_id="seed", side="BUY", order_type="LIMIT",
+                price=round(mid - spread, 6), volume=1.0, tick=0,
+            ))
+            self.book.add_limit_order(Order(
+                agent_id="seed", side="SELL", order_type="LIMIT",
+                price=round(mid + spread, 6), volume=1.0, tick=0,
+            ))
 
-    # ------------------------------------------------------------------
-    # Public market API (consumed by the shim / entry point)
-    # ------------------------------------------------------------------
     @property
     def current_mid_price(self) -> float:
         mid = self.book.mid_price()
@@ -230,18 +176,10 @@ class MarketSimulator:
         return self.current_mid_price + self.spread_ask_offset
 
     def _on_trade(self, trade) -> None:
-        """Feed matched trades into the OHLCV aggregator and update last_price."""
         self.aggregator.on_tick(trade)
-        # Keep last_price in sync with the most recent execution so agents
-        # and context consumers see a moving reference price, not the initial
-        # price forever.
         self.last_price = trade.price
 
-    # ------------------------------------------------------------------
-    # Stepping
-    # ------------------------------------------------------------------
     def step(self, n_ticks: int = 1) -> int:
-        """Advance the simulation by ``n_ticks`` ticks and process events."""
         n_ticks = max(1, int(n_ticks))
         for _ in range(n_ticks):
             if self.tick >= self.max_ticks_per_step:
@@ -250,32 +188,25 @@ class MarketSimulator:
         return self.tick
 
     def _step_one(self) -> None:
-        # 1) Advance the clock so scheduled events (news checks, etc.) fire.
         self.clock.advance(1)
         self.tick = self.clock.tick
 
-        # 2) Periodically purge stale resting quotes so the book stays fresh.
         if self.tick % self.quote_refresh_interval == 0:
             self._refresh_stale_quotes()
 
-        # 3) Circuit breaker check.
         self._update_circuit_breaker()
 
-        # 4) Let agents act and match.
         if not self.paused:
             orders = self._gather_orders()
             self.engine.process_batch(orders)
 
-        # 5) Track the last closed M5 boundary.
         if self.tick % self.m5_bar_interval_ticks == 0:
             self.last_m5_bar_tick = self.tick
 
-        # 6) Keep a short price trail for statistics and mid fallback.
         self.price_history.append(self.current_mid_price)
         if len(self.price_history) > 10_000:
             self.price_history = self.price_history[-5_000:]
 
-        # 7) Update price_current on all open positions so floating PnL is live.
         if self._virtual_state is not None:
             mid = self.current_mid_price
             for pos in self._virtual_state.positions.values():
@@ -299,17 +230,12 @@ class MarketSimulator:
         else:
             closes = [self.last_price]
 
-        # Compute net inventory across all open virtual positions so that
-        # MarketMaker agents can skew their quotes to shed inventory.
-        # Without this, inventory is always 0.0 and quotes stay symmetric,
-        # which pins the price at the initial_price level.
         net_inventory: float = 0.0
         if self._virtual_state is not None:
             for pos in self._virtual_state.positions.values():
-                # BUY positions contribute positive inventory, SELL negative.
-                if pos.type == 0:  # BUY
+                if pos.type == 0:
                     net_inventory += pos.volume
-                else:             # SELL
+                else:
                     net_inventory -= pos.volume
 
         context = {
@@ -334,43 +260,52 @@ class MarketSimulator:
         return orders
 
     def _refresh_stale_quotes(self) -> None:
-        """Cancel resting limit orders older than the configured lifetime."""
         stale_by = self._quote_lifetime
         for side in (self.book.bids, self.book.asks):
             for _price, _seq, order in list(side):
                 if order.tick <= self.tick - stale_by:
                     self.book.cancel_order(order.order_id)
 
-    # ------------------------------------------------------------------
-    # Circuit breaker
-    # ------------------------------------------------------------------
     def _update_circuit_breaker(self) -> None:
-        drawdown = (self.current_mid_price - self.initial_price) / self.initial_price
-        if abs(drawdown) >= self.circuit_breaker_pct:
+        """Trip the breaker only if price moves >circuit_breaker_pct from the
+        rolling anchor (reset at end of warm_up), not from initial_price.
+        This prevents warm-up drift from locking the live run."""
+        mid = self.current_mid_price
+        deviation = abs(mid - self._cb_anchor) / (self._cb_anchor + 1e-12)
+        if deviation >= self.circuit_breaker_pct:
+            if not self.paused:
+                logger.warning(
+                    "Circuit breaker tripped: mid=%.2f anchor=%.2f dev=%.3f",
+                    mid, self._cb_anchor, deviation,
+                )
             self.paused = True
+        else:
+            self.paused = False
 
-    # ------------------------------------------------------------------
-    # Warm-up / bar helpers
-    # ------------------------------------------------------------------
     def warm_up(self, n_ticks: int = 5000) -> None:
-        """Run the simulation for ``n_ticks`` to build bar history."""
+        """Run the simulation for n_ticks to build bar history.
+
+        After warm-up:
+        - resets the circuit-breaker anchor to the current mid so drift
+          during warm-up does not immediately trip the breaker in live run;
+        - resets the OHLCV aggregator so frozen warm-up bars don't leak
+          into the live bar stream that advance_to_next_m5_bar() returns;
+        - clears paused flag.
+        """
         n_ticks = max(0, int(n_ticks))
         logger.info("Warming up simulation for %d ticks ...", n_ticks)
         self.step(n_ticks)
         logger.info(
             "Warm-up complete: tick=%d mid=%.2f m5_bar_tick=%d",
-            self.tick,
-            self.current_mid_price,
-            self.last_m5_bar_tick,
+            self.tick, self.current_mid_price, self.last_m5_bar_tick,
         )
+        # --- post-warm-up resets ---
+        self._cb_anchor = self.current_mid_price  # re-anchor circuit breaker
+        self.paused = False                        # clear any tripped state
+        self.aggregator.reset()                    # drop stale warm-up bars
+        self._seed_initial_quotes()                # replenish resting liquidity
 
     def advance_to_next_m5_bar(self, max_ticks: int = 240) -> Optional[dict]:
-        """
-        Advance the simulation until the next M5 bar boundary closes and
-        return that closed bar as ``{time, open, high, low, close, volume}``
-        (``time`` is Unix-seconds). Returns ``None`` if the boundary could
-        not be reached within ``max_ticks``.
-        """
         target = self.last_m5_bar_tick + self.m5_bar_interval_ticks
         advanced = 0
         while self.tick < target and advanced < max_ticks:
@@ -383,9 +318,7 @@ class MarketSimulator:
             return None
 
         try:
-            df = self.aggregator.get_bars_by_interval(
-                self.m5_bar_interval_ticks, n=2
-            )
+            df = self.aggregator.get_bars_by_interval(self.m5_bar_interval_ticks, n=2)
         except Exception:
             logger.debug("no M5 bars yet", exc_info=True)
             return None
@@ -403,24 +336,21 @@ class MarketSimulator:
         }
 
     def last_closed_m5_bars(self, n: int = 10) -> list[Bar]:
-        """Return the last ``n`` closed M5 bars (excluding the forming one)."""
         df = self.aggregator.get_bars_by_interval(self.m5_bar_interval_ticks, n=n + 1)
         rows: list[Bar] = []
         if df is not None and len(df) > 0:
             for _, r in df.iterrows():
-                rows.append(
-                    {
-                        "time": int(r["timestamp"]),
-                        "open": float(r["open"]),
-                        "high": float(r["high"]),
-                        "low": float(r["low"]),
-                        "close": float(r["close"]),
-                        "volume": float(r["volume"]),
-                    }
-                )
+                rows.append({
+                    "time": int(r["timestamp"]),
+                    "open": float(r["open"]),
+                    "high": float(r["high"]),
+                    "low": float(r["low"]),
+                    "close": float(r["close"]),
+                    "volume": float(r["volume"]),
+                })
         return rows
 
-    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+    def __repr__(self) -> str:
         return (
             f"MarketSimulator(tick={self.tick}, mid={self.current_mid_price:.2f}, "
             f"agents={len(self.agents)}, book_depth={len(self.book)}, "
