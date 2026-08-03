@@ -1,0 +1,30 @@
+# systemd unit for the overnight self-improvement pipeline.
+#
+# Adjust the two path placeholders (the {{...}} lines) to match your setup,
+# then install with:
+#   sudo cp deploy/overnight/overnight.service /etc/systemd/system/
+#   sudo cp deploy/overnight/overnight.timer    /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now overnight.timer
+
+[Unit]
+Description=XAUUSD overnight model retrain + backtest + summary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# ---- EDIT THESE TWO LINES ----
+WorkingDirectory={{PROJECT_ROOT}}
+ExecStart={{PYTHON}} -m scripts.overnight
+# ------------------------------
+# Run under the user that owns the repo and MT5 terminal.
+User={{USER}}
+Group={{USER}}
+# EnvironmentFile points to the repo .env (Telegram token etc.), if present.
+# The "-" prefix means "ignore if the file is missing".
+EnvironmentFile=-{{PROJECT_ROOT}}/.env
+# Give the full night to a long training run.
+TimeoutStartSec=10h
+StandardOutput=append:{{PROJECT_ROOT}}/logs/overnight.log
+StandardError=append:{{PROJECT_ROOT}}/logs/overnight.log
