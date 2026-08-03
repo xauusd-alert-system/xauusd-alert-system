@@ -81,7 +81,10 @@ class NewsInjector:
 
     # --- internal -------------------------------------------------------
 
-    def _check_arrival(self, tick: int) -> None:
+    def _check_arrival(self, tick: int, ordinal: int) -> None:
+        # SimClock.schedule_every invokes repeating callbacks as
+        # callback(tick, ordinal); ordinal is a monotonically increasing
+        # recurrence counter that this check does not need.
         self._decay_shock(1)
 
         if self._arrival_prob > 0.0 and self.rng.random() < self._arrival_prob:

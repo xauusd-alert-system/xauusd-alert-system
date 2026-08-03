@@ -31,8 +31,15 @@ noise_lognormal_sigma: 0.5
 noise_min_size: 0.01
 noise_max_size: 5.0
 
+# Noise trader directional "tide": BUY probability oscillates as a sine wave in
+# time between 0.5 - amplitude and 0.5 + amplitude (default 45%..55%), giving
+# local buy/sell pressure waves that prevent the price from pinning flat.
+# Period is in ticks; 480 ticks = 8 M1 bars = 40 minutes of simulated time.
+noise_imbalance_amplitude: 0.05
+noise_imbalance_period_ticks: 480.0
+
 # Market maker behaviour
-mm_spread_offset_pct: 0.0003
+mm_spread_offset_pct: 0.0005
 mm_max_inventory: 100.0
 
 # Fundamental/rebalance behaviour

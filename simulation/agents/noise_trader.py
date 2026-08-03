@@ -25,6 +25,23 @@ class NoiseTrader(BaseAgent):
         self.log_sigma: float = float(cfg.get("noise_lognormal_sigma", 0.5))
         self.min_size: float = float(cfg.get("noise_min_size", 0.01))
         self.max_size: float = float(cfg.get("noise_max_size", 5.0))
+        # Directional "tide": the BUY probability oscillates as a sine wave in
+        # time (default sweep 0.45..0.55) so local buy/sell pressure arrives in
+        # waves instead of a perfectly symmetric 50/50 flip that pins the price.
+        self.buy_prob_amplitude: float = float(
+            cfg.get("noise_imbalance_amplitude", 0.05)
+        )
+        self.buy_prob_period: float = float(
+            cfg.get("noise_imbalance_period_ticks", 480.0)
+        )
+        self._phase: float = self.rng.uniform(0.0, 2.0 * math.pi)
+
+    def _buy_probability(self, tick: int) -> float:
+        """Time-varying BUY probability: 0.5 +/- sine wave (default 45%..55%)."""
+        wave = self.buy_prob_amplitude * math.sin(
+            2.0 * math.pi * tick / self.buy_prob_period + self._phase
+        )
+        return 0.5 + wave
 
     def _draw_size(self) -> float:
         """Sample a lognormal order size and clamp to the configured range."""
@@ -37,7 +54,7 @@ class NoiseTrader(BaseAgent):
         if self.rng.random() >= self.lambda_rate:
             return None
 
-        side = "BUY" if self.rng.random() < 0.5 else "SELL"
+        side = "BUY" if self.rng.random() < self._buy_probability(tick) else "SELL"
         volume = self._draw_size()
 
         return Order(
