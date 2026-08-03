@@ -22,12 +22,23 @@ bar_interval_ticks: 12
 # (used by run_loop).
 m5_bar_interval_ticks: 60
 
-# Agents population
-num_noise_traders: 300
+# ============================================================
+# Agent population — rebalanced for directional price movement
+#
+# Previous:  noise=300, mm=20, trend=50,  mr=50,  fund=5
+# Now:       noise=200, mm=20, trend=150, mr=20,  fund=20
+#
+# Rationale:
+#   - Fewer noise traders -> less mean-reverting "wall of randomness"
+#   - 3x more trend followers -> momentum builds and sustains
+#   - 4x more fundamental agents -> stronger price discovery / drift
+#   - Mean-reversion cut 60% -> price escapes equilibrium more easily
+# ============================================================
+num_noise_traders: 200
 num_market_makers: 20
-num_trend_followers: 50
-num_mean_reversion: 50
-num_fundamental: 5
+num_trend_followers: 150
+num_mean_reversion: 20
+num_fundamental: 20
 
 # Noise trader order size distribution (lognormal)
 noise_lambda: 0.3
@@ -38,28 +49,35 @@ noise_max_size: 5.0
 
 # Noise trader directional "tide": BUY probability oscillates as a sine wave
 # between 0.5 - amplitude and 0.5 + amplitude.
-# amplitude=0.15 -> swing from 35% to 65% buy probability (was 0.05 -> 45-55%).
-# period=240 ticks -> ~20 min cycle (was 480 -> ~40 min), creating more frequent
-# directional waves that move the mid price away from the initial level.
-noise_imbalance_amplitude: 0.15
-noise_imbalance_period_ticks: 240.0
+# amplitude=0.30 -> swing from 20% to 80% buy probability (was 0.15 -> 35-65%)
+# period=120 ticks -> ~10 min cycle (was 240 -> ~20 min), creating more frequent
+# and stronger directional waves that push the mid price away from the initial level.
+noise_imbalance_amplitude: 0.30
+noise_imbalance_period_ticks: 120.0
 
 # Market maker behaviour
 mm_spread_offset_pct: 0.0005
 mm_max_inventory: 100.0
 
 # Fundamental/rebalance behaviour
-fundamental_impact_factor: 0.5
+# impact_factor=2.0 (was 0.5) — fundamental agents now punch hard enough to
+# initiate multi-bar directional moves, not just dampen noise.
+# drift_pct=0.0003 introduces a slow random-walk drift (~$0.72/tick on avg)
+# so each simulation run explores a different region of price space.
+fundamental_impact_factor: 2.0
+fundamental_drift_pct: 0.0003
 
-# News shocks: stronger and more frequent than defaults to generate
-# visible price movement during simulation.
-# news_shock_std=0.004 -> ~$9.60 shock on a $2400 price (was 0.002 -> ~$4.80)
-# news_mean_arrival_ticks=300 -> news fires every ~25 min (was 500 -> ~42 min)
-news_shock_std: 0.004
-news_mean_arrival_ticks: 300
+# News shocks: doubled strength and frequency vs previous config to generate
+# clearly visible price impulses on the M5 chart.
+# news_shock_std=0.008 -> ~$19 shock on a $2400 price (was 0.004 -> ~$9.60)
+# news_mean_arrival_ticks=150 -> news fires every ~12 min (was 300 -> ~25 min)
+news_shock_std: 0.008
+news_mean_arrival_ticks: 150
 
-# Circuit breaker that halts trading below a max daily drawdown threshold
-circuit_breaker_pct: 0.15
+# Circuit breaker: tightened from 15% to 5% (realistic intraday limit).
+# At $2400 this allows +-$120 excursion before halting — enough for multi-hour
+# trends without the simulation wandering off to unrealistic price levels.
+circuit_breaker_pct: 0.05
 
 # ============================================================
 # Broker shim config
