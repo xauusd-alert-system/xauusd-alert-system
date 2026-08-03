@@ -74,6 +74,10 @@ class MarketSimulator:
 
     _virtual_state = None
 
+    # Flag: True while warm_up() is running. Circuit breaker is
+    # suppressed during warm-up so agents can build bar history freely.
+    _warming_up: bool = False
+
     def __init__(
         self,
         cfg: Optional[dict] = None,
@@ -92,7 +96,7 @@ class MarketSimulator:
         self.aggregator = OHLCVAggregator(
             bar_interval_ticks=int(self.cfg.get("bar_interval_ticks", 12)),
             tick_duration_seconds=int(self.cfg.get("tick_duration_seconds", 5)),
-            start_tick=int(self.cfg.get("bar_interval_ticks", 12)),
+            start_tick=0,
             start_timestamp=self._start_ts,
         )
         self.engine.on_trade = self._on_trade
@@ -110,9 +114,7 @@ class MarketSimulator:
         self.start_equity: float = float(self.cfg.get("virtual_balance", 10000.0))
         self.paused: bool = False
 
-        # Rolling high-water/low-water for circuit breaker.
-        # Tracks from a rolling window anchor (reset after warm_up) so normal
-        # drift during warm-up does NOT trip the breaker in the live run.
+        # Rolling anchor for circuit breaker; reset after warm_up.
         self._cb_anchor: float = self.initial_price
 
         self._build_agents()
@@ -122,7 +124,7 @@ class MarketSimulator:
         self.max_ticks_per_step: int = int(self.cfg.get("max_ticks_per_step", 1_000_000))
         self.price_history: list[float] = [self.initial_price]
 
-        self._seed_initial_quotes()
+        self._seed_book_quotes(self.initial_price)
 
     def attach_state(self, state) -> None:
         self._virtual_state = state
@@ -130,42 +132,34 @@ class MarketSimulator:
     def _build_agents(self) -> None:
         cfg = self.cfg
         self.agents: list = []
-        n_noise = int(cfg.get("num_noise_traders", 200))
-        n_mm = int(cfg.get("num_market_makers", 20))
-        n_trend = int(cfg.get("num_trend_followers", 150))
-        n_mr = int(cfg.get("num_mean_reversion", 20))
-        n_fund = int(cfg.get("num_fundamental", 20))
-
-        for i in range(n_noise):
+        for i in range(int(cfg.get("num_noise_traders", 200))):
             self.agents.append(NoiseTrader(f"noise-{i}", cfg, rng=random.Random(self.rng.random())))
-        for i in range(n_mm):
+        for i in range(int(cfg.get("num_market_makers", 20))):
             self.agents.append(MarketMaker(f"mm-{i}", cfg, rng=random.Random(self.rng.random())))
-        for i in range(n_trend):
+        for i in range(int(cfg.get("num_trend_followers", 150))):
             self.agents.append(TrendFollower(f"trend-{i}", cfg, rng=random.Random(self.rng.random())))
-        for i in range(n_mr):
+        for i in range(int(cfg.get("num_mean_reversion", 20))):
             self.agents.append(MeanReversion(f"mr-{i}", cfg, rng=random.Random(self.rng.random())))
-        for i in range(n_fund):
+        for i in range(int(cfg.get("num_fundamental", 20))):
             self.agents.append(FundamentalAgent(f"fund-{i}", cfg, rng=random.Random(self.rng.random())))
 
-    def _seed_initial_quotes(self) -> None:
-        mid = self.initial_price
+    def _seed_book_quotes(self, mid: float) -> None:
+        """Plant thin resting limit orders around `mid` to guarantee a spread."""
         for level in range(1, 6):
             spread = level * max(self.spread_ask_offset, 0.05)
             self.book.add_limit_order(Order(
                 agent_id="seed", side="BUY", order_type="LIMIT",
-                price=round(mid - spread, 6), volume=1.0, tick=0,
+                price=round(mid - spread, 6), volume=1.0, tick=self.tick,
             ))
             self.book.add_limit_order(Order(
                 agent_id="seed", side="SELL", order_type="LIMIT",
-                price=round(mid + spread, 6), volume=1.0, tick=0,
+                price=round(mid + spread, 6), volume=1.0, tick=self.tick,
             ))
 
     @property
     def current_mid_price(self) -> float:
         mid = self.book.mid_price()
-        if mid is None:
-            return self.last_price
-        return mid
+        return mid if mid is not None else self.last_price
 
     @property
     def current_bid(self) -> float:
@@ -194,7 +188,9 @@ class MarketSimulator:
         if self.tick % self.quote_refresh_interval == 0:
             self._refresh_stale_quotes()
 
-        self._update_circuit_breaker()
+        # Check circuit breaker only outside warm-up.
+        if not self._warming_up:
+            self._update_circuit_breaker()
 
         if not self.paused:
             orders = self._gather_orders()
@@ -214,9 +210,6 @@ class MarketSimulator:
 
     def _gather_orders(self) -> list[Order]:
         mid = self.current_mid_price
-        bid = self.current_bid
-        ask = self.current_ask
-
         closes: list[float] = []
         try:
             df = self.aggregator.get_bars_by_interval(
@@ -225,23 +218,17 @@ class MarketSimulator:
             closes = [float(x) for x in df["close"].tolist()]
         except Exception:
             logger.debug("aggregator bars unavailable", exc_info=True)
-        if closes:
-            closes = closes + [self.last_price]
-        else:
-            closes = [self.last_price]
+        closes = (closes + [self.last_price]) if closes else [self.last_price]
 
         net_inventory: float = 0.0
         if self._virtual_state is not None:
             for pos in self._virtual_state.positions.values():
-                if pos.type == 0:
-                    net_inventory += pos.volume
-                else:
-                    net_inventory -= pos.volume
+                net_inventory += pos.volume if pos.type == 0 else -pos.volume
 
         context = {
             "mid": mid,
-            "best_bid": bid,
-            "best_ask": ask,
+            "best_bid": self.current_bid,
+            "best_ask": self.current_ask,
             "last_price": self.last_price,
             "last_bar": None,
             "recent_closes": closes,
@@ -251,12 +238,10 @@ class MarketSimulator:
 
         orders: list[Order] = []
         for agent in self.agents:
-            if not agent.active:
-                continue
-            order = agent.act(context, self.tick)
-            if order is not None:
-                orders.append(order)
-
+            if agent.active:
+                order = agent.act(context, self.tick)
+                if order is not None:
+                    orders.append(order)
         return orders
 
     def _refresh_stale_quotes(self) -> None:
@@ -267,55 +252,70 @@ class MarketSimulator:
                     self.book.cancel_order(order.order_id)
 
     def _update_circuit_breaker(self) -> None:
-        """Trip the breaker only if price moves >circuit_breaker_pct from the
-        rolling anchor (reset at end of warm_up), not from initial_price.
-        This prevents warm-up drift from locking the live run."""
+        """Trip (but never auto-reset) the breaker when price is >circuit_breaker_pct
+        from the rolling anchor. Recovery is explicit via warm_up() only.
+        """
+        if self.paused:
+            return  # already tripped – don't spam warnings
         mid = self.current_mid_price
         deviation = abs(mid - self._cb_anchor) / (self._cb_anchor + 1e-12)
         if deviation >= self.circuit_breaker_pct:
-            if not self.paused:
-                logger.warning(
-                    "Circuit breaker tripped: mid=%.2f anchor=%.2f dev=%.3f",
-                    mid, self._cb_anchor, deviation,
-                )
+            logger.warning(
+                "Circuit breaker tripped: mid=%.2f anchor=%.2f dev=%.3f",
+                mid, self._cb_anchor, deviation,
+            )
             self.paused = True
-        else:
-            self.paused = False
 
     def warm_up(self, n_ticks: int = 5000) -> None:
-        """Run the simulation for n_ticks to build bar history.
+        """Run n_ticks of simulation to build bar history.
 
-        After warm-up:
-        - resets the circuit-breaker anchor to the current mid so drift
-          during warm-up does not immediately trip the breaker in live run;
-        - resets the OHLCV aggregator so frozen warm-up bars don't leak
-          into the live bar stream that advance_to_next_m5_bar() returns;
-        - clears paused flag.
+        Post-warm-up resets:
+        1. Re-anchors the CB to the current mid so live-run starts clean.
+        2. Resets the aggregator with the current tick as new start_tick so
+           live bars carry correct incrementing timestamps.
+        3. Resets last_m5_bar_tick to self.tick so advance_to_next_m5_bar
+           doesn't try to catch up to a stale target from the warm-up.
+        4. Re-seeds the order book around current mid (not initial_price)
+           so no immediate CB trip from stale seed quotes.
+        5. Clears paused flag.
         """
         n_ticks = max(0, int(n_ticks))
         logger.info("Warming up simulation for %d ticks ...", n_ticks)
+        self._warming_up = True
         self.step(n_ticks)
+        self._warming_up = False
+
+        current_mid = self.current_mid_price
         logger.info(
             "Warm-up complete: tick=%d mid=%.2f m5_bar_tick=%d",
-            self.tick, self.current_mid_price, self.last_m5_bar_tick,
+            self.tick, current_mid, self.last_m5_bar_tick,
         )
-        # --- post-warm-up resets ---
-        self._cb_anchor = self.current_mid_price  # re-anchor circuit breaker
-        self.paused = False                        # clear any tripped state
-        self.aggregator.reset()                    # drop stale warm-up bars
-        self._seed_initial_quotes()                # replenish resting liquidity
+
+        # 1. Re-anchor CB to post-warmup price.
+        self._cb_anchor = current_mid
+        # 2. Reset aggregator – pass current tick so new bars index from here.
+        self.aggregator.reset(new_start_tick=self.tick)
+        # 3. Align last_m5_bar_tick so advance_to_next_m5_bar advances correctly.
+        self.last_m5_bar_tick = self.tick
+        # 4. Re-seed order book around the current (post-warmup) mid price.
+        self._seed_book_quotes(current_mid)
+        # 5. Clear any tripped state.
+        self.paused = False
 
     def advance_to_next_m5_bar(self, max_ticks: int = 240) -> Optional[dict]:
+        """Advance simulation until the next M5 bar closes, return it.
+
+        Returns None if the bar didn't close within max_ticks (caller
+        will retry on the next driver iteration).
+        """
         target = self.last_m5_bar_tick + self.m5_bar_interval_ticks
         advanced = 0
         while self.tick < target and advanced < max_ticks:
             self.step()
             advanced += 1
-            if self.last_m5_bar_tick >= target:
-                break
 
         if self.last_m5_bar_tick < target:
-            return None
+            return None  # didn't reach boundary yet
 
         try:
             df = self.aggregator.get_bars_by_interval(self.m5_bar_interval_ticks, n=2)

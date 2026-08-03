@@ -33,11 +33,20 @@ class Bar(TypedDict):
 class OHLCVAggregator:
     """Accumulates Trade flow and produces OHLCV bars per tick interval."""
 
-    def __init__(self, bar_interval_ticks: int = 12, tick_duration_seconds: int = 5,
-                 start_tick: int = 0) -> None:
+    def __init__(
+        self,
+        bar_interval_ticks: int = 12,
+        tick_duration_seconds: int = 5,
+        start_tick: int = 0,
+        start_timestamp: int = 0,   # <-- NEW: accepted but used only for
+                                     # absolute wall-clock offset if provided
+    ) -> None:
         self.bar_interval_ticks = bar_interval_ticks
         self.tick_duration_seconds = tick_duration_seconds
         self.start_tick = start_tick
+        # Wall-clock anchor: if caller passes start_timestamp (Unix seconds)
+        # we anchor bar times to that instead of tick-relative 0.
+        self._wall_anchor: int = int(start_timestamp) if start_timestamp else 0
         self.last_price: float | None = None
         self._bars: dict[int, Bar] = {}            # bar_index -> Bar
         self._current_bar_tick: int | None = None
@@ -52,7 +61,6 @@ class OHLCVAggregator:
 
         bar_index = trade.tick // self.bar_interval_ticks
         if self._current_bar_tick != bar_index:
-            # Close current bar and start a new one
             self._current_bar_tick = bar_index
             self._current_bar = Bar(
                 time=self._bar_time(bar_index),
@@ -73,6 +81,11 @@ class OHLCVAggregator:
 
     def _bar_time(self, bar_index: int) -> int:
         """Unix seconds (int) for the opening time of a bar index."""
+        if self._wall_anchor:
+            # Absolute mode: anchor to the wall-clock start_timestamp.
+            offset_ticks = (self.start_tick // self.bar_interval_ticks + bar_index)
+            return self._wall_anchor + offset_ticks * self.bar_interval_ticks * self.tick_duration_seconds
+        # Relative mode (legacy): pure tick arithmetic.
         return (self.start_tick // self.bar_interval_ticks + bar_index) * \
             self.bar_interval_ticks * self.tick_duration_seconds
 
@@ -86,11 +99,6 @@ class OHLCVAggregator:
     def get_bars_by_interval(self, bar_interval: int, n: int = 100) -> pd.DataFrame:
         """
         Return the last `n` bars for an arbitrary tick interval.
-
-        This decouples the shim's copy_rates_from_pos() from timeframe
-        strings: M1 = 12 ticks, M5 = 60 ticks, etc. Bars are re-sampled
-        on the fly from the recorded base bars when the requested interval
-        differs from bar_interval_ticks.
 
         Returns columns: timestamp(int unix seconds), open, high, low,
         close, volume.
@@ -147,13 +155,22 @@ class OHLCVAggregator:
 
     def _resampled_bar_time(self, target_index: int, bar_interval: int) -> int:
         """Unix seconds (int) for the open time of a resampled bar."""
+        if self._wall_anchor:
+            return self._wall_anchor + target_index * bar_interval * self.tick_duration_seconds
         base_time = (self.start_tick // self.bar_interval_ticks) * \
             self.bar_interval_ticks * self.tick_duration_seconds
         return base_time + target_index * bar_interval * self.tick_duration_seconds
 
-    def reset(self) -> None:
-        """Clear all accumulated bars (used before warm-up)."""
+    def reset(self, new_start_tick: int = 0) -> None:
+        """Clear all accumulated bars.
+
+        ``new_start_tick`` should be set to the simulator's current tick
+        so post-reset bar indices are computed relative to the new baseline
+        instead of tick-0, giving correct wall-clock timestamps.
+        """
         self._bars.clear()
         self._current_bar = None
         self._current_bar_tick = None
         self.last_price = None
+        if new_start_tick:
+            self.start_tick = new_start_tick
