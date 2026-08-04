@@ -65,9 +65,27 @@ class EventDrivenBacktester:
         self.slippage = bt_cfg["slippage_points"] / 100.0
         self.balance = bt_cfg["initial_balance"]
         self.risk_pct = bt_cfg["risk_per_trade_pct"] / 100.0
-        self.target_x = lab_cfg["target_pips_x"]
-        self.stop_y = lab_cfg["stop_pips_y"]
-        self.horizon_n = lab_cfg["horizon_candles_n"]
+        self.horizon_n = int(lab_cfg["horizon_candles_n"])
+
+        # HIGH 9: barrier distances must come from the SAME config the labeling
+        # module uses, so backtest outcomes are comparable to the supervised
+        # target (atr_scaled triples vs. legacy fixed pips).
+        method = lab_cfg.get("method", "fixed")
+        if method == "atr_scaled":
+            self.use_atr_scaled = True
+            self.target_x_mult = float(lab_cfg.get("target_atr_multiplier", 1.2))
+            self.stop_y_mult = float(lab_cfg.get("stop_atr_multiplier", 1.0))
+            self.atr_col = lab_cfg.get("atr_column", "atr")
+            # Legacy fixed-barrier fallbacks for when the ATR column is absent.
+            self.target_x = float(lab_cfg.get("target_pips_x", 0.0))
+            self.stop_y = float(lab_cfg.get("stop_pips_y", 0.0))
+        else:
+            self.use_atr_scaled = False
+            self.atr_col = "atr"
+            self.target_x_mult = 0.0
+            self.stop_y_mult = 0.0
+            self.target_x = float(lab_cfg["target_pips_x"])
+            self.stop_y = float(lab_cfg["stop_pips_y"])
 
         self.trades: List[Trade] = []
         self.equity_curve: List[float] = [self.balance]
@@ -81,6 +99,7 @@ class EventDrivenBacktester:
         n = len(df)
         open_position: Optional[Trade] = None
         pending_signal: Optional[int] = None  # signal decided at i, to be acted on at i+1
+        entry_bar: Optional[int] = None  # index of the candle where the current position opened
 
         opens = df["open"].values
         highs = df["high"].values
@@ -89,27 +108,52 @@ class EventDrivenBacktester:
         timestamps = df["timestamp_utc"].values
         sessions = df["session"].values
         regimes = df["regime"].values
+        atrs = df[self.atr_col].values if self.atr_col in df.columns else None
 
         for i in range(n):
             # 1. Execute any pending signal from the PREVIOUS candle's close, using THIS candle's open
             if open_position is None and pending_signal is not None and pending_signal != 0:
                 direction = pending_signal
                 entry_price = opens[i] + (self.spread / 2 if direction == 1 else -self.spread / 2)
-                stop_price = entry_price - direction * self.stop_y
-                target_price = entry_price + direction * self.target_x
-                open_position = Trade(
-                    entry_ts=int(timestamps[i]),
-                    entry_price=entry_price,
-                    direction=direction,
-                    stop_price=stop_price,
-                    target_price=target_price,
-                    session=str(sessions[i]),
-                    regime_at_entry=str(regimes[i - 1]) if i > 0 else str(regimes[i]),
-                )
-                pending_signal = None
 
-            # 2. If a position is open, check for target/stop hit using THIS candle's high/low
-            if open_position is not None:
+                # Barrier sizing: ATR-scaled (matches labeling.method=atr_scaled) or fixed pips.
+                barrier_ok = True
+                if self.use_atr_scaled:
+                    atr_val = float(atrs[i]) if atrs is not None else float("nan")
+                    if pd.isna(atr_val) or atr_val <= 0:
+                        atr_val = 0.0
+                    if atr_val > 0:
+                        stop_price = entry_price - direction * atr_val * self.stop_y_mult
+                        target_price = entry_price + direction * atr_val * self.target_x_mult
+                    elif self.target_x > 0 and self.stop_y > 0:
+                        stop_price = entry_price - direction * self.stop_y
+                        target_price = entry_price + direction * self.target_x
+                    else:
+                        barrier_ok = False
+                else:
+                    stop_price = entry_price - direction * self.stop_y
+                    target_price = entry_price + direction * self.target_x
+
+                if not barrier_ok:
+                    pending_signal = None  # cannot size targets/stops -> skip this entry
+                else:
+                    open_position = Trade(
+                        entry_ts=int(timestamps[i]),
+                        entry_price=entry_price,
+                        direction=direction,
+                        stop_price=stop_price,
+                        target_price=target_price,
+                        session=str(sessions[i]),
+                        regime_at_entry=str(regimes[i - 1]) if i > 0 else str(regimes[i]),
+                    )
+                    entry_bar = i
+                    pending_signal = None
+
+            # 2. If a position is open, check for target/stop hit using the high/low
+            # of the NEXT candle and beyond. Exits are never evaluated on the entry
+            # candle itself (a signal known at candle i-1's close is acted on at i's
+            # OPEN; using this same candle's high/low to close would be look-ahead).
+            if open_position is not None and (entry_bar is None or i > entry_bar):
                 direction = open_position.direction
                 hit_target = (highs[i] >= open_position.target_price) if direction == 1 else (lows[i] <= open_position.target_price)
                 hit_stop = (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
@@ -138,6 +182,7 @@ class EventDrivenBacktester:
                     self.equity_curve.append(self.balance)
                     self.trades.append(open_position)
                     open_position = None
+                    entry_bar = None
 
             # 3. Decide signal AT THE CLOSE of this candle, for execution at i+1 (never at i - that's look-ahead)
             if open_position is None:

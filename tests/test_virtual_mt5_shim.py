@@ -89,9 +89,12 @@ def cfg():
 
 @pytest.fixture()
 def world(cfg):
-    """Warmed-up (virtual) world: simulator + VirtualState wired into the shim."""    
+    """Warmed-up (virtual) world: simulator + VirtualState wired into the shim."""
     sim = MarketSimulator(cfg=cfg, seed=42)
-    sim.warm_up(n_ticks=120)  # 2 M1 bars of history so copy_rates returns data
+    # Build bar history with a plain step() (2 M1 bars -> 2x rebuilt M5 bars) so
+    # copy_rates returns data. Note: warm_up() clears the aggregator at the end
+    # (resets start_tick), which would leave zero history for copy_rates.
+    sim.step(120)
     state = VirtualState(cfg)
     mt5._inject(state, sim, cfg)
     return state, sim
@@ -121,15 +124,20 @@ def test_order_send_deal_opens_position(world):
     result = mt5.order_send(request)
 
     assert result.retcode == mt5.TRADE_RETCODE_DONE == 10009
-    assert result.order >= 100001  # position ticket namespace
+    # Ticket-faithful to real MT5: result.order is a *distinct order ticket*
+    # (small, starting at 1), NOT the position ticket. Decoding the rest of the
+    # result is the caller's job:
+    assert 1 <= result.order  # order ticket namespace (real MT5 behaves the same)
     assert result.deal >= 200001  # deal ticket namespace
     assert result.volume == 0.1
 
-    positions = mt5.positions_get()
+    # --- HIGH 22 path: resolve the genuine position ticket via positions_get(),
+    # --- exactly as execution/mt5_trader.execute_signal does in production.
+    positions = mt5.positions_get(symbol="XAUUSD", magic=777111)
     assert positions is not None
     assert len(positions) == 1
     pos = positions[0]
-    assert pos.ticket == result.order
+    assert pos.ticket != result.order  # order ticket != position ticket
     assert pos.symbol == "XAUUSD"
     assert pos.type == mt5.POSITION_TYPE_BUY
     assert pos.volume == 0.10
@@ -138,6 +146,67 @@ def test_order_send_deal_opens_position(world):
     assert pos.tp == pytest.approx(2430.0)
     assert pos.magic == 777111
     assert state.account_info().balance == pytest.approx(before)  # no balance delta on open
+
+
+def test_order_send_returns_distinct_order_and_position_tickets(world):
+    """Ticket-faithful contract: result.order (order ticket) is NEVER usable as a
+    position id -- the two tickets live in separate namespaces, exactly like a real
+    MT5 terminal. Callers must resolve positions via positions_get() (HIGH 22)."""
+    state, _sim = world
+
+    # First open.
+    res1 = mt5.order_send(
+        {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": "XAUUSD",
+            "volume": 0.10,
+            "type": mt5.ORDER_TYPE_BUY,
+            "price": 2400.0,
+            "sl": 0.0,
+            "tp": 0.0,
+            "magic": 777111,
+            "comment": "test-open-1",
+        }
+    )
+    assert res1.retcode == mt5.TRADE_RETCODE_DONE
+    # Order ticket is a small monotonic counter (not the 100001+ position space).
+    assert 1 <= res1.order < 100001
+
+    pos = mt5.positions_get(symbol="XAUUSD", magic=777111)[0]
+    assert pos.ticket != res1.order
+    assert pos.ticket >= 100001  # position ticket namespace
+    assert res1.deal >= 200001  # deal ticket namespace
+
+    # The order ticket is NOT a valid position id.
+    assert state.get_position(res1.order) is None
+
+    # Second open -> a NEW, distinct order ticket (monotonic++).
+    res2 = mt5.order_send(
+        {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": "XAUUSD",
+            "volume": 0.05,
+            "type": mt5.ORDER_TYPE_SELL,
+            "price": 2410.0,
+            "sl": 0.0,
+            "tp": 0.0,
+            "magic": 777111,
+            "comment": "test-open-2",
+        }
+    )
+    assert res2.retcode == mt5.TRADE_RETCODE_DONE
+    assert res2.order != res1.order
+    assert res2.order > res1.order
+    assert res2.deal != res1.deal
+
+    # Two open positions, resolved purely via positions_get.
+    positions = mt5.positions_get(symbol="XAUUSD", magic=777111)
+    assert len(positions) == 2
+
+    # Every position ticket is distinct from every order ticket returned so far.
+    order_tickets = {res1.order, res2.order}
+    position_tickets = {p.ticket for p in positions}
+    assert order_tickets.isdisjoint(position_tickets)
 
 
 def test_order_send_sltp_modifies_position(world):
@@ -188,7 +257,9 @@ def test_order_send_deal_with_position_closes_and_updates_balance(world):
             "comment": "test-open",
         }
     )
-    pos_id = res.order
+    # Order ticket != position ticket; resolve the real position id like
+    # execution/mt5_trader.execute_signal does (HIGH 22).
+    pos_id = mt5.positions_get(symbol="XAUUSD", magic=777111)[0].ticket
     balance_before = state.balance
 
     # Close partial 0.05 @ 2410 -> +$50 on 0.05 lots * 100 contract * $10 move.
@@ -248,7 +319,9 @@ def test_history_deals_get_returns_in_and_out(world):
             "comment": "test-open",
         }
     )
-    pos_id = res.order
+    # Order ticket != position ticket; resolve the real position id via
+    # positions_get (this is exactly the production HIGH 22 code path).
+    pos_id = mt5.positions_get(symbol="XAUUSD", magic=777111)[0].ticket
 
     mt5.order_send(
         {
@@ -293,7 +366,8 @@ def test_account_info_equity_includes_floating_pnl(world):
             "comment": "test-open",
         }
     )
-    pos = state.get_position(res.order)
+    # Order ticket != position ticket; resolve via positions_get (HIGH 22).
+    pos = mt5.positions_get(symbol="XAUUSD", magic=777111)[0]
 
     # At the open price floating PnL = 0, equity == balance.
     pos.price_current = 2400.0

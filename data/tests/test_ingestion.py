@@ -44,10 +44,15 @@ def test_session_tagging_known_hours():
     label = tag_session(ts_asia, SESSIONS)
     assert "asia" in label
 
-    # 13:00 UTC -> London (7-16) and NY (12-21) overlap
+    # 13:00 UTC with overlapping windows -> combined canonical label
+    # (Issue #50: uses config session names, e.g. "newyork", not "ny").
+    overlap_sessions = {
+        "london": {"start": 8, "end": 16},
+        "newyork": {"start": 12, "end": 21},
+    }
     ts_overlap = pd.Timestamp("2026-07-24 13:00:00", tz="UTC").timestamp()
-    label_overlap = tag_session(ts_overlap, SESSIONS)
-    assert "london" in label_overlap and "ny" in label_overlap
+    label_overlap = tag_session(ts_overlap, overlap_sessions)
+    assert "london" in label_overlap and "newyork" in label_overlap
 
     # 23:00 UTC -> off_session (outside all windows)
     ts_off = pd.Timestamp("2026-07-24 23:00:00", tz="UTC").timestamp()
@@ -59,8 +64,8 @@ def test_storage_roundtrip(tmp_path):
     db_path = str(tmp_path / "test.sqlite")
     init_schema(db_path, ["M5"])
     df = fetch_mock_candles("M5", n_candles=30, sessions_config=SESSIONS)
-    upsert_candles(db_path, "M5", df)
-    read_back = read_candles(db_path, "M5")
+    upsert_candles(db_path, "M5", "XAUUSD", df)
+    read_back = read_candles(db_path, "M5", "XAUUSD")
     assert len(read_back) == 30
     assert list(read_back["timestamp_utc"]) == sorted(read_back["timestamp_utc"])
 
@@ -70,7 +75,7 @@ def test_storage_idempotent_upsert(tmp_path):
     db_path = str(tmp_path / "test2.sqlite")
     init_schema(db_path, ["M1"])
     df = fetch_mock_candles("M1", n_candles=20, sessions_config=SESSIONS)
-    upsert_candles(db_path, "M1", df)
-    upsert_candles(db_path, "M1", df)  # insert same rows again
-    read_back = read_candles(db_path, "M1")
+    upsert_candles(db_path, "M1", "XAUUSD", df)
+    upsert_candles(db_path, "M1", "XAUUSD", df)  # insert same rows again
+    read_back = read_candles(db_path, "M1", "XAUUSD")
     assert len(read_back) == 20  # no duplicates due to INSERT OR REPLACE on PK

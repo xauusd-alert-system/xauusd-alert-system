@@ -400,8 +400,10 @@ class VirtualState:
         """Close a (partial) volume of an open position at ``price``.
 
         Creates an OUT deal carrying realized PnL, updates balance and the
-        position's remaining volume.  When volume reaches (near) zero the
-        position is removed.  Returns the OUT deal or None on error.
+        position's remaining volume.  Cumulated swap is charged proportionally to
+        the closed volume on every (partial) close and applied to the balance.
+        When volume reaches (near) zero the position is removed.
+        Returns the OUT deal or None on error.
         """
         if pos.ticket not in self.positions:
             return None
@@ -412,11 +414,15 @@ class VirtualState:
         if volume <= 1e-12:
             return None
 
+        # Swap accrues on the position; charge the share matching this close.
+        # On a full close we take the entire remaining swap (already scaled by
+        # the volume ratio so no double counting occurs).
         close_type = 1 if pos.type == 0 else 0  # opposite side deal type
         profit = self._compute_pnl(
             pos.symbol, pos.type, pos.price_open, price, volume
         )
-        self.balance += profit
+        swap_charge = round(pos.swap * (volume / pos.volume), 2)
+        self.balance = round(self.balance + profit + swap_charge, 2)
 
         deal = VirtualDeal(
             ticket=self._next_deal_ticket(),
@@ -427,7 +433,7 @@ class VirtualState:
             volume=round(volume, 2),
             price=round(price, 6),
             profit=profit,
-            swap=pos.swap if volume >= pos.volume else 0.0,
+            swap=swap_charge,
             commission=0.0,
             magic=pos.magic,
             comment=comment,
@@ -435,8 +441,13 @@ class VirtualState:
         )
         self.deals.append(deal)
 
-        pos.volume = round(pos.volume - volume, 2)
-        if pos.volume <= 1e-12:
+        remaining = round(pos.volume - volume, 2)
+        # Keep the position's total accumulated swap value, but reflect that the
+        # closed share has been charged, so a later (partial) close charges only
+        # its own proportional share.
+        pos.swap = round(pos.swap - swap_charge, 2)
+        pos.volume = remaining
+        if remaining <= 1e-12:
             del self.positions[pos.ticket]
         else:
             pos.time_update = t

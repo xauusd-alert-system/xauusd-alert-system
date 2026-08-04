@@ -68,15 +68,45 @@ def compute_ensemble_signal(
             pass
 
     is_crypto = "BTC" in asset_key.upper() or "ETH" in asset_key.upper()
+
+    # Phase 5 (#16): enforce p_long + p_short = 1 BEFORE any downstream use.
+    # Some predictors (e.g. a 3-class model) return p_long + p_short < 1 with the
+    # residual mass on a "no_trade" class; raw probabilities that don't sum to 1
+    # would under/over-state confidence and the EV gate. When normalize_probs is
+    # enabled we re-scale the two directional masses so they sum to exactly 1.0.
+    # A degenerate total (0.0 or NaN) carries no directional information, so we
+    # fall back to the neutral (0.5, 0.5) pair which can never pass any filter.
+    if ens_cfg.get("normalize_probs", False):
+        try:
+            p_long = float(ml_p_long)
+            p_short = float(ml_p_short)
+            total = p_long + p_short
+            if total > 0.0 and not (p_long != p_long or p_short != p_short):
+                ml_p_long = p_long / total
+                ml_p_short = p_short / total
+            else:
+                ml_p_long = 0.5
+                ml_p_short = 0.5
+        except (TypeError, ValueError):
+            # Non-numeric probabilities -> no directional information.
+            ml_p_long = 0.5
+            ml_p_short = 0.5
+
     ml_p_max = max(ml_p_long, ml_p_short)
 
     # 2. 🚨 УМНЫЙ ФИЛЬТР СЕССИЙ
     suppress_sessions = ens_cfg.get("suppress_sessions", ["asia", "off_session"])
-    
+    # Конфигурируемые пороги (HIGH 8): все «магические числа» вынесены в config.yaml.
+    crypto_night_min_p = float(ens_cfg.get("crypto_night_min_probability", 0.58))
+    required_p_min = float(ens_cfg.get("min_ml_probability", 0.55))
+    # Масштаб приведения p_max к уверенности: 0.50 -> 0.0, 0.50+floor -> 1.0.
+    ml_confidence_floor = float(ens_cfg.get("ml_confidence_floor", 0.62))
+    ml_confidence_scale = max(1e-9, ml_confidence_floor - 0.50)
+
     if session and (session in suppress_sessions):
         if is_crypto and session == "asia":
-            # Для Биткоина в Азию требуем СВЕРХ-ВЫСОКУЮ уверенность P >= 0.58
-            if ml_p_max < 0.58:
+            # Для Биткоина в Азию требуем СВЕРХ-ВЫСОКУЮ уверенность
+            if ml_p_max < crypto_night_min_p:
                 return EnsembleSignal(
                     bias="no_trade",
                     confidence=0.0,
@@ -85,7 +115,7 @@ def compute_ensemble_signal(
                     ml_p_short=float(ml_p_short),
                     regime=regime.value if hasattr(regime, "value") else str(regime),
                     suppressed_by_meta_filter=True,
-                    reasoning_summary=f"Crypto Night Mode: P={ml_p_max:.3f} below night threshold (0.58)",
+                    reasoning_summary=f"Crypto Night Mode: P={ml_p_max:.3f} below night threshold ({crypto_night_min_p})",
                 )
         else:
             return EnsembleSignal(
@@ -99,8 +129,7 @@ def compute_ensemble_signal(
                 reasoning_summary=f"Suppressed by session filter ({session})",
             )
 
-    # 3. Базовый порог для дневных сделок (P >= 0.55)
-    required_p_min = 0.55
+    # 3. Базовый порог для дневных сделок (P >= min_ml_probability)
     if ml_p_max < required_p_min:
         return EnsembleSignal(
             bias="no_trade",
@@ -113,11 +142,62 @@ def compute_ensemble_signal(
             reasoning_summary=f"Weak ML probability (p_max={ml_p_max:.3f} < {required_p_min})",
         )
 
-    min_confidence_to_alert = ens_cfg.get("min_confidence_to_alert", 0.65)
+    # Phase 2: EV-threshold entry gate. EV per unit risk over the TP1/stop ratio:
+    #   EV_risk = p * payoff_ratio - (1 - p)
+    # with p = directional probability (p_long for long, p_short for short) and
+    # payoff_ratio = reward (TP1 ATR distance) / risk (stop ATR distance) from the
+    # labeling config (tp1_atr_multiplier / stop_atr_multiplier, default 1.0/1.0).
+    # A signal is declined if EV_risk < ev_threshold. ev_threshold=0 (default) disables
+    # the gate so the Phase-0+1 baseline is preserved unless explicitly enabled.
+    ev_threshold = float(ens_cfg.get("ev_threshold", 0.0))
+    if ev_threshold > 0.0:
+        lab_cfg = cfg.get("labeling", {})
+        tp1_mult = float(lab_cfg.get("tp1_atr_multiplier", 1.0))
+        stop_mult = float(lab_cfg.get("stop_atr_multiplier", 1.0))
+        payoff_ratio = (tp1_mult / stop_mult) if stop_mult > 0 else 1.0
+        ev_risk_long = ml_p_long * payoff_ratio - (1.0 - ml_p_long)
+        ev_risk_short = ml_p_short * payoff_ratio - (1.0 - ml_p_short)
+        ev_risk_max = max(ev_risk_long, ev_risk_short)
+        if ev_risk_max < ev_threshold:
+            return EnsembleSignal(
+                bias="no_trade",
+                confidence=0.0,
+                rule_vote=0,
+                ml_p_long=float(ml_p_long),
+                ml_p_short=float(ml_p_short),
+                regime=regime.value if hasattr(regime, "value") else str(regime),
+                suppressed_by_meta_filter=False,
+                reasoning_summary=(
+                    f"EV gate declined: EV_risk={ev_risk_max:.3f} < threshold={ev_threshold:.3f} "
+                    f"(payoff_ratio={payoff_ratio:.3f})"
+                ),
+            )
+
+    # Phase 4 (#30): per-asset dynamic min_confidence scaling when enabled.
+    # base_min_confidence comes from the (already per-asset merged by the caller)
+    # ensemble config. With dynamic_min_confidence=true the effective alert bar is
+    #   effective_bar = base_bar * per_asset_scale * edge_factor
+    # where per_asset_scale = dynamic_min_confidence_scale (per-asset, default 1.0)
+    # lets each asset tighten/loosen its OWN bar, and
+    #   edge_factor = 1 - min(edge_credit, edge * edge_gain)
+    # relaxes the bar (up to edge_credit, default 0.10) as the normalized directional
+    # edge |p_long - p_short| strengthens, so marginal weak-edge signals need more
+    # evidence (fewer, better trades) while strong-edge signals are admitted.
+    # Default false keeps the exact Phase-0+1 per-asset bar unchanged.
+    min_confidence_to_alert = float(ens_cfg.get("min_confidence_to_alert", 0.65))
+    if ens_cfg.get("dynamic_min_confidence", False):
+        per_asset_scale = float(ens_cfg.get("dynamic_min_confidence_scale", 1.0))
+        edge = abs(ml_p_long - ml_p_short)  # in [0, 1]; 0 = no directional edge
+        edge_credit = float(ens_cfg.get("dynamic_edge_credit", 0.10))
+        edge_gain = float(ens_cfg.get("dynamic_edge_gain", 2.0))
+        edge_factor = 1.0 - min(edge_credit, edge * edge_gain)
+        min_confidence_to_alert = min_confidence_to_alert * per_asset_scale * edge_factor
+
     min_regime_confidence = meta_cfg.get("min_regime_confidence", 0.65)
     suppress_regimes = meta_cfg.get("suppress_regimes", ["range", "compression", "reversal_watch"])
-    weight_rule = ens_cfg.get("weight_rule_based", 0.20)
-    weight_ml = ens_cfg.get("weight_ml_probability", 0.80)
+    # HIGH 8 / CRIT 4: веса читаются из ключей config.yaml rule_weight / ml_weight.
+    weight_rule = float(ens_cfg.get("rule_weight", 0.20))
+    weight_ml = float(ens_cfg.get("ml_weight", 0.80))
 
     if isinstance(regime, str):
         try:
@@ -125,13 +205,34 @@ def compute_ensemble_signal(
         except ValueError:
             regime = RegimeLabel.NO_TRADE
 
+    # Phase 4 (#41): rule-vs-ML divergence as a HARD VETO. When enabled, a non-zero
+    # rule vote that OPPOSES the ML vote (rule says long, ML says short, or vice
+    # versa) is treated as a hard no_trade, not merely a confidence collapse. The
+    # asymmetric pairing (rule=+1, ml=0) is NOT a divergence - it just means the ML
+    # is undecided, and the rule side may carry it (requires >= min_ml_probability
+    # upstream). Default false keeps the Phase-0+1 soft-collapse behaviour.
     rule_vote = rule_based_signal(regime)
     ml_vote = 1 if ml_p_long > ml_p_short else (-1 if ml_p_short > ml_p_long else 0)
-
-    # Масштабирование: 0.50 -> 0.0, 0.62 -> 1.0
-    ml_confidence = min(1.0, max(0.0, (ml_p_max - 0.50) / 0.12))
-
     rule_conf = _rule_confidence_component(rule_vote)
+
+    if ens_cfg.get("hard_divergence_veto", False) and (rule_vote != 0) and (ml_vote != 0) and (rule_vote != ml_vote):
+        return EnsembleSignal(
+            bias="no_trade",
+            confidence=0.0,
+            rule_vote=rule_vote,
+            ml_p_long=float(ml_p_long),
+            ml_p_short=float(ml_p_short),
+            regime=regime.value if hasattr(regime, "value") else str(regime),
+            suppressed_by_meta_filter=False,
+            reasoning_summary=(
+                "Hard divergence veto (#41): rule_vote={rule_vote}, ml_vote={ml_vote} "
+                "are opposite -> forced no_trade".format(rule_vote=rule_vote, ml_vote=ml_vote)
+            ),
+        )
+
+    # Масштабирование: 0.50 -> 0.0, 0.50 + ml_confidence_scale -> 1.0
+    ml_confidence = min(1.0, max(0.0, (ml_p_max - 0.50) / ml_confidence_scale))
+
     agree = (rule_vote == ml_vote) and (rule_vote != 0)
 
     if agree:

@@ -99,22 +99,42 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
 
 
 def strategy_fn_factory(cfg, model_path: str, asset_key: str):
+    # HIGH 11: walk-forward folds must NEVER overwrite the production model file.
+    # Saving each fold's model to the prod path destroys the deployed model used by
+    # the live trader every time a backtest runs. Models trained per fold are only
+    # needed transiently for scoring the out-of-sample window, so we keep them in a
+    # temporary, per-fold file and remove it afterwards.
+    import tempfile
+
     def strategy_fn(train_df, test_df, cfg_inner):
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "labeling")
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
 
-        X_train, y_train, cols = build_training_matrix(train_df)
+        X_train, y_train, cols = build_training_matrix(train_df, cfg=cfg_inner)
         test_df_eval = test_df.copy()
 
         if len(X_train) >= 30 and y_train.nunique() >= 2:
             base = train_model(X_train, y_train, cfg_inner)
             calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
-            save_model(calibrated, cols, model_path)
-
-            predictor = ModelPredictor(model_path)
+            # Save to a temp file only; do not touch the production model.
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                prefix="wf_model_", suffix=".joblib"
+            )
+            os.close(tmp_fd)
             try:
-                X_test_feat = test_df_eval[cols].fillna(0.0)
-                preds = predictor.predict_proba(X_test_feat)
+                save_model(calibrated, cols, tmp_path)
+                predictor = ModelPredictor(tmp_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            try:
+                # Phase 3: cols may include regime_<label> one-hot columns that the
+                # eval frame does not carry (it has the raw causal `regime` column).
+                # ModelPredictor re-synthesizes regime_* from `regime` at inference
+                # time, so pass the whole raw frame; fillna keeps warm-up NaN rows
+                # non-crashing exactly as before, and predict_proba ignores any
+                # non-feature columns (it selects only its saved feature_cols).
+                preds = predictor.predict_proba(test_df_eval.fillna(0.0))
                 test_df_eval["ml_p_long"] = preds["p_long"].values
                 test_df_eval["ml_p_short"] = preds["p_short"].values
             except Exception:

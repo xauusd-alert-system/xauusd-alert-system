@@ -24,14 +24,21 @@ from data.session_tagger import tag_dataframe
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Seed XAUUSD historical OHLCV data into SQLite.")
+    parser = argparse.ArgumentParser(description="Seed historical OHLCV data into SQLite.")
     parser.add_argument("--days", type=int, default=90, help="How many days back to seed (default: 90)")
     parser.add_argument("--timeframe", type=str, default=None, help="Single timeframe to seed (default: all)")
+    parser.add_argument("--symbol", type=str, default="XAUUSD",
+                        help="Asset key from config (default: XAUUSD)")
     args = parser.parse_args()
 
     cfg = load_config()
     db_path = cfg["general"]["db_path"]
-    timeframes = [args.timeframe] if args.timeframe else cfg["timeframes"]
+    symbol = args.symbol
+    # Default timeframe list: the primary market timeframe plus the MTF references,
+    # so seeded data covers both the main pipeline and the higher-timeframe features.
+    default_timeframes = [cfg["market_data"]["timeframe"]]
+    default_timeframes += cfg.get("features", {}).get("mtf_reference_timeframes", [])
+    timeframes = [args.timeframe] if args.timeframe else default_timeframes
     sessions_cfg = cfg["sessions"]
 
     init_schema(db_path, timeframes)
@@ -41,12 +48,16 @@ def main():
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
-    print(f"Seeding {len(timeframes)} timeframe(s) from {start_str} to {end_str} into {db_path}")
+    print(f"Seeding {len(timeframes)} timeframe(s) for {symbol} from {start_str} to {end_str} into {db_path}")
+
+    asset_cfg = cfg.get("assets", {}).get(symbol, {})
+    api_symbol = asset_cfg.get("display_name", "XAU/USD")
 
     for tf in timeframes:
-        print(f"  [{tf}] fetching...", end=" ", flush=True)
+        print(f"  [{tf}/{symbol}] fetching...", end=" ", flush=True)
         try:
             df = backfill_historical(
+                symbol=api_symbol,
                 timeframe=tf,
                 start_date=start_str,
                 end_date=end_str,
@@ -55,7 +66,7 @@ def main():
             if df.empty:
                 print("no data returned - skipping")
                 continue
-            upsert_candles(db_path, tf, df)
+            upsert_candles(db_path, tf, symbol, df)
             print(f"{len(df)} candles written")
         except Exception as e:
             print(f"ERROR: {e}")

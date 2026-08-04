@@ -13,8 +13,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
+from config.loader import load_config, get_env
 from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles
+from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
 from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
 from execution.risk_manager import InstitutionalRiskManager
@@ -49,6 +50,18 @@ class MultiAssetMT5Trader:
         self.be_state = {}
         self.active_trades = {}
         self.streak_losses = {}
+
+        # CRIT 5: path to the executed-trades SQLite DB (the same file used by
+        # scripts/retrain_with_real_trades.py). Overridable via env for tests.
+        # get_env may return None; coerce to str so schema init/log calls type-check.
+        self.trade_db_path = str(get_env("TRADE_LOG_DB_PATH", default=self.cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
+        init_trade_log_schema(self.trade_db_path)
+        # Track the feature/confidence snapshot we had at entry, keyed by position ticket,
+        # so we can persist them via log_trade_entry(log_trade_close(...)) for ML retraining.
+        self.signal_features = {}
+        # Last realized PnL (money) per position ticket, captured before the position row
+        # is removed from actives - used to log a meaningful close pnl.
+        self.last_close_pnl = {}
         self.corr_filter_cfg = self.cfg.get("correlation_filter", {})
         self.corr_threshold = self.corr_filter_cfg.get("threshold", 0.80)
         self.corr_history_bars = self.corr_filter_cfg.get("history_bars", 500)
@@ -206,6 +219,15 @@ class MultiAssetMT5Trader:
                     "tp1": None, "tp2": None, "tp3": None,
                     "tp1_hit": False, "tp2_hit": False,
                 }
+            # CRIT 5: keep the DB logging row keyed by the same position ticket.
+            if ticket not in self.signal_features:
+                self.signal_features[ticket] = {
+                    "symbol": symbol,
+                    "type": "long" if pos.type == 0 else "short",
+                    "entry_time": getattr(pos, "time", None)
+                    or int((pos.price_open and 0) or 0),  # shim exposes time
+                    "entry_price": pos.price_open,
+                }
             if ticket in self.be_state:
                 continue
 
@@ -268,6 +290,36 @@ class MultiAssetMT5Trader:
             if history_deals:
                 total_pnl = sum(d.profit + d.swap + d.commission for d in history_deals)
 
+            # CRIT 5: persist the realized close to the executed_trades log.
+            # Prefer the exact deal (entry=OUT) times/prices for accuracy; fall
+            # back on the last deal and our last known current price.
+            close_time = int(datetime.now(timezone.utc).timestamp())
+            close_price = trade_info.get("entry_price")
+            deal_out = [d for d in (history_deals or []) if getattr(d, "entry", None) == 1]
+            if deal_out:
+                close_time = int(getattr(deal_out[-1], "time", close_time))
+                close_price = float(deal_out[-1].price)
+            elif history_deals:
+                close_time = int(getattr(history_deals[-1], "time", close_time))
+                close_price = float(getattr(history_deals[-1], "price", close_price or 0.0) or close_price or 0.0)
+            # pnl from history_deals (money, broker-adjusted) - most accurate.
+            realized_pnl = total_pnl if history_deals else self.last_close_pnl.get(ticket, 0.0)
+            if close_price is None:
+                close_price = 0.0
+            try:
+                log_trade_close(
+                    self.trade_db_path,
+                    ticket,
+                    close_time,
+                    close_price,
+                    realized_pnl,
+                )
+            except Exception as e:
+                logger.error(f"Trade close logging failed for #{ticket}: {e}")
+            finally:
+                self.signal_features.pop(ticket, None)
+                self.last_close_pnl.pop(ticket, None)
+
             if total_pnl < 0:
                 self.streak_losses[symbol] = self.streak_losses.get(symbol, 0) + 1
             else:
@@ -277,7 +329,7 @@ class MultiAssetMT5Trader:
             close_msg = (
                 f"✅ [{symbol}] TRADE CLOSED #{ticket}\n"
                 f"Result: {status_emoji}\n"
-                f"Total PnL: ${total_pnl:+.2f}\n"
+                f"Total PnL: ${realized_pnl:+.2f}\n"
                 f"Loss streak: {self.streak_losses.get(symbol, 0)}"
             )
             logger.info(close_msg)
@@ -398,11 +450,31 @@ class MultiAssetMT5Trader:
 
         result = mt5.order_send(request)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
-            logger.info(f"🔥 [{asset_key}] ORDER EXECUTED IN MT5! Ticket: #{result.order}, Type: {bias.upper()}, Price: {price}, SL: {sl_price}, TP: {tp_price}")
+            # HIGH 22: in real MT5 the order ticket (result.order) differs from the
+            # position ticket. Resolve the genuine position ticket via positions_get so
+            # active_trades and the executed_trades DB log (CRIT 5) are keyed the same
+            # way check_and_move_breakeven() sees them (pos.ticket). The pre-check above
+            # guarantees no pre-existing open position, so the single/last returned one
+            # is the one just opened. The virtual shim returns result.order == pos.ticket
+            # on open, so this stays correct (and backward compatible) in both worlds.
+            pos_ticket = int(result.order)
+            try:
+                opened = mt5.positions_get(symbol=mt5_symbol, magic=self.magic_number)
+                if opened:
+                    pos_ticket = int(opened[-1].ticket)
+            except Exception as e:  # pragma: no cover - defensive fallback
+                logger.warning(f"[{asset_key}] Could not resolve position ticket, using order ticket {pos_ticket}: {e}")
+
+            logger.info(f"🔥 [{asset_key}] ORDER EXECUTED IN MT5! Ticket: #{pos_ticket}, Type: {bias.upper()}, Price: {price}, SL: {sl_price}, TP: {tp_price}")
+
+            try:
+                entry_time = int(float(signal.get("timestamp_utc", 0) or 0))
+            except (TypeError, ValueError):
+                entry_time = int(datetime.now(timezone.utc).timestamp())
 
             exec_msg = (
                 f"🔥 [{asset_key}] ORDER EXECUTED IN MT5!\n"
-                f"Ticket: #{result.order}\n"
+                f"Ticket: #{pos_ticket}\n"
                 f"Type: {bias.upper()}\n"
                 f"Price: {price}\n"
                 f"SL: {sl_price}\n"
@@ -413,7 +485,7 @@ class MultiAssetMT5Trader:
             )
             self.bot.send_text_message(exec_msg)
 
-            self.active_trades[result.order] = {
+            self.active_trades[pos_ticket] = {
                 "symbol": asset_key,
                 "type": bias,
                 "entry_price": price,
@@ -424,6 +496,28 @@ class MultiAssetMT5Trader:
                 "tp1_hit": False,
                 "tp2_hit": False,
             }
+
+            # CRIT 5: persist the entry so check_and_move_breakeven() can log the close
+            # against the same row, feeding scripts/retrain_with_real_trades.py.
+            self.signal_features[pos_ticket] = {
+                "symbol": asset_key,
+                "type": bias,
+                "entry_time": entry_time,
+                "entry_price": price,
+                "features": signal.get("features") or {},
+            }
+            try:
+                log_trade_entry(
+                    self.trade_db_path,
+                    pos_ticket,
+                    asset_key,
+                    bias,
+                    entry_time,
+                    price,
+                    signal.get("features") or {},
+                )
+            except Exception as e:
+                logger.error(f"Trade entry logging failed for #{pos_ticket}: {e}")
 
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)

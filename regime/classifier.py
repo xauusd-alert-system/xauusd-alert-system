@@ -134,3 +134,33 @@ def classify_regime_series(df: pd.DataFrame, cfg: dict) -> pd.Series:
     labels.iloc[:min_candles] = RegimeLabel.NO_TRADE
     return labels
 
+
+def regime_onehot_df(df: pd.DataFrame, regimes=None) -> pd.DataFrame:
+    """Expand a causal `regime` column into <regime_<label>> one-hot columns (Phase 3).
+
+    Reads ONLY row i's own regime value (a RegimeLabel enum or its .value string,
+    computed causally upstream) - never any future row, so it is drop-in safe for
+    both training and realtime inference. Columns are fixed to the full RegimeLabel
+    set so a regime absent from a dataset still gets an explicit 0 column, keeping
+    training and inference feature spaces identical.
+
+    Returns a DataFrame with one int column per regime: 1 where the row's regime
+    matches, 0 otherwise. A missing/NaN regime produces all-0 columns (safe no-op
+    encoding; callers should normally not feed such rows to the model anyway).
+    """
+    regimes = regimes or [r for r in RegimeLabel]
+    names = [f"regime_{r.value}" for r in regimes]
+
+    raw = df["regime"] if "regime" in df.columns else pd.Series(pd.NA, index=df.index)
+    encoded = {}
+    for r in regimes:
+        # Accept both the enum member and its .value string; NaN/unmatched -> 0.
+        encoded[f"regime_{r.value}"] = (
+            raw.map(lambda v: 1 if (isinstance(v, RegimeLabel) and v is r)
+                    or (not isinstance(v, RegimeLabel) and str(v if v is not None else "") == r.value)
+                    else 0).astype(int)
+            if len(raw)
+            else pd.Series(0, index=df.index, dtype=int)
+        )
+    return pd.DataFrame(encoded, index=df.index, columns=names)
+

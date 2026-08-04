@@ -382,11 +382,13 @@ def order_send(request: dict) -> object:
         sl = float(request.get("sl", 0.0) or 0.0)
         tp = float(request.get("tp", 0.0) or 0.0)
         _STATE.modify_sl_tp(pos, sl, tp)
-        # Return the position ticket in the order field so callers that
-        # check res.order after SLTP modification get a meaningful value.
+        # Real MT5 returns a distinct order ticket in the "order" field of
+        # order_send() results (this acts like a request/ack id). Do NOT use
+        # the position ticket here so callers cannot blindly treat result.order
+        # as a position id -- they must resolve positions via positions_get().
         return VirtualOrderResult(
             retcode=TRADE_RETCODE_DONE,
-            order=position_ticket,
+            order=_STATE._next_order_ticket(),
             deal=0,
             comment="SL/TP modified",
         )
@@ -415,9 +417,11 @@ def order_send(request: dict) -> object:
                     order=0,
                     comment="Close failed",
                 )
+            # Real MT5: result.order is the order ticket, NOT the position
+            # ticket. The caller must resolve the position via positions_get().
             return VirtualOrderResult(
                 retcode=V_DONE,
-                order=pos.ticket,
+                order=_STATE._next_order_ticket(),
                 deal=out_deal.ticket,
                 comment=comment,
                 price=round(price, 6),
@@ -457,9 +461,14 @@ def order_send(request: dict) -> object:
             comment=comment,
             t=t,
         )
+        # Ticket-faithful to real MT5: `order` is a *distinct* order ticket
+        # (starting at 1), NOT the position ticket (100001+). Production code
+        # (mt5_trader.execute_signal HIGH 22) therefore MUST resolve the real
+        # position ticket via positions_get() instead of assuming
+        # result.order == pos.ticket -- exactly as in a live terminal.
         return VirtualOrderResult(
             retcode=V_DONE,
-            order=pos.ticket,
+            order=_STATE._next_order_ticket(),
             deal=deal.ticket,
             comment=comment,
             price=round(price, 6),

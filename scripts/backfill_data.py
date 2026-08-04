@@ -49,7 +49,8 @@ def _session_label(timestamp: pd.Timestamp) -> str:
         return "asia"
     if 8 <= hour < 13:
         return "london"
-    return "new_york"
+    # Issue #50: canonical name must match config sessions key (newyork).
+    return "newyork"
 
 
 def _to_storage_frame(df: pd.DataFrame) -> pd.DataFrame:

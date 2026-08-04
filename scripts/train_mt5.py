@@ -93,7 +93,7 @@ def main():
         timeframe=args.timeframe,
     )
 
-    X, y, cols = build_training_matrix(df)
+    X, y, cols = build_training_matrix(df, cfg=cfg)
     if len(X) < 500:
         raise SystemExit(f"Not enough labeled rows after feature/label prep for {args.symbol}: {len(X)}")
     if y.nunique() < 2:

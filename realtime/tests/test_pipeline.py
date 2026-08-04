@@ -54,7 +54,7 @@ def test_pipeline_uses_only_last_closed_candle():
     """The signal's timestamp must match the LAST row of the fetched series, never an earlier one."""
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     from data.ingestion import fetch_mock_candles
-    df_check = fetch_mock_candles(CFG["labeling"]["labeling_timeframe"], n_candles=300, sessions_config=CFG["sessions"])
+    df_check = fetch_mock_candles(CFG["market_data"]["timeframe"], n_candles=300, sessions_config=CFG["sessions"])
     result = pipeline.generate_signal(n_candles=300)
     # Timestamps are time-based (not seeded), so we just check the signal timestamp is recent/valid
     assert result["timestamp_utc"] > 0

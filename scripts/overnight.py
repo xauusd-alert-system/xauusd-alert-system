@@ -18,10 +18,26 @@ a failure in one stage is isolated and the rest of the night keeps going.
     Stage 3  retrain_models           -> scripts.train_all_assets
              Fresh retrain of every enabled asset on the refreshed history.
 
+    Stage 3b deploy_guard_backup      -> scripts.deploy_guard --backup
+             (Part B Phase 6 / audit #25) Snapshot each enabled asset's current
+             production model to <model_path>.deploy_guard.bak BEFORE the
+             retrains below can overwrite them. Idempotent across nights; a
+             failed backup fails the night (you cannot protect what was not
+             backed up).
+
     Stage 4  retrain_with_real_trades -> scripts.retrain_with_real_trades
              Final retrain that also folds real executed trades (from the
              executed_trades table) into the training set. This leaves the
              best, most up-to-date model files on disk.
+
+    Stage 4b deploy_guard_check       -> scripts.deploy_guard --check
+             (Part B Phase 6 / audit #25) Walk-forward validates each newly
+             retrained model against its nightly backup on the SAME freshly
+             backfilled out-of-sample windows. If a new model is no better
+             than (or regressed beyond tolerance of) the incumbent, the backed-
+             up (good) model is restored and the stage exits 1 -> the night is
+             reported FAILED / Telegram ❌. A bad night can never silently
+             replace a good production model.
 
     Stage 5  summary_report           -> scripts.summary_report
              Aggregates logs/backtest_*.csv into a portfolio summary.
@@ -36,6 +52,7 @@ Environment knobs (all optional, every stage on by default):
     OVERNIGHT_NO_BACKFILL=1        skip stage 1
     OVERNIGHT_NO_BACKTEST=1        skip stage 2
     OVERNIGHT_NO_RETRAIN=1         skip stage 3
+    OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard, Part B Phase 6)
     OVERNIGHT_NO_REAL_TRADES=1     skip stage 4
     OVERNIGHT_NO_SUMMARY=1         skip stage 5
     OVERNIGHT_NO_TELEGRAM=1        skip stage 6
@@ -68,8 +85,20 @@ def _env_flag(name: str) -> bool:
     return get_env(name, default="0") not in {"1", "true", "yes", "on"}
 
 
+# Per-stage wall-clock timeouts so a hung subprocess cannot block the night.
+_DEFAULT_STAGE_TIMEOUT = 3600  # 1h for slow backtests / retrains
+_BACKFILL_TIMEOUT = 900  # 15 min
+
+
 def _run(stage: str, cmd: list, timeout: int = None) -> bool:
-    """Run a stage as a subprocess. Returns True on success (failure is logged, not fatal)."""
+    """Run a stage as a subprocess with a wall-clock timeout.
+
+    Returns True on success, False on any failure (logged, not fatal), so one
+    hung/stuck stage cannot block or kill the rest of the overnight pipeline.
+    On timeout the whole child process tree is killed.
+    """
+    if timeout is None:
+        timeout = _DEFAULT_STAGE_TIMEOUT
     logger.info("=== STAGE: %s ===", stage)
     logger.info("Running: %s", " ".join(cmd))
     try:
@@ -77,20 +106,34 @@ def _run(stage: str, cmd: list, timeout: int = None) -> bool:
             cmd,
             cwd=PROJECT_ROOT,
             check=True,
+            capture_output=True,
+            text=True,
             timeout=timeout,
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            ),
         )
+        if result.stdout and result.stdout.strip():
+            logger.info("  %s", result.stdout.strip().splitlines()[-1][-400:])
         logger.info("=== STAGE OK: %s ===", stage)
         return True
     except subprocess.CalledProcessError as e:
         logger.error("=== STAGE FAILED (exit=%s): %s ===", e.returncode, stage)
-    except subprocess.TimeoutExpired:
-        logger.error("=== STAGE TIMED OUT: %s ===", stage)
+        if e.stdout and e.stdout.strip():
+            logger.error("  %s", e.stdout.strip().splitlines()[-1][-400:])
+        if e.stderr and e.stderr.strip():
+            logger.error("  %s", e.stderr.strip().splitlines()[-1][-400:])
+    except subprocess.TimeoutExpired as e:
+        logger.error("=== STAGE TIMED OUT after %ss: %s ===", timeout, stage)
+        _kill_process_tree(e)
     return False
 
 
 def _capture(cmd: list, timeout: int = None) -> str:
     """Run a stage and capture its stdout for the final summary."""
     try:
+        if timeout is None:
+            timeout = _DEFAULT_STAGE_TIMEOUT
         result = subprocess.run(
             cmd,
             cwd=PROJECT_ROOT,
@@ -98,11 +141,45 @@ def _capture(cmd: list, timeout: int = None) -> str:
             timeout=timeout,
             capture_output=True,
             text=True,
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            ),
         )
         return result.stdout.strip()
+    except subprocess.TimeoutExpired as e:
+        logger.error("Timed out capturing output of %s: %s", " ".join(cmd), e)
+        _kill_process_tree(e)
+        return ""
     except Exception as e:  # noqa: BLE001 - summary must never crash the pipeline
         logger.error("Could not capture output of %s: %s", " ".join(cmd), e)
         return ""
+
+
+def _kill_process_tree(expired: subprocess.TimeoutExpired) -> None:
+    """Best-effort kill of the timed-out child and its process group.
+
+    ``subprocess.run`` already waits for the process on timeout, but on Windows
+    a spawned console app (python -m ...) may leave grandchildren running.
+    Using CREATE_NEW_PROCESS_GROUP lets us terminate the whole tree so a hung
+    stage cannot linger after the overnight pipeline has moved on.
+    """
+    pid = getattr(expired, "process", None)
+    if pid is None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid.pid)],
+                capture_output=True,
+                timeout=30,
+            )
+        else:
+            try:
+                os.killpg(os.getpgid(pid.pid), 9)
+            except ProcessLookupError:
+                pass
+    except Exception as e:  # noqa: BLE001 - cleanup must never raise
+        logger.warning("Could not kill timed-out process %s: %s", pid.pid, e)
 
 
 def _backfill_window() -> tuple[str, str]:
@@ -134,6 +211,7 @@ def main() -> int:
                 "--start", start, "--end", end,
                 "--db-path", db_path,
             ],
+            timeout=_BACKFILL_TIMEOUT,
         )
         status.append(("backfill_data", ok))
     else:
@@ -157,6 +235,16 @@ def main() -> int:
     else:
         logger.info("Skipping walk-forward backtest (OVERNIGHT_NO_BACKTEST set).")
 
+    # ---- Stage 3b: back up current production models (Part B Phase 6, #25) ---
+    if _env_flag("OVERNIGHT_NO_DEPLOY_GUARD"):
+        ok = _run(
+            "deploy_guard_backup",
+            [sys.executable, "-m", "scripts.deploy_guard", "--backup"],
+        )
+        status.append(("deploy_guard_backup", ok))
+    else:
+        logger.info("Skipping deploy_guard backup (OVERNIGHT_NO_DEPLOY_GUARD set).")
+
     # ---- Stage 3: fresh retrain of all assets ------------------------------
     if _env_flag("OVERNIGHT_NO_RETRAIN"):
         ok = _run(
@@ -176,6 +264,20 @@ def main() -> int:
         status.append(("retrain_with_real_trades", ok))
     else:
         logger.info("Skipping retrain_with_real_trades (OVERNIGHT_NO_REAL_TRADES set).")
+
+    # ---- Stage 4b: deploy guard - reject a regressing nightly model --------
+    # (Part B Phase 6, #25) Walk-forward-validate the freshly retrained model
+    # against the backup from Stage 3b on the SAME OOS windows; if it regressed
+    # beyond tolerance, restore the incumbent so a bad night cannot overwrite a
+    # good production model. Exit code 1 => stage failed => Telegram ❌.
+    if _env_flag("OVERNIGHT_NO_DEPLOY_GUARD"):
+        ok = _run(
+            "deploy_guard_check",
+            [sys.executable, "-m", "scripts.deploy_guard", "--check"],
+        )
+        status.append(("deploy_guard_check", ok))
+    else:
+        logger.info("Skipping deploy_guard check (OVERNIGHT_NO_DEPLOY_GUARD set).")
 
     # ---- Stage 5: summary report -------------------------------------------
     summary_text = ""

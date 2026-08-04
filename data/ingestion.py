@@ -124,6 +124,7 @@ def fetch_live_candles(timeframe: str, n_candles: int, sessions_config: dict,
 
 
 def backfill_historical(timeframe: str, start_date: str, end_date: str, sessions_config: dict,
+                         symbol: str = "XAU/USD",
                          api_key_env: str = "TWELVE_DATA_API_KEY",
                          base_url: str = "https://api.twelvedata.com/time_series") -> pd.DataFrame:
     """Pull historical candles in 500-row chunks (free-tier safe)."""
@@ -137,7 +138,7 @@ def backfill_historical(timeframe: str, start_date: str, end_date: str, sessions
     current_end = end_date
     while True:
         params = {
-            "symbol": "XAU/USD",
+            "symbol": symbol,
             "interval": interval_map[timeframe],
             "outputsize": CHUNK_SIZE,
             "end_date": current_end,

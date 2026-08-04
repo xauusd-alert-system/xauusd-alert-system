@@ -33,17 +33,33 @@ class Trade:
 class EnsembleBacktester:
     def __init__(self, cfg: dict, asset_key: str = "XAUUSD"):
         self.cfg = cfg
+        self.asset_key = asset_key
         bt_cfg = cfg.get("backtest", {})
         lab_cfg = cfg.get("labeling", {})
         asset_cfg = cfg.get("assets", {}).get(asset_key, {})
 
         # Читаем индивидуальный спред для актива (если прописан в assets), иначе общий дефолт
         self.spread = asset_cfg.get("spread_usd", bt_cfg.get("spread_points", 25) / 100.0)
-        self.slippage = bt_cfg.get("slippage_points", 5) / 100.0
+        # HIGH BUG (FX unit mismatch): the global slippage_points default (5 -> 0.05
+        # absolute price units) is a ~460-pip slippage on EURUSD (~1.08) and a ~177x-ATR
+        # entry shift, instantly stopping every low-priced FX trade (0% win rate, pnl ==
+        # -commission exactly). Mirror the spread_usd pattern with a per-asset
+        # slippage_usd override (MT5's real slippage is the instrument-specific
+        # deviation in points, never a global absolute). Gold keeps the old 0.05 default
+        # so existing benchmark behaviour for metals/BTC is preserved unless overridden.
+        self.slippage = asset_cfg.get(
+            "slippage_usd", bt_cfg.get("slippage_points", 5) / 100.0
+        )
         self.balance = bt_cfg.get("initial_balance", 100.0)
         self.volume = bt_cfg.get("volume", 0.01)  # базовый объём для бэктеста
         self.commission_per_trade = bt_cfg.get("commission_per_trade", 0.07)
         self.swap_per_night = bt_cfg.get("swap_per_night", 0.0)
+        # HIGH 7: point_value_lot = USD notional per 1.0 lot per 1.0 price unit.
+        # Converts price-space PnL into account money so it is comparable with
+        # commission/swap (which are already money). Default 100 (e.g. XAUUSD
+        # 1 lot = 100 oz -> $1 price move = $100 per lot). Per-asset override in
+        # config: assets.<key>.point_value_lot.
+        self.point_value_lot = asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0))
 
         self.atr_col = lab_cfg.get("atr_column", "atr")
         self.tp1_mult = lab_cfg.get("tp1_atr_multiplier", 1.0)
@@ -57,9 +73,16 @@ class EnsembleBacktester:
     def _apply_slippage(self, price: float, direction: int) -> float:
         return price + (self.slippage * direction)
 
+    def _money(self, price_pnl: float) -> float:
+        """Convert a price-space PnL to account money using lot size and contract multiplier."""
+        return price_pnl * self.volume * self.point_value_lot
+
     def run(self, df: pd.DataFrame) -> List[Trade]:
         n = len(df)
         open_position: Optional[Trade] = None
+        # HIGH 7 (no-look-ahead): a position opened at candle i open may only be
+        # exited from candle i+1 onwards - same-candle entries never evaluate TP/SL.
+        entry_bar: Optional[int] = None
         pending_direction: Optional[int] = None
 
         tp1_hit = False
@@ -108,12 +131,13 @@ class EnsembleBacktester:
                     swap=0.0,
                 )
                 pending_direction = None
+                entry_bar = i
                 tp1_hit = False
                 tp2_hit = False
                 remaining_ratio = 1.0
                 accumulated_pnl = 0.0
 
-            if open_position is not None:
+            if open_position is not None and (entry_bar is None or i > entry_bar):
                 direction = open_position.direction
 
                 hit_tp1 = (highs[i] >= open_position.tp1_price) if direction == 1 else (lows[i] <= open_position.tp1_price)
@@ -122,12 +146,21 @@ class EnsembleBacktester:
                 hit_stop = (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
 
                 step = df["timestamp_utc"].diff().mode().iloc[0] if len(df) > 1 else 1
-                candles_held = int((timestamps[i] - open_position.entry_ts) / step)
+                try:
+                    # df["timestamp_utc"] may be epoch-seconds ints (real backtests) or
+                    # uniform Timedeltas (tests); NaT/NaN must not reach int().
+                    step_secs = step.total_seconds() if hasattr(step, "total_seconds") else float(step)
+                except (TypeError, ValueError):
+                    step_secs = 1.0
+                if step_secs != step_secs or step_secs <= 0:  # NaN or non-positive
+                    step_secs = 1.0
+                candles_held = int((timestamps[i] - open_position.entry_ts) / step_secs)
 
                 # 1. TP1 -> 50% закрываем, Стоп в БЕЗУБЫТОК
                 if not tp1_hit and hit_tp1:
                     tp1_hit = True
-                    pnl_tp1 = 0.5 * direction * (open_position.tp1_price - open_position.entry_price)
+                    # HIGH 7: convert price-space PnL to money via volume * point_value_lot.
+                    pnl_tp1 = self._money(0.5 * direction * (open_position.tp1_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp1
                     remaining_ratio = 0.5
                     open_position.stop_price = open_position.entry_price  # BREAKEVEN
@@ -135,7 +168,7 @@ class EnsembleBacktester:
                 # 2. TP2 -> 30% закрываем
                 if tp1_hit and not tp2_hit and hit_tp2:
                     tp2_hit = True
-                    pnl_tp2 = 0.3 * direction * (open_position.tp2_price - open_position.entry_price)
+                    pnl_tp2 = self._money(0.3 * direction * (open_position.tp2_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp2
                     remaining_ratio = 0.2
 
@@ -145,22 +178,22 @@ class EnsembleBacktester:
 
                 if hit_tp3:
                     exit_reason = "tp3_runner"
-                    pnl_tp3 = remaining_ratio * direction * (open_position.tp3_price - open_position.entry_price)
+                    pnl_tp3 = self._money(remaining_ratio * direction * (open_position.tp3_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp3
                     exit_price = self._apply_slippage(open_position.tp3_price, -direction)
                 elif hit_stop:
                     exit_reason = "breakeven" if tp1_hit else "stop"
-                    pnl_stop = remaining_ratio * direction * (open_position.stop_price - open_position.entry_price)
+                    pnl_stop = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))
                     accumulated_pnl += pnl_stop
                     exit_price = self._apply_slippage(open_position.stop_price, -direction)
                 elif candles_held >= self.horizon_n:
                     exit_reason = "timeout"
-                    pnl_time = remaining_ratio * direction * (closes[i] - open_position.entry_price)
+                    pnl_time = self._money(remaining_ratio * direction * (closes[i] - open_position.entry_price))
                     accumulated_pnl += pnl_time
                     exit_price = self._apply_slippage(closes[i], -direction)
 
                 if exit_reason is not None:
-                    # Учитываем комиссию и своп
+                    # Учитываем комиссию и своп (уже в денежных единицах)
                     days_held = max(1, (int(timestamps[i]) - open_position.entry_ts) // 86400)
                     swap = self.swap_per_night * days_held
                     accumulated_pnl -= open_position.commission + swap
@@ -173,6 +206,7 @@ class EnsembleBacktester:
                     self.balance += accumulated_pnl
                     self.trades.append(open_position)
                     open_position = None
+                    entry_bar = None
 
             if open_position is None:
                 reg_val = regimes[i]

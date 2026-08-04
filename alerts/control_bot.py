@@ -135,8 +135,16 @@ class TelegramControlBot:
         fn(chat_id)
 
     def _is_admin(self, chat_id: str) -> bool:
+        # HIGH 34: fail-closed. If no admin id is configured, mutating commands
+        # (like /closeall, /pause, /resume) must NOT be allowed for anyone.
+        # Allow-all here is a dangerous fail-open that would let any Telegram
+        # user shut down or close all positions of the live trader.
         if not self.admin_id:
-            return True   # no restriction configured → allow all
+            logger.warning(
+                "Telegram admin not configured (TELEGRAM_ADMIN_CHAT_ID/TELEGRAM_CHAT_ID "
+                "empty) - refusing mutating command from chat_id=%s", chat_id
+            )
+            return False
         return chat_id == self.admin_id
 
     # ------------------------------------------------------------------

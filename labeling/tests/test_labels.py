@@ -19,9 +19,12 @@ CFG = load_config()
 SESSIONS = CFG["sessions"]
 
 
-# Override labeling barriers to match mock data scale (~0.15 pts/candle drift)
+# Override labeling barriers to match mock data scale (~0.15 pts/candle drift).
+# These unit tests exercise the FIXED-barrier path: mock candles carry no "atr"
+# column, and build_all_indicators() is out of scope here (covered in test_trainer).
 import copy
 CFG = copy.deepcopy(CFG)
+CFG["labeling"]["method"] = "fixed"
 CFG["labeling"]["target_pips_x"] = 3.0
 CFG["labeling"]["stop_pips_y"] = 2.0
 

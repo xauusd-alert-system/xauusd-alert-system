@@ -49,7 +49,7 @@ def run_once(pipeline: RealtimePipeline, bot: TelegramAlertBot, db_path: str, n_
     """
     signal = pipeline.generate_signal(n_candles=n_candles)
     alert_sent = bot.send_alert_if_qualified(signal)
-    log_signal(db_path, signal, alert_sent)
+    log_signal(db_path, signal, alert_sent, symbol=pipeline.asset_key)
 
     logger.info(
         "Signal generated: bias=%s confidence=%.3f regime=%s alert_sent=%s",
@@ -60,7 +60,7 @@ def run_once(pipeline: RealtimePipeline, bot: TelegramAlertBot, db_path: str, n_
 
 def main():
     cfg = load_config()
-    timeframe = cfg["labeling"]["labeling_timeframe"]
+    timeframe = cfg["market_data"]["timeframe"]
     data_mode = get_env("DATA_MODE", default="mock")
     model_path = get_env("MODEL_PATH", default=None)
     db_path = get_env("SIGNAL_LOG_DB_PATH", default="data/signal_log.db")

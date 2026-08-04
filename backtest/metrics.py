@@ -92,3 +92,19 @@ def compute_metrics(trades_df: pd.DataFrame) -> dict:
         "total_pnl": round(float(cum_pnl[-1]), 2),
         "max_consecutive_losses": max_consec_loss,
     }
+
+
+def compute_metrics_per_session(trades_df: pd.DataFrame) -> dict:
+    """
+    Compute full metrics broken down by session label.
+
+    Returns a dict keyed by session name -> metrics dict (the output of
+    compute_metrics() for that session's trades). Sessions with no trades are
+    omitted entirely, so every returned entry has n_trades >= 1.
+    """
+    if trades_df is None or len(trades_df) == 0 or "session" not in trades_df.columns:
+        return {}
+    per_session: dict = {}
+    for session_name, group in trades_df.groupby("session"):
+        per_session[str(session_name)] = compute_metrics(group.reset_index(drop=True))
+    return per_session

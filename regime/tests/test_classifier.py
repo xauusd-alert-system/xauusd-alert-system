@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
 from features.indicators import build_all_indicators
-from regime.classifier import add_regime_indicators, classify_regime_series, classify_regime_row, RegimeLabel
+from regime.classifier import add_regime_indicators, classify_regime_series, classify_regime_row, regime_onehot_df, RegimeLabel
 from regime.ml_interface import RuleBasedRegimeClassifier, MLRegimeClassifierStub
 
 CFG = load_config()
@@ -91,6 +91,48 @@ def test_rule_based_adapter_matches_direct_call():
     direct_labels = classify_regime_series(df, CFG)
     adapter_labels = adapter.classify_series(df)
     assert (direct_labels == adapter_labels).all()
+
+
+def test_regime_onehot_df_emits_full_set_and_matches_raw():
+    """Phase 3: regime_onehot_df expands the causal `regime` column into the FULL
+    RegimeLabel set of int one-hot columns, with exactly one active bit per row that
+    matches the raw label 1:1, and is a pure per-row map (index-aligned, causal)."""
+    df = _prepared_df(n=300)
+    df["regime"] = classify_regime_series(df, CFG)
+    onehot = regime_onehot_df(df)
+
+    expected_cols = [f"regime_{r.value}" for r in RegimeLabel]
+    assert list(onehot.columns) == expected_cols
+    assert len(onehot) == len(df)
+    assert onehot.index.equals(df.index)
+    assert (onehot.min().min() >= 0) and (onehot.max().max() <= 1)
+    assert (onehot.sum(axis=1) == 1).all(), "exactly one active regime bit per row"
+
+    for r in RegimeLabel:
+        bit = onehot[f"regime_{r.value}"].astype(bool).values
+        assert (bit == (df["regime"] == r).values).all()
+
+
+def test_regime_onehot_df_accepts_value_strings_and_missing_na():
+    """Phase 3: regime_onehot_df must also accept plain .value strings (e.g. loaded
+    from a DB/log) and a missing/NaN regime column must produce all-0 columns."""
+    df = _prepared_df(n=300)
+    enum_labels = classify_regime_series(df, CFG)
+
+    str_df = df.copy()
+    str_df["regime"] = enum_labels.map(lambda v: v.value)
+    onehot_str = regime_onehot_df(str_df)
+    onehot_enum = regime_onehot_df(df.assign(regime=enum_labels.values))
+    for col in onehot_enum.columns:
+        assert (onehot_str[col].values == onehot_enum[col].values).all()
+
+    na_df = df.copy()
+    na_df["regime"] = pd.NA
+    onehot_na = regime_onehot_df(na_df)
+    assert (onehot_na.sum(axis=1) == 0).all(), "missing regime -> all-0 one-hot"
+    missing_col_df = df.drop(columns=["regime"]) if "regime" in df.columns else df.copy()
+    onehot_missing = regime_onehot_df(missing_col_df)
+    assert (onehot_missing.sum(axis=1) == 0).all()
 
 
 def test_ml_stub_raises_not_implemented():

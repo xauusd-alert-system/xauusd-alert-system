@@ -28,9 +28,30 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def init_schema(db_path: str):
     conn = get_connection(db_path)
     try:
+        # Migrate a legacy single-symbol table (PK = timestamp_utc, no symbol column):
+        # rename it once so a fresh multi-symbol table can be created. The old data is
+        # preserved under {TABLE_NAME}_legacy_single_symbol rather than silently dropped.
+        columns = conn.execute(f"PRAGMA table_info({TABLE_NAME});").fetchall()
+        if columns:
+            names = {row[1] for row in columns}
+            pk_cols = [c[1] for c in sorted(columns, key=lambda c: c[5]) if c[5] > 0]
+            is_legacy = "symbol" not in names or pk_cols != ["symbol", "timestamp_utc"]
+            if is_legacy:
+                legacy = f"{TABLE_NAME}_legacy_single_symbol"
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (legacy,)
+                ).fetchone()
+                if exists:
+                    raise RuntimeError(
+                        f"Legacy backup table {legacy!r} already exists. "
+                        f"Move or delete it deliberately before migrating {TABLE_NAME!r}."
+                    )
+                conn.execute(f"ALTER TABLE {TABLE_NAME} RENAME TO {legacy};")
+
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
-                timestamp_utc INTEGER PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                timestamp_utc INTEGER NOT NULL,
                 generated_at TEXT NOT NULL,
                 bias TEXT NOT NULL,
                 confidence REAL NOT NULL,
@@ -40,30 +61,34 @@ def init_schema(db_path: str):
                 invalidation REAL,
                 targets TEXT,
                 reasoning_summary TEXT,
-                alert_sent INTEGER NOT NULL DEFAULT 0
+                alert_sent INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (symbol, timestamp_utc)
             );
         """)
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_sym_ts ON {TABLE_NAME}(symbol, timestamp_utc);")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_ts ON {TABLE_NAME}(timestamp_utc);")
         conn.commit()
     finally:
         conn.close()
 
 
-def log_signal(db_path: str, signal: dict, alert_sent: bool):
+def log_signal(db_path: str, signal: dict, alert_sent: bool, symbol: str = "XAUUSD"):
     """
     Persists one signal dict (the exact JSON shape returned by
     realtime/pipeline.py::generate_signal) plus whether an alert was actually sent.
-    Uses INSERT OR REPLACE so re-scoring the same candle (e.g. after a restart)
-    is idempotent, not a duplicate audit entry.
+    Uses INSERT OR REPLACE keyed on (symbol, timestamp_utc) so re-scoring the same
+    candle for the same asset is idempotent, while multiple assets at the same
+    moment never overwrite each other (multi-asset audit trail).
     """
     conn = get_connection(db_path)
     try:
         conn.execute(
             f"""INSERT OR REPLACE INTO {TABLE_NAME}
-                (timestamp_utc, generated_at, bias, confidence, regime, session,
+                (symbol, timestamp_utc, generated_at, bias, confidence, regime, session,
                  entry_zone, invalidation, targets, reasoning_summary, alert_sent)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
+                symbol,
                 signal["timestamp_utc"],
                 signal["generated_at"],
                 signal["bias"],
@@ -82,12 +107,20 @@ def log_signal(db_path: str, signal: dict, alert_sent: bool):
         conn.close()
 
 
-def read_signal_history(db_path: str, start_ts: int = None, end_ts: int = None) -> pd.DataFrame:
+def read_signal_history(
+    db_path: str,
+    start_ts: int = None,
+    end_ts: int = None,
+    symbol: str = None,
+) -> pd.DataFrame:
     """Read logged signals for auditing/reporting, sorted ascending by timestamp."""
     conn = get_connection(db_path)
     try:
         query = f"SELECT * FROM {TABLE_NAME}"
         clauses, params = [], []
+        if symbol is not None:
+            clauses.append("symbol = ?")
+            params.append(symbol)
         if start_ts is not None:
             clauses.append("timestamp_utc >= ?")
             params.append(start_ts)
@@ -96,7 +129,7 @@ def read_signal_history(db_path: str, start_ts: int = None, end_ts: int = None) 
             params.append(end_ts)
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY timestamp_utc ASC"
+        query += " ORDER BY symbol ASC, timestamp_utc ASC"
         df = pd.read_sql_query(query, conn, params=params)
     finally:
         conn.close()

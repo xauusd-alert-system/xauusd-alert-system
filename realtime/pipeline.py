@@ -22,10 +22,26 @@ from copy import deepcopy
 
 
 class RealtimePipeline:
-    def __init__(self, asset_key: str, cfg: dict = None, data_mode: str = "live"):
+    def __init__(
+        self,
+        cfg: dict = None,
+        model_path: str = None,
+        asset_key: str = None,
+        data_mode: str = "live",
+    ):
         self.cfg = cfg or load_config()
-        self.asset_key = asset_key
         self.data_mode = data_mode
+
+        # asset_key may be passed explicitly or inferred from model_path.
+        if asset_key is None:
+            if model_path:
+                for key, acfg in self.cfg.get("assets", {}).items():
+                    if acfg.get("model_path") == model_path:
+                        asset_key = key
+                        break
+            if asset_key is None:
+                asset_key = "XAUUSD"
+        self.asset_key = asset_key
 
         assets = self.cfg["assets"]
         if asset_key not in assets:
@@ -33,9 +49,10 @@ class RealtimePipeline:
 
         self.asset_cfg = assets[asset_key]
         self.mt5_symbol = self.asset_cfg.get("mt5_symbol", "GOLD")
-        self.model_path = self.asset_cfg["model_path"]
+        # Explicit model_path (env/config) takes precedence over per-asset default.
+        self.model_path = model_path or self.asset_cfg.get("model_path")
         self.timeframe = self.cfg.get("market_data", {}).get("timeframe", "M5")
-        self._predictor = ModelPredictor(self.model_path) if os.path.exists(self.model_path) else None
+        self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
 
         # Эффективный конфиг с asset-specific переопределением ensemble и labeling
         self.effective_cfg = deepcopy(self.cfg)
@@ -103,12 +120,22 @@ class RealtimePipeline:
 
         feature_dict = {}
         if self._predictor is not None:
-            feature_row = latest[self._predictor.feature_cols]
-            if feature_row.isnull().any():
+            # Phase 3: feature_cols may include regime_<label> one-hot columns that
+            # the live row does not carry (it has only the raw causal `regime` column).
+            # Pass the raw row and let ModelPredictor re-synthesize the regime_*
+            # columns from `regime`; a genuinely incomplete row (NaN warm-up or a
+            # missing non-regime feature) raises, which we map to the warm-up
+            # no-trade response exactly as the previous explicit NaN check did.
+            try:
+                proba = self._predictor.predict_single(latest)
+            except (KeyError, ValueError):
                 return self._no_trade_response(latest, regime, "Insufficient feature data (warm-up period)")
-            proba = self._predictor.predict_single(feature_row)
             ml_p_long, ml_p_short = proba["p_long"], proba["p_short"]
-            feature_dict = {k: float(v) for k, v in feature_row.to_dict().items() if not pd.isna(v)}
+            feature_dict = {
+                k: float(v)
+                for k, v in latest.items()
+                if k in self._predictor.feature_cols and not pd.isna(v)
+            }
         else:
             ml_p_long, ml_p_short = 0.5, 0.5
 

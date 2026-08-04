@@ -45,18 +45,24 @@ PID_FILE = os.path.join(BASE_DIR, "logs", "trader.pid")
 TRADER_PROCESS = None
 
 # --- Безопасность ---
-ALLOWED_CMD_PREFIXES = [
-    "python -m execution.mt5_trader",
-    "python -m scripts.summary_report",
-    "python -m scripts.run_backtest",
-    "python -m scripts.train_all_assets",
-    "python -m scripts.retrain_models",
-    "python -m scripts.backfill",
-    "dir",
-    "ls",
-    "pwd",
-    "echo",
-]
+# HIGH 23: the /cmd handler must NEVER invoke a shell. Commands are allowed only if
+# they parse to a restricted argv: either a fixed builtin (handled in Python) or
+# `python -m <module> [args...]` where <module> is in the allowlist below. Any shell
+# metacharacter (; | & > < ` $ ( ) * ? [ ] quotes, newline) is rejected outright.
+_SHELL_METACHARS = set(";&|<>`$(){}*?[]'\"\n\r")
+
+# Modules runnable via `/cmd python -m <module> ...`
+ALLOWED_CMD_MODULES = {
+    "execution.mt5_trader",
+    "scripts.summary_report",
+    "scripts.run_backtest",
+    "scripts.train_all_assets",
+    "scripts.retrain_models",
+    "scripts.backfill",
+}
+
+# Builtin commands implemented directly in Python (no shell involved).
+ALLOWED_BUILTIN_CMDS = {"dir", "ls", "pwd", "echo"}
 
 FORBIDDEN_SUBSTRINGS = [
     ".env",
@@ -100,11 +106,29 @@ def is_safe_path(path: str) -> bool:
     return True
 
 
+def parse_command(command: str) -> list[str] | None:
+    """Tokenize a /cmd command into an argv list.
+
+    Returns None if the command contains shell metacharacters or cannot be parsed,
+    otherwise the whitespace-split argv (already validated to be metachar-free).
+    """
+    if any(ch in command for ch in _SHELL_METACHARS):
+        return None
+    parts = command.strip().split()
+    if not parts:
+        return None
+    return parts
+
+
 def is_allowed_command(command: str) -> bool:
-    command_stripped = command.strip().lower()
-    for prefix in ALLOWED_CMD_PREFIXES:
-        if command_stripped.startswith(prefix.lower()):
-            return True
+    argv = parse_command(command)
+    if argv is None:
+        return False
+    head = argv[0].lower()
+    if head in ALLOWED_BUILTIN_CMDS:
+        return True
+    if head == "python" and len(argv) >= 3 and argv[1] == "-m":
+        return argv[2] in ALLOWED_CMD_MODULES
     return False
 
 
@@ -227,6 +251,35 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 
+def _run_safe_command(argv: list[str]) -> str:
+    """HIGH 23: exec without a shell. Builtins handled in-process."""
+    head = argv[0].lower()
+    if head in ALLOWED_BUILTIN_CMDS:
+        if head == "pwd":
+            out = os.getcwd()
+        elif head in ("dir", "ls"):
+            target = argv[1] if len(argv) > 1 else "."
+            if os.path.isdir(target):
+                entries = sorted(os.listdir(target))
+                out = "\n".join(entries) if entries else "(empty)"
+            else:
+                out = f"Not a directory: {target}"
+        elif head == "echo":
+            out = " ".join(argv[1:])
+        else:  # pragma: no cover - defensive
+            out = ""
+        return out
+    # All other allowed commands are `python -m <module>` (validated earlier).
+    result = subprocess.run(
+        [sys.executable, "-m", *argv[2:]],
+        cwd=os.getcwd(),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    return (result.stdout or result.stderr or "✅ Команда выполнена без вывода.").strip() or "✅ Команда выполнена без вывода."
+
+
 async def cmd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_authorized(update):
         return
@@ -244,14 +297,19 @@ async def cmd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"⏳ Выполняю: `{command}`...", parse_mode="Markdown")
     log_action(update.effective_user.id, "cmd", command)
 
+    argv = parse_command(command)
+    if argv is None:
+        await update.message.reply_text("⛔ Команда отклонена: содержит недопустимые символы.")
+        return
+
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=300)
-        output = result.stdout or result.stderr or "✅ Команда выполнена без вывода."
+        output = _run_safe_command(argv)
         if len(output) > MAX_OUTPUT_LENGTH:
             output = output[-MAX_OUTPUT_LENGTH:]
         await update.message.reply_text(f"```\n{output}\n```", parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
+
 
 
 async def read_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

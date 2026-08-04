@@ -12,6 +12,38 @@
     - off_session
   rule_weight: 0.20
   ml_weight: 0.80
+  # Phase 2: EV-threshold entry gate. EV = p_exit_right * |reward| - (1 - p_exit_right)
+  # * |risk| where p_exit_right = directional probability (p_long for long, p_short for
+  # short), reward = the TP1 ATR distance and risk = the stop ATR distance. When enabled
+  # (> 0) a signal only reaches "long"/"short" if the expected value of (reward * p -
+  # risk * (1 - p)) / risk exceeds this threshold; otherwise it is declined as no_trade.
+  # A value of 0 (the default) disables the gate so the Phase-0+1 baseline is unchanged
+  # unless explicitly enabled for Phase 2 experiments.
+  ev_threshold: 0
+  # Phase 5 (#16): enforce p_long + p_short = 1 BEFORE any downstream use. Some
+  # predictors (e.g. a 3-class model) leave the residual mass on a "no_trade" class,
+  # so the two directional masses don't sum to 1 and would under/over-state confidence
+  # and the EV gate. When true, the pair is re-scaled to sum to exactly 1.0 (a
+  # degenerate total -> neutral 0.5/0.5, which can never pass any filter). Default
+  # false preserves the exact Phase-0+1 behaviour.
+  normalize_probs: false
+  # Phase 4 (#30): per-asset dynamic min_confidence scaling. When true, the effective
+  # alert bar is base * dynamic_min_confidence_scale (per-asset, default 1.0) *
+  # (1 - min(dynamic_edge_credit, |p_long - p_short| * dynamic_edge_gain)) so each
+  # asset tightens its OWN bar via dynamic_min_confidence_scale and weak-edge signals
+  # need more evidence (fewer, better trades) while strong-edge signals are admitted.
+  # Default false keeps the exact Phase-0+1 per-asset bar (static per-asset values in
+  # each asset's ensemble section).
+  dynamic_min_confidence: false
+  dynamic_min_confidence_scale: 1.0
+  dynamic_edge_credit: 0.10
+  dynamic_edge_gain: 2.0
+  # Phase 4 (#41): rule-vs-ML divergence as a HARD VETO. When true, a non-zero rule
+  # vote OPPOSING the ML vote (rule long vs ML short, or vice versa) forces no_trade
+  # outright instead of the soft confidence collapse. A tie (ml_vote=0) is NOT a
+  # divergence - the rule side may carry it (requires min_ml_probability upstream).
+  # Default false keeps the Phase-0+1 soft-collapse behaviour.
+  hard_divergence_veto: false
 
 market_data:
   provider: mt5
@@ -28,6 +60,12 @@ assets:
     display_name: XAU/USD
     model_path: output/models/xauusd_direction_model.joblib
     spread_usd: 0.25
+    # Backtest-only slippage override in USD price units per side. Without an
+    # override the global backtest.slippage_points=5 -> 0.05 price units was
+    # applied to EVERY asset, which for low-priced FX (EURUSD ~1.08) is ~460
+    # pips and instantly stopped every trade (0% win rate). Production uses MT5
+    # deviation (20 pts, instrument-specific), never a global absolute slippage.
+    slippage_usd: 0.05
     ensemble:
       min_confidence_to_alert: 0.70
       suppress_sessions: [asia, off_session]
@@ -41,6 +79,15 @@ assets:
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
     spread_usd: 0.02
+    slippage_usd: 0.02
+    # Contract multiplier: 1.0 lot = 5000 troy oz -> $1 price move = $5000/lot,
+    # so 0.01 lot = $50 per price unit. The global default point_value_lot=100 is
+    # a GOLD multiplier; without a per-asset override XAG/EUR/GBP PnL was scaled
+    # ~100x too small, the flat $0.07 commission swamped every trade and the
+    # winning trades were invisible (win_rate collapsed to ~0% even after the
+    # slippage fix). XAUUSD keeps the default (100 = correct gold multiplier);
+    # BTCUSD keeps the default to preserve its valid, uncorrupted baseline.
+    point_value_lot: 5000
     ensemble:
       min_confidence_to_alert: 0.75
       suppress_sessions: [asia, off_session]
@@ -54,6 +101,17 @@ assets:
     display_name: BTC/USD
     model_path: output/models/btcusd_direction_model.joblib
     spread_usd: 3.00
+    # No slippage_usd override: BTC is high-priced (~50k), so the global default
+    # (slippage_points=5 -> 0.05 price units) is negligible there and the prior
+    # BTCUSD baseline was NOT corrupted by the FX unit-mismatch bug. Keeping the
+    # default preserves that valid baseline instead of re-costing it.
+    # Contract multiplier: 1.0 lot = 1.0 BTC -> $1 price move = $1/lot, so
+    # 0.01 lot = $0.01 per price unit. The global default point_value_lot=100 is
+    # a GOLD multiplier and would have inflated BTCUSD money-PnL 100x (+$377k
+    # fake baseline -> the same class of unit bug fixed for FX/XAG above);
+    # `1` is the standard MT5 BTCUSD contract size (matches simulation
+    # symbol_overrides BTCUSD=1.0).
+    point_value_lot: 1
     ensemble:
       min_confidence_to_alert: 0.62
       suppress_sessions: []
@@ -67,6 +125,11 @@ assets:
     display_name: EUR/USD
     model_path: output/models/eurusd_direction_model.joblib
     spread_usd: 0.00012
+    slippage_usd: 0.0002
+    # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
+    # unit. See XAGUSD comment: the global default 100 left FX money-PnL ~1000x
+    # too small, so the flat commission dominated and every trade showed -0.07.
+    point_value_lot: 100000
     ensemble:
       min_confidence_to_alert: 0.85
       suppress_sessions: [asia, off_session]
@@ -88,6 +151,10 @@ assets:
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
     spread_usd: 0.00015
+    slippage_usd: 0.0002
+    # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
+    # unit. See XAGUSD comment for why this must be a per-asset override.
+    point_value_lot: 100000
     ensemble:
       min_confidence_to_alert: 0.85
       suppress_sessions: [asia, off_session]
@@ -134,6 +201,24 @@ model:
   train_ratio: 0.8
   type: xgboost          # xgboost | random_forest | lightgbm | ensemble
   ensemble_method: soft_voting
+  # Phase 2 (3-class model): when true, label 0 ("no clear outcome" inside the
+  # labeling horizon) is kept as a THIRD class instead of being dropped, so the
+  # model can explicitly express "no edge". y is encoded {0: short, 1: no_trade,
+  # 2: long} and ModelPredictor.predict_proba detects the 3-class model and still
+  # exposes p_short / p_long (p_no_trade = residual mass). Default false preserves
+  # the exact Phase-0+1 two-class baseline. NOTE: when enabled, retraining from
+  # real executed trades is skipped (real trades are only binary outcomes and
+  # cannot be merged into the 3-class label space without corrupting it).
+  include_zero_class: false
+  # Phase 3 (regime as categorical model feature): when true, the rule-based
+  # regime label (trend_up / trend_down / range / compression / reversal_watch /
+  # no_trade) is expanded into one-hot columns (regime_<label>) and added to the
+  # training features so the model can learn regime-conditional behavior directly
+  # (rather than only via the ensemble meta-filter). Default false preserves the
+  # exact Phase-0+1 / Phase-2 feature set. One-hot columns are synthated at
+  # training time in build_training_matrix and re-synthesized at inference time by
+  # ModelPredictor from the raw `regime` column, so all consumers work unchanged.
+  use_regime_feature: false
 
 labeling:
   method: atr_scaled
@@ -176,6 +261,32 @@ retraining:
     day_of_week: "monday"
     hour: 3
     minute: 0
+
+# ===== DEPLOY GUARD (Part B Phase 6 / audit #25) =====
+# The nightly retrain must never silently overwrite a good production model with
+# a bad one. scripts/overnight.py stage 4 wraps its retrain_with_real_trades call
+# with scripts/deploy_guard.py:
+#   --backup   backs up each enabled asset's current model to `<model_path>.deploy_guard.bak`
+#              BEFORE the nightly retrain overwrites it.
+#   --check    after the retrain, walk-forward validates the newly trained model
+#              against the backed-up incumbent on the SAME freshly backfilled
+#              out-of-sample windows; if it regressed beyond `tolerance` (or has
+#              too little OOS evidence, per `min_trades`), the incumbent is
+#              restored and the stage exits 1 -> overnight reports FAILED (❌).
+deploy_guard:
+  enabled: true
+  # Primary metric used to compare candidate vs incumbent on identical OOS
+  # windows. Walked through `fallback_metrics` when it is missing/degenerate.
+  primary_metric: expectancy
+  fallback_metrics: [sharpe_ratio, win_rate, total_pnl]
+  # Minimum OOS trades for a side's metric to be trusted. A candidate with
+  # fewer than this NEVER replaces an incumbent that has enough evidence.
+  min_trades: 20
+  # Allowed degradation (>= 0) of the candidate vs the incumbent on the primary
+  # metric. 0.0 = the candidate must be at least as good (strictly conservative).
+  tolerance: 0.0
+  # Sidecar name used by --backup / --check.
+  backup_suffix: ".deploy_guard.bak"
 
 # ===== CORRELATION FILTER (динамический) =====
 correlation_filter:

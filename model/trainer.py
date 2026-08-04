@@ -21,6 +21,17 @@ calibration is essential here because the ensemble layer (Step 9) and alert
 thresholds rely on P(long)/P(short) being genuinely interpretable probabilities,
 not just rank-ordered scores.
 
+HONEST CALIBRATION (Part B Phase 0+1):
+calibrate_model() does NOT use CalibratedClassifierCV's internal shuffled K-fold,
+because shuffling destroys temporal ordering and lets the model-fitting rows
+overlap the calibrator's validation rows over the label horizon (a real leakage
+for time-series ML). Instead the base model is fit strictly on an EARLIER slice
+of the training set, a purge gap (>= the labeling horizon) is dropped so no label
+window crosses the fit/calibrate boundary, and the calibrator is fit with
+cv="prefit" on a strictly LATER trailing held-out set. This mirrors production:
+train on old data -> calibrate on the most recent data -> evaluate on the future
+(test) window, with no temporal overlap at any boundary.
+
 Now supports multiple model backends:
 - xgboost (default)
 - random_forest
@@ -55,23 +66,71 @@ FEATURE_COLUMNS = [
 ]
 
 
-def build_training_matrix(df: pd.DataFrame, label_col: str = "label") -> tuple:
+def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict = None) -> tuple:
     """
     Extracts (X, y) from a fully-featured, labeled DataFrame.
     Drops rows with NaN in required feature columns or NaN label (label is NaN
     near the end of the dataset where insufficient future data existed, per
     labeling/label_generator.py - these rows are correctly excluded from training).
-    Only binary direction is modeled here (label 0 = "no clear outcome" is dropped
-    from the classifier's training set; the meta-filter/ensemble in Step 9 handles
-    "no signal" via regime + confidence gating, not via a 3rd model class).
+
+    Binary mode (default, model.include_zero_class = false):
+    Only directional outcomes are modeled - label 0 ("no clear outcome" inside
+    the labeling horizon) is dropped; the encoding matches the training label
+    generator, where +1 = long-favorable (upper barrier hit), -1 = short-favorable
+    (lower barrier hit). The meta-filter/ensemble in Step 9 handles "no signal"
+    via regime + confidence gating, not via a 3rd model class.
+
+    Three-class mode (model.include_zero_class = true, Phase 2):
+    label 0 is KEPT as a third class so the model can explicitly learn when
+    there is "no edge" (neither barrier hit within the horizon). y is encoded
+    {0: short, 1: no_trade, 2: long}. Callers can detect the 3-class encoding by
+    checking the returned y for a value of 1 with three classes present, or via
+    the `model.include_zero_class` config flag they passed in - ModelPredictor
+    reads the same flag at inference time to expose p_short / p_no_trade / p_long.
     """
+    model_cfg = (cfg or {}).get("model", {}) if cfg else {}
+    include_zero = bool(model_cfg.get("include_zero_class", False))
+    use_regime = bool(model_cfg.get("use_regime_feature", False))
+
     available_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
+    if use_regime:
+        # Phase 3: expand the causal `regime` column (already computed by
+        # classify_regime_series upstream) into one-hot columns and append them to
+        # the feature set. These columns are saved into the model bundle via
+        # available_cols, and ModelPredictor re-synthesizes them at inference time
+        # from the raw `regime` column, so every consumer works unchanged.
+        if "regime" not in df.columns:
+            raise ValueError(
+                "model.use_regime_feature=true requires a 'regime' column on the "
+                "DataFrame (compute it with classify_regime_series first)"
+            )
+        from regime.classifier import regime_onehot_df
+        onehot = regime_onehot_df(df)
+        new_regime_cols = [c for c in onehot.columns if c not in available_cols]
+        available_cols = available_cols + new_regime_cols
+        # Merge the one-hot columns into the working frame so the section below can
+        # slice available_cols + label_col off one DataFrame (the caller's df is
+        # left untouched - concat returns a new object, so this is side-effect free).
+        df = pd.concat([df, onehot[new_regime_cols]], axis=1)
+
     working = df[available_cols + [label_col]].copy()
-    working = working[working[label_col].isin([1, -1, 1.0, -1.0])]  # binary: drop 0/NaN outcomes (float-safe)
-    working = working.dropna()
+
+    if include_zero:
+        # Keep label 0 as a third class: {0: short, 1: no_trade, 2: long}.
+        working = working[working[label_col].isin([1, -1, 0, 1.0, -1.0, 0.0])]
+        working = working.dropna()
+        y_map = {1: 2, -1: 0}  # long-favorable -> 2, short-favorable -> 0
+        y = working[label_col].map(lambda v: y_map.get(int(v), 1))  # 0 (or any other) -> 1 = no_trade
+    else:
+        # Binary: drop 0 outcomes (float-safe), keep only +/- 1.
+        working = working[working[label_col].isin([1, -1, 1.0, -1.0])]
+        working = working.dropna()
+        y = (working[label_col] == 1).astype(int)  # 1 = upper hit (long-favorable), 0 = lower hit
 
     X = working[available_cols]
-    y = (working[label_col] == 1).astype(int)  # 1 = upper hit (long-favorable), 0 = lower hit
+
+    # Class codes: binary -> {0, 1}; three-class -> {0: short, 1: no_trade, 2: long}.
+    y = y.astype(int)
     return X, y, available_cols
 
 
@@ -182,17 +241,100 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
 
 def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
     """
-    Wrap the trained model with probability calibration.
-    method comes from config.yaml model.calibration_method ("isotonic" or "sigmoid").
-    cv="prefit" would require a held-out calibration set; here we use cv=3 with
-    time-respecting behavior approximated by NOT shuffling (sklearn CalibratedClassifierCV
-    internally does K-fold, which for small time series windows is an acceptable
-    approximation at this training-set scale, but documented as a simplification).
+    Wrap the trained model with HONEST probability calibration using a purged,
+    time-ordered split -- no shuffled K-fold, no temporal overlap (Phase 0+1).
+
+    The caller's base_model is treated as a pre-fit template/structure for its
+    hyper-parameters. We build the SAME model class, REFIT it strictly on an EARLIER
+    slice of X_train, drop a purge gap of `labeling.horizon_candles_n` rows so no
+    label window crosses the fit/calibrate boundary, then fit the calibrator on the
+    strictly LATER (held-out) slice using an explicit single time-ordered split as
+    the `cv` argument (never sklearn's internal shuffled K-fold).
+
+    This mirrors production semantics: train on old data -> calibrate on the most
+    recent data -> be evaluated on future (out-of-sample) data. It removes the former
+    CalibratedClassifierCV(cv=3) internal shuffled K-fold, which let rows used to fit
+    the model leak into the row set used to fit the calibrator across the label
+    horizon -- a real time-series leakage bug that inflated honest-validation metrics.
+
+    Fallback: if the training set is too small for a valid purged split (fewer than
+    ~2 * purge_gap + min_calibration_fit + min_calibration_rows rows, or either final
+    slice ends up class-imbalanced), we degrade to a NON-leaky small calibration fit:
+    the base model is still trained on the FULL set, and the calibration is applied as
+    a no-op identity wrapper so probabilities stay raw (never silently accepted from a
+    shuffled K-fold). Callers check this via the returned object's
+    `_is_honest_placeholder` attribute.
     """
     method = cfg["model"]["calibration_method"]
-    calibrated = CalibratedClassifierCV(base_model, method=method, cv=3)
+    horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 24))
+    # Calibration needs a modest number of rows to be stable; keep it conservative so
+    # short training sets in tests/backtests still function.
+    min_fit = max(30, min(200, len(X_train) // 3 // 2))  # ~ 1/6 of data, lower-bounded
+    min_calib = max(20, min(100, len(X_train) // 6 // 2))  # ~ 1/12 of data, lower-bounded
+
+    n = len(X_train)
+    if n < min_fit + horizon + min_calib + 1:
+        # Too small for a valid purged split: rebuild base on the full set, no-op calibration.
+        logger.warning(
+            "calibrate_model: insufficient data for a purged calibration split "
+            "(n=%d < fit=%d + purge=%d + calib=%d); applying identity calibration.",
+            n, min_fit, horizon, min_calib,
+        )
+        base = train_model(X_train, y_train, cfg)  # deterministic refit, same seed
+        _attach_noop_calibration(base, method_invalid=True)
+        return base
+
+    # Strictly time-ordered split: EARLIER slice fits the model, LATER slice fits the calibrator.
+    fit_end = n - horizon - min_calib                # last row index usable for the model fit
+    if fit_end < min_fit:
+        fit_end = min_fit
+    X_fit = X_train.iloc[:fit_end]
+    y_fit = y_train.iloc[:fit_end]
+    X_calib = X_train.iloc[fit_end + horizon:]       # purge gap of `horizon` rows in between
+    y_calib = y_train.iloc[fit_end + horizon:]
+
+    if len(X_fit) < 2 or y_fit.nunique() < 2:
+        logger.warning("calibrate_model: calibration-fit slice is degenerate; identity calibration.")
+        base = train_model(X_train, y_train, cfg)  # refit on full set (deterministic seed)
+        _attach_noop_calibration(base, method_invalid=True)
+        return base
+    if len(X_calib) < 5 or y_calib.nunique() < 2:
+        logger.warning("calibrate_model: calibration held-out slice lacks class diversity; identity calibration.")
+        base = train_model(X_train, y_train, cfg)
+        _attach_noop_calibration(base, method_invalid=True)
+        return base
+
+    logger.info(
+        "calibrate_model: purged split fit_rows=%d calib_rows=%d purge_gap=%d",
+        len(X_fit), len(X_calib), horizon,
+    )
+
+    # Fit the base model on the earlier slice, then calibrate on the strictly LATER
+    # trailing slice. Using an explicit single time-ordered split as cv avoids
+    # sklearn's internal shuffled K-fold entirely (cv=3 would re-shuffle and let
+    # model-fit rows overlap calibrator rows across the label horizon -- leakage).
+    # base_model acts as the hyper-parameter template; sklearn clones + refits it on
+    # exactly the EARLIER fit indices and fits the calibrator on exactly the LATER,
+    # purged test indices (positions in X_train).
+    split_indices = [
+        (np.arange(fit_end), np.arange(fit_end + horizon, n))
+    ]
+    calibrated = CalibratedClassifierCV(base_model, method=method, cv=split_indices)
     calibrated.fit(X_train, y_train)
     return calibrated
+
+
+def _attach_noop_calibration(model, method_invalid: bool) -> None:
+    """
+    Mark a model as having NO real calibration applied (degraded path / placeholder).
+
+    ModelPredictor must treat a model without calibrated fitted coefficients as raw
+    probabilities. We attach minimal attributes so callers can detect the placeholder.
+    """
+    model._is_honest_placeholder = True
+    model._calibration_method_applied = None
+    if method_invalid:
+        model._calibration_skipped_reason = "insufficient_purged_data"
 
 
 def save_model(model, feature_cols: list, path: str):
