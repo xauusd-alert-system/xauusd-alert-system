@@ -3,6 +3,7 @@ Realtime inference pipeline: wires MT5 live data -> features -> regime -> model 
 into a single callable that produces the structured signal JSON required by the
 FastAPI service, MT5 Auto-Trader, and Telegram bot.
 """
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from model.ensemble import compute_ensemble_signal
 from data.session_tagger import tag_dataframe
 
 from copy import deepcopy
+
+logger = logging.getLogger("realtime_pipeline")
 
 
 class RealtimePipeline:
@@ -99,12 +102,23 @@ class RealtimePipeline:
                 if not raw_htf.empty:
                     htf_df = build_all_indicators(raw_htf, self.cfg)
                     htf_frames[htf] = htf_df
-            except Exception:
-                pass
+            except Exception as e:
+                # A failed higher-timeframe fetch silently zeroed mtf_confluence_score
+                # for every signal with no trace. Keep the graceful degradation but
+                # make it observable so a broken HTF feed can be diagnosed.
+                logger.warning(
+                    "[%s] higher-timeframe (%s) confluence fetch failed; "
+                    "continuing without it: %s",
+                    self.asset_key, htf, e,
+                )
 
         if htf_frames:
             df = compute_confluence_score(df, htf_frames, self.cfg)
         else:
+            logger.warning(
+                "[%s] no higher-timeframe frames available; "
+                "mtf_confluence_score defaulted to 0.0", self.asset_key,
+            )
             df["mtf_confluence_score"] = 0.0
 
         df["regime"] = classify_regime_series(df, self.cfg)

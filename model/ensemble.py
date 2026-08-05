@@ -64,8 +64,11 @@ def compute_ensemble_signal(
                     suppressed_by_meta_filter=True,
                     reasoning_summary=f"Blocked by News Guard -> {news_title}",
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            # Fail open (trading continues) if the news feed is unavailable, but
+            # log it: a silently broken guard would let trades through during
+            # high-impact news with no indication anything went wrong.
+            logger.warning("News guard check failed; proceeding without news suppression: %s", e)
 
     is_crypto = "BTC" in asset_key.upper() or "ETH" in asset_key.upper()
 
