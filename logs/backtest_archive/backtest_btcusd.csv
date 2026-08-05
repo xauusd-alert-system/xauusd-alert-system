@@ -1,4 +1,0 @@
-n_trades,win_rate,profit_factor,sharpe_ratio,sortino_ratio,expectancy,max_drawdown,total_pnl,max_consecutive_losses,window
-110,59.09,1.72,3.32,7.13,37.47,-804.96,4121.66,4,"WalkForwardWindow(train_start_ts=1755426000, train_end_ts=1765794000, test_start_ts=1765794000, test_end_ts=1767522000)"
-156,55.13,1.4,2.2,5.16,25.62,-1894.49,3996.72,5,"WalkForwardWindow(train_start_ts=1757154000, train_end_ts=1767522000, test_start_ts=1767522000, test_end_ts=1769250000)"
-55,70.91,2.52,6.55,21.19,110.21,-916.74,6061.43,2,"WalkForwardWindow(train_start_ts=1758882000, train_end_ts=1769250000, test_start_ts=1769250000, test_end_ts=1770978000)"
