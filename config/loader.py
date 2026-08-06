@@ -75,4 +75,12 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None) -> dict:
         grid.update(
             {k: v for k, v in asset_cfg.get("signal_grid", {}).items() if v is not None}
         )
+    # trailing_atr_mult (for v4b "trailing-runner"): None = legacy (no trailing)
+    # When set (e.g. 2.0), after TP2 the remaining 20% position is trailed at trailing*ATR
+    # from the most recent high (long) / low (short).
+    grid["trailing_atr_mult"] = None
+    if asset_cfg and "trailing_atr_mult" in asset_cfg.get("signal_grid", {}):
+        grid["trailing_atr_mult"] = asset_cfg.get("signal_grid", {}).get("trailing_atr_mult")
+    elif "trailing_atr_mult" in cfg.get("signal_grid", {}):
+        grid["trailing_atr_mult"] = cfg.get("signal_grid", {}).get("trailing_atr_mult")
     return grid

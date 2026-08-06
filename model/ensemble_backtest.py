@@ -73,6 +73,7 @@ class EnsembleBacktester:
         # (BE only when TP1 hits); < 1.0 moves the stop to entry earlier, which
         # cuts the 3x-step loss tail for mean-reverting assets (FX).
         self.be_trigger_mult = float(grid_cfg.get("breakeven_trigger_atr", 1.0))
+        self.trailing_atr_mult = grid_cfg.get("trailing_atr_mult")  # None = legacy no-trail
 
         self.horizon_n = lab_cfg.get("horizon_candles_n", 36)
         self.trades: List[Trade] = []
@@ -191,6 +192,23 @@ class EnsembleBacktester:
                     accumulated_pnl += pnl_tp2
                     remaining_ratio = 0.2
 
+                # 2b. TRAILING (v4b "trailing-runner") — only after TP1+TP2 and if trailing_atr_mult is set
+                trailing_exit = False
+                if tp1_hit and tp2_hit and self.trailing_atr_mult is not None and remaining_ratio > 0:
+                    atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                    if direction == 1:
+                        trail_stop = highs[i] - float(self.trailing_atr_mult) * atr_val
+                        if open_position.stop_price < trail_stop:
+                            open_position.stop_price = trail_stop
+                        if lows[i] <= open_position.stop_price:
+                            trailing_exit = True
+                    else:
+                        trail_stop = lows[i] + float(self.trailing_atr_mult) * atr_val
+                        if open_position.stop_price > trail_stop:
+                            open_position.stop_price = trail_stop
+                        if highs[i] >= open_position.stop_price:
+                            trailing_exit = True
+
                 # 3. Финальный выход (TP3, Стоп или Таймаут)
                 exit_reason = None
                 exit_price = None
@@ -200,6 +218,11 @@ class EnsembleBacktester:
                     pnl_tp3 = self._money(remaining_ratio * direction * (open_position.tp3_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp3
                     exit_price = self._apply_slippage(open_position.tp3_price, -direction)
+                elif trailing_exit:
+                    exit_reason = "trailing"
+                    pnl_trail = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))
+                    accumulated_pnl += pnl_trail
+                    exit_price = self._apply_slippage(open_position.stop_price, -direction)
                 elif hit_stop:
                     exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
                     pnl_stop = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))

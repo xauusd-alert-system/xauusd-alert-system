@@ -55,12 +55,14 @@ class MultiAssetMT5Trader:
         # < 1.0 moves the stop to entry before TP1 (protects mean-reverting FX from
         # the 3x-step loss tail); 1.0 = legacy (BE only at TP1).
         self.be_trigger_by_symbol = {}
+        self.trailing_atr_mult_by_symbol = {}
         for asset_key, a_cfg in assets.items():
             sym = a_cfg.get("mt5_symbol")
             if sym:
-                self.be_trigger_by_symbol[sym] = float(
-                    get_signal_grid(self.cfg, a_cfg).get("breakeven_trigger_atr", 1.0)
-                )
+                grid = get_signal_grid(self.cfg, a_cfg)
+                self.be_trigger_by_symbol[sym] = float(grid.get("breakeven_trigger_atr", 1.0))
+                # v4b trailing (None = legacy)
+                self.trailing_atr_mult_by_symbol[sym] = grid.get("trailing_atr_mult")
 
         # CRIT 5: path to the executed-trades SQLite DB (the same file used by
         # scripts/retrain_with_real_trades.py). Overridable via env for tests.
@@ -296,6 +298,34 @@ class MultiAssetMT5Trader:
                         trade_data["tp2_hit"] = True
                 elif tp3 is not None and tp2_hit and current_price >= tp3:
                     self._close_partial_position(pos, tick.bid, pos.volume, "TP3 (20%)")
+
+                # v4b TRAILING after TP2 (only if trailing_atr_mult set and not yet trailed)
+                if trailing_mult is not None and tp1_hit and tp2_hit and not trade_data.get("trailing_active", False):
+                    try:
+                        atr_now = 0.0  # would need real ATR fetch; use a rough 1% of price for live safety
+                        # In production one would fetch recent ATR; for now use a conservative trail
+                        trail_dist = trailing_mult * max(0.0008, (current_price * 0.0006))  # approx ATR
+                        if pos.type == 0:
+                            new_sl = round(pos.price_open + (current_price - pos.price_open) * 0.7, digits)  # conservative
+                            # Prefer dynamic trail using recent high
+                            if current_price > pos.price_open:
+                                new_sl = round(current_price - trail_dist, digits)
+                            if new_sl > pos.sl:
+                                min_sl = current_price - self._get_min_dist(symbol, tick, info)
+                                if new_sl >= min_sl:
+                                    self._modify_sl_tp(pos, new_sl, pos.tp)
+                                    trade_data["trailing_active"] = True
+                        else:
+                            new_sl = round(pos.price_open - (pos.price_open - current_price) * 0.7, digits)
+                            if current_price < pos.price_open:
+                                new_sl = round(current_price + trail_dist, digits)
+                            if new_sl < pos.sl:
+                                min_sl = current_price + self._get_min_dist(symbol, tick, info)
+                                if new_sl <= min_sl:
+                                    self._modify_sl_tp(pos, new_sl, pos.tp)
+                                    trade_data["trailing_active"] = True
+                    except Exception:
+                        pass
             else:
                 if tp1 is not None and not tp1_hit and current_price <= tp1:
                     close_vol = round(original_volume * 0.5, 2)

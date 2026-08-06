@@ -176,12 +176,14 @@ assets:
       breakeven_trigger_atr: 0.5
 
   GBPUSD:
-    # FX v3: same package as EURUSD (H1 + early breakeven 0.5 + stop 2.0).
+    # FX v4 (trend-friendly): wider stops, later/no early BE, higher TP3, trailing option.
+    # v3 (early BE) was for mean-reverting EUR; GBP is trending.
+    # Diagnostics + grid-search (protected from overfit) recommended before enabling.
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
-    # H1: same cost/tail rationale as EURUSD (see docs/FX_V3.md).
+    # H1 (or H4 candidate). See docs/GBP_FIX_STRATEGY.md
     timeframe: H1
     spread_usd: 0.00015
     slippage_usd: 0.0002
@@ -207,6 +209,21 @@ assets:
       step_max_points: 0.006
       stop_mult: 2.0
       breakeven_trigger_atr: 0.5
+    # Stage 4: per-asset model flags (use_regime_feature / include_zero_class)
+    model:
+      use_regime_feature: true
+      include_zero_class: true
+    # v4a candidate (pure config, only for GBPUSD)
+    # signal_grid:
+    #   stop_mult: 3.0
+    #   breakeven_trigger_atr: 1.0
+    #   tp2_mult: 2.5
+    #   tp3_mult: 4.0
+    # v4b trailing (also requires code path in ensemble_backtest + mt5_trader)
+    # signal_grid:
+    #   trailing_atr_mult: 2.0
+    #   stop_mult: 3.0
+    #   breakeven_trigger_atr: 1.0
 
 alerts:
   cooldown_minutes: 15

@@ -230,3 +230,45 @@ def test_legacy_trigger_keeps_full_stop_loss():
     assert len(trades) == 1
     assert trades[0].exit_reason == "stop"
     assert trades[0].pnl < -0.0005
+
+
+# -----------------------------------------------------------------
+# v4b trailing_atr_mult (after TP1+TP2)
+# -----------------------------------------------------------------
+
+def _cfg_with_trailing(trail_mult=2.0):
+    cfg = _fx_v3_early_be_cfg(1.0)  # legacy BE
+    cfg["signal_grid"]["trailing_atr_mult"] = trail_mult
+    cfg["signal_grid"]["stop_mult"] = 3.0
+    cfg["signal_grid"]["tp2_mult"] = 2.0
+    cfg["signal_grid"]["tp3_mult"] = 4.0
+    cfg["backtest"]["commission_per_trade"] = 0.0
+    return cfg
+
+
+def _trailing_probe_df(n=30, price=1.10, step=0.0003):
+    """After TP1 (+1s) and TP2 (+2s) the price continues up +1.5s then pulls back
+    > trailing*atr (2.0 * step) => trailing exit on the remainder."""
+    df = _df(n=n, price=price)
+    # TP1 at bar ~2
+    df.loc[2, "high"] = price + 1.1 * step
+    # TP2 at bar ~5
+    df.loc[5, "high"] = price + 2.1 * step
+    # Run higher to +3.5 step
+    df.loc[8:12, "high"] = price + 3.5 * step
+    df.loc[8:12, "close"] = price + 3.4 * step
+    # Pullback > 2.0 * step
+    df.loc[15, "low"] = price + 3.4 * step - 2.2 * step
+    return df
+
+
+def test_trailing_atr_mult_exits_on_trail_after_tp2():
+    """With trailing_atr_mult=2.0, after TP1+TP2 the remainder is trailed;
+    a pullback > trailing triggers exit_reason='trailing'."""
+    cfg = _cfg_with_trailing(2.0)
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    trades = bt.run(_trailing_probe_df().head(25))
+    assert len(trades) == 1
+    assert trades[0].exit_reason == "trailing"
+    # Should have captured more than a plain TP2 would have
+    assert trades[0].pnl > 0.0002
