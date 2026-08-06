@@ -129,6 +129,22 @@ def test_get_signal_grid_asset_override_merges():
     assert grid["step_max_points"] == 8.0
 
 
+def test_get_signal_grid_breakeven_trigger():
+    """breakeven_trigger_atr defaults to 1.0 (legacy behaviour) and a per-asset
+    override wins. 0.0 is NOT None, so a zero trigger must override too."""
+    cfg = {"labeling": {"tp1_atr_multiplier": 1.0}}
+    assert get_signal_grid(cfg)["breakeven_trigger_atr"] == 1.0
+
+    cfg_with_grid = {"signal_grid": {"stop_mult": 3.0}}
+    assert get_signal_grid(cfg_with_grid)["breakeven_trigger_atr"] == 1.0
+
+    asset_half = {"signal_grid": {"breakeven_trigger_atr": 0.5}}
+    assert get_signal_grid(cfg_with_grid, asset_half)["breakeven_trigger_atr"] == 0.5
+
+    asset_zero = {"signal_grid": {"breakeven_trigger_atr": 0.0}}
+    assert get_signal_grid(cfg_with_grid, asset_zero)["breakeven_trigger_atr"] == 0.0
+
+
 def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
     """TP2 = exactly 2x the TP1 distance, TP3 and SL = exactly 3x the step."""
     from model.ensemble import EnsembleSignal

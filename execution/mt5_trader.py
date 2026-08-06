@@ -13,7 +13,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_env
+from config.loader import load_config, get_env, get_signal_grid
 from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles
 from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
 from realtime.pipeline import RealtimePipeline
@@ -50,6 +50,17 @@ class MultiAssetMT5Trader:
         self.be_state = {}
         self.active_trades = {}
         self.streak_losses = {}
+
+        # Early-breakeven trigger per MT5 symbol (signal_grid.breakeven_trigger_atr).
+        # < 1.0 moves the stop to entry before TP1 (protects mean-reverting FX from
+        # the 3x-step loss tail); 1.0 = legacy (BE only at TP1).
+        self.be_trigger_by_symbol = {}
+        for asset_key, a_cfg in assets.items():
+            sym = a_cfg.get("mt5_symbol")
+            if sym:
+                self.be_trigger_by_symbol[sym] = float(
+                    get_signal_grid(self.cfg, a_cfg).get("breakeven_trigger_atr", 1.0)
+                )
 
         # CRIT 5: path to the executed-trades SQLite DB (the same file used by
         # scripts/retrain_with_real_trades.py). Overridable via env for tests.
@@ -241,6 +252,30 @@ class MultiAssetMT5Trader:
             original_volume = trade_data.get("original_volume", pos.volume)
             tp1 = trade_data.get("tp1"); tp2 = trade_data.get("tp2"); tp3 = trade_data.get("tp3")
             tp1_hit = trade_data.get("tp1_hit", False); tp2_hit = trade_data.get("tp2_hit", False)
+
+            # EARLY BREAKEVEN (configurable): move the SL to entry once price has moved
+            # be_trigger * (tp1 - entry) in our favor, BEFORE TP1. Default 1.0 keeps the
+            # legacy behaviour; e.g. 0.5 for mean-reverting FX cuts the 3x-step loss tail.
+            be_trigger = self.be_trigger_by_symbol.get(symbol, 1.0)
+            if be_trigger < 1.0 and not tp1_hit and not trade_data.get("be_done", False) and tp1 is not None:
+                step_dist = abs(tp1 - trade_data["entry_price"])
+                if step_dist > 0:
+                    if pos.type == 0 and current_price >= trade_data["entry_price"] + be_trigger * step_dist:
+                        target_sl = round(pos.price_open + (10 ** -digits), digits)
+                        min_sl = current_price - self._get_min_dist(symbol, tick, info)
+                        if target_sl < min_sl:
+                            target_sl = min_sl
+                        self._modify_sl_tp(pos, target_sl, pos.tp)
+                        trade_data["be_done"] = True
+                        logger.info(f"EARLY BREAKEVEN [{symbol}] SL moved to entry (trigger {be_trigger})")
+                    elif pos.type == 1 and current_price <= trade_data["entry_price"] - be_trigger * step_dist:
+                        target_sl = round(pos.price_open - (10 ** -digits), digits)
+                        min_sl = current_price + self._get_min_dist(symbol, tick, info)
+                        if target_sl > min_sl:
+                            target_sl = min_sl
+                        self._modify_sl_tp(pos, target_sl, pos.tp)
+                        trade_data["be_done"] = True
+                        logger.info(f"EARLY BREAKEVEN [{symbol}] SL moved to entry (trigger {be_trigger})")
 
             # Частичные закрытия (без изменений, как в предыдущей версии)
             if pos.type == 0:

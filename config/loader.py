@@ -49,6 +49,11 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None) -> dict:
 
       tp1_mult / tp2_mult / tp3_mult / stop_mult  — grid ratios relative to
           the resolved step (spec: 1 / 2 / 3 / 3)
+      breakeven_trigger_atr  — fraction of the TP1 distance at which the stop
+          is moved to entry BEFORE TP1 (early breakeven). 1.0 = legacy (BE only
+          when TP1 hits); < 1.0 (e.g. 0.5) protects mean-reverting assets (FX)
+          from the 3x-step loss tail by converting would-be losers into
+          scratches (default 1.0 keeps the legacy behaviour).
       step_points       — optional fixed step in price points (overrides the
           dynamic ATR step when set)
       step_min_points   — lower clamp for the step (None = no clamp)
@@ -60,6 +65,7 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None) -> dict:
         "tp2_mult": float(lab.get("tp2_atr_multiplier", 2.0)),
         "tp3_mult": float(lab.get("tp3_atr_multiplier", 3.0)),
         "stop_mult": float(lab.get("stop_atr_multiplier", 3.0)),
+        "breakeven_trigger_atr": float(lab.get("breakeven_trigger_atr", 1.0)),
         "step_points": lab.get("step_points"),
         "step_min_points": lab.get("step_min_points"),
         "step_max_points": lab.get("step_max_points"),

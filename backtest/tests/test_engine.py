@@ -137,9 +137,64 @@ def test_engine_barriers_follow_signal_grid():
     for t in trades:
         stop_dist = abs(t.stop_price - t.entry_price)
         target_dist = abs(t.target_price - t.entry_price)
+        if stop_dist == 0:
+            # The stop was moved to entry by the early-breakeven rule, so the
+            # 3:1 grid ratio no longer applies to this (already-protected) trade.
+            continue
         assert stop_dist > 0 and target_dist > 0
         # Both barriers are sized off the SAME ATR at entry, so the ratio is
         # exactly stop_mult / tp1_mult = 3.0 for the shipped signal grid.
         assert np.isclose(stop_dist / target_dist, 3.0, rtol=1e-6), (
             f"expected stop/target = 3.0 (signal grid), got {stop_dist / target_dist:.4f}"
         )
+
+
+def test_engine_early_breakeven_limits_loss():
+    """With signal_grid.breakeven_trigger_atr=0.5 the engine moves the stop to
+    entry after the +0.6-step probe, so the -3.5-step drop that follows exits
+    as a scratch (pnl ~ 0) instead of a full 3-step stop loss. The engine's
+    exit_reason labels are fixed, so it still reads 'stop'."""
+    cfg = {
+        "backtest": {
+            "spread_points": 0,
+            "slippage_points": 0,
+            "initial_balance": 100.0,
+            "risk_per_trade_pct": 2.0,
+        },
+        "labeling": {
+            "method": "atr_scaled",
+            "horizon_candles_n": 36,
+            "atr_column": "atr",
+            "target_pips_x": 0.0,
+            "stop_pips_y": 0.0,
+        },
+        "signal_grid": {
+            "tp1_mult": 1.0,
+            "stop_mult": 3.0,
+            "breakeven_trigger_atr": 0.5,
+        },
+    }
+    price = 1.10
+    step = 0.0003
+    idx = pd.date_range("2024-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": idx.astype("int64") // 10**9,
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "session": "london",
+            "regime": [RegimeLabel.TREND_UP] * 10,
+            "atr": step,
+        }
+    )
+    df.loc[2, "high"] = price + 0.6 * step  # probe above the 0.5-step BE trigger
+    df.loc[3, "low"] = price - 3.5 * step   # would-be stop-out below -3*step
+
+    engine = EventDrivenBacktester(cfg)
+    trades = engine.run(df)
+    assert len(trades) >= 1
+    for t in trades:
+        assert t.exit_reason == "stop"
+        assert t.pnl > -0.0005  # scratched at breakeven, not a full 3-step loss
