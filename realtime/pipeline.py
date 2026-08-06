@@ -84,7 +84,7 @@ class RealtimePipeline:
         ).get("timeframe", "M5")
         self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
 
-        # Эффективный конфиг с asset-specific переопределением ensemble и labeling
+        # Эффективный конфиг с asset-specific переопределением ensemble, labeling, model
         self.effective_cfg = deepcopy(self.cfg)
         asset_ensemble = self.asset_cfg.get("ensemble")
         if asset_ensemble:
@@ -97,6 +97,12 @@ class RealtimePipeline:
             merged_labeling = deepcopy(self.cfg.get("labeling", {}))
             merged_labeling.update(asset_labeling)
             self.effective_cfg["labeling"] = merged_labeling
+
+        asset_model = self.asset_cfg.get("model")
+        if asset_model:
+            merged_model = deepcopy(self.cfg.get("model", {}))
+            merged_model.update(asset_model)
+            self.effective_cfg["model"] = merged_model
 
     def _fetch_data_frame(self, timeframe: str, n_candles: int) -> pd.DataFrame:
         """Fetches and prepares DataFrame directly from MT5 (live) or Mock generator."""

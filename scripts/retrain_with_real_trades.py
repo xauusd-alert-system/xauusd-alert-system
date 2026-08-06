@@ -162,8 +162,11 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
         asset_key=asset_key,
         timeframe=timeframe,
     )
-    three_class = bool(cfg.get("model", {}).get("include_zero_class", False))
-    use_regime_feature = bool(cfg.get("model", {}).get("use_regime_feature", False))
+    # Per-asset model flags (Stage 4)
+    asset_model = cfg.get("assets", {}).get(asset_key, {}).get("model", {})
+    model_cfg = {**cfg.get("model", {}), **asset_model}
+    three_class = bool(model_cfg.get("include_zero_class", False))
+    use_regime_feature = bool(model_cfg.get("use_regime_feature", False))
 
     # 2. Historical Candles Data (always) + Real Trades Data (binary mode only)
     # NOTE: real executed trades are only ever binary outcomes (win/loss per

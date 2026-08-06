@@ -56,7 +56,7 @@ def load_asset_history(db_path: str, timeframe: str, asset_key: str) -> pd.DataF
 
 
 def merge_asset_cfg(cfg: dict, asset_key: str, section: str) -> dict:
-    """Возвращает cfg с объединённым указанным section (ensemble/labeling) из asset_cfg."""
+    """Возвращает cfg с объединённым указанным section (ensemble/labeling/model) из asset_cfg."""
     asset_cfg = cfg.get("assets", {}).get(asset_key, {})
     base_section = cfg.get(section, {})
     asset_section = asset_cfg.get(section)
