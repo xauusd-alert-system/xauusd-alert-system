@@ -18,6 +18,7 @@ from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
 from features.mtf_confluence import compute_confluence_score
+from features.order_flow import add_order_flow_features
 from regime.classifier import add_regime_indicators, classify_regime_series
 from labeling.label_generator import generate_labels_from_config
 from model.trainer import (
@@ -41,6 +42,7 @@ def build_full_df(
     """
     df = df.copy()
     df = build_all_indicators(df, cfg)
+    df = add_order_flow_features(df)
     df = candle_anatomy(df)
     df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
     df = add_regime_indicators(df, cfg)

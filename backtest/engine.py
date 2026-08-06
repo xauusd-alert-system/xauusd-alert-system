@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 
 from regime.classifier import RegimeLabel
+from config.loader import get_signal_grid
 
 
 @dataclass
@@ -53,8 +54,9 @@ class EventDrivenBacktester:
     """
     Processes a DataFrame of candles (with 'regime' column already attached) one
     row at a time, opening/closing at most one position, applying spread/slippage
-    from config, and using the SAME +X/-Y/N barrier logic as labeling/ for exits -
-    so backtest outcomes are directly comparable to the supervised learning target.
+    from config, and using the SIGNAL GRID barrier logic (TP1 / stop from the
+    signal_grid config, equal-step spec) for exits - so backtest outcomes mirror
+    the live execution grid rather than the training-label barriers.
     """
 
     def __init__(self, cfg: dict):
@@ -67,14 +69,20 @@ class EventDrivenBacktester:
         self.risk_pct = bt_cfg["risk_per_trade_pct"] / 100.0
         self.horizon_n = int(lab_cfg["horizon_candles_n"])
 
-        # HIGH 9: barrier distances must come from the SAME config the labeling
-        # module uses, so backtest outcomes are comparable to the supervised
-        # target (atr_scaled triples vs. legacy fixed pips).
+        # Barrier distances come from the SIGNAL GRID (signal_grid:, per-asset
+        # overrides allowed) so backtest exits mirror the live Telegram/MT5 grid
+        # (TP1 = 1*step, stop = 3*step) instead of the training-label barriers.
+        # Legacy labeling keys are kept as fallback for minimal/test configs.
+        grid_cfg = get_signal_grid(cfg)
         method = lab_cfg.get("method", "fixed")
         if method == "atr_scaled":
             self.use_atr_scaled = True
-            self.target_x_mult = float(lab_cfg.get("target_atr_multiplier", 1.2))
-            self.stop_y_mult = float(lab_cfg.get("stop_atr_multiplier", 1.0))
+            self.target_x_mult = float(
+                grid_cfg.get("tp1_mult", lab_cfg.get("tp1_atr_multiplier", 1.0))
+            )
+            self.stop_y_mult = float(
+                grid_cfg.get("stop_mult", lab_cfg.get("stop_atr_multiplier", 1.0))
+            )
             self.atr_col = lab_cfg.get("atr_column", "atr")
             # Legacy fixed-barrier fallbacks for when the ATR column is absent.
             self.target_x = float(lab_cfg.get("target_pips_x", 0.0))

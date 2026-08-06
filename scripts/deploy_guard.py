@@ -373,7 +373,8 @@ def guard_asset(cfg: dict, asset_key: str, deployed_path: str) -> dict:
     """
     dg = cfg.get("deploy_guard", {})
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
-    timeframe = cfg.get("market_data", {}).get("timeframe", "M5")
+    asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+    timeframe = asset_cfg.get("timeframe") or cfg.get("market_data", {}).get("timeframe", "M5")
     wf = cfg.get("backtest", {}).get("walk_forward", {})
     train_days = int(wf.get("train_window_days", 300))
     test_days = int(wf.get("test_window_days", 50))

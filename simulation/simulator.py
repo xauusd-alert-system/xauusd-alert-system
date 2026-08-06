@@ -198,6 +198,12 @@ class MarketSimulator:
 
         if self.tick % self.m5_bar_interval_ticks == 0:
             self.last_m5_bar_tick = self.tick
+            # Rolling CB anchor: re-anchor on each closed M5 bar so a slow
+            # multi-bar drift never trips the breaker permanently. The ±pct
+            # band still halts single-bar shocks (checked above against the
+            # previous bar's anchor).
+            if not self._warming_up and not self.paused:
+                self._cb_anchor = self.current_mid_price
 
         self.price_history.append(self.current_mid_price)
         if len(self.price_history) > 10_000:

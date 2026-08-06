@@ -143,7 +143,7 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
     """
     asset_cfg = cfg["assets"][asset_key]
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
-    timeframe = cfg.get("market_data", {}).get("timeframe", "M5")
+    timeframe = asset_cfg.get("timeframe") or cfg.get("market_data", {}).get("timeframe", "M5")
     model_path = asset_cfg["model_path"]
 
     logger.info(f"--- Weekly Retraining for {asset_key} ({asset_cfg['mt5_symbol']}) ---")

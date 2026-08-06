@@ -79,7 +79,8 @@ class TelegramAlertBot:
         if not self._should_send(signal):
             return False
 
-        message = format_signal_message(signal, asset_key)
+        include_meta = bool(self.cfg.get("alerts", {}).get("include_signal_meta", False))
+        message = format_signal_message(signal, asset_key, include_meta=include_meta)
         success = self.send_text_message(message)
         if success:
             self._last_alert_ts = time.time()

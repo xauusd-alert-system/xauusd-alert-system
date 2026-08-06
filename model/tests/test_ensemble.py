@@ -113,13 +113,16 @@ def test_news_guard_blocks_signal_during_news_window(monkeypatch):
 
 
 def _ev_cfg(ev_threshold: float) -> dict:
-    """Config copy with a specific ev_threshold (uses payoff_ratio = tp1/stop = 1.0)."""
+    """Config copy with a specific ev_threshold (uses payoff_ratio = tp3/stop = 1.0)."""
     cfg = dict(CFG)
     cfg["ensemble"] = dict(cfg["ensemble"])
     cfg["ensemble"]["ev_threshold"] = ev_threshold
-    cfg["labeling"] = dict(cfg.get("labeling", {}))
-    cfg["labeling"]["tp1_atr_multiplier"] = 1.0
-    cfg["labeling"]["stop_atr_multiplier"] = 1.0
+    # The EV gate reads the signal grid (signal_grid.tp3_mult / stop_mult);
+    # force the 1:1 payoff ratio here regardless of the shipped config values.
+    cfg["signal_grid"] = dict(cfg.get("signal_grid", {}))
+    cfg["signal_grid"]["tp1_mult"] = 1.0
+    cfg["signal_grid"]["tp3_mult"] = 1.0
+    cfg["signal_grid"]["stop_mult"] = 1.0
     return cfg
 
 
@@ -158,15 +161,15 @@ def test_ev_gate_considers_payoff_ratio():
     the first but passes the second, proving the gate uses the TP1/stop payoff ratio,
     not just the raw probability."""
     low_ratio = _ev_cfg(0.15)
-    low_ratio["labeling"]["tp1_atr_multiplier"] = 1.0
-    low_ratio["labeling"]["stop_atr_multiplier"] = 1.0
+    low_ratio["signal_grid"]["tp3_mult"] = 1.0
+    low_ratio["signal_grid"]["stop_mult"] = 1.0
     sig_ratio1 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.55, 0.45, low_ratio)
     # EV_risk = 0.10 < 0.15 -> declined at 1:1 payoff.
     assert "EV gate declined" in sig_ratio1.reasoning_summary
 
     high_ratio = _ev_cfg(0.15)
-    high_ratio["labeling"]["tp1_atr_multiplier"] = 1.5
-    high_ratio["labeling"]["stop_atr_multiplier"] = 1.0
+    high_ratio["signal_grid"]["tp3_mult"] = 1.5
+    high_ratio["signal_grid"]["stop_mult"] = 1.0
     sig_ratio15 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.55, 0.45, high_ratio)
     # EV_risk = 0.375 >= 0.15 -> not declined at 1.5:1 payoff (the later no_trade, if any,
     # is purely a confidence matter and must not carry the EV-gate reasoning string).
@@ -279,3 +282,27 @@ def test_hard_divergence_veto_disabled_by_default_preserves_soft_collapse():
     sig = compute_ensemble_signal(RegimeLabel.TREND_UP, ml_p_long=0.4, ml_p_short=0.6, cfg=_flag_cfg("hard_divergence_veto", False))
     assert sig.bias == "no_trade"
     assert "Hard divergence veto" not in sig.reasoning_summary
+
+
+def test_ev_gate_uses_tp3_payoff_ratio_with_shipped_grid():
+    """Under the equal-step grid (tp3=3, stop=3 -> payoff 1.0) the gate is a pure
+    probability filter: p=0.60 passes a 0.10 threshold (EV = 0.2). The OLD
+    TP1-based payoff (1/3) would have declined it (EV = -0.2), so this locks in
+    the TP3/stop semantics that match the 1:1 risk:TP3 execution grid."""
+    grid_cfg = dict(CFG.get("signal_grid", {}))
+    assert grid_cfg.get("tp3_mult", 3.0) == 3.0
+    assert grid_cfg.get("stop_mult", 3.0) == 3.0
+
+    cfg = _ev_cfg(0.10)
+    cfg["signal_grid"]["tp3_mult"] = 3.0
+    cfg["signal_grid"]["stop_mult"] = 3.0
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.60, 0.40, cfg)
+    # EV = 0.60 * 1.0 - 0.40 = 0.20 >= 0.10 -> not declined by the EV gate.
+    assert "EV gate declined" not in sig.reasoning_summary
+
+    # Same p with a 1:3 payoff (tp3=1, stop=3) must be declined: EV = 0.2 - 0.4.
+    bad = _ev_cfg(0.10)
+    bad["signal_grid"]["tp3_mult"] = 1.0
+    bad["signal_grid"]["stop_mult"] = 3.0
+    sig_bad = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.60, 0.40, bad)
+    assert "EV gate declined" in sig_bad.reasoning_summary

@@ -34,10 +34,17 @@ def main():
     cfg = load_config()
     db_path = cfg["general"]["db_path"]
     symbol = args.symbol
-    # Default timeframe list: the primary market timeframe plus the MTF references,
+    # Default timeframe list: the primary market timeframe plus the MTF references
+    # plus any per-asset timeframe overrides (e.g. EURUSD/GBPUSD/XAGUSD on M15),
     # so seeded data covers both the main pipeline and the higher-timeframe features.
     default_timeframes = [cfg["market_data"]["timeframe"]]
     default_timeframes += cfg.get("features", {}).get("mtf_reference_timeframes", [])
+    default_timeframes += [
+        a_cfg.get("timeframe")
+        for a_cfg in cfg.get("assets", {}).values()
+        if a_cfg.get("enabled", False) and a_cfg.get("timeframe")
+    ]
+    default_timeframes = sorted({tf for tf in default_timeframes if tf})
     timeframes = [args.timeframe] if args.timeframe else default_timeframes
     sessions_cfg = cfg["sessions"]
 

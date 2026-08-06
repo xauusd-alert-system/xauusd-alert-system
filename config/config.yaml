@@ -14,11 +14,13 @@ ensemble:
   ml_weight: 0.80
   # Phase 2: EV-threshold entry gate. EV = p_exit_right * |reward| - (1 - p_exit_right)
   # * |risk| where p_exit_right = directional probability (p_long for long, p_short for
-  # short), reward = the TP1 ATR distance and risk = the stop ATR distance. When enabled
-  # (> 0) a signal only reaches "long"/"short" if the expected value of (reward * p -
-  # risk * (1 - p)) / risk exceeds this threshold; otherwise it is declined as no_trade.
-  # A value of 0 (the default) disables the gate so the Phase-0+1 baseline is unchanged
-  # unless explicitly enabled for Phase 2 experiments.
+  # short), reward = the TP3 distance and risk = the stop distance from the signal grid
+  # (signal_grid.tp3_mult / stop_mult; under the equal-step spec 3/3 = 1.0, i.e. the gate
+  # is a pure probability-quality filter: p must exceed 0.5 + threshold/2 to pass).
+  # When enabled (> 0) a signal only reaches "long"/"short" if the expected value of
+  # (reward * p - risk * (1 - p)) / risk exceeds this threshold; otherwise it is declined
+  # as no_trade. A value of 0 (the default) disables the gate so the Phase-0+1 baseline
+  # is unchanged unless explicitly enabled for Phase 2 experiments.
   ev_threshold: 0
   # Phase 5 (#16): enforce p_long + p_short = 1 BEFORE any downstream use. Some
   # predictors (e.g. a 3-class model) leave the residual mass on a "no_trade" class,
@@ -72,12 +74,21 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
       ml_weight: 0.85
+    # Equal-step signal grid clamps (price points). Gold M5 ATR ~3-7 -> keep the
+    # step inside 2..8 pts so extreme ATR cannot produce absurd TP/SL levels.
+    signal_grid:
+      step_min_points: 2.0
+      step_max_points: 8.0
 
   XAGUSD:
     enabled: true
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
+    # Per-asset timeframe: M15 (global default is M5). M5 step is too small
+    # relative to fixed spread+slippage on silver (~25% of TP1); M15 makes the
+    # grid ~2-2.5x wider so transaction costs eat far less of the target.
+    timeframe: M15
     spread_usd: 0.02
     slippage_usd: 0.02
     # Contract multiplier: 1.0 lot = 5000 troy oz -> $1 price move = $5000/lot,
@@ -94,6 +105,9 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
       ml_weight: 0.85
+    signal_grid:
+      step_min_points: 0.1
+      step_max_points: 1.0
 
   BTCUSD:
     enabled: true
@@ -118,12 +132,18 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.20
       ml_weight: 0.80
+    signal_grid:
+      step_min_points: 200.0
+      step_max_points: 3000.0
 
   EURUSD:
     enabled: true
     mt5_symbol: EURUSD
     display_name: EUR/USD
     model_path: output/models/eurusd_direction_model.joblib
+    # M15: on M5 the round-trip cost (~5 pips) is ~100% of the TP1 step, so the
+    # trade cannot pay for itself; M15 widens the grid ~2.5x.
+    timeframe: M15
     spread_usd: 0.00012
     slippage_usd: 0.0002
     # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
@@ -144,12 +164,17 @@ assets:
       tp1_atr_multiplier: 1.0
       tp2_atr_multiplier: 1.8
       tp3_atr_multiplier: 2.8
+    signal_grid:
+      step_min_points: 0.0005
+      step_max_points: 0.005
 
   GBPUSD:
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
+    # M15: same cost rationale as EURUSD (M5 TP1 step ≈ round-trip cost).
+    timeframe: M15
     spread_usd: 0.00015
     slippage_usd: 0.0002
     # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
@@ -169,10 +194,16 @@ assets:
       tp1_atr_multiplier: 1.0
       tp2_atr_multiplier: 1.8
       tp3_atr_multiplier: 2.8
+    signal_grid:
+      step_min_points: 0.0005
+      step_max_points: 0.006
 
 alerts:
   cooldown_minutes: 15
   max_alerts_per_day: 30
+  # Append a compact metadata line (Conf / Regime / Session) to Telegram
+  # signals. Default false keeps the clean ШОРТ/ЛОНГ layout from the spec.
+  include_signal_meta: false
 
 features:
   ema_periods: [9, 21, 50, 200]
@@ -220,6 +251,12 @@ model:
   # ModelPredictor from the raw `regime` column, so all consumers work unchanged.
   use_regime_feature: false
 
+# ---------------------------------------------------------------------------
+# TRAINING labels (triple-barrier, labeling/label_generator.py). These barrier
+# distances define the SUPERVISED target the models are trained on and are
+# intentionally decoupled from the Telegram signal grid (see `signal_grid:`
+# below) so retraining semantics stay stable.
+# ---------------------------------------------------------------------------
 labeling:
   method: atr_scaled
   horizon_candles_n: 36
@@ -229,6 +266,23 @@ labeling:
   tp1_atr_multiplier: 1.0
   tp2_atr_multiplier: 1.8
   tp3_atr_multiplier: 2.8
+
+# ---------------------------------------------------------------------------
+# Signal grid spec for Telegram (alerts/formatter.py, realtime/pipeline.py).
+# Equal-step grid: step = step_points (if set) else 1.0 * ATR, clamped to
+# [step_min_points, step_max_points]; TP1 = entry ± 1*step, TP2 = ±2*step,
+# TP3 = ±3*step, Stop = entry ∓ 3*step (risk:TP3 = 1:1, BE on TP1).
+# Per-asset overrides live in assets.<key>.signal_grid (e.g. clamps tuned to
+# each instrument's price scale).
+# ---------------------------------------------------------------------------
+signal_grid:
+  tp1_mult: 1.0
+  tp2_mult: 2.0
+  tp3_mult: 3.0
+  stop_mult: 3.0
+  step_points: null        # fixed step in price points; null = dynamic 1.0*ATR
+  step_min_points: null    # lower clamp (null = no clamp)
+  step_max_points: null    # upper clamp (null = no clamp)
 
 sessions:
   asia: {start: 0, end: 8}

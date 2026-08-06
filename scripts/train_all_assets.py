@@ -20,14 +20,16 @@ def main():
     for asset in enabled_assets:
         asset_cfg = assets[asset]
         model_path = asset_cfg["model_path"]
+        # Per-asset timeframe override (assets.<key>.timeframe), else global.
+        asset_tf = asset_cfg.get("timeframe") or timeframe
         print(f"\n==========================================")
-        print(f"Training Model for {asset} ({asset_cfg['mt5_symbol']})...")
+        print(f"Training Model for {asset} ({asset_cfg['mt5_symbol']}) on {asset_tf}...")
         print(f"==========================================")
         
         cmd = [
             sys.executable, "-m", "scripts.train_mt5",
             "--symbol", asset,
-            "--timeframe", timeframe,
+            "--timeframe", asset_tf,
             "--db-path", db_path,
             "--output", model_path
         ]

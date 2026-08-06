@@ -74,9 +74,10 @@ fundamental_drift_pct: 0.0003
 news_shock_std: 0.008
 news_mean_arrival_ticks: 150
 
-# Circuit breaker: tightened from 15% to 5% (realistic intraday limit).
-# At $2400 this allows +-$120 excursion before halting — enough for multi-hour
-# trends without the simulation wandering off to unrealistic price levels.
+# Circuit breaker: trips when price deviates >circuit_breaker_pct from a
+# rolling anchor that re-anchors on every closed M5 bar. At $2400 a 5% band
+# halts single-bar shocks (~$120 excursion) without freezing the sim on slow
+# multi-bar trends/drift.
 circuit_breaker_pct: 0.05
 
 # ============================================================
