@@ -167,10 +167,11 @@ class RealtimePipeline:
         atr_val = float(latest["atr"]) if not pd.isna(latest["atr"]) else 1.0
 
         lab_cfg = self.asset_cfg.get("labeling") or self.cfg.get("labeling", {})
+        # Equal-step grid spec: TP1 = 1*ATR, TP2 = 2*ATR, TP3 = 3*ATR, SL = 3*ATR.
         tp1_mult = lab_cfg.get("tp1_atr_multiplier", 1.0)
-        tp2_mult = lab_cfg.get("tp2_atr_multiplier", 1.8)
-        tp3_mult = lab_cfg.get("tp3_atr_multiplier", 2.8)
-        stop_mult = lab_cfg.get("stop_atr_multiplier", 1.0)
+        tp2_mult = lab_cfg.get("tp2_atr_multiplier", 2.0)
+        tp3_mult = lab_cfg.get("tp3_atr_multiplier", 3.0)
+        stop_mult = lab_cfg.get("stop_atr_multiplier", 3.0)
 
         if signal.bias == "long":
             entry_zone = [round(entry_price - atr_val * 0.1, 2), round(entry_price + atr_val * 0.1, 2)]
@@ -197,6 +198,7 @@ class RealtimePipeline:
             "entry_zone": entry_zone,
             "invalidation": invalidation,
             "targets": targets,
+            "step": round(atr_val, 4),
             "reasoning_summary": signal.reasoning_summary,
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
             "timestamp_utc": int(latest["timestamp_utc"]),

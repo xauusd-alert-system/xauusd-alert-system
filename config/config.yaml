@@ -139,11 +139,11 @@ assets:
     labeling:
       horizon_candles_n: 36
       target_atr_multiplier: 1.2
-      stop_atr_multiplier: 1.0
+      stop_atr_multiplier: 3.0
       atr_column: atr
       tp1_atr_multiplier: 1.0
-      tp2_atr_multiplier: 1.8
-      tp3_atr_multiplier: 2.8
+      tp2_atr_multiplier: 2.0
+      tp3_atr_multiplier: 3.0
 
   GBPUSD:
     enabled: true
@@ -164,11 +164,11 @@ assets:
     labeling:
       horizon_candles_n: 36
       target_atr_multiplier: 1.2
-      stop_atr_multiplier: 1.0
+      stop_atr_multiplier: 3.0
       atr_column: atr
       tp1_atr_multiplier: 1.0
-      tp2_atr_multiplier: 1.8
-      tp3_atr_multiplier: 2.8
+      tp2_atr_multiplier: 2.0
+      tp3_atr_multiplier: 3.0
 
 alerts:
   cooldown_minutes: 15
@@ -224,11 +224,11 @@ labeling:
   method: atr_scaled
   horizon_candles_n: 36
   target_atr_multiplier: 1.2
-  stop_atr_multiplier: 1.0
+  stop_atr_multiplier: 3.0
   atr_column: atr
   tp1_atr_multiplier: 1.0
-  tp2_atr_multiplier: 1.8
-  tp3_atr_multiplier: 2.8
+  tp2_atr_multiplier: 2.0
+  tp3_atr_multiplier: 3.0
 
 sessions:
   asia: {start: 0, end: 8}

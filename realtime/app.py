@@ -203,10 +203,11 @@ def get_asset_chart(asset: str = "XAUUSD"):
 
     current_p = float(close[-1])
     entry = current_p
-    sl = current_p - step * 2.0
-    tp1 = current_p + step * 2.0
-    tp2 = current_p + step * 3.6
-    tp3 = current_p + step * 5.6
+    # Equal-step grid spec: TP1/2/3 = entry + 1/2/3*step, Stop = entry - 3*step.
+    sl = current_p - step * 3.0
+    tp1 = current_p + step * 1.0
+    tp2 = current_p + step * 2.0
+    tp3 = current_p + step * 3.0
 
     svg = ChartRenderer.render_svg_candlestick(
         df=df,
