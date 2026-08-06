@@ -178,3 +178,55 @@ def test_config_point_value_lot_overrides_match_contract_sizes_per_asset():
         assert (
             cfg["assets"][asset_key].get("point_value_lot", 100) > 0
         ), f"{asset_key} point_value_lot must be > 0"
+
+
+# ---------------------------------------------------------------------------
+# FX v3: early breakeven (signal_grid.breakeven_trigger_atr)
+# ---------------------------------------------------------------------------
+
+def _fx_v3_early_be_cfg(breakeven_trigger_atr=None):
+    """Zero-cost config on the equal-step grid (stop = 3*step) with an optional
+    early-breakeven trigger. Zero commission/slippage/spread so PnL assertions
+    reflect pure barrier mechanics, not transaction costs."""
+    cfg = _cfg({
+        "slippage_usd": 0.0,
+        "spread_usd": 0.0,
+    })
+    cfg["backtest"]["commission_per_trade"] = 0.0
+    grid = {"stop_mult": 3.0}
+    if breakeven_trigger_atr is not None:
+        grid["breakeven_trigger_atr"] = breakeven_trigger_atr
+    cfg["signal_grid"] = grid
+    return cfg
+
+
+def _fx_v3_probe_df(n=10, price=1.10, step=0.0003):
+    """Flat candles with a +0.6-step probe on bar 2 and a -3.5-step drop on bar
+    3 (same shape as the mean-reverting FX scenario the early breakeven is
+    designed for)."""
+    df = _df(n=n, price=price)
+    df.loc[2, "high"] = price + 0.6 * step
+    df.loc[3, "low"] = price - 3.5 * step
+    return df
+
+
+def test_early_breakeven_turns_stop_loss_into_scratch():
+    """With breakeven_trigger_atr=0.5 the stop moves to entry after the +0.6-step
+    probe, so the -3.5-step drop that follows exits as a BREAKEVEN scratch
+    (pnl == 0) instead of a full 3-step stop loss."""
+    bt = EnsembleBacktester(_fx_v3_early_be_cfg(0.5), asset_key="TEST")
+    trades = bt.run(_fx_v3_probe_df().head(10))
+    assert len(trades) == 1
+    assert trades[0].exit_reason == "breakeven"
+    assert trades[0].pnl > -0.0005
+
+
+def test_legacy_trigger_keeps_full_stop_loss():
+    """Without breakeven_trigger_atr (default 1.0 = legacy) the same price path
+    keeps the stop at -3*step, so the -3.5-step drop exits as a full STOP loss
+    (pnl < -0.0005). This locks in that the default preserves old behaviour."""
+    bt = EnsembleBacktester(_fx_v3_early_be_cfg(), asset_key="TEST")
+    trades = bt.run(_fx_v3_probe_df().head(10))
+    assert len(trades) == 1
+    assert trades[0].exit_reason == "stop"
+    assert trades[0].pnl < -0.0005

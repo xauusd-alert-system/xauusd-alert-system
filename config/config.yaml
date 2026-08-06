@@ -137,13 +137,18 @@ assets:
       step_max_points: 3000.0
 
   EURUSD:
+    # FX v3: H1 + early breakeven (0.5 step) + tighter stop (2.0 step) to cut
+    # the 3x-step loss tail that made M15 unprofitable (WR 62% cannot pay for
+    # a 1:3 grid).
     enabled: true
     mt5_symbol: EURUSD
     display_name: EUR/USD
     model_path: output/models/eurusd_direction_model.joblib
-    # M15: on M5 the round-trip cost (~5 pips) is ~100% of the TP1 step, so the
-    # trade cannot pay for itself; M15 widens the grid ~2.5x.
-    timeframe: M15
+    # H1: on M5 the round-trip cost (~5 pips) is ~100% of the TP1 step, so the
+    # trade cannot pay for itself; M15 was still unprofitable (mean-reverting
+    # 1:3 grid), H1 widens the grid further AND early-breakeven + stop 2.0 cut
+    # the loss tail (see docs/FX_V3.md).
+    timeframe: H1
     spread_usd: 0.00012
     slippage_usd: 0.0002
     # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
@@ -151,15 +156,13 @@ assets:
     # too small, so the flat commission dominated and every trade showed -0.07.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.92
-      ev_threshold: 0.10
-      hard_divergence_veto: true
+      min_confidence_to_alert: 0.85
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
     labeling:
-      horizon_candles_n: 36
+      horizon_candles_n: 48
       target_atr_multiplier: 1.2
       stop_atr_multiplier: 1.0
       atr_column: atr
@@ -169,29 +172,30 @@ assets:
     signal_grid:
       step_min_points: 0.0005
       step_max_points: 0.005
+      stop_mult: 2.0
+      breakeven_trigger_atr: 0.5
 
   GBPUSD:
+    # FX v3: same package as EURUSD (H1 + early breakeven 0.5 + stop 2.0).
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
-    # M15: same cost rationale as EURUSD (M5 TP1 step ≈ round-trip cost).
-    timeframe: M15
+    # H1: same cost/tail rationale as EURUSD (see docs/FX_V3.md).
+    timeframe: H1
     spread_usd: 0.00015
     slippage_usd: 0.0002
     # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
     # unit. See XAGUSD comment for why this must be a per-asset override.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.92
-      ev_threshold: 0.10
-      hard_divergence_veto: true
+      min_confidence_to_alert: 0.85
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
     labeling:
-      horizon_candles_n: 36
+      horizon_candles_n: 48
       target_atr_multiplier: 1.2
       stop_atr_multiplier: 1.0
       atr_column: atr
@@ -201,6 +205,8 @@ assets:
     signal_grid:
       step_min_points: 0.0005
       step_max_points: 0.006
+      stop_mult: 2.0
+      breakeven_trigger_atr: 0.5
 
 alerts:
   cooldown_minutes: 15
@@ -284,6 +290,11 @@ signal_grid:
   tp2_mult: 2.0
   tp3_mult: 3.0
   stop_mult: 3.0
+  # Early breakeven: move the stop to entry once price reaches this fraction
+  # of the TP1 distance in our favor. 1.0 = legacy (BE only when TP1 hits);
+  # values < 1.0 (e.g. 0.5) protect mean-reverting assets (FX) from the
+  # 3x-step loss tail by converting most would-be losers into scratches.
+  breakeven_trigger_atr: 1.0
   step_points: null        # fixed step in price points; null = dynamic 1.0*ATR
   step_min_points: null    # lower clamp (null = no clamp)
   step_max_points: null    # upper clamp (null = no clamp)

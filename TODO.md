@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**240/240 tests passing**; FX-var2 фильтры EUR/GBP: 0.92 / EV 0.10 / hard veto).
+**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**244/244 tests passing**; FX v3 для EUR/GBP: H1 + stop 2.0 + ранний безубыток 0.5).
 
 ---
 
@@ -116,14 +116,15 @@ GOLD | ЗОЛОТО | XAUUSD
 - [x] **Фаза 14: ИИ-анализ тональности макроэкономических новостей** (`data/sentiment_analyzer.py`).
 - [x] **Фаза 15: Визуализация торговых сетапов и уровней (SVG / ASCII)** (`alerts/chart_renderer.py`).
 - [x] **Фаза 16: Кастомный чистый формат сигналов для Telegram** (`alerts/formatter.py`): сетка TP1/2/3 с равным шагом и стоп-лоссом $3.0 \times \text{Step}$, отправка в формате ШОРТ/ЛОНГ.
+- [x] **FX v3 — ранний безубыток + стоп 2.0 + H1 для EUR/GBP (механика ВЫХОДА):** var-2 фильтры входов (0.92 / EV 0.10 / hard veto) перевеса не дали (EUR exp −0.26, 0/14; GBP exp −0.24, 2/14) — при WR 62–66% сетка 1:3 математически убыточна ДО издержек (хвост −3×шага ≈ 6× среднего выигрыша). Пакет атакует хвост потерь только для `assets.EURUSD`/`assets.GBPUSD`: `timeframe: H1`, `signal_grid.stop_mult: 2.0`, новый `signal_grid.breakeven_trigger_atr: 0.5` (SL → entry после 50% дистанции до TP1, ДО TP1), `labeling.horizon_candles_n: 48`, `ensemble.min_confidence_to_alert: 0.85` без `ev_threshold`/`hard_divergence_veto` (убраны; наследуют глобальные 0/false). Реализовано в трёх движках: `config/loader.py::get_signal_grid` (ключ `breakeven_trigger_atr`, дефолт 1.0), `model/ensemble_backtest.py` (exit_reason `"breakeven"`; дефолт 1.0 = бит-в-бит legacy → XAU/BTC/XAG не меняются), `backtest/engine.py` (ранний BE, ярлыки выхода не менялись), `execution/mt5_trader.py` (`be_trigger_by_symbol`, SL в ноль только при trigger < 1.0). XAU/XAG/BTC не трогались. Перезамер: `python -m scripts.run_backtest --asset EURUSD/GBPUSD` (см. `docs/FX_V3.md`); решение по `exp>0, PF>1, плюсовых фолдов ≥5/14`.
 - [x] **Фаза 17: Order-flow фичи в моделях + per-asset таймфреймы** (`features/order_flow.py` → обучение и инференс): CVD, CVD-slope, Order Flow Imbalance 14/50, дистанция до VWAP по ATR добавлены в `FEATURE_COLUMNS` (41 → 46 фич) и в пайплайн (`train_mt5`, `run_backtest`, `realtime/pipeline`). `assets.<key>.timeframe` позволяет торговать FX/XAG на M15 (издержки ~100% шага на M5 падают до ~30–40%), XAU/BTC остаются на M5; подхвачено в `train_all_assets`, `run_backtest`, `overnight` (бэкфилл по всем таймфреймам), `retrain_with_real_trades`, `deploy_guard`, `seed_db`.
-- [x] **FX var2 (tighten) — ужесточение фильтров EUR/GBP (вариант 2):** только per-asset `assets.EURUSD.ensemble` и `assets.GBPUSD.ensemble` → `min_confidence_to_alert: 0.85→0.92`, `ev_threshold: 0→0.10`, `hard_divergence_veto: false→true`; глобальные `ensemble` без изменений; merge через `merge_asset_cfg` / `RealtimePipeline.effective_cfg`; `compute_ensemble_signal` читает `ens_cfg` после merge (покрыто 5 тестами). XAU/XAG/BTC не трогались. Ожидаем сдвиг EUR (exp −0.26, 0/14) / GBP (exp −0.24, 2/14) к `exp>0, PF>1, ≥5/14`; перезамер: `python -m scripts.run_backtest --asset EURUSD` / `GBPUSD` (решение — отдельным коммитом, см. `docs/benchmarks.md`).
+- [x] **FX var2 (tighten) — ужесточение фильтров EUR/GBP (вариант 2, SUPERSEDED by FX v3):** только per-asset `assets.EURUSD.ensemble` и `assets.GBPUSD.ensemble` → `min_confidence_to_alert: 0.85→0.92`, `ev_threshold: 0→0.10`, `hard_divergence_veto: false→true`; глобальные `ensemble` без изменений; merge через `merge_asset_cfg` / `RealtimePipeline.effective_cfg`; `compute_ensemble_signal` читает `ens_cfg` после merge (покрыто 5 тестами). XAU/XAG/BTC не трогались. Ожидаем сдвиг EUR (exp −0.26, 0/14) / GBP (exp −0.24, 2/14) к `exp>0, PF>1, ≥5/14`; перезамер: `python -m scripts.run_backtest --asset EURUSD` / `GBPUSD` (решение — отдельным коммитом, см. `docs/benchmarks.md`).
 
 ---
 
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **240 passed in ~20s** (100% green; +5 FX-var2 per-asset override тестов).
+- [x] **Тестовый набор:** `pytest -q` — **244 passed in ~20s** (100% green; +4 FX v3 regression теста: ранний BE → скретч / полный стоп по дефолту в ensemble-backtest, ранний BE в rule-движке, loader default+overrides).
 - [x] **Веб-дашборд реального времени:** `http://localhost:8000/dashboard` — **ONLINE**.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

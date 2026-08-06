@@ -69,6 +69,10 @@ class EnsembleBacktester:
         self.tp2_mult = grid_cfg.get("tp2_mult", 2.0)
         self.tp3_mult = grid_cfg.get("tp3_mult", 3.0)
         self.stop_mult = grid_cfg.get("stop_mult", 3.0)
+        # Early breakeven trigger (fraction of the TP1 distance). 1.0 = legacy
+        # (BE only when TP1 hits); < 1.0 moves the stop to entry earlier, which
+        # cuts the 3x-step loss tail for mean-reverting assets (FX).
+        self.be_trigger_mult = float(grid_cfg.get("breakeven_trigger_atr", 1.0))
 
         self.horizon_n = lab_cfg.get("horizon_candles_n", 36)
         self.trades: List[Trade] = []
@@ -90,6 +94,7 @@ class EnsembleBacktester:
 
         tp1_hit = False
         tp2_hit = False
+        be_triggered = False
         remaining_ratio = 1.0
 
         opens = df["open"].values
@@ -137,6 +142,7 @@ class EnsembleBacktester:
                 entry_bar = i
                 tp1_hit = False
                 tp2_hit = False
+                be_triggered = False
                 remaining_ratio = 1.0
                 accumulated_pnl = 0.0
 
@@ -158,6 +164,16 @@ class EnsembleBacktester:
                 if step_secs != step_secs or step_secs <= 0:  # NaN or non-positive
                     step_secs = 1.0
                 candles_held = int((timestamps[i] - open_position.entry_ts) / step_secs)
+
+                # 0. EARLY BREAKEVEN (configurable): move the stop to entry as soon as
+                # price reaches be_trigger_mult * (TP1 distance) in our favor — BEFORE TP1.
+                if not tp1_hit and not be_triggered:
+                    be_level = (open_position.entry_price
+                                + direction * self.be_trigger_mult
+                                * (open_position.tp1_price - open_position.entry_price))
+                    if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
+                        open_position.stop_price = open_position.entry_price
+                        be_triggered = True
 
                 # 1. TP1 -> 50% закрываем, Стоп в БЕЗУБЫТОК
                 if not tp1_hit and hit_tp1:
@@ -185,7 +201,7 @@ class EnsembleBacktester:
                     accumulated_pnl += pnl_tp3
                     exit_price = self._apply_slippage(open_position.tp3_price, -direction)
                 elif hit_stop:
-                    exit_reason = "breakeven" if tp1_hit else "stop"
+                    exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
                     pnl_stop = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))
                     accumulated_pnl += pnl_stop
                     exit_price = self._apply_slippage(open_position.stop_price, -direction)

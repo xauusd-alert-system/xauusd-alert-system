@@ -74,6 +74,8 @@ class EventDrivenBacktester:
         # (TP1 = 1*step, stop = 3*step) instead of the training-label barriers.
         # Legacy labeling keys are kept as fallback for minimal/test configs.
         grid_cfg = get_signal_grid(cfg)
+        # Early breakeven trigger (fraction of the target distance). 1.0 = legacy.
+        self.be_trigger_mult = float(grid_cfg.get("breakeven_trigger_atr", 1.0))
         method = lab_cfg.get("method", "fixed")
         if method == "atr_scaled":
             self.use_atr_scaled = True
@@ -163,6 +165,17 @@ class EventDrivenBacktester:
             # OPEN; using this same candle's high/low to close would be look-ahead).
             if open_position is not None and (entry_bar is None or i > entry_bar):
                 direction = open_position.direction
+
+                # Early breakeven (configurable): move the stop to entry once price reaches
+                # be_trigger_mult * target-distance in our favor.
+                if not getattr(open_position, "_be_triggered", False):
+                    be_level = (open_position.entry_price
+                                + direction * self.be_trigger_mult
+                                * (open_position.target_price - open_position.entry_price))
+                    if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
+                        open_position.stop_price = open_position.entry_price
+                        open_position._be_triggered = True
+
                 hit_target = (highs[i] >= open_position.target_price) if direction == 1 else (lows[i] <= open_position.target_price)
                 hit_stop = (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
 
