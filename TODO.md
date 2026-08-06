@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**226/226 tests passing**).
+**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**229/229 tests passing**).
 
 ---
 
@@ -119,7 +119,7 @@ GOLD | ЗОЛОТО | XAUUSD
 
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **226 passed in ~19s** (100% green).
+- [x] **Тестовый набор:** `pytest -q` — **229 passed in ~19s** (100% green).
 - [x] **Веб-дашборд реального времени:** `http://localhost:8000/dashboard` — **ONLINE**.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

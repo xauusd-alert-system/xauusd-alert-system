@@ -440,3 +440,45 @@ def test_unwarmed_simulator_returns_none_for_rates(world):
     rates = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M5, 1, 1)
     # start_pos=1 on an empty history returns None (MT5 semantics: no data).
     assert rates is None
+
+
+# ----------------------------------------------------------------------
+# Regression tests: run_simulation / run_bot wiring (live-loop integration)
+# ----------------------------------------------------------------------
+
+def test_run_simulation_imports_plain_mt5_module():
+    """The entry points must inject state into the SAME module object that
+    `import MetaTrader5 as mt5` in execution/data resolves to. A dotted
+    `from simulation.mt5_shim import MetaTrader5` creates a second module
+    object and _inject() would be invisible to the protected modules
+    (run_loop would never see new bars -> no trades at all)."""
+    import scripts.run_simulation as rs
+    assert rs.mt5 is mt5  # mt5 here is the plain top-level MetaTrader5 shim
+
+
+def test_build_virtual_cfg_registers_mt5_symbol_names():
+    """build_virtual_cfg must extend symbol_overrides with the MT5 symbol
+    names from the main config (GOLD, SILVER, ...) so the trader's
+    validate_symbol(mt5_symbol) succeeds against the virtual terminal."""
+    from scripts.run_simulation import build_virtual_cfg
+    cfg = build_virtual_cfg()
+    overrides = cfg["symbol_overrides"]
+    assert "GOLD" in overrides
+    assert "SILVER" in overrides
+    assert "BITCOIN" in overrides
+    # MT5 name inherits the asset-key params (e.g. gold contract size 100).
+    assert overrides["GOLD"].get("trade_contract_size") == overrides.get("XAUUSD", {}).get(
+        "trade_contract_size", 100.0
+    )
+
+
+def test_circuit_breaker_anchor_rolls_on_bar_close(cfg):
+    """The CB anchor must re-anchor on every closed M5 bar (rolling anchor),
+    so a slow multi-bar drift cannot freeze the simulation permanently."""
+    sim = MarketSimulator(cfg=cfg, seed=1)
+    sim.warm_up(n_ticks=240)
+    for _ in range(3):
+        sim.advance_to_next_m5_bar(max_ticks=120)
+    assert sim.paused is False
+    # After the last bar close the anchor tracks the current mid exactly.
+    assert sim._cb_anchor == pytest.approx(sim.current_mid_price, rel=1e-9)

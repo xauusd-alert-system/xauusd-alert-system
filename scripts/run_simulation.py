@@ -44,8 +44,39 @@ from simulation.simulator import (
     load_simulation_config,
     shutdown_mt5_shim,
 )
-from simulation.mt5_shim import MetaTrader5 as mt5
+# NOTE: must import the shim under its plain top-level name so it is the SAME
+# module object that `import MetaTrader5 as mt5` in execution/data resolves to
+# (a dotted `from simulation.mt5_shim import MetaTrader5` creates a second
+# module object and _inject() would be invisible to the protected modules).
+import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
 from simulation.virtual_state import VirtualState
+
+
+def build_virtual_cfg() -> dict:
+    """Simulation config whose ``symbol_overrides`` also carries the MT5 symbol
+    names from the main config (GOLD, SILVER, BITCOIN, EURUSD, GBPUSD).
+
+    The real trader validates orders/candles by ``assets.<key>.mt5_symbol``
+    (e.g. ``validate_symbol("GOLD")``), while the shim's VirtualState registers
+    symbols from ``symbol_overrides`` (historically keyed by asset key, e.g.
+    XAUUSD). Without this bridge the virtual terminal answers "symbol not
+    found" for every live symbol.
+    """
+    import copy
+
+    from config.loader import load_config as load_main_config
+
+    cfg = load_simulation_config()
+    overrides = dict(cfg.get("symbol_overrides", {}) or {})
+    main_cfg = load_main_config()
+    for asset_key, a_cfg in main_cfg.get("assets", {}).items():
+        if not a_cfg.get("enabled", True):
+            continue
+        mt5_sym = a_cfg.get("mt5_symbol")
+        if mt5_sym and mt5_sym not in overrides:
+            overrides[mt5_sym] = copy.deepcopy(overrides.get(asset_key, {}))
+    cfg["symbol_overrides"] = overrides
+    return cfg
 
 logging.basicConfig(
     level=logging.INFO,
@@ -135,7 +166,7 @@ def _bar_timestamp(bar: dict) -> str:
 # Main
 # ----------------------------------------------------------------------
 def main() -> None:
-    cfg = load_simulation_config()
+    cfg = build_virtual_cfg()
 
     # ---- build the simulated world ------------------------------------
     seed = os.getenv("SIMULATION_SEED")

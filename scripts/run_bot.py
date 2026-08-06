@@ -36,10 +36,12 @@ if _shim_dir not in sys.path:
 import threading
 
 from simulation.simulator import MarketSimulator, load_simulation_config, shutdown_mt5_shim
-from simulation.mt5_shim import MetaTrader5 as mt5
+# NOTE: import the shim under its plain top-level name (see run_simulation.py
+# comment) so _inject() lands on the module object the trader actually uses.
+import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
 from simulation.virtual_state import VirtualState
 from alerts.control_bot import TelegramControlBot
-from scripts.run_simulation import SimulationDriver, _bar_timestamp  # reuse driver
+from scripts.run_simulation import SimulationDriver, _bar_timestamp, build_virtual_cfg  # reuse driver
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +51,7 @@ logger = logging.getLogger("run_bot")
 
 
 def main() -> None:
-    cfg = load_simulation_config()
+    cfg = build_virtual_cfg()
 
     # 1. Build & warm up the virtual market.
     seed = os.getenv("SIMULATION_SEED")

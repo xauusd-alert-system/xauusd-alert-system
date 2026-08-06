@@ -46,6 +46,7 @@ class SignalResponse(BaseModel):
     entry_zone: Optional[List[float]] = None
     invalidation: Optional[float] = None
     targets: Optional[List[float]] = None
+    step: Optional[float] = None
     reasoning_summary: str
     regime: str
     timestamp_utc: int
