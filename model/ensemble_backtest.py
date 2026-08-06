@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from regime.classifier import RegimeLabel
 from model.ensemble import compute_ensemble_signal
+from config.loader import get_signal_grid
 
 
 @dataclass
@@ -61,11 +62,13 @@ class EnsembleBacktester:
         # config: assets.<key>.point_value_lot.
         self.point_value_lot = asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0))
 
+        # Signal grid (equal-step spec) with legacy labeling-key fallback.
+        grid_cfg = get_signal_grid(cfg, asset_cfg)
         self.atr_col = lab_cfg.get("atr_column", "atr")
-        self.tp1_mult = lab_cfg.get("tp1_atr_multiplier", 1.0)
-        self.tp2_mult = lab_cfg.get("tp2_atr_multiplier", 1.8)
-        self.tp3_mult = lab_cfg.get("tp3_atr_multiplier", 2.8)
-        self.stop_mult = lab_cfg.get("stop_atr_multiplier", 1.0)
+        self.tp1_mult = grid_cfg.get("tp1_mult", 1.0)
+        self.tp2_mult = grid_cfg.get("tp2_mult", 2.0)
+        self.tp3_mult = grid_cfg.get("tp3_mult", 3.0)
+        self.stop_mult = grid_cfg.get("stop_mult", 3.0)
 
         self.horizon_n = lab_cfg.get("horizon_candles_n", 36)
         self.trades: List[Trade] = []

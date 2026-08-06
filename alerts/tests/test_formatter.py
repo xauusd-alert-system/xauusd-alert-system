@@ -132,6 +132,26 @@ def test_missing_step_info_raises():
         compute_levels(signal)
 
 
+def test_meta_footer_absent_by_default():
+    """Clean spec layout: no metadata line unless include_meta=True."""
+    signal = _sample_signal(bias="long", confidence=0.85)
+    signal["step"] = 3.0
+    msg = format_signal_message(signal)
+    assert "Conf:" not in msg
+    assert "Regime:" not in msg
+
+
+def test_meta_footer_appended_when_enabled():
+    """include_meta=True appends a compact Conf / Regime / Session line."""
+    signal = _sample_signal(bias="long", confidence=0.85)
+    signal["step"] = 3.0
+    msg = format_signal_message(signal, include_meta=True)
+    assert "📊 Conf: 85.0% · Regime: trend_up · Session: london" in msg
+    # The clean grid block is preserved above the footer.
+    assert msg.splitlines()[0] == "ЛОНГ"
+    assert "Стоп: 2391.25" in msg
+
+
 # ---------------------------------------------------------------------------
 # Telegram bot gating logic
 # ---------------------------------------------------------------------------
@@ -212,3 +232,23 @@ def test_send_alert_if_qualified_sends_clean_format(mock_post):
     assert "Зона входа: 2400.25" in payload
     assert "→ TP1: 2403.25" in payload
     assert "Стоп: 2391.25" in payload
+
+
+@patch("alerts.telegram_bot.requests.post")
+def test_send_alert_meta_flag_read_from_config(mock_post):
+    """alerts.include_signal_meta=true appends the metadata footer in the bot."""
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_post.return_value = mock_response
+
+    cfg = dict(CFG)
+    cfg["alerts"] = {**CFG["alerts"], "include_signal_meta": True}
+    bot = TelegramAlertBot(cfg, bot_token="fake_token", chat_id="fake_chat_id")
+    signal = _sample_signal(bias="long", confidence=0.9)
+    signal["step"] = 3.0
+
+    sent = bot.send_alert_if_qualified(signal)
+    assert sent is True
+    payload = mock_post.call_args.kwargs["data"]["text"]
+    assert "📊 Conf: 90.0%" in payload
+    assert "Regime: trend_up" in payload

@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**216/216 tests passing**).
+**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**226/226 tests passing**).
 
 ---
 
@@ -48,6 +48,8 @@
 - **Стоп-лосс ($\Delta_{SL}$):**
 
   - $\text{Stop Loss} = \text{Entry} \mp 3.0 \times \text{Step}$ (ровно $3\times$ шага от точки входа, что дает соотношение риска к TP3 $1:1$, а при фиксации TP1 и переводе в безубыток — безрисковую позицию).
+
+- **Конфигурация шага (гибрид):** по умолчанию шаг динамический ($1.0 \times ATR$); при необходимости перекрывается per-asset параметром `step_points` (в пунктах цены) и ограничивается клампами `step_min_points` / `step_max_points` (секция `signal_grid` в `config/config.yaml`, per-asset оверрайды — в `assets.<key>.signal_grid`). Тренировочные triple-barrier метки (`labeling:`) намеренно отделены от сетки сигналов и сохраняют исходные барьеры (target 1.2 / stop 1.0). Метаданные (Conf / Regime / Session) в сообщение Telegram добавляются опционально флагом `alerts.include_signal_meta` (по умолчанию `false` — чистый формат по ТЗ).
 
 - **Формат отправки в Telegram:**
 
@@ -117,7 +119,7 @@ GOLD | ЗОЛОТО | XAUUSD
 
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **216 passed in ~19s** (100% green).
+- [x] **Тестовый набор:** `pytest -q` — **226 passed in ~19s** (100% green).
 - [x] **Веб-дашборд реального времени:** `http://localhost:8000/dashboard` — **ONLINE**.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

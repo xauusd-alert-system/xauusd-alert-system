@@ -101,7 +101,9 @@ def compute_levels(signal: dict, step: Optional[float] = None) -> dict:
     }
 
 
-def format_clean_signal_message(signal: dict, asset_key: str = "XAUUSD") -> str:
+def format_clean_signal_message(
+    signal: dict, asset_key: str = "XAUUSD", include_meta: bool = False
+) -> str:
     """
     Formats a trade signal in the clean Telegram layout:
 
@@ -113,6 +115,9 @@ def format_clean_signal_message(signal: dict, asset_key: str = "XAUUSD") -> str:
         → TP2: 4247.14
         → TP3: 4242.89
         Стоп: 4268.42
+
+    When include_meta=True a compact metadata footer is appended
+    (Conf / Regime / Session) for auditability.
     """
     bias = signal["bias"]
     if bias == "no_trade":
@@ -130,7 +135,7 @@ def format_clean_signal_message(signal: dict, asset_key: str = "XAUUSD") -> str:
     asset_line = ASSET_LABELS.get(asset_key, asset_key)
     levels = compute_levels(signal)
 
-    return (
+    message = (
         f"{direction}\n"
         f"{asset_line}\n"
         f"Зона входа: {_fmt_price(levels['entry'])}\n"
@@ -141,7 +146,19 @@ def format_clean_signal_message(signal: dict, asset_key: str = "XAUUSD") -> str:
         f"Стоп: {_fmt_price(levels['sl'])}"
     )
 
+    if include_meta:
+        confidence_pct = round(signal.get("confidence", 0.0) * 100, 1)
+        regime = signal.get("regime", "unknown")
+        session = signal.get("session", "unknown")
+        message += (
+            f"\n\n📊 Conf: {confidence_pct}% · Regime: {regime} · Session: {session}"
+        )
 
-def format_signal_message(signal: dict, asset_key: str = "XAUUSD") -> str:
+    return message
+
+
+def format_signal_message(
+    signal: dict, asset_key: str = "XAUUSD", include_meta: bool = False
+) -> str:
     """Backwards-compatible entry point; emits the clean signal format."""
-    return format_clean_signal_message(signal, asset_key)
+    return format_clean_signal_message(signal, asset_key, include_meta=include_meta)

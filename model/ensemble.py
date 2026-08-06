@@ -10,6 +10,7 @@ import pandas as pd
 from regime.classifier import RegimeLabel
 from backtest.engine import rule_based_signal
 from data.news_filter import is_news_red_zone
+from config.loader import get_signal_grid
 
 logger = logging.getLogger("ensemble")
 
@@ -148,15 +149,15 @@ def compute_ensemble_signal(
     # Phase 2: EV-threshold entry gate. EV per unit risk over the TP1/stop ratio:
     #   EV_risk = p * payoff_ratio - (1 - p)
     # with p = directional probability (p_long for long, p_short for short) and
-    # payoff_ratio = reward (TP1 ATR distance) / risk (stop ATR distance) from the
-    # labeling config (tp1_atr_multiplier / stop_atr_multiplier, default 1.0/1.0).
+    # payoff_ratio = reward (TP1 distance) / risk (stop distance) from the
+    # signal grid config (signal_grid.tp1_mult / stop_mult, default 1.0/3.0).
     # A signal is declined if EV_risk < ev_threshold. ev_threshold=0 (default) disables
     # the gate so the Phase-0+1 baseline is preserved unless explicitly enabled.
     ev_threshold = float(ens_cfg.get("ev_threshold", 0.0))
     if ev_threshold > 0.0:
-        lab_cfg = cfg.get("labeling", {})
-        tp1_mult = float(lab_cfg.get("tp1_atr_multiplier", 1.0))
-        stop_mult = float(lab_cfg.get("stop_atr_multiplier", 1.0))
+        grid_cfg = get_signal_grid(cfg)
+        tp1_mult = float(grid_cfg.get("tp1_mult", 1.0))
+        stop_mult = float(grid_cfg.get("stop_mult", 3.0))
         payoff_ratio = (tp1_mult / stop_mult) if stop_mult > 0 else 1.0
         ev_risk_long = ml_p_long * payoff_ratio - (1.0 - ml_p_long)
         ev_risk_short = ml_p_short * payoff_ratio - (1.0 - ml_p_short)

@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 import pandas as pd
 
-from config.loader import load_config
+from config.loader import load_config, get_signal_grid
 from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
@@ -22,6 +22,29 @@ from data.session_tagger import tag_dataframe
 from copy import deepcopy
 
 logger = logging.getLogger("realtime_pipeline")
+
+
+def resolve_signal_step(atr_val: float, grid_cfg: dict) -> float:
+    """
+    Resolves the equal-step TP/SL grid step for a signal.
+
+    Priority: fixed `step_points` (price points) when set, otherwise the
+    dynamic ATR step (tp1_mult * ATR, spec default 1.0 * ATR). The result is
+    clamped to [step_min_points, step_max_points] when those are configured.
+    """
+    step_points = grid_cfg.get("step_points")
+    if step_points:
+        step = float(step_points)
+    else:
+        step = atr_val * float(grid_cfg.get("tp1_mult", 1.0))
+
+    step_min = grid_cfg.get("step_min_points")
+    step_max = grid_cfg.get("step_max_points")
+    if step_min:
+        step = max(step, float(step_min))
+    if step_max:
+        step = min(step, float(step_max))
+    return step
 
 
 class RealtimePipeline:
@@ -166,28 +189,30 @@ class RealtimePipeline:
         entry_price = float(latest["close"])
         atr_val = float(latest["atr"]) if not pd.isna(latest["atr"]) else 1.0
 
-        lab_cfg = self.asset_cfg.get("labeling") or self.cfg.get("labeling", {})
-        # Equal-step grid spec: TP1 = 1*ATR, TP2 = 2*ATR, TP3 = 3*ATR, SL = 3*ATR.
-        tp1_mult = lab_cfg.get("tp1_atr_multiplier", 1.0)
-        tp2_mult = lab_cfg.get("tp2_atr_multiplier", 2.0)
-        tp3_mult = lab_cfg.get("tp3_atr_multiplier", 3.0)
-        stop_mult = lab_cfg.get("stop_atr_multiplier", 3.0)
+        # Equal-step grid spec (config `signal_grid`): step = step_points or
+        # 1.0*ATR (clamped), TP1/2/3 = entry ± 1/2/3*step, SL = entry ∓ 3*step.
+        grid_cfg = get_signal_grid(self.cfg, self.asset_cfg)
+        step = resolve_signal_step(atr_val, grid_cfg)
+        tp1_mult = float(grid_cfg.get("tp1_mult", 1.0))
+        tp2_mult = float(grid_cfg.get("tp2_mult", 2.0))
+        tp3_mult = float(grid_cfg.get("tp3_mult", 3.0))
+        stop_mult = float(grid_cfg.get("stop_mult", 3.0))
 
         if signal.bias == "long":
-            entry_zone = [round(entry_price - atr_val * 0.1, 2), round(entry_price + atr_val * 0.1, 2)]
-            invalidation = round(entry_price - atr_val * stop_mult, 2)
+            entry_zone = [round(entry_price - step * 0.1, 2), round(entry_price + step * 0.1, 2)]
+            invalidation = round(entry_price - step * stop_mult, 2)
             targets = [
-                round(entry_price + atr_val * tp1_mult, 2),
-                round(entry_price + atr_val * tp2_mult, 2),
-                round(entry_price + atr_val * tp3_mult, 2),
+                round(entry_price + step * tp1_mult, 2),
+                round(entry_price + step * tp2_mult, 2),
+                round(entry_price + step * tp3_mult, 2),
             ]
         elif signal.bias == "short":
-            entry_zone = [round(entry_price - atr_val * 0.1, 2), round(entry_price + atr_val * 0.1, 2)]
-            invalidation = round(entry_price + atr_val * stop_mult, 2)
+            entry_zone = [round(entry_price - step * 0.1, 2), round(entry_price + step * 0.1, 2)]
+            invalidation = round(entry_price + step * stop_mult, 2)
             targets = [
-                round(entry_price - atr_val * tp1_mult, 2),
-                round(entry_price - atr_val * tp2_mult, 2),
-                round(entry_price - atr_val * tp3_mult, 2),
+                round(entry_price - step * tp1_mult, 2),
+                round(entry_price - step * tp2_mult, 2),
+                round(entry_price - step * tp3_mult, 2),
             ]
         else:
             entry_zone, invalidation, targets = None, None, None
@@ -198,7 +223,7 @@ class RealtimePipeline:
             "entry_zone": entry_zone,
             "invalidation": invalidation,
             "targets": targets,
-            "step": round(atr_val, 4),
+            "step": round(step, 4),
             "reasoning_summary": signal.reasoning_summary,
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
             "timestamp_utc": int(latest["timestamp_utc"]),

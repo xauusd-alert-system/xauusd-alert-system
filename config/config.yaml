@@ -72,6 +72,11 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
       ml_weight: 0.85
+    # Equal-step signal grid clamps (price points). Gold M5 ATR ~3-7 -> keep the
+    # step inside 2..8 pts so extreme ATR cannot produce absurd TP/SL levels.
+    signal_grid:
+      step_min_points: 2.0
+      step_max_points: 8.0
 
   XAGUSD:
     enabled: true
@@ -94,6 +99,9 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
       ml_weight: 0.85
+    signal_grid:
+      step_min_points: 0.1
+      step_max_points: 1.0
 
   BTCUSD:
     enabled: true
@@ -118,6 +126,9 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.20
       ml_weight: 0.80
+    signal_grid:
+      step_min_points: 200.0
+      step_max_points: 3000.0
 
   EURUSD:
     enabled: true
@@ -139,11 +150,14 @@ assets:
     labeling:
       horizon_candles_n: 36
       target_atr_multiplier: 1.2
-      stop_atr_multiplier: 3.0
+      stop_atr_multiplier: 1.0
       atr_column: atr
       tp1_atr_multiplier: 1.0
-      tp2_atr_multiplier: 2.0
-      tp3_atr_multiplier: 3.0
+      tp2_atr_multiplier: 1.8
+      tp3_atr_multiplier: 2.8
+    signal_grid:
+      step_min_points: 0.0005
+      step_max_points: 0.005
 
   GBPUSD:
     enabled: true
@@ -164,15 +178,21 @@ assets:
     labeling:
       horizon_candles_n: 36
       target_atr_multiplier: 1.2
-      stop_atr_multiplier: 3.0
+      stop_atr_multiplier: 1.0
       atr_column: atr
       tp1_atr_multiplier: 1.0
-      tp2_atr_multiplier: 2.0
-      tp3_atr_multiplier: 3.0
+      tp2_atr_multiplier: 1.8
+      tp3_atr_multiplier: 2.8
+    signal_grid:
+      step_min_points: 0.0005
+      step_max_points: 0.006
 
 alerts:
   cooldown_minutes: 15
   max_alerts_per_day: 30
+  # Append a compact metadata line (Conf / Regime / Session) to Telegram
+  # signals. Default false keeps the clean ШОРТ/ЛОНГ layout from the spec.
+  include_signal_meta: false
 
 features:
   ema_periods: [9, 21, 50, 200]
@@ -220,15 +240,38 @@ model:
   # ModelPredictor from the raw `regime` column, so all consumers work unchanged.
   use_regime_feature: false
 
+# ---------------------------------------------------------------------------
+# TRAINING labels (triple-barrier, labeling/label_generator.py). These barrier
+# distances define the SUPERVISED target the models are trained on and are
+# intentionally decoupled from the Telegram signal grid (see `signal_grid:`
+# below) so retraining semantics stay stable.
+# ---------------------------------------------------------------------------
 labeling:
   method: atr_scaled
   horizon_candles_n: 36
   target_atr_multiplier: 1.2
-  stop_atr_multiplier: 3.0
+  stop_atr_multiplier: 1.0
   atr_column: atr
   tp1_atr_multiplier: 1.0
-  tp2_atr_multiplier: 2.0
-  tp3_atr_multiplier: 3.0
+  tp2_atr_multiplier: 1.8
+  tp3_atr_multiplier: 2.8
+
+# ---------------------------------------------------------------------------
+# Signal grid spec for Telegram (alerts/formatter.py, realtime/pipeline.py).
+# Equal-step grid: step = step_points (if set) else 1.0 * ATR, clamped to
+# [step_min_points, step_max_points]; TP1 = entry ± 1*step, TP2 = ±2*step,
+# TP3 = ±3*step, Stop = entry ∓ 3*step (risk:TP3 = 1:1, BE on TP1).
+# Per-asset overrides live in assets.<key>.signal_grid (e.g. clamps tuned to
+# each instrument's price scale).
+# ---------------------------------------------------------------------------
+signal_grid:
+  tp1_mult: 1.0
+  tp2_mult: 2.0
+  tp3_mult: 3.0
+  stop_mult: 3.0
+  step_points: null        # fixed step in price points; null = dynamic 1.0*ATR
+  step_min_points: null    # lower clamp (null = no clamp)
+  step_max_points: null    # upper clamp (null = no clamp)
 
 sessions:
   asia: {start: 0, end: 8}

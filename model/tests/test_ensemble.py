@@ -117,9 +117,11 @@ def _ev_cfg(ev_threshold: float) -> dict:
     cfg = dict(CFG)
     cfg["ensemble"] = dict(cfg["ensemble"])
     cfg["ensemble"]["ev_threshold"] = ev_threshold
-    cfg["labeling"] = dict(cfg.get("labeling", {}))
-    cfg["labeling"]["tp1_atr_multiplier"] = 1.0
-    cfg["labeling"]["stop_atr_multiplier"] = 1.0
+    # The EV gate reads the signal grid (signal_grid.tp1_mult / stop_mult);
+    # force the 1:1 payoff ratio here regardless of the shipped config values.
+    cfg["signal_grid"] = dict(cfg.get("signal_grid", {}))
+    cfg["signal_grid"]["tp1_mult"] = 1.0
+    cfg["signal_grid"]["stop_mult"] = 1.0
     return cfg
 
 
@@ -158,15 +160,15 @@ def test_ev_gate_considers_payoff_ratio():
     the first but passes the second, proving the gate uses the TP1/stop payoff ratio,
     not just the raw probability."""
     low_ratio = _ev_cfg(0.15)
-    low_ratio["labeling"]["tp1_atr_multiplier"] = 1.0
-    low_ratio["labeling"]["stop_atr_multiplier"] = 1.0
+    low_ratio["signal_grid"]["tp1_mult"] = 1.0
+    low_ratio["signal_grid"]["stop_mult"] = 1.0
     sig_ratio1 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.55, 0.45, low_ratio)
     # EV_risk = 0.10 < 0.15 -> declined at 1:1 payoff.
     assert "EV gate declined" in sig_ratio1.reasoning_summary
 
     high_ratio = _ev_cfg(0.15)
-    high_ratio["labeling"]["tp1_atr_multiplier"] = 1.5
-    high_ratio["labeling"]["stop_atr_multiplier"] = 1.0
+    high_ratio["signal_grid"]["tp1_mult"] = 1.5
+    high_ratio["signal_grid"]["stop_mult"] = 1.0
     sig_ratio15 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.55, 0.45, high_ratio)
     # EV_risk = 0.375 >= 0.15 -> not declined at 1.5:1 payoff (the later no_trade, if any,
     # is purely a confidence matter and must not carry the EV-gate reasoning string).

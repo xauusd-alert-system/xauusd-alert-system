@@ -5,10 +5,12 @@ Run with: pytest realtime/tests/test_pipeline.py -v
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config
-from realtime.pipeline import RealtimePipeline
+from config.loader import load_config, get_signal_grid
+from realtime.pipeline import RealtimePipeline, resolve_signal_step
 
 CFG = load_config()
 
@@ -65,3 +67,96 @@ def test_pipeline_regime_field_is_valid_enum_value():
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     result = pipeline.generate_signal(n_candles=300)
     assert result["regime"] in [r.value for r in RegimeLabel]
+
+
+# ---------------------------------------------------------------------------
+# Signal grid: equal-step TP/SL spec (step_points / ATR / clamps)
+# ---------------------------------------------------------------------------
+
+def test_resolve_signal_step_defaults_to_dynamic_atr():
+    """Default step = 1.0 * ATR (spec: dynamic, gold @4250 -> ~4.25 pts)."""
+    assert resolve_signal_step(4.25, {}) == pytest.approx(4.25)
+    assert resolve_signal_step(4.25, {"tp1_mult": 2.0}) == pytest.approx(8.5)
+
+
+def test_resolve_signal_step_fixed_override_wins():
+    """A configured step_points overrides the dynamic ATR step entirely."""
+    grid = {"step_points": 4.25}
+    assert resolve_signal_step(10.0, grid) == pytest.approx(4.25)
+
+
+def test_resolve_signal_step_clamps():
+    """step_min_points / step_max_points bound the resolved step."""
+    grid = {"step_min_points": 2.0, "step_max_points": 8.0}
+    assert resolve_signal_step(1.0, grid) == pytest.approx(2.0)
+    assert resolve_signal_step(12.0, grid) == pytest.approx(8.0)
+    assert resolve_signal_step(5.0, grid) == pytest.approx(5.0)
+
+
+def test_get_signal_grid_signal_grid_wins_over_labeling():
+    """signal_grid overrides legacy labeling tp/stop keys for the signal grid."""
+    cfg = {
+        "labeling": {
+            "tp1_atr_multiplier": 1.0,
+            "tp2_atr_multiplier": 1.8,
+            "tp3_atr_multiplier": 2.8,
+            "stop_atr_multiplier": 1.0,
+        },
+        "signal_grid": {"tp2_mult": 2.0, "tp3_mult": 3.0, "stop_mult": 3.0},
+    }
+    grid = get_signal_grid(cfg)
+    assert grid["tp1_mult"] == 1.0
+    assert grid["tp2_mult"] == 2.0
+    assert grid["tp3_mult"] == 3.0
+    assert grid["stop_mult"] == 3.0
+
+
+def test_get_signal_grid_legacy_labeling_fallback():
+    """Configs without signal_grid fall back to legacy labeling keys."""
+    cfg = {"labeling": {"tp1_atr_multiplier": 1.0, "stop_atr_multiplier": 1.0}}
+    grid = get_signal_grid(cfg)
+    assert grid["tp1_mult"] == 1.0
+    assert grid["stop_mult"] == 1.0
+
+
+def test_get_signal_grid_asset_override_merges():
+    """Per-asset signal_grid merges over the top-level section."""
+    cfg = {"signal_grid": {"step_min_points": 2.0, "step_max_points": 8.0}}
+    asset = {"signal_grid": {"step_points": 4.25, "step_min_points": 5.0}}
+    grid = get_signal_grid(cfg, asset)
+    assert grid["step_points"] == 4.25
+    assert grid["step_min_points"] == 5.0
+    assert grid["step_max_points"] == 8.0
+
+
+def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
+    """TP2 = exactly 2x the TP1 distance, TP3 and SL = exactly 3x the step."""
+    from model.ensemble import EnsembleSignal
+    from realtime import pipeline as pipeline_module
+
+    def fake_ensemble(*args, **kwargs):
+        return EnsembleSignal(
+            bias="long",
+            confidence=0.9,
+            rule_vote=1,
+            ml_p_long=0.9,
+            ml_p_short=0.1,
+            regime="trend_up",
+            suppressed_by_meta_filter=False,
+            reasoning_summary="test",
+        )
+
+    monkeypatch.setattr(pipeline_module, "compute_ensemble_signal", fake_ensemble)
+    pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
+    result = pipeline.generate_signal(n_candles=300)
+
+    assert result["bias"] == "long"
+    entry = sum(result["entry_zone"]) / 2.0
+    tp1, tp2, tp3 = result["targets"][:3]
+    step = abs(tp1 - entry)
+    assert step > 0
+    assert result["step"] > 0
+    # rounding to 2 decimals gives ~0.01 tolerance per level
+    assert abs(abs(tp2 - entry) - 2.0 * step) < 0.05
+    assert abs(abs(tp3 - entry) - 3.0 * step) < 0.05
+    assert abs(abs(result["invalidation"] - entry) - 3.0 * step) < 0.05
