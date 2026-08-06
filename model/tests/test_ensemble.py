@@ -306,3 +306,116 @@ def test_ev_gate_uses_tp3_payoff_ratio_with_shipped_grid():
     bad["signal_grid"]["stop_mult"] = 3.0
     sig_bad = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.60, 0.40, bad)
     assert "EV gate declined" in sig_bad.reasoning_summary
+
+
+# ============= Variant 2: per-asset EUR/GBP quality filters (0.92 / EV 0.10 / veto) =============
+
+def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
+    """Per-asset ensemble overrides for EURUSD must propagate via merge_asset_cfg.
+
+    QA contract for variant 2 (already merged, see config/config.yaml):
+      assets.EURUSD.ensemble = {min_confidence_to_alert: 0.92, ev_threshold: 0.10,
+                                hard_divergence_veto: true}
+    After merge_asset_cfg(cfg, 'EURUSD', 'ensemble') those keys must appear in
+    cfg['ensemble'] (the merged copy that compute_ensemble_signal reads).
+    """
+    from scripts.run_backtest import merge_asset_cfg as _merge
+    cfg = load_config()
+    # Raw per-asset declaration (config file) sanity
+    eur_raw = cfg["assets"]["EURUSD"]["ensemble"]
+    assert eur_raw.get("min_confidence_to_alert") == pytest.approx(0.92)
+    assert eur_raw.get("ev_threshold") == pytest.approx(0.10)
+    assert eur_raw.get("hard_divergence_veto") is True
+
+    merged = _merge(cfg, "EURUSD", "ensemble")
+    ens = merged["ensemble"]
+    assert ens.get("min_confidence_to_alert") == pytest.approx(0.92)
+    assert ens.get("ev_threshold") == pytest.approx(0.10)
+    assert ens.get("hard_divergence_veto") is True
+    # Global keys must survive the merge (merge = base + per-asset patch)
+    assert "rule_weight" in ens
+    assert ens["rule_weight"] == pytest.approx(0.10)
+    # Original CFG must not be mutated by the merge helper
+    assert cfg["ensemble"].get("ev_threshold", 0) == 0
+
+
+def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
+    """Same contract for GBPUSD."""
+    from scripts.run_backtest import merge_asset_cfg as _merge
+    cfg = load_config()
+    gbp_raw = cfg["assets"]["GBPUSD"]["ensemble"]
+    assert gbp_raw.get("min_confidence_to_alert") == pytest.approx(0.92)
+    assert gbp_raw.get("ev_threshold") == pytest.approx(0.10)
+    assert gbp_raw.get("hard_divergence_veto") is True
+
+    merged = _merge(cfg, "GBPUSD", "ensemble")
+    ens = merged["ensemble"]
+    assert ens.get("min_confidence_to_alert") == pytest.approx(0.92)
+    assert ens.get("ev_threshold") == pytest.approx(0.10)
+    assert ens.get("hard_divergence_veto") is True
+
+
+def test_per_asset_merge_does_not_pollute_xau_btc():
+    """XAU/BTC per-asset blocks must NOT carry the FX tightening keys."""
+    from scripts.run_backtest import merge_asset_cfg as _merge
+    cfg = load_config()
+    for asset in ("XAUUSD", "BTCUSD", "XAGUSD"):
+        merged = _merge(cfg, asset, "ensemble")
+        ens = merged["ensemble"]
+        # 0 is the global default (gate disabled) and hard_divergence_veto false
+        assert ens.get("ev_threshold", 0) == pytest.approx(0)
+        assert ens.get("hard_divergence_veto", False) is False
+
+
+def test_per_asset_override_effective_cfg_in_pipeline():
+    """RealtimePipeline.effective_cfg must mirror the same merge for EUR/GBP."""
+    from realtime.pipeline import RealtimePipeline
+    cfg = load_config()
+    eur_pipe = RealtimePipeline(cfg=cfg, asset_key="EURUSD", data_mode="mock")
+    assert eur_pipe.effective_cfg["ensemble"].get("ev_threshold") == pytest.approx(0.10)
+    assert eur_pipe.effective_cfg["ensemble"].get("hard_divergence_veto") is True
+    assert eur_pipe.effective_cfg["ensemble"].get("min_confidence_to_alert") == pytest.approx(0.92)
+
+    gbp_pipe = RealtimePipeline(cfg=cfg, asset_key="GBPUSD", data_mode="mock")
+    assert gbp_pipe.effective_cfg["ensemble"].get("ev_threshold") == pytest.approx(0.10)
+    assert gbp_pipe.effective_cfg["ensemble"].get("hard_divergence_veto") is True
+
+    xau_pipe = RealtimePipeline(cfg=cfg, asset_key="XAUUSD", data_mode="mock")
+    assert xau_pipe.effective_cfg["ensemble"].get("ev_threshold", 0) == pytest.approx(0)
+    assert xau_pipe.effective_cfg["ensemble"].get("hard_divergence_veto", False) is False
+
+
+def test_compute_ensemble_signal_reads_merged_eur_filters():
+    """compute_ensemble_signal must honour the merged per-asset filters.
+
+    For the same inputs (TREND_UP rule=+1 vs ML short) the EUR-mERGED cfg must
+    hit the hard-veto path, while the XAU-merged (global) cfg must NOT.
+    The EV gate is also checked: at 0.60/0.40 with threshold 0.10 and payoff 1.0
+    the EUR cfg passes the EV gate (EV=0.20) but a weaker 0.54/0.46 is declined.
+    """
+    from scripts.run_backtest import merge_asset_cfg as _merge
+    cfg = load_config()
+    eur_cfg = _merge(cfg, "EURUSD", "ensemble")
+    xau_cfg = _merge(cfg, "XAUUSD", "ensemble")
+
+    # Hard veto: EUR fires, XAU does not
+    eur_sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.40, 0.60, eur_cfg)
+    xau_sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.40, 0.60, xau_cfg)
+    assert "Hard divergence veto" in eur_sig.reasoning_summary
+    assert eur_sig.bias == "no_trade"
+    assert "Hard divergence veto" not in xau_sig.reasoning_summary
+
+    # EV gate under EUR tightening: p=0.56 passes (EV 0.12 >=0.10), p=0.54 would
+    # fail the EV threshold (0.08 <0.10) — but 0.54 is already under the
+    # min_ml_probability 0.55 guard, so pick a case that reaches the gate.
+    # Use a lowered min_ml_probability copy to isolate the EV gate.
+    import copy as _copy
+    eur_loose = _copy.deepcopy(eur_cfg)
+    eur_loose["ensemble"]["min_ml_probability"] = 0.50
+    sig_pass = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.56, 0.44, eur_loose)
+    assert "EV gate declined" not in sig_pass.reasoning_summary
+    eur_loose2 = _copy.deepcopy(eur_cfg)
+    eur_loose2["ensemble"]["min_ml_probability"] = 0.50
+    eur_loose2["ensemble"]["ev_threshold"] = 0.20  # now 0.56 fails: EV 0.12 <0.20
+    sig_fail = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.56, 0.44, eur_loose2)
+    assert "EV gate declined" in sig_fail.reasoning_summary

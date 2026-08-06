@@ -151,7 +151,9 @@ assets:
     # too small, so the flat commission dominated and every trade showed -0.07.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.85
+      min_confidence_to_alert: 0.92
+      ev_threshold: 0.10
+      hard_divergence_veto: true
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -181,7 +183,9 @@ assets:
     # unit. See XAGUSD comment for why this must be a per-asset override.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.85
+      min_confidence_to_alert: 0.92
+      ev_threshold: 0.10
+      hard_divergence_veto: true
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
