@@ -124,3 +124,22 @@ def test_walk_forward_runner_calls_strategy_per_fold():
     for r in results:
         assert "window" in r
         assert "n_trades" in r
+
+
+def test_engine_barriers_follow_signal_grid():
+    """The engine's ATR-scaled barriers must mirror the signal grid (equal-step
+    spec: stop = 3*step, TP1 = 1*step -> stop/target distance ratio = 3.0),
+    not the training-label barriers (target 1.2 / stop 1.0)."""
+    df = _prepared_df()
+    engine = EventDrivenBacktester(CFG)
+    trades = engine.run(df)
+    assert len(trades) > 0
+    for t in trades:
+        stop_dist = abs(t.stop_price - t.entry_price)
+        target_dist = abs(t.target_price - t.entry_price)
+        assert stop_dist > 0 and target_dist > 0
+        # Both barriers are sized off the SAME ATR at entry, so the ratio is
+        # exactly stop_mult / tp1_mult = 3.0 for the shipped signal grid.
+        assert np.isclose(stop_dist / target_dist, 3.0, rtol=1e-6), (
+            f"expected stop/target = 3.0 (signal grid), got {stop_dist / target_dist:.4f}"
+        )

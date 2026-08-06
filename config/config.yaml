@@ -14,11 +14,13 @@ ensemble:
   ml_weight: 0.80
   # Phase 2: EV-threshold entry gate. EV = p_exit_right * |reward| - (1 - p_exit_right)
   # * |risk| where p_exit_right = directional probability (p_long for long, p_short for
-  # short), reward = the TP1 ATR distance and risk = the stop ATR distance. When enabled
-  # (> 0) a signal only reaches "long"/"short" if the expected value of (reward * p -
-  # risk * (1 - p)) / risk exceeds this threshold; otherwise it is declined as no_trade.
-  # A value of 0 (the default) disables the gate so the Phase-0+1 baseline is unchanged
-  # unless explicitly enabled for Phase 2 experiments.
+  # short), reward = the TP3 distance and risk = the stop distance from the signal grid
+  # (signal_grid.tp3_mult / stop_mult; under the equal-step spec 3/3 = 1.0, i.e. the gate
+  # is a pure probability-quality filter: p must exceed 0.5 + threshold/2 to pass).
+  # When enabled (> 0) a signal only reaches "long"/"short" if the expected value of
+  # (reward * p - risk * (1 - p)) / risk exceeds this threshold; otherwise it is declined
+  # as no_trade. A value of 0 (the default) disables the gate so the Phase-0+1 baseline
+  # is unchanged unless explicitly enabled for Phase 2 experiments.
   ev_threshold: 0
   # Phase 5 (#16): enforce p_long + p_short = 1 BEFORE any downstream use. Some
   # predictors (e.g. a 3-class model) leave the residual mass on a "no_trade" class,
