@@ -13,6 +13,7 @@ from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
 from features.mtf_confluence import compute_confluence_score
+from features.order_flow import add_order_flow_features
 from regime.classifier import add_regime_indicators, classify_regime_series
 from labeling.label_generator import generate_labels_from_config
 from data.storage import read_candles
@@ -73,6 +74,7 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
     cfg = merge_asset_cfg(cfg, asset_key, "labeling")
     df = raw_df.copy()
     df = build_all_indicators(df, cfg)
+    df = add_order_flow_features(df)
     df = candle_anatomy(df)
     df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
     df = add_regime_indicators(df, cfg)
@@ -168,8 +170,10 @@ def main():
 
     asset_cfg = assets[args.asset]
     model_path = asset_cfg["model_path"]
+    # Per-asset timeframe override (assets.<key>.timeframe) wins over --timeframe.
+    timeframe = asset_cfg.get("timeframe") or args.timeframe
 
-    raw = load_asset_history(args.db_path, args.timeframe, args.asset)
+    raw = load_asset_history(args.db_path, timeframe, args.asset)
     df = build_full_df(cfg, raw, db_path=args.db_path, asset_key=args.asset)
 
     print(f"Loaded {len(df)} rows for {args.asset} from {args.db_path}")

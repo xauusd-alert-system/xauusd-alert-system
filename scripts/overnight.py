@@ -203,16 +203,27 @@ def main() -> int:
     # ---- Stage 1: backfill fresh MT5 data (incremental) --------------------
     if _env_flag("OVERNIGHT_NO_BACKFILL"):
         start, end = _backfill_window()
-        ok = _run(
-            "backfill_fresh_data",
-            [
-                sys.executable, "-m", "scripts.backfill_data",
-                "--all", "--timeframe", timeframe,
-                "--start", start, "--end", end,
-                "--db-path", db_path,
-            ],
-            timeout=_BACKFILL_TIMEOUT,
+        # Backfill every timeframe any enabled asset trades on (global M5 plus
+        # per-asset overrides, e.g. EURUSD/GBPUSD/XAGUSD on M15).
+        trade_tfs = sorted(
+            {
+                (a_cfg.get("timeframe") or timeframe)
+                for a_cfg in cfg.get("assets", {}).values()
+                if a_cfg.get("enabled", False)
+            }
         )
+        ok = True
+        for tf in trade_tfs:
+            ok = _run(
+                f"backfill_fresh_data:{tf}",
+                [
+                    sys.executable, "-m", "scripts.backfill_data",
+                    "--all", "--timeframe", tf,
+                    "--start", start, "--end", end,
+                    "--db-path", db_path,
+                ],
+                timeout=_BACKFILL_TIMEOUT,
+            ) and ok
         status.append(("backfill_data", ok))
     else:
         logger.info("Skipping backfill (OVERNIGHT_NO_BACKFILL set).")
@@ -221,12 +232,13 @@ def main() -> int:
     if _env_flag("OVERNIGHT_NO_BACKTEST"):
         all_ok = True
         for asset in enabled_assets:
+            asset_tf = cfg["assets"][asset].get("timeframe") or timeframe
             ok = _run(
                 f"walk_forward_backtest:{asset}",
                 [
                     sys.executable, "-m", "scripts.run_backtest",
                     "--asset", asset,
-                    "--timeframe", timeframe,
+                    "--timeframe", asset_tf,
                     "--db-path", db_path,
                 ],
             )

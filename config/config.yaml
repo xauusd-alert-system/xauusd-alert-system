@@ -85,6 +85,10 @@ assets:
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
+    # Per-asset timeframe: M15 (global default is M5). M5 step is too small
+    # relative to fixed spread+slippage on silver (~25% of TP1); M15 makes the
+    # grid ~2-2.5x wider so transaction costs eat far less of the target.
+    timeframe: M15
     spread_usd: 0.02
     slippage_usd: 0.02
     # Contract multiplier: 1.0 lot = 5000 troy oz -> $1 price move = $5000/lot,
@@ -137,6 +141,9 @@ assets:
     mt5_symbol: EURUSD
     display_name: EUR/USD
     model_path: output/models/eurusd_direction_model.joblib
+    # M15: on M5 the round-trip cost (~5 pips) is ~100% of the TP1 step, so the
+    # trade cannot pay for itself; M15 widens the grid ~2.5x.
+    timeframe: M15
     spread_usd: 0.00012
     slippage_usd: 0.0002
     # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
@@ -166,6 +173,8 @@ assets:
     mt5_symbol: GBPUSD
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
+    # M15: same cost rationale as EURUSD (M5 TP1 step ≈ round-trip cost).
+    timeframe: M15
     spread_usd: 0.00015
     slippage_usd: 0.0002
     # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price

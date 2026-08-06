@@ -160,3 +160,46 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
     assert abs(abs(tp2 - entry) - 2.0 * step) < 0.05
     assert abs(abs(tp3 - entry) - 3.0 * step) < 0.05
     assert abs(abs(result["invalidation"] - entry) - 3.0 * step) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# Order-flow features + per-asset timeframe (upgrade path)
+# ---------------------------------------------------------------------------
+
+def test_pipeline_builds_order_flow_features():
+    """The inference feature builder must attach the causal order-flow columns
+    (CVD, imbalance, VWAP distance) so models trained with them can infer."""
+    pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
+    df = pipeline._fetch_data_frame("M5", 300)
+    featured = pipeline._build_features(df)
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
+                "order_flow_imbalance_50", "dist_vwap_atr"):
+        assert col in featured.columns, f"missing {col}"
+    assert featured["cvd"].notna().all()
+
+
+def test_order_flow_columns_in_training_feature_set():
+    """FEATURE_COLUMNS must include the order-flow columns so build_training_matrix
+    feeds them to the model (training/inference consistency)."""
+    from model.trainer import FEATURE_COLUMNS
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
+                "order_flow_imbalance_50", "dist_vwap_atr"):
+        assert col in FEATURE_COLUMNS
+
+
+def test_pipeline_per_asset_timeframe_override():
+    """assets.<key>.timeframe overrides the global market_data.timeframe."""
+    cfg = {**CFG, "assets": {**CFG["assets"], "XAUUSD": {**CFG["assets"]["XAUUSD"], "timeframe": "M15"}}}
+    p = RealtimePipeline(cfg=cfg, model_path=None, data_mode="mock")
+    assert p.timeframe == "M15"
+    # No override -> global default M5.
+    assert RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock").timeframe == "M5"
+
+
+def test_pipeline_m15_asset_generates_valid_signal():
+    """A per-asset M15 pipeline must still produce a valid signal contract."""
+    cfg = {**CFG, "assets": {**CFG["assets"], "EURUSD": {**CFG["assets"]["EURUSD"], "timeframe": "M15"}}}
+    pipeline = RealtimePipeline(cfg=cfg, asset_key="EURUSD", model_path=None, data_mode="mock")
+    result = pipeline.generate_signal(n_candles=300)
+    assert result["bias"] in ("long", "short", "no_trade")
+    assert 0.0 <= result["confidence"] <= 1.0

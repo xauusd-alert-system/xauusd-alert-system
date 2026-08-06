@@ -14,6 +14,7 @@ from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
 from features.mtf_confluence import compute_confluence_score
+from features.order_flow import add_order_flow_features
 from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
 from model.predictor import ModelPredictor
 from model.ensemble import compute_ensemble_signal
@@ -77,7 +78,10 @@ class RealtimePipeline:
         self.mt5_symbol = self.asset_cfg.get("mt5_symbol", "GOLD")
         # Explicit model_path (env/config) takes precedence over per-asset default.
         self.model_path = model_path or self.asset_cfg.get("model_path")
-        self.timeframe = self.cfg.get("market_data", {}).get("timeframe", "M5")
+        # Per-asset timeframe override (assets.<key>.timeframe), else global.
+        self.timeframe = self.asset_cfg.get("timeframe") or self.cfg.get(
+            "market_data", {}
+        ).get("timeframe", "M5")
         self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
 
         # Эффективный конфиг с asset-specific переопределением ensemble и labeling
@@ -112,6 +116,7 @@ class RealtimePipeline:
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = build_all_indicators(df, self.cfg)
+        df = add_order_flow_features(df)
         df = candle_anatomy(df)
         df = detect_structure(df, lookback=self.cfg["features"]["structure_lookback"])
         df = add_regime_indicators(df, self.cfg)

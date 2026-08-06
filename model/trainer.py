@@ -63,6 +63,9 @@ FEATURE_COLUMNS = [
     "obv", "mfi", "rsi_slope", "volume_zscore",
     "dist_donchian_high_atr", "dist_donchian_low_atr",
     "bb_width_percentile", "atr_percentile",
+    # Order-flow / microstructure (features/order_flow.py, causal, per-row)
+    "cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50",
+    "dist_vwap_atr",
 ]
 
 
