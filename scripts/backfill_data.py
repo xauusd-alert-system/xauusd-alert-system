@@ -1,4 +1,4 @@
-﻿"""
+"""
 Backfill local FxPro MT5 candle history into the multi-asset SQLite database.
 
 Examples:

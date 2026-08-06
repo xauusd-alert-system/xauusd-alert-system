@@ -1,4 +1,4 @@
-﻿"""
+"""
 Rule-based market regime classifier.
 
 Regimes: trend-up, trend-down, range, compression, reversal-watch, no-trade.
