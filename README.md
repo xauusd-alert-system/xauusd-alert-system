@@ -40,6 +40,12 @@ MT5 candles ─▶ features ─▶ regime ─▶ model ─▶ ensemble/meta-filt
 | Simulation | `simulation/` | A virtual limit-order-book market + MT5 shim for deterministic, offline end-to-end runs |
 | Scripts | `scripts/` | Backfill, train, backtest, simulate, overnight retrain, deploy guard, reporting |
 
+## Documentation
+
+- **[Technical Specification / Техническое Задание (ТЗ)](TZ.md)** (`TZ.md` / `docs/TZ.md`): исчерпывающее техническое описание всех подсистем, формул, потоков данных, риск-менеджмента и контрактов исполнения.
+- **[TODO & Roadmap (План работ и статус)](TODO.md)** (`TODO.md` / `docs/TODO.md`): матрица готовности подсистем, чеклист развертывания и дорожная карта развития (Phase 0–6 completed, Phase 7+ roadmap).
+- **[Strategy Benchmarks & Validation](docs/benchmarks.md)** (`docs/benchmarks.md`): протокол честной валидации без утечек данных, walk-forward бейзлайны по активам и журнал изменений.
+
 ## Requirements
 
 - **Python 3.12+** (the pinned dependency stack, e.g. `numpy==2.5.1`, requires it).

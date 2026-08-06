@@ -1,4 +1,4 @@
-﻿"""
+"""
 One-time (or periodic) historical data seed script.
 Pulls OHLCV candles for all configured timeframes from Twelve Data API
 and writes them to the local SQLite database.

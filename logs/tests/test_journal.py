@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for logs/journal.py and logs/reporter.py.
 Run with: pytest logs/tests/test_journal.py -v
 """

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for regime/classifier.py.
 Run with: pytest regime/tests/test_classifier.py -v
 """

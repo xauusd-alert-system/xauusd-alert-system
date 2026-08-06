@@ -1,4 +1,4 @@
-﻿"""
+"""
 Daily/weekly summary report generator. Reads the signal journal SQLite DB and
 produces a structured performance summary dict (and optionally a formatted string
 for Telegram or stdout). Pure read-only — never writes to the journal.

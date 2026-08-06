@@ -1,4 +1,4 @@
-﻿"""
+"""
 Label generator for supervised learning.
 
 Supports:

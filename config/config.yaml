@@ -1,4 +1,4 @@
-﻿ensemble:
+ensemble:
   min_confidence_to_alert: 0.60
   min_regime_confidence: 0.60
   use_news_guard: true

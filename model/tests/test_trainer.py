@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for model/trainer.py and model/predictor.py.
 Run with: pytest model/tests/test_trainer.py -v
 """

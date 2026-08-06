@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for labeling/label_generator.py.
 Validates label correctness on constructed synthetic price paths where the
 correct outcome is known exactly, plus statistical sanity checks on distribution.

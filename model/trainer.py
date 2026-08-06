@@ -1,4 +1,4 @@
-﻿"""
+"""
 Gradient boosting model trainer (XGBoost) for directional bias prediction.
 
 CRITICAL NO-LOOK-AHEAD DESIGN:

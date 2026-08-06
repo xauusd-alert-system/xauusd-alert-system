@@ -1,4 +1,4 @@
-﻿"""
+"""
 Train one per-asset model from the MT5-backed SQLite database.
 
 Example:

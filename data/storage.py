@@ -1,4 +1,4 @@
-﻿"""
+"""
 SQLite storage for multi-asset OHLCV candles.
 
 Each timeframe has its own table. Within each table, candles are uniquely
