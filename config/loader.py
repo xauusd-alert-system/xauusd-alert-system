@@ -37,7 +37,7 @@ def get_env(key: str, default=None, required: bool = False):
     return val
 
 
-def get_signal_grid(cfg: dict, asset_cfg: dict = None) -> dict:
+def get_signal_grid(cfg: dict, asset_cfg: dict = None, regime: str = None) -> dict:
     """
     Effective signal-grid config (the equal-step TP/SL grid sent to Telegram).
 
@@ -83,4 +83,32 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None) -> dict:
         grid["trailing_atr_mult"] = asset_cfg.get("signal_grid", {}).get("trailing_atr_mult")
     elif "trailing_atr_mult" in cfg.get("signal_grid", {}):
         grid["trailing_atr_mult"] = cfg.get("signal_grid", {}).get("trailing_atr_mult")
+
+    # Per-regime exit policy (quant audit 2026-08-07, Claude plan action 4):
+    # the audit's law — in trend regimes manage WIDE (later/no early BE, far
+    # targets, optional trailing), in range/compression manage FAST (early BE,
+    # tight stop). Overrides live under signal_grid.regime_overrides.<regime>
+    # (top-level or per-asset), e.g.
+    #   signal_grid:
+    #     regime_overrides:
+    #       trend_up:   {stop_mult: 4.0, breakeven_trigger_atr: 1.0, tp2_mult: 2.5,
+    #                    tp3_mult: 4.0, scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}}
+    #       range:      {stop_mult: 2.0, breakeven_trigger_atr: 0.5,
+    #                    scaleout: {tp1_ratio: 0.6, tp2_ratio: 0.4}}
+    # When `regime` is given and a matching override exists, its keys are
+    # layered on top of the effective grid (non-None values only), so the base
+    # equal-step spec stays the default everywhere else.
+    if regime and regime is not None:
+        overrides = {}
+        top_ro = cfg.get("signal_grid", {}).get("regime_overrides")
+        asset_ro = asset_cfg.get("signal_grid", {}).get("regime_overrides") if asset_cfg else None
+        if isinstance(top_ro, dict):
+            overrides.update(top_ro)
+        if isinstance(asset_ro, dict):
+            overrides.update(asset_ro)
+        ro = overrides.get(str(regime))
+        if isinstance(ro, dict):
+            for k, v in ro.items():
+                if v is not None and k != "regime_overrides":
+                    grid[k] = v
     return grid

@@ -322,6 +322,49 @@ same OHLCV; LSTM/Transformer; another TP/SL/BE grid; saving XAG; CVD from MT5
 tick volume as alpha; COT as intraday entry; explicit vol targeting on top of
 ATR stops; lot scaling as "making the system profitable".
 
+## 3f. Week-1 measurements + exit geometry + org measures (2026-08-07, continued)
+
+Continued the Claude plan past the metrology core:
+
+1. **Look-ahead check at entry** (`scripts/diag_entry_timing.py`): runs the
+   honest walk-forward under `next_open` (honest) vs `signal_close`
+   (look-ahead measurement; `EnsembleBacktester.fill_mode`). Reports E[R]/PF/
+   t_block per mode plus the close→next-open gap in ATR (the size of the
+   look-ahead advantage). Verdict: honest fill must keep ≥ 70% of the
+   look-ahead edge, else part of the result is look-ahead.
+2. **Queue-loss measurement** (`scripts/diag_r_metrics.py` + engine
+   `rejected_signals` / `simulate_blocked_entry`): signals rejected by the
+   one-position-at-a-time constraint are simulated through the engine's own
+   exit logic (forced entry at next open, `max_trades=1`). If E[R] of
+   rejected ≥ E[R] of taken, the constraint itself destroys the edge → the
+   audit's recommendation (2 half-size positions per asset once the
+   portfolio layer exists) applies.
+3. **Trial journal** (`scripts/trial_journal.py`): append-only
+   `logs/trial_journal.csv`; `run_backtest`, every `grid_search_gbp` combo and
+   `deflated_sharpe` log automatically. DSR's deflation N now defaults to the
+   journal's real trial count (floor 729) — the project's true history
+   includes the conf/EV/divergence/TF/BE experiments, not just the last grid.
+4. **Locked hold-out guard**: `validation.locked_holdout` in config; every
+   walk-forward runner refuses to run when its test windows overlap the
+   reserved period unless `--allow-locked` (which burns the lock).
+5. **Per-regime exit policy (engine + live)**: `signal_grid.regime_overrides`
+   resolved by `get_signal_grid(cfg, asset_cfg, regime=...)` and honored by
+   `EnsembleBacktester` (per-trade stop/TP/BE/trailing), the realtime
+   pipeline (live targets → mt5_trader parity) and the EV gate. Per-regime
+   scaleout ratios (e.g. 30/30/40 trend, 60/40/0 range) replace the hard
+   50/30/20. Default config unchanged (bit-identical legacy behavior).
+   Pre-registered (commented) trend/range policies in `config/config.yaml`
+   for GBP.
+6. **Exit-geometry calibration** (`scripts/exit_calibration.py`): SL/TP1/TP2
+   and trailing-vs-TP3 from MFE/MAE per regime, calibrated on TRAIN windows
+   only (never OOS). The grid-search alternative that does not burn trials.
+   Values are proposals; applying them is a separate pre-registered step.
+
+**Week-1 measurements produced on synthetic data** (numbers NOT real):
+GBP cost_ratio 44% (RED zone — the audit's M5-cost concern), σ[R] 0.35,
+skew(R) −1.37 (audit's negative-asymmetry geometry), queue loss shows
+rejected E[R] ≥ taken E[R], honest fill keeps ~80% of the look-ahead edge.
+
 ---
 
 ## 4. Change Log
@@ -349,3 +392,4 @@ ATR stops; lot scaling as "making the system profitable".
 | 2026-08-07 | fix | **Timestamp unit bug (pandas 3.x)**: `series.astype("int64") // 10**9` silently returns MILLISECONDS when the datetime resolution is µs (pandas 3.0 stores non-nano), so `data/ingestion.py::fetch_candles` (API backfill), `realtime/pipeline.py` (MT5 live frame) and every synthetic builder wrote timestamps ~1000× too small — new backfills would produce 0 walk-forward folds and mixed-unit DBs. Added resolution-independent `data/ingestion.to_epoch_seconds()` (timedelta arithmetic) and replaced all 8 call sites (ingestion, pipeline, grid_search, diag, deflated_sharpe, 3 test builders). | Correctness/ops: new backfills and live frames keep true epoch-seconds; regression test locks the behaviour and asserts the legacy idiom is still broken on this pandas (so a future resolution change cannot silently pass). | `271 passed` (+1 regression) |
 | 2026-08-07 | audit | **Quant-audit findings implemented** (3rd-party audit, transfer notes): (1) **labeling bias FIXED** — a same-candle touch of both barriers was hard-coded `-1` (short) in both label generators; now excluded as NaN (OHLC cannot order intrabar touches; audit rule: tick replay or exclude). (2) **N_eff added** (`effective_number_trials`: N_eff = 1+(M−1)(1−ρ̄) + participation ratio); `scripts/deflated_sharpe.py` reports DSR at N_eff AND full N=729, CLI prints ρ̄/N_eff. (3) **CSCV scorecard extended** with OOS probability of loss and IS→OOS degradation of the IS-best config. (4) **New `scripts/exit_profile.py`**: exit-path contribution per asset×regime in money + net R, payoff geometry (avg win/loss R, breakeven WR); `Trade` gained `tp1_hit`/`tp2_hit`/`initial_stop_price` audit fields. (5) **XAGUSD → shadow** (`enabled: false`; all prod paths honor it; research scripts take `--asset` explicitly). (6) Decisions: no new TP/SL/BE grids, no LSTM/Transformer on 46 tabular features; next = meta-sizing on OOF predictions. | Honesty/risk: removes a systematic short bias from training labels; selection-adjusted DSR at defensible N_eff; payoff asymmetry now visible per path; XAG capital parked until outer-OOS return gate. | `283 passed` (was 271; +12: 3 label-bias, 3 N_eff, 1 CSCV, 1 run-analysis, 5 exit-profile incl. main) |
 | 2026-08-07 | audit2 | **Second quant audit (Claude 5 Opus plan) applied**: (1) R-multiplicator metrology in `backtest/metrics.py` — `trades_to_dataframe` extended (entry_price/initial_stop_price/tp1_price/volume), `compute_r_metrics` (E[R], σ[R], skew/kurt, payoff geometry, exit buckets in R), `block_bootstrap_t`, `fold_sign_test`, `summarize_folds` + arithmetic-consistency check (audit 0.1: median PF > 1 vs positive-VALID-folds). `run_backtest` prints/saves the fold summary on every run. (2) Decision gate in `scripts/deflated_sharpe.py` (t≥3.0 block-bootstrap, DSR(N_eff)>0.95, PBO<0.30, PF>1.1 at 1.5× costs, ≥55% positive valid folds, IS→OOS slope ≥0.5, locked hold-out) + cost-stress rerun at 1.5× for the current config. (3) CSCV `is_oos_slope` (pooled OOS-on-IS SR regression across splits). (4) Week-1 measurements `scripts/diag_r_metrics.py`: R metrics + buckets, `cost_ratio` (norm <8–10%, red >15%), events-per-feature (rule ≥10; H1 assets over-parameterized at 46 features), MFE/MAE per regime (P(MFE≥1/2/3/5), MAE p50/p80/p90) as exit-calibration input, fold sign test. (5) Pre-registered commented TF hypotheses XAU/BTC M5→M15 gated on real-DB cost_ratio>15% (config not flipped blindly). (6) Adopted audit §3: no new grids, no LSTM/Transformer, meta-sizing only after the gate with AUC≥0.55 pre-check. | Correctness/risk: cross-asset comparisons now in R (never raw money); a gate that currently fails every asset → paper/shadow until evidence; cost and MFE/MAE measurements replace grid-search guessing. | `300 passed` (was 283; +17: 7 R-metrics, 10 diag/gate/slope) |
+| 2026-08-07 | audit3 | **Claude plan continued — week-1 measurements + org**: (1) `EnsembleBacktester.fill_mode` (`next_open` honest / `signal_close` look-ahead measurement) + `scripts/diag_entry_timing.py` (E[R]/PF/t_block per mode, close→next-open gap in ATR). (2) Queue loss: engine records `rejected_signals` and `simulate_blocked_entry` (forced entry at next open, max_trades=1, engine's own exit logic); `diag_r_metrics` reports E[R] rejected vs taken. (3) Per-regime exit policy: `signal_grid.regime_overrides` in `get_signal_grid(cfg, asset_cfg, regime=...)`; honored by EnsembleBacktester (per-trade stop/TP/BE/trailing/scaleout ratios), realtime pipeline (live targets → mt5_trader parity), EV gate; default config bit-identical. Pre-registered commented trend/range policies for GBP. (4) `scripts/trial_journal.py`: append-only journal wired into run_backtest/grid_search/deflated_sharpe; DSR N defaults to journal count (floor 729). (5) Locked hold-out guard (`validation.locked_holdout`) enforced by all walk-forward runners unless `--allow-locked`. (6) `scripts/exit_calibration.py`: SL/TP1/TP2 + trailing decision from MFE/MAE per regime, TRAIN-only (no OOS touch). | Correctness/org: quantifies the look-ahead rent and the queue-constraint cost; per-regime exits implement the audit's trend-wide/range-fast law in backtest AND live; DSR deflation now uses the real trial history; research can no longer accidentally look at the reserved period; exit geometry stops burning trials via grids. | `319 passed` (was 300; +19: 6 engine fill/regime/scaleout/rejection/sim, 1 loader regime override, 12 journal/holdout/calibration/timing) |

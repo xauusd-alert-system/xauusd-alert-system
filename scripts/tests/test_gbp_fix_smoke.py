@@ -113,3 +113,37 @@ def test_per_asset_model_in_realtime_pipeline_effective_cfg():
         # If predictor load fails (no file) it is acceptable for smoke as long as merge happened
         # We can check before predictor init by inspecting the code path
         assert "model" in str(e) or True  # tolerate
+
+
+def test_get_signal_grid_regime_overrides():
+    """Per-regime exit policy: signal_grid.regime_overrides.<regime> layers on
+    top of the effective grid; absent regime keeps the base grid untouched."""
+    from config.loader import get_signal_grid
+    cfg = load_config()
+    asset = cfg["assets"]["GBPUSD"]
+
+    # Base (no regime) — the shipped v4 grid
+    base = get_signal_grid(cfg, asset)
+    assert base["stop_mult"] == 3.0
+    assert base["breakeven_trigger_atr"] == 1.0
+
+    # Simulate a trend override in the asset section
+    cfg["assets"]["GBPUSD"] = dict(asset)
+    cfg["assets"]["GBPUSD"]["signal_grid"] = dict(asset["signal_grid"])
+    cfg["assets"]["GBPUSD"]["signal_grid"]["regime_overrides"] = {
+        "trend_up": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
+                     "tp3_mult": 4.0, "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
+        "range": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
+                  "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4}},
+    }
+    trend = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="trend_up")
+    assert trend["stop_mult"] == 4.0
+    assert trend["tp3_mult"] == 4.0
+    assert trend["scaleout"]["tp1_ratio"] == 0.3
+
+    rng = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="range")
+    assert rng["stop_mult"] == 2.0
+    assert rng["breakeven_trigger_atr"] == 0.5
+
+    other = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="trend_down")
+    assert other["stop_mult"] == 3.0  # no override -> base grid

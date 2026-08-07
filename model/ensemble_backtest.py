@@ -35,12 +35,20 @@ class Trade:
     tp1_hit: bool = False
     tp2_hit: bool = False
     initial_stop_price: Optional[float] = None
+    # Per-trade exit policy resolved from signal_grid.regime_overrides at entry
+    # (quant audit 2026-08-07, Claude plan action 4): trend -> wide/late,
+    # range -> fast/early. Defaults equal the legacy global grid.
+    be_trigger_mult: float = 1.0
+    trailing_atr_mult: Optional[float] = None
+    scaleout1: float = 0.5
+    scaleout2: float = 0.3
 
 
 class EnsembleBacktester:
     def __init__(self, cfg: dict, asset_key: str = "XAUUSD"):
         self.cfg = cfg
         self.asset_key = asset_key
+        self.asset_cfg = cfg.get("assets", {}).get(asset_key, {})
         bt_cfg = cfg.get("backtest", {})
         lab_cfg = cfg.get("labeling", {})
         asset_cfg = cfg.get("assets", {}).get(asset_key, {})
@@ -83,6 +91,32 @@ class EnsembleBacktester:
 
         self.horizon_n = lab_cfg.get("horizon_candles_n", 36)
         self.trades: List[Trade] = []
+        # Fill mode (quant audit, week-1 look-ahead check): "next_open" (honest
+        # default) enters at the OPEN of the bar AFTER the signal bar;
+        # "signal_close" enters at the CLOSE of the signal bar itself — this is
+        # a look-ahead and MUST only be used for measurement (diag_entry_timing).
+        self.fill_mode = str(bt_cfg.get("fill_mode", "next_open"))
+        # Signals that fired while a position was open (one-position-at-a-time
+        # constraint) — the queue-loss measurement input.
+        self.rejected_signals: List[dict] = []
+
+    def simulate_blocked_entry(self, df: pd.DataFrame, signal_bar: int,
+                               direction: int) -> Optional[Trade]:
+        """Queue-loss measurement: what WOULD a rejected signal have earned.
+
+        The signal fired at `signal_bar` while a position was open; the
+        hypothetical honest fill is the OPEN of `signal_bar + 1`. Runs the
+        engine on the sliced frame with a forced entry (max_trades=1) so the
+        exit logic is bit-identical to real trades. Returns the trade or None
+        (no exit within the slice).
+        """
+        if signal_bar + 1 >= len(df):
+            return None
+        sub = df.iloc[signal_bar + 1:].reset_index(drop=True)
+        sim = EnsembleBacktester(self.cfg, asset_key=self.asset_key)
+        sim.fill_mode = "next_open"
+        trades = sim.run(sub, forced_direction=direction, max_trades=1)
+        return trades[0] if trades else None
 
     def _apply_slippage(self, price: float, direction: int) -> float:
         return price + (self.slippage * direction)
@@ -91,9 +125,20 @@ class EnsembleBacktester:
         """Convert a price-space PnL to account money using lot size and contract multiplier."""
         return price_pnl * self.volume * self.point_value_lot
 
-    def run(self, df: pd.DataFrame) -> List[Trade]:
+    def run(self, df: pd.DataFrame, forced_direction: int = None,
+            max_trades: int = None) -> List[Trade]:
+        """Run the backtest over `df`.
+
+        forced_direction: if set (1/-1), a trade is opened at the first bar
+            without evaluating signals (used by simulate_blocked_entry for the
+            queue-loss measurement — the hypothetical entry of a signal that
+            was rejected because a position was already open).
+        max_trades: stop after this many closed trades (also used by the
+            queue-loss simulation).
+        """
         n = len(df)
         open_position: Optional[Trade] = None
+        self.rejected_signals = []
         # HIGH 7 (no-look-ahead): a position opened at candle i open may only be
         # exited from candle i+1 onwards - same-candle entries never evaluate TP/SL.
         entry_bar: Optional[int] = None
@@ -119,6 +164,12 @@ class EnsembleBacktester:
         accumulated_pnl = 0.0
 
         for i in range(n):
+            if open_position is None and forced_direction is not None and i == 0:
+                # Queue-loss simulation: forced hypothetical entry at the first
+                # bar of the sliced frame (open of the bar AFTER the signal).
+                pending_direction = int(forced_direction)
+                forced_direction = None
+
             if open_position is None and pending_direction is not None and pending_direction != 0:
                 direction = pending_direction
                 entry_price = opens[i] + (self.spread / 2 if direction == 1 else -self.spread / 2)
@@ -126,10 +177,25 @@ class EnsembleBacktester:
 
                 atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
 
-                stop_price = entry_price - direction * (atr_val * self.stop_mult)
-                tp1_price = entry_price + direction * (atr_val * self.tp1_mult)
-                tp2_price = entry_price + direction * (atr_val * self.tp2_mult)
-                tp3_price = entry_price + direction * (atr_val * self.tp3_mult)
+                # Per-trade exit policy resolved from the regime at SIGNAL time
+                # (bar i-1, same as regime_at_entry). signal_grid.regime_overrides
+                # lets trend regimes run wide and range regimes manage fast.
+                reg_name = str(regimes[i - 1]) if i > 0 else str(regimes[i])
+                grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
+                tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
+                tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
+                tp3_mult = float(grid.get("tp3_mult", self.tp3_mult))
+                stop_mult = float(grid.get("stop_mult", self.stop_mult))
+                be_trigger = float(grid.get("breakeven_trigger_atr", self.be_trigger_mult))
+                trail_mult = grid.get("trailing_atr_mult")
+                scaleout = grid.get("scaleout") or {}
+                so1 = float(scaleout.get("tp1_ratio", 0.5)) if isinstance(scaleout, dict) else 0.5
+                so2 = float(scaleout.get("tp2_ratio", 0.3)) if isinstance(scaleout, dict) else 0.3
+
+                stop_price = entry_price - direction * (atr_val * stop_mult)
+                tp1_price = entry_price + direction * (atr_val * tp1_mult)
+                tp2_price = entry_price + direction * (atr_val * tp2_mult)
+                tp3_price = entry_price + direction * (atr_val * tp3_mult)
 
                 open_position = Trade(
                     entry_ts=int(timestamps[i]),
@@ -141,10 +207,14 @@ class EnsembleBacktester:
                     tp3_price=tp3_price,
                     initial_stop_price=stop_price,
                     session=str(sessions[i]),
-                    regime_at_entry=str(regimes[i - 1]) if i > 0 else str(regimes[i]),
+                    regime_at_entry=reg_name,
                     volume=self.volume,
                     commission=self.commission_per_trade,
                     swap=0.0,
+                    be_trigger_mult=be_trigger,
+                    trailing_atr_mult=trail_mult,
+                    scaleout1=so1,
+                    scaleout2=so2,
                 )
                 pending_direction = None
                 entry_bar = i
@@ -177,40 +247,40 @@ class EnsembleBacktester:
                 # price reaches be_trigger_mult * (TP1 distance) in our favor — BEFORE TP1.
                 if not tp1_hit and not be_triggered:
                     be_level = (open_position.entry_price
-                                + direction * self.be_trigger_mult
+                                + direction * open_position.be_trigger_mult
                                 * (open_position.tp1_price - open_position.entry_price))
                     if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
                         open_position.stop_price = open_position.entry_price
                         be_triggered = True
 
-                # 1. TP1 -> 50% закрываем, Стоп в БЕЗУБЫТОК
+                # 1. TP1 -> scaleout1 закрываем, Стоп в БЕЗУБЫТОК
                 if not tp1_hit and hit_tp1:
                     tp1_hit = True
                     # HIGH 7: convert price-space PnL to money via volume * point_value_lot.
-                    pnl_tp1 = self._money(0.5 * direction * (open_position.tp1_price - open_position.entry_price))
+                    pnl_tp1 = self._money(open_position.scaleout1 * direction * (open_position.tp1_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp1
-                    remaining_ratio = 0.5
+                    remaining_ratio = 1.0 - open_position.scaleout1
                     open_position.stop_price = open_position.entry_price  # BREAKEVEN
 
-                # 2. TP2 -> 30% закрываем
+                # 2. TP2 -> scaleout2 закрываем
                 if tp1_hit and not tp2_hit and hit_tp2:
                     tp2_hit = True
-                    pnl_tp2 = self._money(0.3 * direction * (open_position.tp2_price - open_position.entry_price))
+                    pnl_tp2 = self._money(open_position.scaleout2 * direction * (open_position.tp2_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp2
-                    remaining_ratio = 0.2
+                    remaining_ratio = 1.0 - open_position.scaleout1 - open_position.scaleout2
 
                 # 2b. TRAILING (v4b "trailing-runner") — only after TP1+TP2 and if trailing_atr_mult is set
                 trailing_exit = False
-                if tp1_hit and tp2_hit and self.trailing_atr_mult is not None and remaining_ratio > 0:
+                if tp1_hit and tp2_hit and open_position.trailing_atr_mult is not None and remaining_ratio > 0:
                     atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
                     if direction == 1:
-                        trail_stop = highs[i] - float(self.trailing_atr_mult) * atr_val
+                        trail_stop = highs[i] - float(open_position.trailing_atr_mult) * atr_val
                         if open_position.stop_price < trail_stop:
                             open_position.stop_price = trail_stop
                         if lows[i] <= open_position.stop_price:
                             trailing_exit = True
                     else:
-                        trail_stop = lows[i] + float(self.trailing_atr_mult) * atr_val
+                        trail_stop = lows[i] + float(open_position.trailing_atr_mult) * atr_val
                         if open_position.stop_price > trail_stop:
                             open_position.stop_price = trail_stop
                         if highs[i] >= open_position.stop_price:
@@ -258,6 +328,8 @@ class EnsembleBacktester:
                     self.trades.append(open_position)
                     open_position = None
                     entry_bar = None
+                    if max_trades is not None and len(self.trades) >= max_trades:
+                        return self.trades
 
             if open_position is None:
                 reg_val = regimes[i]
@@ -277,5 +349,79 @@ class EnsembleBacktester:
                     asset_key=self.asset_key if hasattr(self, 'asset_key') else "XAUUSD"
                 )
                 pending_direction = {"long": 1, "short": -1, "no_trade": 0}[sig.bias]
+
+                # LOOK-AHEAD MEASUREMENT MODE ONLY: fill at the close of the
+                # SIGNAL bar itself instead of the next bar's open. Any edge
+                # that collapses under this comparison is partly look-ahead.
+                if pending_direction != 0 and self.fill_mode == "signal_close":
+                    direction = pending_direction
+                    entry_price = closes[i] + (self.spread / 2 if direction == 1 else -self.spread / 2)
+                    entry_price = self._apply_slippage(entry_price, direction)
+                    atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                    reg_name = str(regimes[i])
+                    grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
+                    tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
+                    tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
+                    tp3_mult = float(grid.get("tp3_mult", self.tp3_mult))
+                    stop_mult = float(grid.get("stop_mult", self.stop_mult))
+                    be_trigger = float(grid.get("breakeven_trigger_atr", self.be_trigger_mult))
+                    trail_mult = grid.get("trailing_atr_mult")
+                    scaleout = grid.get("scaleout") or {}
+                    so1 = float(scaleout.get("tp1_ratio", 0.5)) if isinstance(scaleout, dict) else 0.5
+                    so2 = float(scaleout.get("tp2_ratio", 0.3)) if isinstance(scaleout, dict) else 0.3
+                    open_position = Trade(
+                        entry_ts=int(timestamps[i]),
+                        entry_price=entry_price,
+                        direction=direction,
+                        stop_price=entry_price - direction * (atr_val * stop_mult),
+                        tp1_price=entry_price + direction * (atr_val * tp1_mult),
+                        tp2_price=entry_price + direction * (atr_val * tp2_mult),
+                        tp3_price=entry_price + direction * (atr_val * tp3_mult),
+                        initial_stop_price=entry_price - direction * (atr_val * stop_mult),
+                        session=str(sessions[i]),
+                        regime_at_entry=reg_name,
+                        volume=self.volume,
+                        commission=self.commission_per_trade,
+                        swap=0.0,
+                        be_trigger_mult=be_trigger,
+                        trailing_atr_mult=trail_mult,
+                        scaleout1=so1,
+                        scaleout2=so2,
+                    )
+                    entry_bar = i
+                    tp1_hit = False
+                    tp2_hit = False
+                    be_triggered = False
+                    remaining_ratio = 1.0
+                    accumulated_pnl = 0.0
+                    pending_direction = None
+            else:
+                # Position already open: record any signal that WOULD have fired
+                # (one-position-at-a-time constraint) for the queue-loss
+                # measurement. Same gates as above.
+                reg_val = regimes[i]
+                if not isinstance(reg_val, RegimeLabel):
+                    try:
+                        reg_val = RegimeLabel(reg_val)
+                    except ValueError:
+                        reg_val = RegimeLabel.NO_TRADE
+                sig = compute_ensemble_signal(
+                    reg_val,
+                    float(p_longs[i]),
+                    float(p_shorts[i]),
+                    self.cfg,
+                    session=str(sessions[i]),
+                    timestamp_utc=int(timestamps[i]),
+                    asset_key=self.asset_key if hasattr(self, 'asset_key') else "XAUUSD"
+                )
+                if sig.bias in ("long", "short"):
+                    self.rejected_signals.append({
+                        "bar": i,
+                        "direction": 1 if sig.bias == "long" else -1,
+                        "regime": str(reg_val.value if hasattr(reg_val, "value") else reg_val),
+                        "session": str(sessions[i]),
+                        "p_long": float(p_longs[i]),
+                        "p_short": float(p_shorts[i]),
+                    })
 
         return self.trades

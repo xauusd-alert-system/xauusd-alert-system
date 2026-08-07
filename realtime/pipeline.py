@@ -205,7 +205,10 @@ class RealtimePipeline:
 
         # Equal-step grid spec (config `signal_grid`): step = step_points or
         # 1.0*ATR (clamped), TP1/2/3 = entry ± 1/2/3*step, SL = entry ∓ 3*step.
-        grid_cfg = get_signal_grid(self.cfg, self.asset_cfg)
+        # Per-regime exit policy (signal_grid.regime_overrides) is resolved at
+        # signal time so the LIVE targets match the backtest engine.
+        reg_name = regime.value if isinstance(regime, RegimeLabel) else str(regime)
+        grid_cfg = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
         step = resolve_signal_step(atr_val, grid_cfg)
         tp1_mult = float(grid_cfg.get("tp1_mult", 1.0))
         tp2_mult = float(grid_cfg.get("tp2_mult", 2.0))

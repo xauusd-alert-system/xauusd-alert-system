@@ -633,12 +633,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--db-path", default=None, help="SQLite DB (default: config general.db_path)")
     parser.add_argument("--variants", default=None,
                         help="Comma-separated variant subset (default: full family)")
-    parser.add_argument("--historical-trials", type=int, default=729,
-                        help="Total trials ever tried on this asset's data (deflation N)")
+    parser.add_argument("--historical-trials", type=int, default=None,
+                        help="Total trials ever tried on this asset's data (deflation N); "
+                             "default: max(trial-journal count, 729)")
     parser.add_argument("--n-splits", type=int, default=None, help="CSCV split count (default: auto)")
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds (quick runs/tests)")
     parser.add_argument("--no-cost-stress", action="store_true",
                         help="Skip the 1.5x-cost stress rerun of the current config")
+    parser.add_argument("--no-journal", action="store_true",
+                        help="Do not append this run to logs/trial_journal.csv")
+    parser.add_argument("--allow-locked", action="store_true",
+                        help="Allow test windows overlapping the locked hold-out")
     parser.add_argument("--out", default=None, help="Output CSV path (default: logs/deflated_sharpe_<asset>.csv)")
     args = parser.parse_args(argv)
 
@@ -667,6 +672,17 @@ def main(argv: list[str] | None = None) -> None:
         df = _make_synthetic_wf_df(n, spec["price"], spec["atr"], freq)
         df = _inject_biased_probs(df)
 
+    from scripts.trial_journal import default_historical_trials, enforce_locked_holdout, log_trial
+    if args.historical_trials is None:
+        args.historical_trials = default_historical_trials(args.asset)
+
+    from backtest.walk_forward import generate_windows
+    windows_probe = generate_windows(
+        df, cfg["backtest"]["walk_forward"]["train_window_days"],
+        cfg["backtest"]["walk_forward"]["test_window_days"],
+        cfg["backtest"]["walk_forward"]["step_days"])
+    enforce_locked_holdout(cfg, windows_probe, "deflated_sharpe", allow=args.allow_locked)
+
     variants = _select_variants(args.asset, args.variants)
     try:
         res = run_analysis(cfg, args.asset, df, variants=variants,
@@ -682,6 +698,18 @@ def main(argv: list[str] | None = None) -> None:
     os.makedirs("logs", exist_ok=True)
     out_csv = args.out or f"logs/deflated_sharpe_{args.asset.lower()}.csv"
     pd.DataFrame(res["trials"]).to_csv(out_csv, index=False)
+
+    # Append-only trial journal (audit: DSR's N must come from the journal).
+    if not args.no_journal:
+        log_trial(
+            experiment="deflated_sharpe",
+            asset=args.asset,
+            params={"variants": args.variants or "all",
+                    "historical_trials": args.historical_trials},
+            metrics={"dsr_historical": next((t["dsr_historical"] for t in res["trials"]
+                                             if t["variant"] == "current"), None),
+                     "pbo": res["cscv"]["pbo"],
+                     "n_eff": res["n_eff"]["n_eff_historical"]})
     out_json = out_csv.replace(".csv", ".json")
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=2, default=str)

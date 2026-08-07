@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**300/300**; FX v3/v4, Deflated Sharpe / CSCV + N_eff, exit-path профилирование, R-метрология + decision gate; по квант-аудитам 2026-08-07: исправлен labeling bias, XAGUSD в shadow, cost/MFE-MAE измерения).
+**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**319/319**; FX v3/v4, DSR/CSCV + N_eff + decision gate, R-метрология, look-ahead/queue-loss измерения, per-regime exit policy, журнал испытаний, локированный hold-out; по квант-аудитам 2026-08-07: labeling bias fix, XAGUSD в shadow).
 
 ---
 

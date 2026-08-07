@@ -247,6 +247,29 @@ assets:
     #   trailing_atr_mult: 2.0
     #   stop_mult: 3.0
     #   breakeven_trigger_atr: 1.0
+    # Per-regime exit policy (audit action 4, PRE-REGISTERED, NOT enabled):
+    # the audit's law — trend regimes run WIDE (no early BE, far targets,
+    # back-loaded scaleout 30/30/40), range regimes manage FAST (early BE,
+    # tight stop, front-loaded 60/40). Values below are placeholders to be
+    # calibrated from MFE/MAE (scripts/exit_calibration.py) on the real DB.
+    # signal_grid:
+    #   regime_overrides:
+    #     trend_up:
+    #       stop_mult: 4.0
+    #       breakeven_trigger_atr: 1.0
+    #       tp2_mult: 2.5
+    #       tp3_mult: 4.0
+    #       scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
+    #     trend_down:
+    #       stop_mult: 4.0
+    #       breakeven_trigger_atr: 1.0
+    #       tp2_mult: 2.5
+    #       tp3_mult: 4.0
+    #       scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
+    #     range:
+    #       stop_mult: 2.0
+    #       breakeven_trigger_atr: 0.5
+    #       scaleout: {tp1_ratio: 0.6, tp2_ratio: 0.4}
 
 alerts:
   cooldown_minutes: 15
@@ -396,6 +419,18 @@ deploy_guard:
   tolerance: 0.0
   # Sidecar name used by --backup / --check.
   backup_suffix: ".deploy_guard.bak"
+
+# ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====
+# A reserved period that RESEARCH must never look at. When enabled, every
+# walk-forward runner (run_backtest / deflated_sharpe / grid_search) refuses
+# to run if any of its test windows overlaps this range unless --allow-locked
+# is passed (which burns the lock). Set it to the most recent ~12 months once
+# the current research round is frozen; inspect it ONE time before deploy.
+validation:
+  locked_holdout:
+    enabled: false
+    start: null        # e.g. "2025-06-01" (ISO date)
+    end: null          # e.g. "2026-08-07"
 
 # ===== CORRELATION FILTER (динамический) =====
 correlation_filter:

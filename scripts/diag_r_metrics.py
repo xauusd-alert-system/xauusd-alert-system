@@ -130,17 +130,33 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     fold_results = []
     all_trades = []
     mfe_mae_rows = []
+    rejected_rows = []
     for fold_i, fdf in enumerate(frames):
         cfg_run = merge_asset_cfg(cfg, asset_key, "labeling")
         cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
         engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
-        trades = engine.run(fdf.reset_index(drop=True))
+        fdf_run = fdf.reset_index(drop=True)
+        trades = engine.run(fdf_run)
         tdf = trades_to_df(trades)
         if len(tdf):
             all_trades.append(tdf)
             fold_results.append({"fold": fold_i, "n_trades": len(tdf),
                                  "total_pnl": float(tdf["pnl"].sum()),
                                  "profit_factor": _pf(tdf["pnl"].to_numpy())})
+        # Queue loss (audit week 1): signals rejected because a position was
+        # already open — simulate their hypothetical honest entry.
+        for rej in engine.rejected_signals:
+            t_sim = engine.simulate_blocked_entry(fdf_run, rej["bar"], rej["direction"])
+            if t_sim is None:
+                continue
+            risk = abs(t_sim.entry_price - t_sim.initial_stop_price) * volume * point_value_lot
+            rejected_rows.append({
+                "fold": fold_i,
+                "regime": rej["regime"],
+                "direction": rej["direction"],
+                "pnl": float(t_sim.pnl),
+                "r": float(t_sim.pnl / risk) if risk > 1e-12 else float("nan"),
+            })
         # MFE/MAE for all signal rows in this fold
         mm = _mfe_mae(fdf, horizon)
         sig = _signal_mask(fdf)
@@ -189,6 +205,30 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
                 "mae_p90": round(float(mae.quantile(0.90)), 3),
             }
 
+    # Queue-loss summary: E[R] of rejected signals vs E[R] of taken trades.
+    queue_loss = {"n_rejected": 0, "n_simulated": 0, "mean_r_rejected": None,
+                  "mean_r_taken": None, "verdict": None}
+    if rejected_rows:
+        rdf = pd.DataFrame(rejected_rows)
+        r_rej = rdf["r"].dropna().to_numpy(dtype=float)
+        r_taken = None
+        if len(all_trades):
+            tdf_all = pd.concat(all_trades, ignore_index=True)
+            risk_all = (tdf_all["entry_price"] - tdf_all["initial_stop_price"]).abs() * volume * point_value_lot
+            ok = risk_all > 1e-12
+            r_taken = (tdf_all.loc[ok, "pnl"] / risk_all[ok]).to_numpy(dtype=float)
+        queue_loss = {
+            "n_rejected": len(rejected_rows),
+            "n_simulated": int(len(r_rej)),
+            "mean_r_rejected": round(float(r_rej.mean()), 4) if len(r_rej) else None,
+            "mean_r_taken": round(float(r_taken.mean()), 4) if r_taken is not None and len(r_taken) else None,
+        }
+        if queue_loss["mean_r_rejected"] is not None and queue_loss["mean_r_taken"] is not None:
+            queue_loss["verdict"] = (
+                "queue constraint destroys edge: rejected E[R] >= taken E[R]"
+                if queue_loss["mean_r_rejected"] >= queue_loss["mean_r_taken"]
+                else "queue constraint costs little: rejected E[R] < taken E[R]")
+
     # fold sign test + consistency
     fold_results = [r for r in fold_results if r["n_trades"] > 0]
     pos_folds = int(sum(1 for r in fold_results if r["total_pnl"] > 0))
@@ -220,6 +260,7 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         },
         "fold_sign_test": sign,
         "fold_summary": summary,
+        "queue_loss": queue_loss,
         "mfe_mae": mfe_mae,
         "trades": trades_df,
     }
@@ -262,6 +303,11 @@ def print_report(d: dict) -> None:
         st = d["fold_sign_test"]
         print(f"Fold sign test: {st['n_positive']}/{st['n_folds']} positive valid folds "
               f"(z={st['z']}, p={st['p_one_sided']})")
+    ql = d["queue_loss"]
+    if ql["n_rejected"]:
+        print(f"Queue loss: {ql['n_rejected']} rejected signals (simulated "
+              f"{ql['n_simulated']}) | E[R] rejected = {ql['mean_r_rejected']} vs "
+              f"E[R] taken = {ql['mean_r_taken']} -> {ql['verdict']}")
     if d["mfe_mae"]:
         print("MFE/MAE (steps over horizon, per regime; exit calibration input):")
         for reg, v in d["mfe_mae"].items():

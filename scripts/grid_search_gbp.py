@@ -164,6 +164,7 @@ def main():
     coarse_combos = list(itertools.product(stop_vals, be_vals, tp3_vals))
     print(f"[grid] Stage 1: coarse grid {len(coarse_combos)} combos (stop×BE×tp3)")
 
+    from scripts.trial_journal import log_trial
     records = []
     for stop, be, tp3 in coarse_combos:
         # fix tp2 to 2.5 for coarse, vary later if needed
@@ -174,6 +175,12 @@ def main():
                "tp2_mult": 2.5, "tp3_mult": tp3, "min_confidence_to_alert": 0.85,
                "horizon_candles_n": 48, **res}
         records.append(rec)
+        log_trial(experiment="grid_search_gbp", asset="GBPUSD",
+                  params={k: rec[k] for k in ("stage", "stop_mult", "breakeven_trigger_atr",
+                                              "tp2_mult", "tp3_mult", "min_confidence_to_alert",
+                                              "horizon_candles_n")},
+                  metrics={"median_pf": rec.get("median_pf"), "pos_folds": rec.get("pos_folds"),
+                           "total_pnl": rec.get("total_pnl"), "last6_pos": rec.get("last6_pos")})
         print(f"  coarse stop={stop} be={be} tp3={tp3} -> medPF={res.get('median_pf')} pos={res.get('pos_folds')}/{res.get('valid_folds')} last6+={res.get('last6_pos')}")
 
     # Stage 2: fine search on top coarse by median_pf + pos_folds
@@ -202,6 +209,12 @@ def main():
                    "tp2_mult": row["tp2_mult"], "tp3_mult": row["tp3_mult"],
                    "min_confidence_to_alert": conf, "horizon_candles_n": hor, **res}
             records.append(rec)
+            log_trial(experiment="grid_search_gbp", asset="GBPUSD",
+                      params={k: rec[k] for k in ("stage", "stop_mult", "breakeven_trigger_atr",
+                                                  "tp2_mult", "tp3_mult", "min_confidence_to_alert",
+                                                  "horizon_candles_n")},
+                      metrics={"median_pf": rec.get("median_pf"), "pos_folds": rec.get("pos_folds"),
+                               "total_pnl": rec.get("total_pnl"), "last6_pos": rec.get("last6_pos")})
 
     res_df = pd.DataFrame(records)
     os.makedirs("logs", exist_ok=True)

@@ -25,7 +25,7 @@ from model.trainer import (
 )
 from model.predictor import ModelPredictor
 from model.ensemble_backtest import EnsembleBacktester
-from backtest.walk_forward import run_walk_forward
+from backtest.walk_forward import run_walk_forward, generate_windows
 
 
 def load_asset_history(db_path: str, timeframe: str, asset_key: str) -> pd.DataFrame:
@@ -166,6 +166,10 @@ def main():
     parser.add_argument("--asset", required=True, help="Internal asset key, e.g. XAUUSD")
     parser.add_argument("--timeframe", default="M5")
     parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
+    parser.add_argument("--no-journal", action="store_true",
+                        help="Do not append this run to logs/trial_journal.csv")
+    parser.add_argument("--allow-locked", action="store_true",
+                        help="Allow test windows overlapping the locked hold-out")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -183,6 +187,13 @@ def main():
 
     print(f"Loaded {len(df)} rows for {args.asset} from {args.db_path}")
     print(f"Running Ensemble ML Walk-Forward Backtest...")
+
+    from scripts.trial_journal import enforce_locked_holdout
+    windows_probe = generate_windows(
+        df, cfg["backtest"]["walk_forward"]["train_window_days"],
+        cfg["backtest"]["walk_forward"]["test_window_days"],
+        cfg["backtest"]["walk_forward"]["step_days"])
+    enforce_locked_holdout(cfg, windows_probe, "run_backtest", allow=args.allow_locked)
 
     results = run_walk_forward(df, cfg, strategy_fn_factory(cfg, model_path, asset_key=args.asset))
     if not results:
@@ -209,6 +220,20 @@ def main():
         print(f"WARNING: {summary['note']} -- re-check the aggregate tables "
               "(positive folds must use valid folds only).")
     pd.DataFrame([summary]).to_csv(f"logs/backtest_{args.asset.lower()}_fold_summary.csv", index=False)
+
+    # Append-only trial journal (audit: N_trials for DSR comes from the real
+    # project history, not from the last grid).
+    if not args.no_journal:
+        from scripts.trial_journal import log_trial
+        log_trial(
+            experiment="run_backtest",
+            asset=args.asset,
+            params={"timeframe": timeframe, "db_path": db_path},
+            metrics={"n_folds": summary["n_folds"], "valid_folds": summary["valid_folds"],
+                     "positive_folds_valid": summary["positive_folds_valid"],
+                     "median_pf_valid": summary["median_pf_valid"],
+                     "total_pnl": float(results_df["total_pnl"].sum())
+                     if "total_pnl" in results_df.columns else None})
 
 
 if __name__ == "__main__":
