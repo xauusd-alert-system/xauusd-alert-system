@@ -61,9 +61,16 @@ def main():
 
     if not args.synthetic:
         try:
-            raw = pd.read_sql_query(
-                "SELECT * FROM candles WHERE asset=? AND timeframe=? ORDER BY timestamp_utc",
-                __import__("sqlite3").connect(db_path), params=(asset_key, timeframe))
+            # Read the real DB via the same loader run_backtest uses: the candles
+            # live in the per-timeframe tables `ohlcv_<tf>` (not a single
+            # `candles` table), and load_asset_history adds the `timestamp`
+            # column build_full_df expects. The previous read_sql_query against
+            # `candles` always raised (no such table) -> synthetic fallback.
+            from scripts.run_backtest import load_asset_history
+            raw = load_asset_history(db_path, timeframe, asset_key)
+            if raw.empty:
+                raise ValueError("empty")
+            print(f"[diag] Using real DB: {len(raw)} rows for {asset_key} {timeframe}")
             df = build_full_df(
                 raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe
             )

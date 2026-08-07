@@ -92,15 +92,20 @@ GENERIC_VARIANTS: dict = {
 
 GBP_VARIANTS: dict = {
     "current": {},  # = v4 (post-sync config): stop 3.0, BE 1.0, tp2 2.5, tp3 3.0, conf 0.80, h36
-    "v3_early_be": {  # pre-v4 (EUR-style early-BE package)
+    "v3_early_be": {  # pre-v4 (EUR-style early-BE package);
+        # regime_overrides: None strips the shipped per-regime policy so the
+        # comparison is against the plain grid (patch-value None = key removal).
         "signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
-                        "tp2_mult": 2.0, "tp3_mult": 3.0},
+                        "tp2_mult": 2.0, "tp3_mult": 3.0,
+                        "regime_overrides": None},
         "ensemble": {"min_confidence_to_alert": 0.85},
         "labeling": {"horizon_candles_n": 48},
     },
-    "v4a": {  # commented candidate in the old config: tp3 4.0 + conf 0.85
+    "v4a": {  # commented candidate in the old config: tp3 4.0 + conf 0.85;
+        # regime_overrides: None — same reason as v3_early_be.
         "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.5, "tp3_mult": 4.0},
+                        "tp2_mult": 2.5, "tp3_mult": 4.0,
+                        "regime_overrides": None},
         "ensemble": {"min_confidence_to_alert": 0.85},
         "labeling": {"horizon_candles_n": 48},
     },

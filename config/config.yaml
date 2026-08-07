@@ -178,6 +178,8 @@ assets:
     # trade cannot pay for itself; M15 was still unprofitable (mean-reverting
     # 1:3 grid), H1 widens the grid further AND early-breakeven + stop 2.0 cut
     # the loss tail (see docs/FX_V3.md).
+    # H4 measured 2026-08-08: cost_ratio 22.4% (RED), E[R] -0.025, t_block
+    # -0.63, 10/22 folds -> REJECTED, EUR stays on H1.
     timeframe: H1
     spread_usd: 0.00012
     slippage_usd: 0.0002
@@ -220,6 +222,9 @@ assets:
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
     # H1 (or H4 candidate). See docs/GBP_FIX_STRATEGY.md
+    # H4 measured 2026-08-08: cost_ratio 17.4% (RED), E[R] 0.041, t_block 3.56,
+    # 19/25 folds, 161 trades -> NOT enabled (too few trades, RED costs);
+    # recorded in the trial journal as a perspective once 1-2y of H4 data exist.
     timeframe: H1
     spread_usd: 0.00015
     slippage_usd: 0.0002
@@ -227,7 +232,12 @@ assets:
     # unit. See XAGUSD comment for why this must be a per-asset override.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.80
+      # LEGACY adopted as current (final iteration TZ 2026-08-08, step B1):
+      # honest comparison after the None-removal fix — legacy (conf 0.60,
+      # tp2 2.0) beat the v4 bar: PF 1.39 vs 1.31, PnL +139 vs +85, 25/27 vs
+      # 22/27 folds, SR 1.52 vs 1.07. Decision gate stays FAIL for both
+      # (cost stress ~1.0, t_block < 3) -> GBP remains paper/shadow.
+      min_confidence_to_alert: 0.60
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -245,16 +255,11 @@ assets:
       step_max_points: 0.006
       stop_mult: 3.0
       breakeven_trigger_atr: 1.0
-      tp2_mult: 2.5
+      tp2_mult: 2.0
       tp3_mult: 3.0
-      # Per-regime exit policy — ENABLED (post-measurements TZ 2026-08-07, step 3).
-      # Adopted as `current` from the pre-registered regime_wide variant after
-      # the real-DB run: regime_wide PF 1.31 vs legacy current 1.20
-      # (n≈529, PnL≈+85); regime_fast measured harmful (-60.6) and is NOT used.
-      # The audit's law: trend regimes run WIDE (no early BE, far targets,
-      # back-loaded scaleout 30/30/40), range regimes manage FAST (early BE,
-      # tight stop, front-loaded 60/40). Note: even with PF 1.31 the decision
-      # gate stays FAIL (cost-stress PF 0.97) -> GBP remains paper/shadow.
+      # Per-regime exit policy — KEPT from the 2026-08-07 measurements
+      # (regime_wide PF 1.31 vs plain 1.20). Combined with the legacy entry
+      # bar above (the winning combo measured in the final iteration).
       regime_overrides:
         trend_up:
           stop_mult: 4.0
