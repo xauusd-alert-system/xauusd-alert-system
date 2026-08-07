@@ -248,3 +248,71 @@ def test_main_writes_csv_and_json(tmp_path, monkeypatch):
         payload = json.load(f)
     assert payload["asset"] == "GBPUSD"
     assert payload["synthetic"] is True
+
+
+# ---------------------------------------------------------------------------
+# N_eff (dependent-trial correction) + CSCV audit extras
+# ---------------------------------------------------------------------------
+
+def test_effective_number_trials_perfectly_correlated():
+    """Identical trials -> N_eff == 1 (one independent draw)."""
+    from backtest.deflated_sharpe import effective_number_trials
+    rng = np.random.default_rng(11)
+    base = rng.normal(0.0, 1.0, 24)
+    M = np.stack([base, base, base, base])  # rho = 1
+    res = effective_number_trials(M)
+    assert res["n_trials"] == 4
+    assert res["n_eff"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_effective_number_trials_uncorrelated():
+    """Independent trials -> N_eff == M."""
+    from backtest.deflated_sharpe import effective_number_trials
+    rng = np.random.default_rng(12)
+    M = rng.normal(0.0, 1.0, size=(5, 24))
+    res = effective_number_trials(M)
+    assert res["n_eff"] == pytest.approx(5.0, abs=0.5)
+
+
+def test_effective_number_trials_audit_example():
+    """Audit numbers: M=729, rho=0.95 -> N_eff ~= 37; rho=0.90 -> ~74."""
+    from backtest.deflated_sharpe import effective_number_trials
+    # Construct a matrix with approximate rho by mixing a common factor
+    rng = np.random.default_rng(13)
+    M = 729
+    common = rng.normal(0.0, 1.0, 24)
+    w = 0.9747  # ~ rho 0.95 after noise
+    rows = [w * common + np.sqrt(1 - w ** 2) * rng.normal(0.0, 1.0, 24) for _ in range(M)]
+    res = effective_number_trials(np.asarray(rows))
+    n_eff_729 = 1.0 + (729 - 1.0) * (1.0 - res["mean_rho"])
+    assert 25 < n_eff_729 < 55  # rho~0.95 -> ~37
+    assert res["participation_ratio"] <= res["n_trials"]
+
+
+def test_cscv_oos_prob_loss_and_degradation():
+    """CSCV extras: dominant strategy -> OOS prob loss ~0; degradation reported."""
+    rng = np.random.default_rng(14)
+    M = rng.normal(0.0, 0.5, size=(5, 24))
+    M[0, :] += 2.0
+    res = cscv_pbo(M, random_seed=42)
+    assert res["oos_prob_loss"] == 0.0
+    # degradation is a finite relative number (on small blocks it can be either
+    # sign by noise; the dominant trial must not be wiped out OOS)
+    assert math.isfinite(res["is_oos_degradation"])
+    assert res["is_oos_degradation"] > -0.5
+
+
+def test_run_analysis_reports_n_eff(synthetic_gbp_df):
+    from config.loader import load_config
+    cfg = load_config()
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df,
+                       variants={"current": {}, "tight": {"signal_grid": {"stop_mult": 2.0}},
+                                 "wide": {"signal_grid": {"stop_mult": 4.0}}, "null": None},
+                       historical_trials=729)
+    assert "n_eff" in res
+    assert res["n_eff"]["n_eff_historical"] > 0
+    assert res["n_eff"]["n_eff_historical"] <= 729
+    assert res["cscv"]["oos_prob_loss"] is not None
+    # every trial row carries the new DSR(N_eff) column
+    for t in res["trials"]:
+        assert "dsr_neff" in t

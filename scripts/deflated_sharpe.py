@@ -66,6 +66,7 @@ from backtest.deflated_sharpe import (
     deflated_sharpe_ratio,
     minimum_track_record_length,
     cscv_pbo,
+    effective_number_trials,
 )
 from model.ensemble_backtest import EnsembleBacktester
 from model.trainer import build_training_matrix, train_model, calibrate_model, save_model
@@ -280,7 +281,7 @@ def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
 
 def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
                      historical_trials: int, n_variants: int,
-                     trades_per_year: float) -> dict:
+                     trades_per_year: float, n_eff_historical: float) -> dict:
     """One row of the DSR report for a single config variant."""
     if not fold_trades:
         return {"variant": name, "n_trades": 0, "n_folds": n_folds, "pos_folds": 0,
@@ -305,6 +306,7 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
     sr = annualized_sharpe(arr)
     psr_0 = probabilistic_sharpe_ratio(arr, sr_benchmark=0.0)
     d_trials = deflated_sharpe_ratio(arr, n_trials=n_variants)
+    d_neff = deflated_sharpe_ratio(arr, n_trials=max(n_eff_historical, 1.0))
     d_hist = deflated_sharpe_ratio(arr, n_trials=historical_trials)
     mtrl = minimum_track_record_length(arr, n_trials=historical_trials)
 
@@ -323,6 +325,7 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
         "kurtosis_excess": round(float(d_trials["kurtosis_excess"]), 3),
         "psr_0": round(psr_0, 4),
         "dsr_trials": round(float(d_trials["dsr"]), 4),
+        "dsr_neff": round(float(d_neff["dsr"]), 4),
         "dsr_historical": round(float(d_hist["dsr"]), 4),
         "min_trl_trades": round(float(mtrl["min_trl_trades"]), 1),
         "min_trl_years": round(float(mtrl["min_trl_trades"] / trades_per_year), 2)
@@ -356,6 +359,7 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 
     fold_matrix = []
     trials = []
+    n_eff_historical = float(len(variants))
     for name, overrides in variants.items():
         cfg_v = _apply_variant(cfg, asset_key, overrides)
         fold_trades: list[np.ndarray] = []
@@ -377,10 +381,21 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         trades_per_year = n_total / years if years > 0 else 0.0
         trials.append(_summarize_trial(
             name, fold_trades, len(windows), historical_trials,
-            n_variants=len(variants), trades_per_year=trades_per_year))
+            n_variants=len(variants), trades_per_year=trades_per_year,
+            n_eff_historical=n_eff_historical))
         fold_matrix.append([float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades])
 
-    cscv = cscv_pbo(np.asarray(fold_matrix, dtype=float), n_splits=n_splits)
+    fold_arr = np.asarray(fold_matrix, dtype=float)
+    cscv = cscv_pbo(fold_arr, n_splits=n_splits)
+
+    # Effective number of trials: rho_bar from THIS family, extrapolated to the
+    # full historical trial count (audit: publish DSR at N_eff AND at full N).
+    n_eff_info = effective_number_trials(fold_arr)
+    mean_rho = n_eff_info.get("mean_rho")
+    if np.isfinite(mean_rho):
+        n_eff_historical = 1.0 + (historical_trials - 1.0) * (1.0 - mean_rho)
+    else:
+        n_eff_historical = float(historical_trials)
 
     # Record the effective config of the "current" variant for the report.
     cur_cfg = _apply_variant(cfg, asset_key, variants.get("current"))
@@ -395,6 +410,11 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         "years": round(years, 2),
         "n_trials": len(variants),
         "historical_trials": historical_trials,
+        "n_eff": {
+            "family_rho_bar": round(float(mean_rho), 4) if np.isfinite(mean_rho) else None,
+            "n_eff_historical": round(n_eff_historical, 2),
+            "family_participation_ratio": round(n_eff_info.get("participation_ratio", float("nan")), 2),
+        },
         "current_config": {
             "signal_grid": {k: v for k, v in sg.items()},
             "ensemble": {
@@ -433,16 +453,25 @@ def print_report(res: dict) -> None:
           f" | conf={cc['ensemble']['min_confidence_to_alert']} | "
           f"h={cc['labeling']['horizon_candles_n']}")
 
+    neff = res.get("n_eff", {})
+    rho = neff.get("family_rho_bar")
+    rho_s = f"{rho:.2f}" if rho is not None else "n/a"
+    print(f"Trial correlation: rho_bar={rho_s} -> N_eff({res['historical_trials']}) = "
+          f"{neff.get('n_eff_historical', 'n/a')} (participation ratio "
+          f"{neff.get('family_participation_ratio', 'n/a')})")
+
     dsr_label = f"DSR({res['historical_trials']})"
+    neff_label = f"DSR(Nef)"
     hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'WR%':>6}{'PF':>6}{'medPF':>7}"
            f"{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
-           f"{dsr_label:>9}{'MinTRL y':>9}{'+folds':>7}")
+           f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>7}")
     print(hdr)
     print("-" * len(hdr))
     for t in res["trials"]:
         print(f"{t['variant']:<14}{t['n_trades']:>6}{t['total_pnl']:>9.1f}"
               f"{t['win_rate']:>6.1f}{t['profit_factor']:>6.2f}{t['median_fold_pf']:>7.2f}"
               f"{t['sharpe']:>8.2f}{_fmt(t['psr_0'], 8):>8}{_fmt(t['dsr_trials'], 8):>8}"
+              f"{_fmt(t['dsr_neff'], 8):>8}"
               f"{_fmt(t['dsr_historical'], 9):>9}{_fmt(t['min_trl_years'], 9):>9}"
               f"{t['pos_folds']}/{t['n_folds']:>2}")
 
@@ -452,7 +481,8 @@ def print_report(res: dict) -> None:
           f"combinations={c['n_combinations']} (of {c['total_combinations']})")
     print(f"  PBO = {c['pbo']:.3f} | mean lambda = {c['mean_lambda']:+.3f} | "
           f"median lambda = {c['median_lambda']:+.3f} | frac lambda>0 = "
-          f"{c['frac_lambda_positive']:.3f}")
+          f"{c['frac_lambda_positive']:.3f} | OOS prob loss = {c['oos_prob_loss']:.3f} | "
+          f"IS->OOS degradation = {c['is_oos_degradation']:+.2%}")
     if c["pbo"] <= 0.20:
         verdict = "LOW overfit risk: the IS-best config usually wins OOS."
     elif c["pbo"] <= 0.40:

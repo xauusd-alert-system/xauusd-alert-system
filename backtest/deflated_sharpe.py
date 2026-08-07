@@ -187,6 +187,59 @@ def minimum_track_record_length(pnls, n_trials: int, prob: float = 0.95,
 
 
 # ---------------------------------------------------------------------------
+# Effective number of trials (N_eff) -- dependent-trial correction
+# ---------------------------------------------------------------------------
+
+def effective_number_trials(returns_matrix) -> dict:
+    """N_eff: the number of INDEPENDENT trials a family of correlated config
+    searches is equivalent to (quant audit 2026-08-07; Bailey & Lopez de Prado).
+
+        N_eff = 1 + (M - 1) * (1 - rho_bar)
+
+    where M is the number of trials and rho_bar the mean pairwise correlation
+    of their per-fold (or per-day) return streams. The eigenvalue
+    participation ratio PR = (sum lambda)^2 / sum(lambda^2) of the correlation
+    matrix is reported as a second, spectral estimate of the effective
+    dimension of the trial family.
+
+    With M=729 and rho_bar=0.95 the family behaves like ~37 independent
+    trials; with rho_bar=0.80 like ~147. Using the FULL M in DSR is then
+    overly harsh, using N_eff is the defensible middle -- the audit's rule:
+    publish DSR at BOTH.
+    """
+    M = np.asarray(returns_matrix, dtype=float)
+    if M.ndim != 2 or M.shape[0] < 2 or M.shape[1] < 2:
+        return {"n_trials": int(M.shape[0]) if M.ndim == 2 else 1,
+                "mean_rho": float("nan"), "n_eff": float(M.shape[0]) if M.ndim == 2 else 1,
+                "participation_ratio": float(M.shape[0]) if M.ndim == 2 else 1}
+    n_trials = int(M.shape[0])
+    # Pairwise correlation across observations (rows = trials, cols = folds/days).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        corr = np.corrcoef(M)
+    iu = np.triu_indices(n_trials, k=1)
+    rhos = corr[iu]
+    rhos = rhos[np.isfinite(rhos)]
+    if len(rhos) == 0:
+        mean_rho = 0.0
+    else:
+        mean_rho = float(np.clip(np.nanmean(rhos), 0.0, 1.0 - 1e-9))
+    n_eff = 1.0 + (n_trials - 1.0) * (1.0 - mean_rho)
+    # Participation ratio on the correlation matrix spectrum.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        eigvals = np.linalg.eigvalsh(np.nan_to_num(corr, nan=0.0))
+    eigvals = np.clip(eigvals, 0.0, None)
+    total = float(eigvals.sum())
+    if total > 0.0:
+        pr = float(total ** 2 / np.sum(eigvals ** 2))
+    else:
+        pr = 1.0
+    return {"n_trials": n_trials, "mean_rho": mean_rho, "n_eff": n_eff,
+            "participation_ratio": pr}
+
+
+# ---------------------------------------------------------------------------
 # CSCV -- Probability of Backtest Overfitting (Bailey et al. 2015)
 # ---------------------------------------------------------------------------
 
@@ -270,12 +323,18 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
         combos = [combos[i] for i in pick]
 
     lambdas: list[float] = []
+    oos_loss_flags: list[bool] = []
+    degradations: list[float] = []
     for sel in combos:
         is_cols = np.concatenate([blocks[b] for b in sel])
         oos_cols = np.concatenate([blocks[b] for b in range(n_splits) if b not in sel])
         is_perf = M[:, is_cols].mean(axis=1)
         oos_perf = M[:, oos_cols].mean(axis=1)
         n_star = int(np.argmax(is_perf))
+        # IS -> OOS degradation of the IS-best trial (relative, mean over splits).
+        if abs(is_perf[n_star]) > 1e-12:
+            degradations.append(float(oos_perf[n_star] / is_perf[n_star] - 1.0))
+        oos_loss_flags.append(bool(oos_perf[n_star] <= 0.0))
         # omega = fraction of trials whose OOS performance is <= the IS-best
         # trial's (the IS-best itself always counts, so omega >= 1/N).
         # omega == 1 means the IS-best is ALSO the OOS best -> lambda = +inf
@@ -292,6 +351,10 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
         "mean_lambda": float(np.mean(lambdas)),
         "median_lambda": float(np.median(lambdas)),
         "frac_lambda_positive": float(np.mean(lambdas > 0.0)),
+        # Audit scorecard: how often the IS-best config LOSES money OOS, and
+        # the mean relative IS->OOS degradation of its performance.
+        "oos_prob_loss": float(np.mean(oos_loss_flags)) if oos_loss_flags else float("nan"),
+        "is_oos_degradation": float(np.mean(degradations)) if degradations else float("nan"),
         "n_splits": int(n_splits),
         "n_combinations": int(len(lambdas)),
         "n_trials": int(n_trials),

@@ -29,6 +29,12 @@ class Trade:
     exit_price: Optional[float] = None
     exit_reason: Optional[str] = None
     pnl: Optional[float] = None
+    # Audit fields (exit-path profiling): which barriers were reached before
+    # the final exit, and the ORIGINAL stop distance (before any BE/trailing
+    # move), so net R = pnl / money(|entry - initial_stop|) can be computed.
+    tp1_hit: bool = False
+    tp2_hit: bool = False
+    initial_stop_price: Optional[float] = None
 
 
 class EnsembleBacktester:
@@ -133,6 +139,7 @@ class EnsembleBacktester:
                     tp1_price=tp1_price,
                     tp2_price=tp2_price,
                     tp3_price=tp3_price,
+                    initial_stop_price=stop_price,
                     session=str(sessions[i]),
                     regime_at_entry=str(regimes[i - 1]) if i > 0 else str(regimes[i]),
                     volume=self.volume,
@@ -245,6 +252,8 @@ class EnsembleBacktester:
                     open_position.exit_reason = exit_reason
                     open_position.swap = swap
                     open_position.pnl = accumulated_pnl
+                    open_position.tp1_hit = tp1_hit
+                    open_position.tp2_hit = tp2_hit
                     self.balance += accumulated_pnl
                     self.trades.append(open_position)
                     open_position = None

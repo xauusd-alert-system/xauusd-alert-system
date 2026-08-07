@@ -459,13 +459,22 @@ def test_run_simulation_imports_plain_mt5_module():
 def test_build_virtual_cfg_registers_mt5_symbol_names():
     """build_virtual_cfg must extend symbol_overrides with the MT5 symbol
     names from the main config (GOLD, SILVER, ...) so the trader's
-    validate_symbol(mt5_symbol) succeeds against the virtual terminal."""
+    validate_symbol(mt5_symbol) succeeds against the virtual terminal.
+
+    Shadow assets (XAGUSD `enabled: false` per the 2026-08-07 quant audit)
+    are intentionally NOT registered — the simulator mirrors the live symbol
+    set, so SILVER must be absent while the 4 live symbols are present.
+    """
     from scripts.run_simulation import build_virtual_cfg
     cfg = build_virtual_cfg()
     overrides = cfg["symbol_overrides"]
     assert "GOLD" in overrides
-    assert "SILVER" in overrides
     assert "BITCOIN" in overrides
+    assert "EURUSD" in overrides
+    assert "GBPUSD" in overrides
+    # Shadow asset: XAGUSD is disabled -> its MT5 symbol must not be tradable
+    assert "SILVER" not in overrides
+    assert "XAGUSD" not in overrides
     # MT5 name inherits the asset-key params (e.g. gold contract size 100).
     assert overrides["GOLD"].get("trade_contract_size") == overrides.get("XAUUSD", {}).get(
         "trade_contract_size", 100.0

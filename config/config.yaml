@@ -81,7 +81,14 @@ assets:
       step_max_points: 8.0
 
   XAGUSD:
-    enabled: true
+    # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).
+    # Rationale: PF_med ~0.91 (< 1), only 6/14 positive walk-forward folds —
+    # the positive aggregate PnL is concentrated in a few periods; combined
+    # with ~0.84 spot correlation to XAU the asset is not a diversifier.
+    # Research continues via explicit --asset scripts (run_backtest,
+    # deflated_sharpe, exit_profile); return to live only if outer-OOS shows
+    # dSharpe >= +0.10 vs the 4-asset portfolio or ES95/maxDD improves >= 10%.
+    enabled: false
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib

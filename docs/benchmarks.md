@@ -225,6 +225,52 @@ PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds; CSCV summary).
 > 0.95` (or at least clearly above `null`) AND `PBO ≤ 0.3`. XAGUSD (6/14
 > positive folds) and the two FX pairs are the first candidates to test.
 
+## 3d. Quant audit actions (2026-08-07)
+
+A third-party quant audit of the system (`docs` / transfer notes, 2026-08-07)
+re-prioritized the roadmap. Findings + actions taken this session:
+
+1. **Labeling directional bias (FIXED).** A bar touching BOTH barriers in one
+   candle was always labeled `-1` (short) in `labeling/label_generator.py` —
+   a systematic skew of training labels toward the lower barrier. With
+   OHLC-only data the intrabar order is unknowable, so the observation is now
+   EXCLUDED (NaN → dropped by `build_training_matrix`), per the audit's rule
+   «tick replay or exclude/zero-weight». `backtest/engine.py` already handled
+   its own same-bar double touch conservatively (stop first). +3 tests.
+2. **N_eff (IMPLEMENTED).** `effective_number_trials` in
+   `backtest/deflated_sharpe.py`: `N_eff = 1 + (M−1)(1−ρ̄)` with ρ̄ = mean
+   pairwise correlation of trial return streams + eigenvalue participation
+   ratio. `scripts/deflated_sharpe.py` now reports DSR at **N_eff** (ρ̄ from
+   the run's family, extrapolated to the historical trial count) AND at full
+   N=729 as stress. With ρ̄=0.95 → N_eff(729)≈37; ρ̄=0.90 → ≈74 (audit
+   examples). +3 tests.
+3. **CSCV scorecard (IMPLEMENTED).** `cscv_pbo` now also reports **OOS
+   probability of loss** of the IS-best config and its **IS→OOS relative
+   degradation**. Both printed in the CLI report. +1 test.
+4. **Exit-path contribution report (NEW TOOL).** `scripts/exit_profile.py`
+   runs the honest walk-forward for an asset and reports PnL contribution by
+   exit path (SL_pre_TP1 / BE_early / TP1_BE / TP1_SL / TP1_timeout /
+   TP2_exit / TP2_trailing / TP3 / timeout) per asset × regime, in money AND
+   net R (pnl ÷ money(|entry − initial_stop|)), plus the payoff geometry
+   (avg win/loss in R, breakeven WR). `Trade` gained audit fields
+   `tp1_hit`, `tp2_hit`, `initial_stop_price` (backward compatible).
+   This is the audit's «первый отчёт» for the payoff-asymmetry diagnosis
+   (WR 72–73% + PF≈1.06 ⇒ most wins end at TP1/BE, rare full SLs eat the
+   profit). +5 tests.
+5. **XAGUSD → shadow (DONE).** `assets.XAGUSD.enabled: false` — out of live
+   trading/retrain/overnight (all prod paths honor `enabled`); research via
+   explicit `--asset` scripts continues. Return gate per audit: ΔSharpe
+   ≥ +0.10 vs the 4-asset portfolio on outer-OOS, or ES95/maxDD −10%.
+6. **No new big grid / no LSTM (DECISION).** Audit: further TP/SL/BE grids
+   worsen selection bias; deep models on the same 46 tabular features are
+   unlikely to beat XGBoost. Next model work = meta-sizing (audit item 4)
+   on OOF predictions only, with Brier/calibration/decile-uplift gates.
+
+**Audit gates adopted for production:** DSR ≥ 0.95 (at defensible N_eff) AND
+PBO ≤ 0.10 → capital; PBO 0.10–0.20 → shadow/reduced size; > 0.20 → selection
+procedure considered overfit. Post-freeze shadow: 3–6 months of untouched
+live-forward data (≥100–150 trades per strategy) before promotion.
+
 ---
 
 ## 4. Change Log
@@ -250,3 +296,4 @@ PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds; CSCV summary).
 | 2026-08-07 | sync | **Master synced to the user-machine final state**: (1) `assets.GBPUSD` = FX v4 winner (stop 3.0, BE 1.0, tp2 2.5, tp3 3.0, conf 0.80, h36, model flags on) — replaces the v3 early-BE config that CUT GBP recoveries; (2) `scripts/run_backtest.py::strategy_fn_factory` now merges the per-asset `model` section (use_regime_feature / include_zero_class) so the GBP walk-forward trains the same 3-class + regime-feature model the live trader uses (was silently training the global binary model); (3) `scripts/diag_gbp_profile.py` real-data path scores the frame with the PRODUCTION model (was 0.5-default → zero trades → useless diagnostics); (4) `scripts/grid_search_gbp.py` — the leaky `_inject_ml_probs` (close.shift(-6) future bias → PF 6–30 / 27/27) is DELETED; every candidate is now scored by `run_backtest.strategy_fn_factory` (per-fold XGBoost, temp-file models, no look-ahead) as documented in the transfer notes; synthetic builder gained a `regime` column for the honest path; (5) v4b trailing test probe fixed (was touching the BE/trail stop on flat lows — impossible scenario). | Honesty + parity with the machine state: grid-search and backtest numbers now come from the same no-look-ahead machinery; diagnostics profile real model entries. Tests updated accordingly. | `250 passed` (0 regressions, 1 broken trailing test fixed) |
 | 2026-08-07 | mult | **Multiple-testing assessment tool (priority #1 of the transfer notes)**: new `backtest/deflated_sharpe.py` (PSR / DSR / E[max SR_N] / MinTRL per Bailey & López de Prado 2014; CSCV PBO per Bailey et al. 2015, full-enumeration with seeded sampling cap) + `scripts/deflated_sharpe.py` CLI: runs a per-asset config FAMILY (GBP: current-v4 / v3_early_be / v4a / v4b_trailing / legacy / null) through the honest walk-forward (same per-fold models for every variant), reports SR, PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds + CSCV PBO; `null` = random-prob negative control isolating the ML edge from grid+BE mechanics; synthetic no-DB fallback for tests. Outputs `logs/deflated_sharpe_<asset>.csv/.json`. | Answers «~700 grid combinations — is the winner real?» for every asset (esp. GBP v4 / EUR v3 / XAG). Run on the machine DB: `python -m scripts.deflated_sharpe --asset GBPUSD` (decision rule: dsr_historical ≥ 0.95 AND PBO ≤ 0.3). | `270 passed` (+20: 16 math/unit + 4 script integration) |
 | 2026-08-07 | fix | **Timestamp unit bug (pandas 3.x)**: `series.astype("int64") // 10**9` silently returns MILLISECONDS when the datetime resolution is µs (pandas 3.0 stores non-nano), so `data/ingestion.py::fetch_candles` (API backfill), `realtime/pipeline.py` (MT5 live frame) and every synthetic builder wrote timestamps ~1000× too small — new backfills would produce 0 walk-forward folds and mixed-unit DBs. Added resolution-independent `data/ingestion.to_epoch_seconds()` (timedelta arithmetic) and replaced all 8 call sites (ingestion, pipeline, grid_search, diag, deflated_sharpe, 3 test builders). | Correctness/ops: new backfills and live frames keep true epoch-seconds; regression test locks the behaviour and asserts the legacy idiom is still broken on this pandas (so a future resolution change cannot silently pass). | `271 passed` (+1 regression) |
+| 2026-08-07 | audit | **Quant-audit findings implemented** (3rd-party audit, transfer notes): (1) **labeling bias FIXED** — a same-candle touch of both barriers was hard-coded `-1` (short) in both label generators; now excluded as NaN (OHLC cannot order intrabar touches; audit rule: tick replay or exclude). (2) **N_eff added** (`effective_number_trials`: N_eff = 1+(M−1)(1−ρ̄) + participation ratio); `scripts/deflated_sharpe.py` reports DSR at N_eff AND full N=729, CLI prints ρ̄/N_eff. (3) **CSCV scorecard extended** with OOS probability of loss and IS→OOS degradation of the IS-best config. (4) **New `scripts/exit_profile.py`**: exit-path contribution per asset×regime in money + net R, payoff geometry (avg win/loss R, breakeven WR); `Trade` gained `tp1_hit`/`tp2_hit`/`initial_stop_price` audit fields. (5) **XAGUSD → shadow** (`enabled: false`; all prod paths honor it; research scripts take `--asset` explicitly). (6) Decisions: no new TP/SL/BE grids, no LSTM/Transformer on 46 tabular features; next = meta-sizing on OOF predictions. | Honesty/risk: removes a systematic short bias from training labels; selection-adjusted DSR at defensible N_eff; payoff asymmetry now visible per path; XAG capital parked until outer-OOS return gate. | `283 passed` (was 271; +12: 3 label-bias, 3 N_eff, 1 CSCV, 1 run-analysis, 5 exit-profile incl. main) |
