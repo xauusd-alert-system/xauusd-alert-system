@@ -300,6 +300,7 @@ class MultiAssetMT5Trader:
                     self._close_partial_position(pos, tick.bid, pos.volume, "TP3 (20%)")
 
                 # v4b TRAILING after TP2 (only if trailing_atr_mult set and not yet trailed)
+                trailing_mult = self.trailing_atr_mult_by_symbol.get(symbol)
                 if trailing_mult is not None and tp1_hit and tp2_hit and not trade_data.get("trailing_active", False):
                     try:
                         atr_now = 0.0  # would need real ATR fetch; use a rough 1% of price for live safety
