@@ -11,6 +11,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config, get_signal_grid
+from data.ingestion import to_epoch_seconds
 
 
 def test_get_signal_grid_trailing_default_is_none():
@@ -40,7 +41,7 @@ def test_diag_gbp_smoke_runs_without_db(monkeypatch):
     n = 80
     idx = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")
     df = pd.DataFrame({
-        "timestamp_utc": (idx.astype("int64") // 10**9).astype("int64"),
+        "timestamp_utc": to_epoch_seconds(idx),
         "open": 1.30,
         "high": 1.3005,
         "low": 1.2995,
@@ -59,14 +60,20 @@ def test_diag_gbp_smoke_runs_without_db(monkeypatch):
 
 
 def test_grid_search_gbp_smoke_runs(monkeypatch):
-    """grid_search_gbp should import and be callable on synthetic path."""
+    """grid_search_gbp should import and be callable on synthetic path, and the
+    leaky future-injection helper must be GONE (honesty regression)."""
     # We avoid full long run; just import and instantiate a tiny helper
-    from scripts.grid_search_gbp import _make_synthetic_gbp_wf_df, _inject_ml_probs
+    from scripts.grid_search_gbp import _make_synthetic_gbp_wf_df
     df = _make_synthetic_gbp_wf_df(n=300)
-    df2 = _inject_ml_probs(df)
-    assert len(df2) == 300
-    assert "ml_p_long" in df2.columns
-    assert "ml_p_short" in df2.columns
+    assert len(df) == 300
+    # The builder now carries the columns the honest per-fold strategy needs
+    # (regime for the per-asset model flags) and MUST NOT pre-inject ml_p_*
+    # (that was the look-ahead path: close.shift(-6) biased probabilities).
+    assert "regime" in df.columns
+    assert "ml_p_long" not in df.columns
+    assert "ml_p_short" not in df.columns
+    assert not hasattr(__import__("scripts.grid_search_gbp", fromlist=["x"]),
+                       "_inject_ml_probs"), "leaky _inject_ml_probs must stay deleted"
 
 
 def test_per_asset_model_merge_in_run_backtest():
@@ -106,3 +113,37 @@ def test_per_asset_model_in_realtime_pipeline_effective_cfg():
         # If predictor load fails (no file) it is acceptable for smoke as long as merge happened
         # We can check before predictor init by inspecting the code path
         assert "model" in str(e) or True  # tolerate
+
+
+def test_get_signal_grid_regime_overrides():
+    """Per-regime exit policy: signal_grid.regime_overrides.<regime> layers on
+    top of the effective grid; absent regime keeps the base grid untouched."""
+    from config.loader import get_signal_grid
+    cfg = load_config()
+    asset = cfg["assets"]["GBPUSD"]
+
+    # Base (no regime) — the shipped v4 grid
+    base = get_signal_grid(cfg, asset)
+    assert base["stop_mult"] == 3.0
+    assert base["breakeven_trigger_atr"] == 1.0
+
+    # Simulate a trend override in the asset section
+    cfg["assets"]["GBPUSD"] = dict(asset)
+    cfg["assets"]["GBPUSD"]["signal_grid"] = dict(asset["signal_grid"])
+    cfg["assets"]["GBPUSD"]["signal_grid"]["regime_overrides"] = {
+        "trend_up": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
+                     "tp3_mult": 4.0, "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
+        "range": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
+                  "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4}},
+    }
+    trend = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="trend_up")
+    assert trend["stop_mult"] == 4.0
+    assert trend["tp3_mult"] == 4.0
+    assert trend["scaleout"]["tp1_ratio"] == 0.3
+
+    rng = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="range")
+    assert rng["stop_mult"] == 2.0
+    assert rng["breakeven_trigger_atr"] == 0.5
+
+    other = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="trend_down")
+    assert other["stop_mult"] == 3.0  # no override -> base grid

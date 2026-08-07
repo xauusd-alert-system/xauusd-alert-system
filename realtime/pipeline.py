@@ -110,9 +110,12 @@ class RealtimePipeline:
             from data.mt5_provider import fetch_closed_candles
             raw = fetch_closed_candles(symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles)
             
-            # Приводим метку времени к единому формату UTC epoch seconds
+            # Приводим метку времени к единому формату UTC epoch seconds.
+            # Resolution-independent (pandas 3.x stores datetimes at µs, so the
+            # legacy `astype("int64") // 10**9` would return milliseconds).
             if "timestamp_utc" not in raw.columns:
-                raw["timestamp_utc"] = (raw["timestamp"].astype("int64") // 10**9)
+                from data.ingestion import to_epoch_seconds
+                raw["timestamp_utc"] = to_epoch_seconds(raw["timestamp"])
                 
             df = tag_dataframe(raw, self.cfg["sessions"])
             return df
@@ -202,7 +205,10 @@ class RealtimePipeline:
 
         # Equal-step grid spec (config `signal_grid`): step = step_points or
         # 1.0*ATR (clamped), TP1/2/3 = entry ± 1/2/3*step, SL = entry ∓ 3*step.
-        grid_cfg = get_signal_grid(self.cfg, self.asset_cfg)
+        # Per-regime exit policy (signal_grid.regime_overrides) is resolved at
+        # signal time so the LIVE targets match the backtest engine.
+        reg_name = regime.value if isinstance(regime, RegimeLabel) else str(regime)
+        grid_cfg = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
         step = resolve_signal_step(atr_val, grid_cfg)
         tp1_mult = float(grid_cfg.get("tp1_mult", 1.0))
         tp2_mult = float(grid_cfg.get("tp2_mult", 2.0))

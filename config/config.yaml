@@ -79,9 +79,24 @@ assets:
     signal_grid:
       step_min_points: 2.0
       step_max_points: 8.0
+    # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
+    # M5 -> M15 if cost_ratio > 15% on the real DB (measure first:
+    #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M5
+    #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M15
+    # cost_ratio = (spread + 2*slippage + commission_price) / mean_step;
+    # norm < 8-10%, red zone > 15%. Step scales ~sqrt(3) while costs are
+    # fixed, so net expectancy multiplies. Everything else stays frozen.
+    # timeframe: M15
 
   XAGUSD:
-    enabled: true
+    # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).
+    # Rationale: PF_med ~0.91 (< 1), only 6/14 positive walk-forward folds —
+    # the positive aggregate PnL is concentrated in a few periods; combined
+    # with ~0.84 spot correlation to XAU the asset is not a diversifier.
+    # Research continues via explicit --asset scripts (run_backtest,
+    # deflated_sharpe, exit_profile); return to live only if outer-OOS shows
+    # dSharpe >= +0.10 vs the 4-asset portfolio or ES95/maxDD improves >= 10%.
+    enabled: false
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
@@ -135,6 +150,11 @@ assets:
     signal_grid:
       step_min_points: 200.0
       step_max_points: 3000.0
+    # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
+    # M5 -> M15 if cost_ratio > 15% on the real DB (measure first with
+    #   python -m scripts.diag_r_metrics --asset BTCUSD --timeframe M5|M15
+    # norm < 8-10%, red zone > 15%. Everything else stays frozen.
+    # timeframe: M15
 
   EURUSD:
     # FX v3: H1 + early breakeven (0.5 step) + tighter stop (2.0 step) to cut
@@ -176,9 +196,14 @@ assets:
       breakeven_trigger_atr: 0.5
 
   GBPUSD:
-    # FX v4 (trend-friendly): wider stops, later/no early BE, higher TP3, trailing option.
-    # v3 (early BE) was for mean-reverting EUR; GBP is trending.
-    # Diagnostics + grid-search (protected from overfit) recommended before enabling.
+    # FX v4 (trend-friendly) — FINAL GBPUSD config, result of the protected
+    # grid-search (docs/GBP_FIX_STRATEGY.md). v3's early-BE package (BE 0.5,
+    # stop 2.0) was tuned for mean-reverting EUR and CUT GBP's recoveries
+    # (PF ~0.84). GBP is trending: give it room to run — wide stop (3.0), NO
+    # early BE (BE only at TP1), further TP2 (2.5) and TP3 (3.0), lower conf
+    # bar (0.80), horizon 36. Walk-forward 2022-26 (24 folds, honest):
+    # PF_med 2.42, total PnL +138, 17/24 positive folds (see docs/benchmarks.md
+    # §3 "FX v4"). Diagnostics: python -m scripts.diag_gbp_profile
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
@@ -191,13 +216,13 @@ assets:
     # unit. See XAGUSD comment for why this must be a per-asset override.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.85
+      min_confidence_to_alert: 0.80
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
     labeling:
-      horizon_candles_n: 48
+      horizon_candles_n: 36
       target_atr_multiplier: 1.2
       stop_atr_multiplier: 1.0
       atr_column: atr
@@ -207,23 +232,44 @@ assets:
     signal_grid:
       step_min_points: 0.0005
       step_max_points: 0.006
-      stop_mult: 2.0
-      breakeven_trigger_atr: 0.5
+      stop_mult: 3.0
+      breakeven_trigger_atr: 1.0
+      tp2_mult: 2.5
+      tp3_mult: 3.0
     # Stage 4: per-asset model flags (use_regime_feature / include_zero_class)
     model:
       use_regime_feature: true
       include_zero_class: true
-    # v4a candidate (pure config, only for GBPUSD)
-    # signal_grid:
-    #   stop_mult: 3.0
-    #   breakeven_trigger_atr: 1.0
-    #   tp2_mult: 2.5
-    #   tp3_mult: 4.0
-    # v4b trailing (also requires code path in ensemble_backtest + mt5_trader)
+    # v4b trailing candidate (code path implemented in ensemble_backtest +
+    # mt5_trader; NOT enabled): after TP1+TP2 the 20% remainder is trailed at
+    # trailing*ATR instead of the fixed TP3.
     # signal_grid:
     #   trailing_atr_mult: 2.0
     #   stop_mult: 3.0
     #   breakeven_trigger_atr: 1.0
+    # Per-regime exit policy (audit action 4, PRE-REGISTERED, NOT enabled):
+    # the audit's law — trend regimes run WIDE (no early BE, far targets,
+    # back-loaded scaleout 30/30/40), range regimes manage FAST (early BE,
+    # tight stop, front-loaded 60/40). Values below are placeholders to be
+    # calibrated from MFE/MAE (scripts/exit_calibration.py) on the real DB.
+    # signal_grid:
+    #   regime_overrides:
+    #     trend_up:
+    #       stop_mult: 4.0
+    #       breakeven_trigger_atr: 1.0
+    #       tp2_mult: 2.5
+    #       tp3_mult: 4.0
+    #       scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
+    #     trend_down:
+    #       stop_mult: 4.0
+    #       breakeven_trigger_atr: 1.0
+    #       tp2_mult: 2.5
+    #       tp3_mult: 4.0
+    #       scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
+    #     range:
+    #       stop_mult: 2.0
+    #       breakeven_trigger_atr: 0.5
+    #       scaleout: {tp1_ratio: 0.6, tp2_ratio: 0.4}
 
 alerts:
   cooldown_minutes: 15
@@ -373,6 +419,42 @@ deploy_guard:
   tolerance: 0.0
   # Sidecar name used by --backup / --check.
   backup_suffix: ".deploy_guard.bak"
+
+# ===== RISK ENGINE (quant audit 2026-08-07, Claude plan Q6) =====
+# Pre-trade stop-risk sizing + exposure caps (priority 1), drawdown throttle
+# (priority 3). DEFAULT OFF: enabling changes live order sizes, so it is a
+# separate, audited step (execution/risk_sizer.py implements the math).
+risk:
+  enabled: false
+  # fraction of equity risked per trade on a full stop-out (audit: 0.002-0.0025)
+  risk_per_trade_pct: 0.0025
+  # correlated-cluster stop-risk cap (fraction of equity)
+  cluster_risk_cap: 0.004
+  total_open_risk_cap: 0.0075
+  # portfolio vol target (annualized) + leverage clip for vol targeting
+  vol_target: 0.10
+  leverage_lo: 0.5
+  leverage_hi: 1.25
+  # new same-direction signal in an exposed cluster -> size multiplier
+  same_direction_multiplier: 0.35
+  # drawdown throttle from high-water mark (fraction, multiplier)
+  drawdown_throttle:
+    - [-0.04, 0.75]
+    - [-0.06, 0.50]
+    - [-0.08, 0.0]
+  min_lot: 0.01
+
+# ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====
+# A reserved period that RESEARCH must never look at. When enabled, every
+# walk-forward runner (run_backtest / deflated_sharpe / grid_search) refuses
+# to run if any of its test windows overlaps this range unless --allow-locked
+# is passed (which burns the lock). Set it to the most recent ~12 months once
+# the current research round is frozen; inspect it ONE time before deploy.
+validation:
+  locked_holdout:
+    enabled: false
+    start: null        # e.g. "2025-06-01" (ISO date)
+    end: null          # e.g. "2026-08-07"
 
 # ===== CORRELATION FILTER (динамический) =====
 correlation_filter:

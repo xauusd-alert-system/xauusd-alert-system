@@ -34,7 +34,13 @@ def generate_labels(df: pd.DataFrame, target_x: float, stop_y: float, horizon_n:
             hit_upper = highs[j] >= upper_barrier
             hit_lower = lows[j] <= lower_barrier
             if hit_upper and hit_lower:
-                outcome = -1
+                # Same-candle touch of BOTH barriers: with OHLC-only data the
+                # intrabar order is unknowable (no tick replay). Labeling it
+                # either direction is a SYSTEMATIC bias — this code used to
+                # always emit -1 (short), silently skewing training labels
+                # toward the lower barrier. Per the quant audit: ambiguous
+                # observations are excluded (NaN) instead.
+                outcome = np.nan
                 break
             elif hit_upper:
                 outcome = 1
@@ -85,7 +91,13 @@ def generate_labels_atr_scaled(
             hit_upper = highs[j] >= upper_barrier
             hit_lower = lows[j] <= lower_barrier
             if hit_upper and hit_lower:
-                outcome = -1
+                # Same-candle touch of BOTH barriers: with OHLC-only data the
+                # intrabar order is unknowable (no tick replay). Labeling it
+                # either direction is a SYSTEMATIC bias — this code used to
+                # always emit -1 (short), silently skewing training labels
+                # toward the lower barrier. Per the quant audit: ambiguous
+                # observations are excluded (NaN) instead.
+                outcome = np.nan
                 break
             elif hit_upper:
                 outcome = 1

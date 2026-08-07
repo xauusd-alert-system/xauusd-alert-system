@@ -157,6 +157,267 @@ Sum `total_pnl` across folds = **−3,438.10**; positive-PnL folds = **0/42**.
 
 ---
 
+## 3b. FX v4 session — final per-asset configs (2022–2026 walk-forward)
+
+Recorded from the FX v3/v4 sessions on the user's real DB
+(`python -m scripts.run_backtest --asset <ASSET>`, honest per-fold XGBoost,
+lot 0.01, real spread/slippage/commission per asset). These are the CURRENT
+shipped configs in `config/config.yaml`.
+
+| Asset | TF | Config | exp | PF (мед) | total PnL | WR | плюс. фолды |
+|-------|----|--------|----:|---------:|----------:|----:|----:|
+| XAUUSD | M5 | стандарт (1/2/3, SL 3) | +0.10 | ~1.07 | +90 | 47% | 19/41 |
+| BTCUSD | M5 | стандарт | +0.09 | ~1.06 | +151 | 73% | 24/42 |
+| XAGUSD | M15 | стандарт | +0.84 | 0.91 | +58 | 65% | 6/14 |
+| EURUSD | H1 | v3: BE=0.5, stop=2.0, conf 0.85, h48 | +0.08 | 1.19 | +30 | 35% | 17/26 |
+| GBPUSD | H1 | v4: stop=3.0, BE=1.0, tp2=2.5, tp3=3.0, conf 0.80, h36 + model flags | +0.12 | 2.42 | +138 | 36% | 17/24 |
+
+Key facts behind these numbers (see `docs/GBP_FIX_STRATEGY.md`, `docs/FX_V3.md`):
+
+- **Costs decide the timeframe.** M5 FX round-trip cost ≈ 98% of the TP1 step;
+  M15/H1 widen the grid so costs eat far less of the target.
+- **Early breakeven is per-asset.** `breakeven_trigger_atr: 0.5` helps
+  mean-reverting EUR (PF 1.19), HURTS trending GBP (PF 0.84 → removed → 2.42).
+  GBP gets room: wide stop (3.0), BE only at TP1, TP2 2.5 / TP3 3.0.
+- **Entry-quality filters (conf 0.92 / EV gate / hard veto) gave no edge** and
+  were reverted for FX (inherited global defaults).
+- XAGUSD PF(мед) < 1 with total PnL > 0: 6/14 positive folds, median fold PF
+  dragged by a few bad folds — the weakest asset; monitor after DSR/CSCV.
+
+> ⚠️ These rows were recorded in the closed sandbox session; **re-run the same
+> commands on the machine DB before acting on them** (configs are now synced to
+> master, so numbers must match).
+
+## 3c. Multiple-testing risk: Deflated Sharpe / CSCV (2026-08-07)
+
+The grid-searches tried ~700 hyper-parameter combinations on the same
+walk-forward folds — every headline number above is the BEST of many draws.
+Selection bias is NOT captured by the metrics tables. The new tool:
+
+    python -m scripts.deflated_sharpe --asset GBPUSD            # full family
+    python -m scripts.deflated_sharpe --asset EURUSD --historical-trials 200
+    python -m scripts.deflated_sharpe --asset XAUUSD --variants current,wide,null
+
+What it computes (math in `backtest/deflated_sharpe.py`, tests in
+`scripts/tests/test_deflated_sharpe.py`):
+
+- **DSR** = probability that the config's true per-trade Sharpe > 0 after
+  deflating by the expected max Sharpe under N trials (Bailey & López de Prado
+  2014), with skew/kurtosis correction. `dsr_trials` uses only the family in
+  the run; `dsr_historical` uses `--historical-trials` (default 729 = the
+  project's total search history). Correlated trials make the full count
+  conservative — the honest direction.
+- **MinTRL** = trades needed before the edge can be told apart from the
+  best-of-N null (also in years).
+- **CSCV PBO** = probability the in-sample-best config is in the bottom half
+  out-of-sample across all half-block splits of the fold-return matrix
+  (Bailey et al. 2015). PBO ≤ 0.2–0.3 with positive mean λ is the healthy
+  regime; PBO > 0.5 means the selection process is overfitting.
+- A **`null` variant** (random 0.5±0.05 probabilities, same rules/grid/session
+  filters) is always included as a negative control: it isolates the ML
+  contribution from the grid+BE mechanics. If `current` and `null` both show
+  DSR ≥ 0.95, the edge lives in the exit mechanics, not the model.
+
+Output: `logs/deflated_sharpe_<asset>.csv` + `.json` (per-trial rows: SR,
+PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds; CSCV summary).
+
+> **Decision rule for each asset:** keep the config only if `dsr_historical ≥
+> 0.95` (or at least clearly above `null`) AND `PBO ≤ 0.3`. XAGUSD (6/14
+> positive folds) and the two FX pairs are the first candidates to test.
+
+## 3d. Quant audit actions (2026-08-07)
+
+A third-party quant audit of the system (`docs` / transfer notes, 2026-08-07)
+re-prioritized the roadmap. Findings + actions taken this session:
+
+1. **Labeling directional bias (FIXED).** A bar touching BOTH barriers in one
+   candle was always labeled `-1` (short) in `labeling/label_generator.py` —
+   a systematic skew of training labels toward the lower barrier. With
+   OHLC-only data the intrabar order is unknowable, so the observation is now
+   EXCLUDED (NaN → dropped by `build_training_matrix`), per the audit's rule
+   «tick replay or exclude/zero-weight». `backtest/engine.py` already handled
+   its own same-bar double touch conservatively (stop first). +3 tests.
+2. **N_eff (IMPLEMENTED).** `effective_number_trials` in
+   `backtest/deflated_sharpe.py`: `N_eff = 1 + (M−1)(1−ρ̄)` with ρ̄ = mean
+   pairwise correlation of trial return streams + eigenvalue participation
+   ratio. `scripts/deflated_sharpe.py` now reports DSR at **N_eff** (ρ̄ from
+   the run's family, extrapolated to the historical trial count) AND at full
+   N=729 as stress. With ρ̄=0.95 → N_eff(729)≈37; ρ̄=0.90 → ≈74 (audit
+   examples). +3 tests.
+3. **CSCV scorecard (IMPLEMENTED).** `cscv_pbo` now also reports **OOS
+   probability of loss** of the IS-best config and its **IS→OOS relative
+   degradation**. Both printed in the CLI report. +1 test.
+4. **Exit-path contribution report (NEW TOOL).** `scripts/exit_profile.py`
+   runs the honest walk-forward for an asset and reports PnL contribution by
+   exit path (SL_pre_TP1 / BE_early / TP1_BE / TP1_SL / TP1_timeout /
+   TP2_exit / TP2_trailing / TP3 / timeout) per asset × regime, in money AND
+   net R (pnl ÷ money(|entry − initial_stop|)), plus the payoff geometry
+   (avg win/loss in R, breakeven WR). `Trade` gained audit fields
+   `tp1_hit`, `tp2_hit`, `initial_stop_price` (backward compatible).
+   This is the audit's «первый отчёт» for the payoff-asymmetry diagnosis
+   (WR 72–73% + PF≈1.06 ⇒ most wins end at TP1/BE, rare full SLs eat the
+   profit). +5 tests.
+5. **XAGUSD → shadow (DONE).** `assets.XAGUSD.enabled: false` — out of live
+   trading/retrain/overnight (all prod paths honor `enabled`); research via
+   explicit `--asset` scripts continues. Return gate per audit: ΔSharpe
+   ≥ +0.10 vs the 4-asset portfolio on outer-OOS, or ES95/maxDD −10%.
+6. **No new big grid / no LSTM (DECISION).** Audit: further TP/SL/BE grids
+   worsen selection bias; deep models on the same 46 tabular features are
+   unlikely to beat XGBoost. Next model work = meta-sizing (audit item 4)
+   on OOF predictions only, with Brier/calibration/decile-uplift gates.
+
+**Audit gates adopted for production:** DSR ≥ 0.95 (at defensible N_eff) AND
+PBO ≤ 0.10 → capital; PBO 0.10–0.20 → shadow/reduced size; > 0.20 → selection
+procedure considered overfit. Post-freeze shadow: 3–6 months of untouched
+live-forward data (≥100–150 trades per strategy) before promotion.
+
+## 3e. Second quant audit (Claude 5 Opus) — applied 2026-08-07
+
+The two model answers were compared; Claude 5 Opus's plan was selected (more
+operational: exact formulas, numeric gates, week-by-week work order). What was
+implemented this session:
+
+1. **R-multiplicator metrology** (`backtest/metrics.py`): `trades_to_dataframe`
+   now carries `entry_price` / `initial_stop_price` / `tp1_price` / `volume`;
+   `compute_r_metrics` gives E[R], σ[R], skew/kurtosis of R, payoff geometry
+   (avg win/loss in R, breakeven WR) and the exit-bucket table (count, share,
+   mean R, R contribution). `block_bootstrap_t` (block = holding horizon),
+   `fold_sign_test` (exact binomial, one-sided), `summarize_folds` with the
+   **arithmetic-consistency check** (audit 0.1: median PF > 1 requires ≥ 50%
+   positive VALID folds; empty folds must not pollute one statistic only).
+   `scripts/run_backtest.py` prints the fold summary + sign test + consistency
+   warning on every run (also saved to `logs/backtest_<asset>_fold_summary.csv`).
+2. **Detectability framing adopted**: with σ(R) ≈ 0.35–0.45 the grid's R cap
+   (+0.567 / −1.0) means 600–1500 trades can only resolve E[R] ≥ 0.04–0.05
+   (PF ≈ 1.20–1.30). XAU/BTC PF 1.06–1.07 are below the detection threshold —
+   the goal is PF ≥ 1.2 or "unmeasurable", not more validation.
+3. **Decision gate** (`scripts.deflated_sharpe.py::decision_gate`, printed in
+   every report): block-bootstrap t ≥ 3.0, DSR(N_eff) > 0.95, PBO < 0.30,
+   PF > 1.1 at 1.5× costs, positive folds ≥ 55% of valid, IS→OOS slope ≥ 0.5,
+   locked hold-out (organizational). All conditions simultaneously, else
+   paper/shadow. **Cost stress**: `run_analysis` reruns the current config at
+   1.5× spread/slippage/commission and reports PF under stress.
+4. **CSCV slope**: `cscv_pbo` now also returns `is_oos_slope` (pooled OOS-SR on
+   IS-SR regression across splits; ≥ 0.5 = informative, ~0/negative = overfit).
+5. **Week-1 measurements** (`scripts/diag_r_metrics.py`): per asset, honest
+   walk-forward → R metrics + buckets, `cost_ratio` = (spread + 2·slippage +
+   commission_in_price) / mean_step with the audit's zones (norm < 8–10%,
+   red > 15%), events-per-feature (audit rule ≥ 10; EUR H1 ≈ 120 events / 46
+   features ≈ 2.6 → over-parameterized), MFE/MAE in steps over the horizon per
+   regime — P(MFE ≥ 1/2/3/5) and MAE p50/p80/p90 — as the calibration input for
+   exit geometry (Action 4; no barrier tuned here, only measured), fold sign
+   test. Outputs `logs/diag_r_metrics_<asset>.csv/.json`.
+6. **Pre-registered TF hypotheses** (commented in `config/config.yaml` for
+   XAUUSD/BTCUSD): M5 → M15 ONLY if the real-DB `cost_ratio > 15%` (measure
+   with the diag script on both TFs first). Config not flipped without
+   measurement, per the audit's own rule; XAG stays shadow.
+7. **Decisions confirmed**: no new grids (each trial lowers DSR of everything
+   found), no LSTM/Transformer on 46 tabular features (10²–10³ events per fold
+   vs 10⁵+ needed), meta-labeling only as continuous sizing AFTER an asset
+   passes the gate (target label «TP2 before SL», AUC ≥ 0.55 pre-check, meta
+   features must be NEW information: strategy state, cross-asset z, IV state).
+
+**Where improvement is unlikely (audit §3, adopted):** more features from the
+same OHLCV; LSTM/Transformer; another TP/SL/BE grid; saving XAG; CVD from MT5
+tick volume as alpha; COT as intraday entry; explicit vol targeting on top of
+ATR stops; lot scaling as "making the system profitable".
+
+## 3f. Week-1 measurements + exit geometry + org measures (2026-08-07, continued)
+
+Continued the Claude plan past the metrology core:
+
+1. **Look-ahead check at entry** (`scripts/diag_entry_timing.py`): runs the
+   honest walk-forward under `next_open` (honest) vs `signal_close`
+   (look-ahead measurement; `EnsembleBacktester.fill_mode`). Reports E[R]/PF/
+   t_block per mode plus the close→next-open gap in ATR (the size of the
+   look-ahead advantage). Verdict: honest fill must keep ≥ 70% of the
+   look-ahead edge, else part of the result is look-ahead.
+2. **Queue-loss measurement** (`scripts/diag_r_metrics.py` + engine
+   `rejected_signals` / `simulate_blocked_entry`): signals rejected by the
+   one-position-at-a-time constraint are simulated through the engine's own
+   exit logic (forced entry at next open, `max_trades=1`). If E[R] of
+   rejected ≥ E[R] of taken, the constraint itself destroys the edge → the
+   audit's recommendation (2 half-size positions per asset once the
+   portfolio layer exists) applies.
+3. **Trial journal** (`scripts/trial_journal.py`): append-only
+   `logs/trial_journal.csv`; `run_backtest`, every `grid_search_gbp` combo and
+   `deflated_sharpe` log automatically. DSR's deflation N now defaults to the
+   journal's real trial count (floor 729) — the project's true history
+   includes the conf/EV/divergence/TF/BE experiments, not just the last grid.
+4. **Locked hold-out guard**: `validation.locked_holdout` in config; every
+   walk-forward runner refuses to run when its test windows overlap the
+   reserved period unless `--allow-locked` (which burns the lock).
+5. **Per-regime exit policy (engine + live)**: `signal_grid.regime_overrides`
+   resolved by `get_signal_grid(cfg, asset_cfg, regime=...)` and honored by
+   `EnsembleBacktester` (per-trade stop/TP/BE/trailing), the realtime
+   pipeline (live targets → mt5_trader parity) and the EV gate. Per-regime
+   scaleout ratios (e.g. 30/30/40 trend, 60/40/0 range) replace the hard
+   50/30/20. Default config unchanged (bit-identical legacy behavior).
+   Pre-registered (commented) trend/range policies in `config/config.yaml`
+   for GBP.
+6. **Exit-geometry calibration** (`scripts/exit_calibration.py`): SL/TP1/TP2
+   and trailing-vs-TP3 from MFE/MAE per regime, calibrated on TRAIN windows
+   only (never OOS). The grid-search alternative that does not burn trials.
+   Values are proposals; applying them is a separate pre-registered step.
+
+**Week-1 measurements produced on synthetic data** (numbers NOT real):
+GBP cost_ratio 44% (RED zone — the audit's M5-cost concern), σ[R] 0.35,
+skew(R) −1.37 (audit's negative-asymmetry geometry), queue loss shows
+rejected E[R] ≥ taken E[R], honest fill keeps ~80% of the look-ahead edge.
+
+## 3g. Final audit batch (2026-08-07) — everything else from the Claude plan
+
+Closed out the remaining plan items so the repo is fully equipped before the
+user runs the measurements on the real DB:
+
+1. **Fractional differencing** (`features/fractional_diff.py`): frac_diff with
+   weight truncation + min-d ADF search (Lopez de Prado ch.5) — the cheap
+   capacity boost recommended instead of DL. Not enabled by default.
+2. **Purged CV + uniqueness** (`model/cv.py`, `model/uniqueness.py`):
+   `purged_kfold_indices` (time-ordered K-fold with purge of overlapping label
+   windows + embargo) and `average_uniqueness_weights` (overlapping-label
+   weights, optional exp freshness decay). `train_model` accepts
+   `sample_weight`; `build_training_matrix` honors `model.feature_subset`
+   (subset saved into the model bundle, inference unchanged).
+3. **Feature selection** (`scripts/feature_selection.py`): MDA (mean decrease
+   accuracy) on purged CV — NOT `feature_importances_` — with greedy
+   clustering of |rho|>=threshold features and a suggested 12-15 subset;
+   prints the per-asset `model.feature_subset` config line.
+4. **Meta-labeling pre-check** (`scripts/diag_meta_precheck.py`): honest
+   walk-forward OOF primary-probability vs «TP2 before SL» → AUC, Brier/ECE,
+   decile net-R table + Spearman monotonicity. Audit verdict: AUC < 0.53 no,
+   0.53-0.55 borderline, >= 0.55 sizing may add value (Brier>0, slope
+   0.8-1.2, monotone deciles, >=60% outer folds, DSR not worse).
+5. **Tier-1 event tail** (`scripts/diag_event_tail.py`): worst-5% R trades vs
+   minutes-to-nearest-event buckets (±30m verdict ≥30% → hard block).
+   Reuses `data/news_filter.fetch_economic_calendar`; `--calendar CSV` or
+   `--synthetic-calendar` fallbacks.
+6. **Time-stop curve** (`scripts/diag_time_stop.py`): E[net R | held >= h]
+   with bootstrap CI; first h with non-positive conditional expectancy =
+   suggested time-stop.
+7. **Portfolio layer** (`backtest/portfolio.py` + `scripts/portfolio.py`):
+   daily net-R matrix from walk-forward trades, STRATEGY correlation (not
+   spot), ENB from the correlation spectrum, cluster risk parity
+   (metals/fx/crypto = 1/3 each), scheme comparison equal/inverse-vol/risk
+   parity/cluster-parity with and without XAG, kill-switch thresholds from
+   the backtest distribution (2σ daily / 3σ weekly).
+8. **Risk engine** (`execution/risk_sizer.py` + `risk:` config block, OFF by
+   default): per-trade risk from the portfolio vol target, lot sizing with
+   skip-below-min-lot (never round up), cluster exposure caps (0.40% /
+   0.75%), same-direction cluster penalty 0.35, drawdown throttle
+   (−4%: 0.75 / −6%: 0.50 / −8%: 0.0), vol-target leverage clip.
+9. **Limit-entry mode** (`EnsembleBacktester.fill_mode="limit"`): fill at
+   signal_close ± 0.25×step intrabar with a timeout — the audit's Q4b
+   measurement (fill rate + E[R] of filled vs missed).
+10. **Pre-registered exit-policy variants** in `deflated_sharpe`:
+    `regime_wide` (trend→wide/late + 30/30/40 scaleout, range→fast/60/40)
+    and `regime_fast` (early BE everywhere) — compare vs `current` with the
+    same honest walk-forward, no new grid.
+11. **Profit concentration** in `compute_r_metrics`: share of total R from
+    the best 5%/1% trades (audit Q7: >50% from top-5% = tail edge).
+
+---
+
 ## 4. Change Log
 
 | Date (UTC) | Phase | Change | Impact | Test status |
@@ -177,3 +438,10 @@ Sum `total_pnl` across folds = **−3,438.10**; positive-PnL folds = **0/42**.
 | 2026-08-06 | FX v3 | **FX v3 (exit-mechanics package)**
 | 2026-08-06 | FX v4 / GBP fix | **GBPUSD FX v4 «развернуть подход» (трендовый)**: Диагностика + grid-search с защитой от переобучения + трендовые конфиги (v4a/v4b/v4c) + per-asset  флаги. - : H1 + order-flow, , exit dist + "цена раннего БУ" + стоп-хант доля. - : 2-stage (coarse 27 + fine), критерии: median PF >1 + pos folds + ≥10 trades/fold + deferred last-6-folds ≥4/6. - v4a (config): stop=3.0, BE=1.0, tp2=2.5, tp3=4.0. - v4b (code):  (loader + ensemble_backtest + mt5_trader) — остаток 20% после TP2 трейлится. - v4c (config): H4 + horizon=24. - Per-asset model:  +  + retrain support. - GBPUSD config updated (комменты +  + примеры v4). - Новые тесты: trailing exit, per-asset model merge, smoke diag/grid. XAU/XAG/BTC/EUR не тронуты. Глобальные секции без изменений. | Диагностика + защищённый поиск трендовых конфигов для GBP. Реальные результаты — после прогона пользователя (, , ). См. . Критерий успеха: exp>0, med PF>1, ≥10/24 pos folds, ≥4/6 на 2024-26. |  |
 : the var-2 entry filters (0.92 / EV 0.10 / hard veto) did NOT move the needle (EUR exp −0.26 / PF 0.65 / 0/14; GBP exp −0.24 / PF 0.73 / 2/14) — the problem is the EXIT, not the entry: at WR 62–66% a 1:3 grid (TP1 = 1×step, SL = 3×step) is mathematically negative before costs (loss tail −3×step ≈ 6× the average +0.5×step win). FX v3 attacks the tail, only for EURUSD/GBPUSD: per-asset `timeframe: H1` (was M15), `signal_grid.stop_mult: 2.0` (was 3.0), new `signal_grid.breakeven_trigger_atr: 0.5` (early BE: SL moves to entry once price covers 50% of the TP1 distance, BEFORE TP1), `labeling.horizon_candles_n: 48` (was 36), per-asset `ensemble.min_confidence_to_alert: 0.85` WITHOUT `ev_threshold`/`hard_divergence_veto` (var-2 keys removed → inherit global 0/false). Implemented in all three engines: `config/loader.py::get_signal_grid` (new normalized key `breakeven_trigger_atr`, default 1.0), `model/ensemble_backtest.py` (new exit_reason `"breakeven"` when the early trigger fired; default 1.0 = bit-for-bit legacy, so XAU/BTC/XAG unchanged), `backtest/engine.py` (early BE moves the stop; exit labels stay "stop"/"target"/"timeout"), `execution/mt5_trader.py::check_and_move_breakeven` (live per-symbol SL-to-entry via `be_trigger_by_symbol`, only when `be_trigger < 1.0`). 4 new regression tests (ensemble-backtest scratch vs full-stop, engine early-BE limits loss, grid loader default+overrides incl. 0.0, engine 3:1 barrier test now skips stop-dist==0 trades). | Fixes the FX exit mechanics: most would-be −3×step losers become ~0 scratches; real numbers await the user re-measure (`python -m scripts.run_backtest --asset EURUSD/GBPUSD`, see `docs/FX_V3.md`). | `244 passed` (was 240; +4 new tests, 0 regressions) |
+| 2026-08-07 | sync | **Master synced to the user-machine final state**: (1) `assets.GBPUSD` = FX v4 winner (stop 3.0, BE 1.0, tp2 2.5, tp3 3.0, conf 0.80, h36, model flags on) — replaces the v3 early-BE config that CUT GBP recoveries; (2) `scripts/run_backtest.py::strategy_fn_factory` now merges the per-asset `model` section (use_regime_feature / include_zero_class) so the GBP walk-forward trains the same 3-class + regime-feature model the live trader uses (was silently training the global binary model); (3) `scripts/diag_gbp_profile.py` real-data path scores the frame with the PRODUCTION model (was 0.5-default → zero trades → useless diagnostics); (4) `scripts/grid_search_gbp.py` — the leaky `_inject_ml_probs` (close.shift(-6) future bias → PF 6–30 / 27/27) is DELETED; every candidate is now scored by `run_backtest.strategy_fn_factory` (per-fold XGBoost, temp-file models, no look-ahead) as documented in the transfer notes; synthetic builder gained a `regime` column for the honest path; (5) v4b trailing test probe fixed (was touching the BE/trail stop on flat lows — impossible scenario). | Honesty + parity with the machine state: grid-search and backtest numbers now come from the same no-look-ahead machinery; diagnostics profile real model entries. Tests updated accordingly. | `250 passed` (0 regressions, 1 broken trailing test fixed) |
+| 2026-08-07 | mult | **Multiple-testing assessment tool (priority #1 of the transfer notes)**: new `backtest/deflated_sharpe.py` (PSR / DSR / E[max SR_N] / MinTRL per Bailey & López de Prado 2014; CSCV PBO per Bailey et al. 2015, full-enumeration with seeded sampling cap) + `scripts/deflated_sharpe.py` CLI: runs a per-asset config FAMILY (GBP: current-v4 / v3_early_be / v4a / v4b_trailing / legacy / null) through the honest walk-forward (same per-fold models for every variant), reports SR, PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds + CSCV PBO; `null` = random-prob negative control isolating the ML edge from grid+BE mechanics; synthetic no-DB fallback for tests. Outputs `logs/deflated_sharpe_<asset>.csv/.json`. | Answers «~700 grid combinations — is the winner real?» for every asset (esp. GBP v4 / EUR v3 / XAG). Run on the machine DB: `python -m scripts.deflated_sharpe --asset GBPUSD` (decision rule: dsr_historical ≥ 0.95 AND PBO ≤ 0.3). | `270 passed` (+20: 16 math/unit + 4 script integration) |
+| 2026-08-07 | fix | **Timestamp unit bug (pandas 3.x)**: `series.astype("int64") // 10**9` silently returns MILLISECONDS when the datetime resolution is µs (pandas 3.0 stores non-nano), so `data/ingestion.py::fetch_candles` (API backfill), `realtime/pipeline.py` (MT5 live frame) and every synthetic builder wrote timestamps ~1000× too small — new backfills would produce 0 walk-forward folds and mixed-unit DBs. Added resolution-independent `data/ingestion.to_epoch_seconds()` (timedelta arithmetic) and replaced all 8 call sites (ingestion, pipeline, grid_search, diag, deflated_sharpe, 3 test builders). | Correctness/ops: new backfills and live frames keep true epoch-seconds; regression test locks the behaviour and asserts the legacy idiom is still broken on this pandas (so a future resolution change cannot silently pass). | `271 passed` (+1 regression) |
+| 2026-08-07 | audit | **Quant-audit findings implemented** (3rd-party audit, transfer notes): (1) **labeling bias FIXED** — a same-candle touch of both barriers was hard-coded `-1` (short) in both label generators; now excluded as NaN (OHLC cannot order intrabar touches; audit rule: tick replay or exclude). (2) **N_eff added** (`effective_number_trials`: N_eff = 1+(M−1)(1−ρ̄) + participation ratio); `scripts/deflated_sharpe.py` reports DSR at N_eff AND full N=729, CLI prints ρ̄/N_eff. (3) **CSCV scorecard extended** with OOS probability of loss and IS→OOS degradation of the IS-best config. (4) **New `scripts/exit_profile.py`**: exit-path contribution per asset×regime in money + net R, payoff geometry (avg win/loss R, breakeven WR); `Trade` gained `tp1_hit`/`tp2_hit`/`initial_stop_price` audit fields. (5) **XAGUSD → shadow** (`enabled: false`; all prod paths honor it; research scripts take `--asset` explicitly). (6) Decisions: no new TP/SL/BE grids, no LSTM/Transformer on 46 tabular features; next = meta-sizing on OOF predictions. | Honesty/risk: removes a systematic short bias from training labels; selection-adjusted DSR at defensible N_eff; payoff asymmetry now visible per path; XAG capital parked until outer-OOS return gate. | `283 passed` (was 271; +12: 3 label-bias, 3 N_eff, 1 CSCV, 1 run-analysis, 5 exit-profile incl. main) |
+| 2026-08-07 | audit2 | **Second quant audit (Claude 5 Opus plan) applied**: (1) R-multiplicator metrology in `backtest/metrics.py` — `trades_to_dataframe` extended (entry_price/initial_stop_price/tp1_price/volume), `compute_r_metrics` (E[R], σ[R], skew/kurt, payoff geometry, exit buckets in R), `block_bootstrap_t`, `fold_sign_test`, `summarize_folds` + arithmetic-consistency check (audit 0.1: median PF > 1 vs positive-VALID-folds). `run_backtest` prints/saves the fold summary on every run. (2) Decision gate in `scripts/deflated_sharpe.py` (t≥3.0 block-bootstrap, DSR(N_eff)>0.95, PBO<0.30, PF>1.1 at 1.5× costs, ≥55% positive valid folds, IS→OOS slope ≥0.5, locked hold-out) + cost-stress rerun at 1.5× for the current config. (3) CSCV `is_oos_slope` (pooled OOS-on-IS SR regression across splits). (4) Week-1 measurements `scripts/diag_r_metrics.py`: R metrics + buckets, `cost_ratio` (norm <8–10%, red >15%), events-per-feature (rule ≥10; H1 assets over-parameterized at 46 features), MFE/MAE per regime (P(MFE≥1/2/3/5), MAE p50/p80/p90) as exit-calibration input, fold sign test. (5) Pre-registered commented TF hypotheses XAU/BTC M5→M15 gated on real-DB cost_ratio>15% (config not flipped blindly). (6) Adopted audit §3: no new grids, no LSTM/Transformer, meta-sizing only after the gate with AUC≥0.55 pre-check. | Correctness/risk: cross-asset comparisons now in R (never raw money); a gate that currently fails every asset → paper/shadow until evidence; cost and MFE/MAE measurements replace grid-search guessing. | `300 passed` (was 283; +17: 7 R-metrics, 10 diag/gate/slope) |
+| 2026-08-07 | audit3 | **Claude plan continued — week-1 measurements + org**: (1) `EnsembleBacktester.fill_mode` (`next_open` honest / `signal_close` look-ahead measurement) + `scripts/diag_entry_timing.py` (E[R]/PF/t_block per mode, close→next-open gap in ATR). (2) Queue loss: engine records `rejected_signals` and `simulate_blocked_entry` (forced entry at next open, max_trades=1, engine's own exit logic); `diag_r_metrics` reports E[R] rejected vs taken. (3) Per-regime exit policy: `signal_grid.regime_overrides` in `get_signal_grid(cfg, asset_cfg, regime=...)`; honored by EnsembleBacktester (per-trade stop/TP/BE/trailing/scaleout ratios), realtime pipeline (live targets → mt5_trader parity), EV gate; default config bit-identical. Pre-registered commented trend/range policies for GBP. (4) `scripts/trial_journal.py`: append-only journal wired into run_backtest/grid_search/deflated_sharpe; DSR N defaults to journal count (floor 729). (5) Locked hold-out guard (`validation.locked_holdout`) enforced by all walk-forward runners unless `--allow-locked`. (6) `scripts/exit_calibration.py`: SL/TP1/TP2 + trailing decision from MFE/MAE per regime, TRAIN-only (no OOS touch). | Correctness/org: quantifies the look-ahead rent and the queue-constraint cost; per-regime exits implement the audit's trend-wide/range-fast law in backtest AND live; DSR deflation now uses the real trial history; research can no longer accidentally look at the reserved period; exit geometry stops burning trials via grids. | `319 passed` (was 300; +19: 6 engine fill/regime/scaleout/rejection/sim, 1 loader regime override, 12 journal/holdout/calibration/timing) |
+| 2026-08-07 | audit4 | **Final audit batch (Claude plan, all remaining items)**: fractional differencing (frac_diff + min-d ADF); purged K-fold + embargo (`model/cv.py`), average uniqueness weights (`model/uniqueness.py`), `train_model(sample_weight=...)`, `model.feature_subset` in `build_training_matrix`; MDA feature selection on purged CV with feature clustering (`scripts/feature_selection.py`); meta-labeling pre-check AUC vs TP2-before-SL + deciles (`diag_meta_precheck.py`); Tier-1 event tail buckets (`diag_event_tail.py`, reuses news calendar); time-stop curve (`diag_time_stop.py`); portfolio layer — daily-R matrix, strategy correlations, ENB, cluster risk parity, scheme comparison with/without XAG, kill-switch thresholds (`backtest/portfolio.py`, `scripts/portfolio.py`); risk engine — vol-target sizing, lot sizing skip-below-min, cluster/total exposure caps, same-direction penalty, DD throttle, leverage clip (`execution/risk_sizer.py`, `risk:` config OFF); limit-entry mode (`fill_mode="limit"`, 0.25×step, timeout); pre-registered `regime_wide`/`regime_fast` variants in deflated_sharpe; top-5%/1% profit concentration in R metrics. | Completes the audit's measurement + capacity + portfolio + risk toolset: every remaining plan item now has a runnable, tested implementation; production defaults unchanged (all new behaviors off unless configured). | `351 passed` (was 319; +32: 4 fracdiff, 3 purged-CV, 2 uniqueness, 2 trainer, 1 featuresel, 1 metaprecheck, 1 eventtail, 1 timestop, 1 pooled, 6 portfolio, 8 risk, 3 limit-fill, 2 metrics) |

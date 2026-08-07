@@ -78,18 +78,55 @@ def test_insufficient_future_data_produces_nan():
     assert not labels.iloc[:n - horizon].isna().any()
 
 
-def test_double_touch_same_candle_defaults_to_conservative_loss():
+def test_double_touch_same_candle_is_excluded_not_short():
     """
     If a single future candle's range covers BOTH barriers (huge volatility candle),
-    intra-candle order is unknowable from OHLC alone - the conservative assumption
-    (stop hit first) must be applied, matching documented behavior.
+    intra-candle order is unknowable from OHLC alone. Regression (quant audit
+    2026-08-07): this used to be hard-coded to -1 (short), a systematic
+    directional bias in training labels. The ambiguous observation must now be
+    EXCLUDED (NaN), never labeled.
     """
     n = 20
     df = _flat_df(n)
     df.loc[4, "high"] = 2000.0 + 200.0
     df.loc[4, "low"] = 2000.0 - 200.0
     labels = generate_labels(df, target_x=150, stop_y=100, horizon_n=10)
-    assert labels.iloc[0] == -1
+    assert np.isnan(labels.iloc[0])
+    # and no other row may be polluted by the ambiguous bar's direction
+    assert not (labels.iloc[1:10] == -1).all()
+
+
+def test_double_touch_atr_scaled_is_excluded_too():
+    """Same exclusion contract for the ATR-scaled label path."""
+    n = 20
+    df = _flat_df(n)
+    df["atr"] = 100.0
+    df.loc[4, "high"] = 2000.0 + 200.0
+    df.loc[4, "low"] = 2000.0 - 200.0
+    from labeling.label_generator import generate_labels_atr_scaled
+    labels = generate_labels_atr_scaled(
+        df, target_atr_multiplier=1.5, stop_atr_multiplier=1.0,
+        horizon_n=10, atr_col="atr")
+    assert np.isnan(labels.iloc[0])
+
+
+def test_ambiguous_bar_excluded_from_training_matrix():
+    """build_training_matrix drops NaN labels, so excluded observations never
+    reach the model (both in binary and 3-class mode)."""
+    from model.trainer import build_training_matrix
+    n = 20
+    df = _flat_df(n)
+    df.loc[4, "high"] = 2000.0 + 200.0
+    df.loc[4, "low"] = 2000.0 - 200.0
+    labels = generate_labels(df, target_x=150, stop_y=100, horizon_n=10)
+    df["label"] = labels
+    # Minimal feature columns the trainer requires
+    df["regime"] = "trend_up"
+    df["rsi"] = 50.0
+    df["atr"] = 100.0
+    X, y, cols = build_training_matrix(df, cfg={"model": {"include_zero_class": False}})
+    # The ambiguous row must not be part of training
+    assert len(y) == 0 or not np.isnan(y).any()
 
 
 def test_label_distribution_on_mock_data_is_not_degenerate():

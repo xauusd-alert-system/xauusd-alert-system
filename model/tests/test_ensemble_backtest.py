@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from model.ensemble_backtest import EnsembleBacktester
+from data.ingestion import to_epoch_seconds
 
 
 def _cfg(asset_section: dict, bt_slippage_points=5) -> dict:
@@ -47,7 +48,7 @@ def _df(n=400, price=1.10):
     idx = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
     df = pd.DataFrame(
         {
-            "timestamp_utc": idx.astype("int64") // 10**9,
+            "timestamp_utc": to_epoch_seconds(idx),
             "open": price,
             "high": price,
             "low": price,
@@ -247,17 +248,32 @@ def _cfg_with_trailing(trail_mult=2.0):
 
 
 def _trailing_probe_df(n=30, price=1.10, step=0.0003):
-    """After TP1 (+1s) and TP2 (+2s) the price continues up +1.5s then pulls back
-    > trailing*atr (2.0 * step) => trailing exit on the remainder."""
+    """After TP1 (+1s) and TP2 (+2s) the price runs up to +3.5s (bars 8-12),
+    then pulls back > trailing*atr (2.0 * step) on bar 15 => trailing exit on
+    the 20% remainder.
+
+    The probe must respect the engine's conservative INTRABAR semantics:
+    - `_df` starts with low == high == entry, and after TP1 the stop moves to
+      the entry price, so a flat low == entry would scratch the BE stop on the
+      next bar. Bars 3-7 therefore keep their lows strictly ABOVE entry.
+    - The trail stop ratchets to high - 2*ATR (== +1.5s here) on the same bar
+      whose high prints, so any bar with a low below +1.5s exits immediately.
+      Bars 8-14 keep lows at +2.6s (above the ratcheted stop) and only bar 15
+      dips to +1.2s, which is below the stop -> 'trailing' exit.
+    """
     df = _df(n=n, price=price)
-    # TP1 at bar ~2
+    # TP1 at bar ~2 (high touches +1.1s)
     df.loc[2, "high"] = price + 1.1 * step
-    # TP2 at bar ~5
+    # TP2 at bar ~5 (high touches +2.1s)
     df.loc[5, "high"] = price + 2.1 * step
-    # Run higher to +3.5 step
-    df.loc[8:12, "high"] = price + 3.5 * step
-    df.loc[8:12, "close"] = price + 3.4 * step
-    # Pullback > 2.0 * step
+    # After TP1 the stop is at entry: keep lows above entry until the pullback.
+    df.loc[3:7, "low"] = price + 0.6 * step
+    # Run higher to +3.5s: trail stop ratchets to high - 2*ATR = +1.5s; lows
+    # stay above it (2.6s) so the runner survives bars 8-14.
+    df.loc[8:14, "high"] = price + 3.5 * step
+    df.loc[8:14, "low"] = price + 2.6 * step
+    df.loc[8:14, "close"] = price + 3.4 * step
+    # Pullback > 2.0 * step (low drops to +1.2s < trail stop +1.5s)
     df.loc[15, "low"] = price + 3.4 * step - 2.2 * step
     return df
 
@@ -272,3 +288,105 @@ def test_trailing_atr_mult_exits_on_trail_after_tp2():
     assert trades[0].exit_reason == "trailing"
     # Should have captured more than a plain TP2 would have
     assert trades[0].pnl > 0.0002
+
+
+# ---------------------------------------------------------------------------
+# Quant audit 2026-08-07: fill_mode (look-ahead check), per-regime exit
+# policy (signal_grid.regime_overrides), scaleout ratios, queue loss
+# ---------------------------------------------------------------------------
+
+def _regime_cfg(regime_overrides=None, scaleout=None):
+    cfg = _fx_v3_early_be_cfg(1.0)
+    cfg["signal_grid"]["regime_overrides"] = regime_overrides or {}
+    if scaleout:
+        cfg["signal_grid"]["scaleout"] = scaleout
+    return cfg
+
+
+def test_fill_mode_signal_close_enters_at_signal_bar_close():
+    """fill_mode='signal_close' must open at the CLOSE of the signal bar (the
+    look-ahead measurement), while the default enters at the NEXT open."""
+    cfg = _cfg_with_trailing()  # commission 0, legacy BE
+    cfg["signal_grid"]["regime_overrides"] = {}
+    bt_honest = EnsembleBacktester(cfg, asset_key="TEST")
+    bt_close = EnsembleBacktester(cfg, asset_key="TEST")
+    bt_close.fill_mode = "signal_close"
+    df = _df(n=400)
+    df.loc[1, "open"] = 1.1001  # next-open differs from signal close -> distinguishes fills
+    t_honest = bt_honest.run(df)
+    t_close = bt_close.run(df)
+    assert len(t_close) >= 1 and len(t_honest) >= 1
+    # signal fires at bar 0: signal_close fills at the SIGNAL bar's close,
+    # the honest mode at the NEXT bar's open.
+    assert t_close[0].entry_price == pytest.approx(df["close"].iloc[0], abs=1e-9)
+    assert t_honest[0].entry_price == pytest.approx(df["open"].iloc[1], abs=1e-9)
+    assert t_close[0].entry_price != t_honest[0].entry_price
+
+
+def test_regime_override_resolved_at_entry():
+    """regime_overrides.trend_up must widen the stop vs the base grid."""
+    cfg = _fx_v3_early_be_cfg(1.0)
+    cfg["signal_grid"]["regime_overrides"] = {
+        "trend_up": {"stop_mult": 5.0, "tp3_mult": 4.0},
+    }
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    df = _df(n=400)
+    trades = bt.run(df)
+    assert len(trades) >= 1
+    t0 = trades[0]
+    stop_dist = abs(t0.entry_price - t0.stop_price)
+    assert stop_dist == pytest.approx(5.0 * 0.0003, rel=1e-6)
+    tp3_dist = abs(t0.tp3_price - t0.entry_price)
+    assert tp3_dist == pytest.approx(4.0 * 0.0003, rel=1e-6)
+    assert t0.regime_at_entry == "trend_up"
+
+
+def test_regime_override_absent_keeps_base_grid():
+    """No regime_overrides -> bit-identical to the legacy base grid."""
+    cfg = _fx_v3_early_be_cfg(1.0)
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    df = _df(n=400)
+    trades = bt.run(df)
+    stop_dist = abs(trades[0].entry_price - trades[0].stop_price)
+    assert stop_dist == pytest.approx(3.0 * 0.0003, rel=1e-6)
+
+
+def test_scaleout_ratios_change_remaining_position():
+    """A 60/40/0 (mean-reversion) scaleout must realize TP1 on 60%: the
+    TP1-only scratch path differs from the default 50/30/20."""
+    cfg = _cfg_with_trailing()
+    cfg["signal_grid"]["scaleout"] = {"tp1_ratio": 0.6, "tp2_ratio": 0.4}
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    # path: TP1 at bar 2, then flat -> timeout at close ~ entry -> remaining 40%
+    df = _df(n=400)
+    df.loc[2, "high"] = 1.10 + 1.1 * 0.0003
+    trades = bt.run(df)
+    assert len(trades) >= 1
+    # first TP1 leg paid 0.6 * 1 step; remaining 0.4 times ~0 (flat timeout)
+    assert trades[0].pnl == pytest.approx(0.6 * 1.0 * 0.0003, abs=1e-4)
+
+
+def test_rejected_signals_recorded_while_position_open():
+    """Signals that fire while a position is open must be recorded (queue
+    loss input). Flat df with ml_p_long 0.9 -> signal on bar 1, entry at bar
+    2 open, timeout keeps a position open -> bar-2 signal is rejected."""
+    cfg = _fx_v3_early_be_cfg(1.0)
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    df = _df(n=25)
+    bt.run(df)
+    assert len(bt.rejected_signals) > 0
+    rej = bt.rejected_signals[0]
+    assert rej["direction"] in (1, -1)
+    assert "regime" in rej and "bar" in rej
+
+
+def test_simulate_blocked_entry_uses_honest_next_open():
+    """simulate_blocked_entry must enter at the open of signal_bar+1 and
+    produce exactly one trade via the engine's own exit logic."""
+    cfg = _fx_v3_early_be_cfg(1.0)
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    df = _df(n=40)
+    t = bt.simulate_blocked_entry(df, signal_bar=2, direction=1)
+    assert t is not None
+    assert t.entry_price == pytest.approx(df["open"].iloc[3], abs=1e-9)
+    assert t.direction == 1

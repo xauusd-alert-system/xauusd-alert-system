@@ -25,7 +25,7 @@ from model.trainer import (
 )
 from model.predictor import ModelPredictor
 from model.ensemble_backtest import EnsembleBacktester
-from backtest.walk_forward import run_walk_forward
+from backtest.walk_forward import run_walk_forward, generate_windows
 
 
 def load_asset_history(db_path: str, timeframe: str, asset_key: str) -> pd.DataFrame:
@@ -111,6 +111,11 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
     def strategy_fn(train_df, test_df, cfg_inner):
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "labeling")
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
+        # Per-asset model flags (assets.<key>.model: use_regime_feature /
+        # include_zero_class) must reach build_training_matrix, otherwise the
+        # GBPUSD v4 backtest silently trains the GLOBAL binary model instead of
+        # the per-asset 3-class + regime-feature model the live trader uses.
+        cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "model")
 
         X_train, y_train, cols = build_training_matrix(train_df, cfg=cfg_inner)
         test_df_eval = test_df.copy()
@@ -161,6 +166,10 @@ def main():
     parser.add_argument("--asset", required=True, help="Internal asset key, e.g. XAUUSD")
     parser.add_argument("--timeframe", default="M5")
     parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
+    parser.add_argument("--no-journal", action="store_true",
+                        help="Do not append this run to logs/trial_journal.csv")
+    parser.add_argument("--allow-locked", action="store_true",
+                        help="Allow test windows overlapping the locked hold-out")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -179,6 +188,13 @@ def main():
     print(f"Loaded {len(df)} rows for {args.asset} from {args.db_path}")
     print(f"Running Ensemble ML Walk-Forward Backtest...")
 
+    from scripts.trial_journal import enforce_locked_holdout
+    windows_probe = generate_windows(
+        df, cfg["backtest"]["walk_forward"]["train_window_days"],
+        cfg["backtest"]["walk_forward"]["test_window_days"],
+        cfg["backtest"]["walk_forward"]["step_days"])
+    enforce_locked_holdout(cfg, windows_probe, "run_backtest", allow=args.allow_locked)
+
     results = run_walk_forward(df, cfg, strategy_fn_factory(cfg, model_path, asset_key=args.asset))
     if not results:
         raise SystemExit("No walk-forward folds produced.")
@@ -187,6 +203,37 @@ def main():
     os.makedirs("logs", exist_ok=True)
     results_df.to_csv(f"logs/backtest_{args.asset.lower()}.csv", index=False)
     print(f"Saved metrics to logs/backtest_{args.asset.lower()}.csv")
+
+    # Quant audit 0.1: PF-median vs positive-fold arithmetic consistency.
+    # Positive folds MUST be counted over VALID (non-empty) folds; a median
+    # PF > 1 with < 50% positive VALID folds means the two statistics refer
+    # to different fold sets.
+    from backtest.metrics import summarize_folds, fold_sign_test
+    summary = summarize_folds(results)
+    print(f"\nFold summary: {summary['positive_folds_valid']}/{summary['valid_folds']} "
+          f"positive valid folds ({summary['positive_folds_pct_valid']}%) | "
+          f"median PF (valid) = {summary['median_pf_valid']} | "
+          f"empty folds = {summary['n_folds'] - summary['valid_folds']}")
+    st = fold_sign_test(summary["positive_folds_valid"], summary["valid_folds"])
+    print(f"Sign test vs 50%: z={st['z']}, p(one-sided)={st['p_one_sided']}")
+    if summary["inconsistent"]:
+        print(f"WARNING: {summary['note']} -- re-check the aggregate tables "
+              "(positive folds must use valid folds only).")
+    pd.DataFrame([summary]).to_csv(f"logs/backtest_{args.asset.lower()}_fold_summary.csv", index=False)
+
+    # Append-only trial journal (audit: N_trials for DSR comes from the real
+    # project history, not from the last grid).
+    if not args.no_journal:
+        from scripts.trial_journal import log_trial
+        log_trial(
+            experiment="run_backtest",
+            asset=args.asset,
+            params={"timeframe": timeframe, "db_path": db_path},
+            metrics={"n_folds": summary["n_folds"], "valid_folds": summary["valid_folds"],
+                     "positive_folds_valid": summary["positive_folds_valid"],
+                     "median_pf_valid": summary["median_pf_valid"],
+                     "total_pnl": float(results_df["total_pnl"].sum())
+                     if "total_pnl" in results_df.columns else None})
 
 
 if __name__ == "__main__":
