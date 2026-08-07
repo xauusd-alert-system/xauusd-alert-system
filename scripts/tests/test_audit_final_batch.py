@@ -7,6 +7,8 @@ Tests for the final audit batch:
   diag_time_stop.py, backtest_pooled.py
 - backtest/portfolio.py + execution/risk_sizer.py
 - EnsembleBacktester fill_mode='limit'
+- regression: block_bootstrap_t with fewer trades than the block
+- regression: regime_overrides applied with enum regimes (str(enum) vs .value)
 """
 
 import json
@@ -58,6 +60,41 @@ from model.ensemble_backtest import EnsembleBacktester
 def synthetic_gbp_df():
     df = _make_synthetic_wf_df(12600, price=1.28, atr=0.0014, freq="1h")
     return _inject_biased_probs(df)
+
+
+# ---------------------------------------------------------------------------
+# Regression (post-real-run 2026-08-07, PR #11): the two bugs fixed there
+# ---------------------------------------------------------------------------
+
+def test_block_bootstrap_t_fewer_trades_than_block():
+    """A fold with fewer trades than the bootstrap block (20) made
+    rng.integers(0, n - block) fail with ValueError: high <= 0. The block must
+    be shrunk to n - 1; the call must return a float without raising."""
+    from backtest.metrics import block_bootstrap_t
+    t = block_bootstrap_t([1.0, -0.5, 0.2], block=20, n_boot=100)
+    assert isinstance(t, float) and np.isfinite(t)
+
+
+def test_regime_override_applied_with_enum_regimes():
+    """classify_regime_series() returns RegimeLabel enum objects; str(enum) is
+    'RegimeLabel.TREND_UP' while regime_overrides keys are 'trend_up' (.value).
+    The engine must normalize via _regime_name() so the override applies:
+    stop 5.0xATR vs the base 3.0xATR, and regime_at_entry == 'trend_up'."""
+    from model.tests.test_ensemble_backtest import _fx_v3_early_be_cfg, _df
+    from regime.classifier import RegimeLabel
+    cfg = _fx_v3_early_be_cfg(1.0)
+    cfg["signal_grid"]["regime_overrides"] = {
+        "trend_up": {"stop_mult": 5.0, "tp3_mult": 4.0},
+    }
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    df = _df(n=400)
+    df["regime"] = RegimeLabel.TREND_UP  # enum objects, as in production
+    trades = bt.run(df)
+    assert len(trades) >= 1
+    t0 = trades[0]
+    assert t0.regime_at_entry == "trend_up"  # .value, not 'RegimeLabel.TREND_UP'
+    assert abs(t0.entry_price - t0.stop_price) == pytest.approx(5.0 * 0.0003, rel=1e-6)
+    assert abs(t0.tp3_price - t0.entry_price) == pytest.approx(4.0 * 0.0003, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
