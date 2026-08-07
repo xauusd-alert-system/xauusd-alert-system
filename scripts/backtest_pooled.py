@@ -87,7 +87,6 @@ def _load_asset_frames(cfg, assets, max_folds):
     return out
 
 
-
 def _pooled_matrix(frames_by_asset: dict, assets: list[str], cfg: dict,
                    scale: str = "zscore", window: int = 200) -> tuple:
     """Stack per-asset train frames into one pooled matrix with asset one-hot.
@@ -221,7 +220,6 @@ def run_pooled_comparison(cfg: dict, assets: list[str], max_folds: int | None = 
     return _summarize(assets, per_asset_rows, pooled_rows, auc_rows, scale, window)
 
 
-
 def _score_frame(predictor, test_df: pd.DataFrame, assets: list[str], asset: str) -> pd.DataFrame:
     """Score `test_df` with a predictor whose feature set may exceed the frame's
     columns (synthetic/short frames): missing features are zero-filled; regime_*
@@ -237,7 +235,11 @@ def _score_frame(predictor, test_df: pd.DataFrame, assets: list[str], asset: str
             elif c.startswith("asset_"):
                 build[c] = 1.0 if c == f"asset_{asset}" else 0.0
             elif c.startswith("regime_") and "regime" in out.columns:
-                build[c] = (out["regime"].astype(str) == c.replace("regime_", "")).astype(float)
+                # RegimeLabel enum objects str() as 'RegimeLabel.TREND_UP', so
+                # normalize to the .value key ('trend_up') before matching.
+                reg_norm = out["regime"].map(
+                    lambda r: r.value if hasattr(r, "value") else str(r))
+                build[c] = (reg_norm == c.replace("regime_", "")).astype(float)
             else:
                 build[c] = 0.0
         frame = pd.DataFrame(build, index=out.index)

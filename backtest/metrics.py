@@ -224,7 +224,10 @@ def block_bootstrap_t(r, block: int = 20, n_boot: int = 10000, seed: int = 0) ->
     n = len(arr)
     if n < 2:
         return 0.0
-    block = max(1, int(block))
+    # A block longer than the sample would make rng.integers(0, n - block)
+    # fail with high <= 0; shrink the block to n - 1 (single block = whole
+    # series re-sampled by block starts).
+    block = max(1, min(int(block), n - 1))
     rng = np.random.default_rng(seed)
     nb = int(np.ceil(n / block))
     means = np.empty(n_boot)

@@ -44,6 +44,12 @@ class Trade:
     scaleout2: float = 0.3
 
 
+def _regime_name(r):
+    """Normalize a regime value (RegimeLabel enum or str) to its string key
+    (e.g. 'trend_up'), so signal_grid.regime_overrides lookups match."""
+    return r.value if hasattr(r, "value") else str(r)
+
+
 class EnsembleBacktester:
     def __init__(self, cfg: dict, asset_key: str = "XAUUSD"):
         self.cfg = cfg
@@ -186,7 +192,7 @@ class EnsembleBacktester:
                     direction = ldir
                     entry_price = limit_price
                     atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
-                    reg_name = str(regimes[i - 1]) if i > 0 else str(regimes[i])
+                    reg_name = _regime_name(regimes[i - 1]) if i > 0 else _regime_name(regimes[i])
                     grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
                     tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
                     tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
@@ -241,7 +247,7 @@ class EnsembleBacktester:
                 # Per-trade exit policy resolved from the regime at SIGNAL time
                 # (bar i-1, same as regime_at_entry). signal_grid.regime_overrides
                 # lets trend regimes run wide and range regimes manage fast.
-                reg_name = str(regimes[i - 1]) if i > 0 else str(regimes[i])
+                reg_name = _regime_name(regimes[i - 1]) if i > 0 else _regime_name(regimes[i])
                 grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
                 tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
                 tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
@@ -429,7 +435,7 @@ class EnsembleBacktester:
                     entry_price = closes[i] + (self.spread / 2 if direction == 1 else -self.spread / 2)
                     entry_price = self._apply_slippage(entry_price, direction)
                     atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
-                    reg_name = str(regimes[i])
+                    reg_name = _regime_name(regimes[i])
                     grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
                     tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
                     tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
