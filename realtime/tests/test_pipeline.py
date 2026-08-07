@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from config.loader import load_config, get_signal_grid
 from realtime.pipeline import RealtimePipeline, resolve_signal_step
 
+
 CFG = load_config()
 
 
@@ -72,6 +73,7 @@ def test_pipeline_regime_field_is_valid_enum_value():
 # ---------------------------------------------------------------------------
 # Signal grid: equal-step TP/SL spec (step_points / ATR / clamps)
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_signal_step_defaults_to_dynamic_atr():
     """Default step = 1.0 * ATR (spec: dynamic, gold @4250 -> ~4.25 pts)."""
@@ -182,6 +184,7 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
 # Order-flow features + per-asset timeframe (upgrade path)
 # ---------------------------------------------------------------------------
 
+
 def test_pipeline_builds_order_flow_features():
     """The inference feature builder must attach the causal order-flow columns
     (CVD, imbalance, VWAP distance) so models trained with them can infer."""
@@ -208,8 +211,10 @@ def test_pipeline_per_asset_timeframe_override():
     cfg = {**CFG, "assets": {**CFG["assets"], "XAUUSD": {**CFG["assets"]["XAUUSD"], "timeframe": "M15"}}}
     p = RealtimePipeline(cfg=cfg, model_path=None, data_mode="mock")
     assert p.timeframe == "M15"
-    # No override -> global default M5.
-    assert RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock").timeframe == "M5"
+    # No override -> the asset's own configured timeframe when it has one
+    # (XAUUSD ships timeframe: M15 since 2026-08-07), else the global default.
+    expected = CFG["assets"]["XAUUSD"].get("timeframe") or CFG["market_data"]["timeframe"]
+    assert RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock").timeframe == expected
 
 
 def test_pipeline_m15_asset_generates_valid_signal():
