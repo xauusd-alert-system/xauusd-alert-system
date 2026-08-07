@@ -223,7 +223,7 @@ assets:
     slippage_usd: 0.0002
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.80
+      min_confidence_to_alert: 0.60
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
