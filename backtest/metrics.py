@@ -1,10 +1,16 @@
 """
 Advanced Institutional Backtest Performance Metrics:
 Win Rate, Profit Factor, Sharpe Ratio, Sortino Ratio, Expectancy, Drawdown, Max Consec Loss.
+PnL Concentration Report (quant audit Section 5 / Task 3).
+AUC Translator for Meta-Labeling / PF Targets (quant audit Section 5 / Task 9).
 """
+from __future__ import annotations
+
+import math
 import numpy as np
 import pandas as pd
 from typing import List
+from scipy import stats
 
 
 def trades_to_dataframe(trades) -> pd.DataFrame:
@@ -118,6 +124,7 @@ def compute_metrics_per_session(trades_df: pd.DataFrame) -> dict:
     for session_name, group in trades_df.groupby("session"):
         per_session[str(session_name)] = compute_metrics(group.reset_index(drop=True))
     return per_session
+
 
 # ---------------------------------------------------------------------------
 # R-multiplicator metrics (quant audit 2026-08-07, Claude 5 Opus plan)
@@ -247,7 +254,7 @@ def fold_sign_test(n_positive_folds: int, n_folds: int) -> dict:
     Uses the exact binomial test (scipy) with the continuity-corrected normal
     z for reporting. This is the audit's 'знаковый тест по фолдам'.
     """
-    from scipy.stats import binomtest, norm
+    from scipy.stats import binomtest
     if n_folds <= 0:
         return {"z": float("nan"), "p_one_sided": float("nan"), "n_positive": 0, "n_folds": 0}
     z = (n_positive_folds - 0.5 * n_folds) / (0.5 * np.sqrt(n_folds)) if n_folds > 0 else float("nan")
@@ -290,3 +297,303 @@ def summarize_folds(results: list) -> dict:
         "note": ("PF/PnL statistics refer to different fold sets (empty folds counted in one, "
                  "excluded from the other)" if inconsistent else None),
     }
+
+
+# ---------------------------------------------------------------------------
+# Task 3: PnL Concentration Metrics (KIMI K3 / Quant Audit Section 5)
+# ---------------------------------------------------------------------------
+
+def pnl_concentration_report(
+    trades_df: pd.DataFrame,
+    top5_threshold: float = 0.35,
+    fold_threshold: float = 0.30,
+) -> dict:
+    """Computes profit concentration metrics and evaluates red flags.
+
+    Parameters
+    ----------
+    trades_df : pd.DataFrame
+        DataFrame of executed trades with 'pnl' (or 'net_r'), 'fold_id' (or 'fold'/'window'),
+        and 'date' (or 'entry_ts'/'timestamp_utc').
+    top5_threshold : float
+        Red-flag threshold for share of top-5 winning trades (default 0.35 = 35%).
+    fold_threshold : float
+        Red-flag threshold for share of single best fold in total PnL (default 0.30 = 30%).
+
+    Returns
+    -------
+    dict with:
+      - top5_share: fraction of total positive PnL coming from the top 5 winning trades
+      - top5_pnl: sum of top 5 trades PnL
+      - top5_flag: bool, True if top5_share > top5_threshold
+      - best_fold_share: fraction of total PnL contributed by the single best fold
+      - best_fold_pnl: PnL of the best fold
+      - best_fold_id: identifier of the best fold
+      - best_fold_flag: bool, True if best_fold_share > fold_threshold
+      - worst_day_pnl: lowest single-day aggregated PnL
+      - worst_day_date: date of the worst day
+      - total_pnl: total aggregate PnL
+      - has_red_flags: bool, True if any concentration threshold was exceeded
+    """
+    empty = {
+        "top5_share": 0.0,
+        "top5_pnl": 0.0,
+        "top5_threshold": top5_threshold,
+        "top5_flag": False,
+        "best_fold_share": 0.0,
+        "best_fold_pnl": 0.0,
+        "best_fold_id": None,
+        "fold_threshold": fold_threshold,
+        "best_fold_flag": False,
+        "worst_day_pnl": 0.0,
+        "worst_day_date": None,
+        "total_pnl": 0.0,
+        "has_red_flags": False,
+    }
+    if trades_df is None or len(trades_df) == 0:
+        return empty
+
+    tdf = trades_df.copy()
+    pnl_col = "pnl" if "pnl" in tdf.columns else ("net_r" if "net_r" in tdf.columns else None)
+    if not pnl_col:
+        return empty
+
+    pnls = tdf[pnl_col].values.astype(float)
+    total_pnl = float(pnls.sum())
+    wins = pnls[pnls > 0]
+    gross_profit = float(wins.sum()) if len(wins) > 0 else 0.0
+
+    # 1. Share of top-5 winning trades in gross profit
+    if gross_profit > 0 and len(wins) > 0:
+        sorted_wins = np.sort(wins)[::-1]
+        top5_pnl = float(sorted_wins[: min(5, len(sorted_wins))].sum())
+        top5_share = top5_pnl / gross_profit
+    elif total_pnl > 0 and len(pnls) > 0:
+        sorted_pnls = np.sort(pnls)[::-1]
+        top5_pnl = float(sorted_pnls[: min(5, len(sorted_pnls))].sum())
+        top5_share = top5_pnl / total_pnl
+    else:
+        top5_pnl = 0.0
+        top5_share = 0.0
+
+    top5_flag = bool(top5_share > top5_threshold)
+
+    # 2. Contribution of best fold to total PnL
+    fold_col = next((c for c in ["fold_id", "fold", "window", "fold_idx"] if c in tdf.columns), None)
+    if fold_col is not None and tdf[fold_col].nunique() > 1:
+        fold_sums = tdf.groupby(fold_col)[pnl_col].sum()
+        best_fold_id = fold_sums.idxmax()
+        best_fold_pnl = float(fold_sums.max())
+        if total_pnl > 0:
+            best_fold_share = best_fold_pnl / total_pnl
+        elif best_fold_pnl > 0:
+            best_fold_share = 1.0
+        else:
+            best_fold_share = 0.0
+    else:
+        best_fold_id = "fold_0" if fold_col else None
+        best_fold_pnl = total_pnl
+        best_fold_share = 1.0 if total_pnl > 0 else 0.0
+
+    best_fold_flag = bool(best_fold_share > fold_threshold and (fold_col is not None and tdf[fold_col].nunique() > 1))
+
+    # 3. Worst day by daily PnL aggregation
+    date_col = next((c for c in ["date", "entry_date", "day"] if c in tdf.columns), None)
+    if date_col is None:
+        ts_col = next((c for c in ["entry_ts", "timestamp_utc", "exit_ts"] if c in tdf.columns), None)
+        if ts_col is not None:
+            tdf["_computed_date"] = pd.to_datetime(tdf[ts_col], unit="s", utc=True).dt.date
+            date_col = "_computed_date"
+
+    if date_col is not None:
+        daily_sums = tdf.groupby(date_col)[pnl_col].sum()
+        worst_day_pnl = float(daily_sums.min())
+        worst_day_date = str(daily_sums.idxmin())
+    else:
+        worst_day_pnl = float(pnls.min()) if len(pnls) > 0 else 0.0
+        worst_day_date = None
+
+    has_red_flags = bool(top5_flag or best_fold_flag)
+
+    return {
+        "top5_share": round(float(top5_share), 4),
+        "top5_pnl": round(float(top5_pnl), 2),
+        "top5_threshold": float(top5_threshold),
+        "top5_flag": top5_flag,
+        "best_fold_share": round(float(best_fold_share), 4),
+        "best_fold_pnl": round(float(best_fold_pnl), 2),
+        "best_fold_id": best_fold_id,
+        "fold_threshold": float(fold_threshold),
+        "best_fold_flag": best_fold_flag,
+        "worst_day_pnl": round(float(worst_day_pnl), 2),
+        "worst_day_date": worst_day_date,
+        "total_pnl": round(float(total_pnl), 2),
+        "has_red_flags": has_red_flags,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Task 9: AUC Translator for PF Targets (Signal Detection Theory / Quant Audit)
+# ---------------------------------------------------------------------------
+
+def required_auc_for_pf_target(
+    pf_current: float,
+    pf_target: float,
+    win_rate: float = 0.517,
+    avg_win_r: float = 1.0,
+    sigma_r: float = 0.40,
+    cutoff_fraction: float = 0.40,
+) -> dict:
+    """Translates a target Profit Factor (PF) increase into the required AUC
+    on purged-OOS predictions using Signal Detection Theory (Green & Swets 1966,
+    AFML audit translation: d' = sqrt(2) * Phi^-1(AUC)).
+
+    Parameters
+    ----------
+    pf_current : float
+        Current baseline Profit Factor (e.g. 1.07).
+    pf_target : float
+        Target Profit Factor after filtering (e.g. 1.21).
+    win_rate : float
+        Current win rate (fraction in (0, 1), default 0.517).
+    avg_win_r : float
+        Average win magnitude in R (default 1.0).
+    sigma_r : float
+        Standard deviation of trade return in R units (default 0.40).
+    cutoff_fraction : float
+        Fraction of lowest-scoring trades removed by the filter (default 0.40,
+        i.e. retaining top 60% of trades: N=1000 -> 600).
+
+    Returns
+    -------
+    dict with:
+      - required_auc: float in [0.50, 1.00]
+      - d_prime: sensitivity index d' = sqrt(2) * Phi^-1(AUC)
+      - delta_expectancy_r: required improvement in average trade R
+      - realistic: bool, True if required_auc is in realistic range (0.50..0.58)
+      - verdict: 'realistic' (0.50-0.58), 'unlikely_high' (>0.58), or 'already_achieved' (<=0.50)
+    """
+    if pf_target <= pf_current:
+        return {
+            "required_auc": 0.50,
+            "d_prime": 0.0,
+            "delta_expectancy_r": 0.0,
+            "realistic": True,
+            "verdict": "already_achieved",
+        }
+
+    p0 = float(win_rate)
+    W = float(avg_win_r)
+    # Baseline average loss L from current PF: PF = (p0 * W) / ((1 - p0) * L)
+    L = (p0 * W) / ((1.0 - p0) * max(pf_current, 1e-6))
+
+    # Target win rate p1 needed to reach pf_target assuming W/L ratio approx preserved
+    p1 = (pf_target * L) / (W + pf_target * L)
+    delta_p = p1 - p0
+    delta_mu_r = delta_p * (W + L)
+
+    # Selection intensity i_c for standard normal truncated at cutoff c
+    c = float(np.clip(cutoff_fraction, 0.01, 0.99))
+    z_c = float(stats.norm.ppf(c))
+    phi_z_c = float(stats.norm.pdf(z_c))
+    i_c = phi_z_c / (1.0 - c)
+
+    # In Signal Detection Theory, d' = sqrt(2) * Phi^-1(AUC)
+    # The expected improvement delta_mu_r = i_c * sigma_r * rho
+    # with rho = d' / sqrt(d'^2 + 2) or linear approximation d' = delta_mu_r / (i_c * sigma_r)
+    denom = i_c * float(sigma_r)
+    d_prime = delta_mu_r / max(denom, 1e-12) if denom > 0 else 0.0
+
+    if d_prime <= 0.0:
+        auc = 0.50
+    elif d_prime >= 8.0:
+        auc = 0.9999
+    else:
+        # AUC = Phi(d' / sqrt(2)) from d' = sqrt(2) * Phi^-1(AUC)
+        auc = float(stats.norm.cdf(d_prime / math.sqrt(2.0)))
+
+    # Realistic bounds for low SNR financial time series (0.50..0.58 realistic, >0.58 unlikely)
+    realistic = bool(0.50 <= auc <= 0.58)
+    if auc <= 0.50:
+        verdict = "already_achieved"
+    elif 0.50 < auc <= 0.58:
+        verdict = "realistic"
+    else:
+        verdict = "unlikely_high"
+
+    return {
+        "required_auc": round(float(auc), 4),
+        "d_prime": round(float(d_prime), 4),
+        "delta_expectancy_r": round(float(delta_mu_r), 4),
+        "target_win_rate": round(float(p1), 4),
+        "realistic": realistic,
+        "verdict": verdict,
+    }
+
+
+def progress_pnl_curve(
+    df: pd.DataFrame,
+    trades: list,
+    max_bars: int = 36,
+) -> pd.DataFrame:
+    """Computes cumulative and average PnL for trades remaining open at each
+    holding bar N in [1, max_bars].
+
+    Allows setting the progress-stop threshold from the empirical curve shape
+    rather than arbitrary picking (quant audit Section 5 / Task 6).
+    """
+    if not trades or len(df) == 0:
+        return pd.DataFrame(columns=["bar", "n_open", "cum_pnl", "mean_pnl", "mean_progress_atr"])
+
+    # Discretize timestamps to bar index
+    ts_values = df["timestamp_utc"].values
+    ts_to_idx = {ts: idx for idx, ts in enumerate(ts_values)}
+    closes = df["close"].values
+    highs = df["high"].values
+    lows = df["low"].values
+    atrs = df["atr"].values if "atr" in df.columns else np.ones(len(df))
+
+    records = []
+    for bar_k in range(1, max_bars + 1):
+        bar_pnls = []
+        bar_progress = []
+
+        for t in trades:
+            entry_ts = getattr(t, "entry_ts", None)
+            exit_ts = getattr(t, "exit_ts", None)
+            direction = getattr(t, "direction", 1)
+            entry_price = getattr(t, "entry_price", None)
+            if entry_ts not in ts_to_idx or entry_price is None:
+                continue
+
+            e_idx = ts_to_idx[entry_ts]
+            x_idx = ts_to_idx.get(exit_ts, len(df) - 1)
+            held = x_idx - e_idx
+
+            if held >= bar_k:
+                curr_idx = min(e_idx + bar_k, len(df) - 1)
+                pnl_k = direction * (closes[curr_idx] - entry_price)
+                atr_k = atrs[curr_idx] if curr_idx < len(atrs) and not np.isnan(atrs[curr_idx]) else 1.0
+                fav_move = (highs[curr_idx] - entry_price) if direction == 1 else (entry_price - lows[curr_idx])
+                bar_pnls.append(pnl_k)
+                bar_progress.append(fav_move / max(atr_k, 1e-6))
+
+        n_open = len(bar_pnls)
+        if n_open > 0:
+            records.append({
+                "bar": bar_k,
+                "n_open": n_open,
+                "cum_pnl": round(float(np.sum(bar_pnls)), 2),
+                "mean_pnl": round(float(np.mean(bar_pnls)), 4),
+                "mean_progress_atr": round(float(np.mean(bar_progress)), 4),
+            })
+        else:
+            records.append({
+                "bar": bar_k,
+                "n_open": 0,
+                "cum_pnl": 0.0,
+                "mean_pnl": 0.0,
+                "mean_progress_atr": 0.0,
+            })
+
+    return pd.DataFrame(records)

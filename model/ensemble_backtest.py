@@ -72,9 +72,15 @@ class EnsembleBacktester:
             "slippage_usd", bt_cfg.get("slippage_points", 5) / 100.0
         )
         self.balance = bt_cfg.get("initial_balance", 100.0)
-        self.volume = bt_cfg.get("volume", 0.01)  # базовый объём для бэктеста
+        self.volume = bt_cfg.get("volume", 0.10)  # базовый объём для бэктеста
         self.commission_per_trade = bt_cfg.get("commission_per_trade", 0.07)
         self.swap_per_night = bt_cfg.get("swap_per_night", 0.0)
+        # Validation of scaleout lot sizes (Task 7 / Section 5.2A)
+        from execution.portfolio_allocator import validate_scaleout_tranches
+        self.strict_scaleout_validation = bool(bt_cfg.get("strict_scaleout_validation", False))
+        is_valid, err_msg, _ = validate_scaleout_tranches(self.volume, [0.5, 0.3, 0.2], raise_on_invalid=self.strict_scaleout_validation)
+        if not is_valid and self.strict_scaleout_validation:
+            raise ValueError(f"Scale-out validation error: {err_msg}")
         # HIGH 7: point_value_lot = USD notional per 1.0 lot per 1.0 price unit.
         # Converts price-space PnL into account money so it is comparable with
         # commission/swap (which are already money). Default 100 (e.g. XAUUSD
@@ -93,6 +99,9 @@ class EnsembleBacktester:
         # (BE only when TP1 hits); < 1.0 moves the stop to entry earlier, which
         # cuts the 3x-step loss tail for mean-reverting assets (FX).
         self.be_trigger_mult = float(grid_cfg.get("breakeven_trigger_atr", 1.0))
+        self.progress_stop_enabled = bool(grid_cfg.get("progress_stop_enabled", False))
+        self.progress_stop_ratio = float(grid_cfg.get("progress_stop_ratio", 0.5))
+        self.progress_stop_atr = float(grid_cfg.get("progress_stop_atr", 0.3))
         self.trailing_atr_mult = grid_cfg.get("trailing_atr_mult")  # None = legacy no-trail
 
         self.horizon_n = lab_cfg.get("horizon_candles_n", 36)
@@ -353,9 +362,19 @@ class EnsembleBacktester:
                         if highs[i] >= open_position.stop_price:
                             trailing_exit = True
 
-                # 3. Финальный выход (TP3, Стоп или Таймаут)
+                # 3. Финальный выход (TP3, Стоп, Progress-Stop или Таймаут)
                 exit_reason = None
                 exit_price = None
+
+                hit_progress_stop = False
+                if self.progress_stop_enabled and not tp1_hit:
+                    progress_bars = int(self.horizon_n * self.progress_stop_ratio)
+                    if candles_held >= progress_bars:
+                        atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                        prog = (highs[i] - open_position.entry_price) if direction == 1 else (open_position.entry_price - lows[i])
+                        prog_atr = prog / max(atr_val, 1e-6)
+                        if prog_atr < self.progress_stop_atr:
+                            hit_progress_stop = True
 
                 if hit_tp3:
                     exit_reason = "tp3_runner"
@@ -372,6 +391,11 @@ class EnsembleBacktester:
                     pnl_stop = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))
                     accumulated_pnl += pnl_stop
                     exit_price = self._apply_slippage(open_position.stop_price, -direction)
+                elif hit_progress_stop:
+                    exit_reason = "progress_stop"
+                    pnl_prog = self._money(remaining_ratio * direction * (closes[i] - open_position.entry_price))
+                    accumulated_pnl += pnl_prog
+                    exit_price = self._apply_slippage(closes[i], -direction)
                 elif candles_held >= self.horizon_n:
                     exit_reason = "timeout"
                     pnl_time = self._money(remaining_ratio * direction * (closes[i] - open_position.entry_price))
