@@ -67,7 +67,10 @@ from backtest.deflated_sharpe import (
     minimum_track_record_length,
     cscv_pbo,
     effective_number_trials,
+    n_eff_participation_ratio,
+    decision_gate,
 )
+from model.uniqueness import compute_trade_uniqueness, average_uniqueness_weights
 from backtest.metrics import block_bootstrap_t
 from model.ensemble_backtest import EnsembleBacktester
 from model.trainer import build_training_matrix, train_model, calibrate_model, save_model
@@ -86,6 +89,9 @@ GENERIC_VARIANTS: dict = {
     },
     "wide": {  # trend style: no early BE + wider stop + further TP3
         "signal_grid": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0, "tp3_mult": 4.0},
+    },
+    "progress_stop": {  # Task 6: early cut if < 0.3x ATR progress within 0.5x horizon
+        "signal_grid": {"progress_stop_enabled": True, "progress_stop_ratio": 0.5, "progress_stop_atr": 0.3},
     },
     "null": None,
 }
@@ -107,6 +113,14 @@ GBP_VARIANTS: dict = {
     "v4b_trailing": {  # trailing-runner candidate (engine code path exists)
         "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
                         "tp2_mult": 2.5, "tp3_mult": 3.0, "trailing_atr_mult": 2.0},
+        "ensemble": {"min_confidence_to_alert": 0.80},
+        "labeling": {"horizon_candles_n": 36},
+    },
+    "progress_stop": {  # Task 6: progress-stop candidate
+        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
+                        "tp2_mult": 2.5, "tp3_mult": 3.0,
+                        "progress_stop_enabled": True, "progress_stop_ratio": 0.5,
+                        "progress_stop_atr": 0.3},
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
@@ -341,10 +355,11 @@ def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
 def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
                      historical_trials: int, n_variants: int,
                      trades_per_year: float, n_eff_historical: float,
-                     trade_r: list[float] | None = None) -> dict:
+                     trade_r: list[float] | None = None,
+                     horizon_bars: int = 36) -> dict:
     """One row of the DSR report for a single config variant."""
     if not fold_trades:
-        return {"variant": name, "n_trades": 0, "n_folds": n_folds, "pos_folds": 0,
+        return {"variant": name, "n_trades": 0, "t_eff": 0.0, "n_folds": n_folds, "pos_folds": 0,
                 "total_pnl": 0.0, "expectancy": 0.0, "win_rate": 0.0,
                 "profit_factor": 0.0, "median_fold_pf": 0.0, "sharpe": 0.0,
                 "skew": 0.0, "kurtosis_excess": 0.0, "psr_0": float("nan"),
@@ -363,12 +378,16 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
             fold_pfs.append(compute_metrics(pd.DataFrame({"pnl": ft}))["profit_factor"])
     median_fold_pf = float(np.median(fold_pfs)) if fold_pfs else 0.0
 
+    # Effective sample size T_eff from label/trade uniqueness
+    uniqueness = average_uniqueness_weights(len(arr), horizon=horizon_bars) if len(arr) > 0 else np.array([])
+    t_eff = float(np.sum(uniqueness)) if len(uniqueness) > 0 else float(len(arr))
+
     sr = annualized_sharpe(arr)
-    psr_0 = probabilistic_sharpe_ratio(arr, sr_benchmark=0.0)
-    d_trials = deflated_sharpe_ratio(arr, n_trials=n_variants)
-    d_neff = deflated_sharpe_ratio(arr, n_trials=max(n_eff_historical, 1.0))
-    d_hist = deflated_sharpe_ratio(arr, n_trials=historical_trials)
-    mtrl = minimum_track_record_length(arr, n_trials=historical_trials)
+    psr_0 = probabilistic_sharpe_ratio(arr, sr_benchmark=0.0, t_eff=t_eff)
+    d_trials = deflated_sharpe_ratio(arr, n_trials=n_variants, t_eff=t_eff)
+    d_neff = deflated_sharpe_ratio(arr, n_trials=max(n_eff_historical, 1.0), t_eff=t_eff)
+    d_hist = deflated_sharpe_ratio(arr, n_trials=historical_trials, t_eff=t_eff)
+    mtrl = minimum_track_record_length(arr, n_trials=historical_trials, t_eff=t_eff)
 
     valid_folds = int(np.sum([len(ft) > 0 for ft in fold_trades]))
     t_block = block_bootstrap_t(trade_r) if trade_r and len(trade_r) >= 2 else float("nan")
@@ -376,6 +395,7 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
     return {
         "variant": name,
         "n_trades": int(len(arr)),
+        "t_eff": round(t_eff, 1),
         "n_folds": n_folds,
         "valid_folds": valid_folds,
         "t_block": t_block,
@@ -423,6 +443,12 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     span_secs = float(df_full["timestamp_utc"].max() - df_full["timestamp_utc"].min())
     years = span_secs / (86400.0 * 365.25) if span_secs > 0 else 1.0
 
+    cur_cfg = _apply_variant(cfg, asset_key, variants.get("current"))
+    cur_asset = cur_cfg["assets"].get(asset_key, {})
+    sg = get_signal_grid(cur_cfg, cur_asset)
+    merged_ens = merge_asset_cfg(cur_cfg, asset_key, "ensemble")["ensemble"]
+    merged_lab = merge_asset_cfg(cur_cfg, asset_key, "labeling")["labeling"]
+
     fold_matrix = []
     trials = []
     current_r: list[float] = []
@@ -460,7 +486,8 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         trials.append(_summarize_trial(
             name, fold_trades, len(windows), historical_trials,
             n_variants=len(variants), trades_per_year=trades_per_year,
-            n_eff_historical=n_eff_historical, trade_r=variant_r))
+            n_eff_historical=n_eff_historical, trade_r=variant_r,
+            horizon_bars=int(merged_lab.get("horizon_candles_n", 36))))
         fold_matrix.append([float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades])
 
     fold_arr = np.asarray(fold_matrix, dtype=float)
@@ -470,10 +497,12 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     # full historical trial count (audit: publish DSR at N_eff AND at full N).
     n_eff_info = effective_number_trials(fold_arr)
     mean_rho = n_eff_info.get("mean_rho")
+    pr_ratio = float(n_eff_info.get("participation_ratio", 1.0))
     if np.isfinite(mean_rho):
         n_eff_historical = 1.0 + (historical_trials - 1.0) * (1.0 - mean_rho)
     else:
         n_eff_historical = float(historical_trials)
+    n_eff_historical = max(n_eff_historical, pr_ratio)
 
     # Cost stress (audit gate: survive 1.5x costs with PF > 1.1): rerun ONLY
     # the current variant with spread/slippage/commission x 1.5.

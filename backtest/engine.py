@@ -76,6 +76,9 @@ class EventDrivenBacktester:
         grid_cfg = get_signal_grid(cfg)
         # Early breakeven trigger (fraction of the target distance). 1.0 = legacy.
         self.be_trigger_mult = float(grid_cfg.get("breakeven_trigger_atr", 1.0))
+        self.progress_stop_enabled = bool(grid_cfg.get("progress_stop_enabled", False))
+        self.progress_stop_ratio = float(grid_cfg.get("progress_stop_ratio", 0.5))
+        self.progress_stop_atr = float(grid_cfg.get("progress_stop_atr", 0.3))
         method = lab_cfg.get("method", "fixed")
         if method == "atr_scaled":
             self.use_atr_scaled = True
@@ -181,6 +184,16 @@ class EventDrivenBacktester:
 
                 candles_held = self._candles_since(df, open_position.entry_ts, timestamps[i])
 
+                hit_progress_stop = False
+                if self.progress_stop_enabled:
+                    progress_bars = int(self.horizon_n * self.progress_stop_ratio)
+                    if candles_held >= progress_bars:
+                        atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                        prog = (highs[i] - open_position.entry_price) if direction == 1 else (open_position.entry_price - lows[i])
+                        prog_atr = prog / max(atr_val, 1e-6)
+                        if prog_atr < self.progress_stop_atr:
+                            hit_progress_stop = True
+
                 exit_reason = None
                 exit_price = None
                 if hit_target and hit_stop:
@@ -190,6 +203,8 @@ class EventDrivenBacktester:
                     exit_reason, exit_price = "stop", open_position.stop_price
                 elif hit_target:
                     exit_reason, exit_price = "target", open_position.target_price
+                elif hit_progress_stop:
+                    exit_reason, exit_price = "progress_stop", closes[i]
                 elif candles_held >= self.horizon_n:
                     exit_reason, exit_price = "timeout", closes[i]
 
@@ -214,5 +229,8 @@ class EventDrivenBacktester:
     @staticmethod
     def _candles_since(df: pd.DataFrame, entry_ts: int, current_ts: int) -> int:
         """Count candles elapsed between entry and current timestamp using the DataFrame's own spacing."""
-        step = df["timestamp_utc"].diff().mode().iloc[0] if len(df) > 1 else 1
-        return int((current_ts - entry_ts) / step)
+        diffs = df["timestamp_utc"].diff().dropna()
+        valid = diffs[diffs > 0]
+        step = valid.mode().iloc[0] if len(valid) > 0 else 1
+        diff = current_ts - entry_ts
+        return int(diff / step) if (step > 0 and not np.isnan(step)) else 0

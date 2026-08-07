@@ -169,3 +169,80 @@ def kill_switch_thresholds(daily_r: pd.DataFrame,
         "note": "portfolio R thresholds; a daily sum below daily_2sigma or a "
                 "5-day sum below weekly_3sigma trips the kill-switch",
     }
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Signal Ranking & Queue Loss Analytics (Quant Audit Section 5.2B / Q4f)
+# ---------------------------------------------------------------------------
+
+def rank_concurrent_signals(
+    signals: list[dict],
+    ranking_metric: str = "confidence",
+) -> list[dict]:
+    """Ranks competing signals firing at the same timestamp across assets.
+
+    Parameters
+    ----------
+    signals : list of signal dicts with keys like 'confidence', 'p_long', 'p_short', 'asset', 'ev'
+    ranking_metric : 'confidence' (max(|p_long - p_short|)), 'ev', or 'probability'
+
+    Returns
+    -------
+    list of signals sorted descending by the chosen ranking metric.
+    """
+    if not signals:
+        return []
+
+    def _score(sig: dict) -> float:
+        if ranking_metric == "ev":
+            return float(sig.get("ev", sig.get("confidence", 0.0)))
+        if ranking_metric in ("confidence", "probability"):
+            p_long = float(sig.get("p_long", 0.5))
+            p_short = float(sig.get("p_short", 0.5))
+            conf = float(sig.get("confidence", max(p_long, p_short)))
+            return conf
+        return float(sig.get(ranking_metric, 0.0))
+
+    return sorted(signals, key=_score, reverse=True)
+
+
+def calculate_queue_loss(
+    taken_trades: list[dict] | pd.DataFrame,
+    rejected_trades: list[dict] | pd.DataFrame,
+) -> dict:
+    """Calculates the expected return E[R] of taken signals versus rejected signals
+    (queue loss from position concurrency caps, audit Section 5.2B / Question 4f).
+
+    If E[R]_rejected >= E[R]_taken, logs a critical finding.
+    """
+    taken_df = pd.DataFrame(taken_trades) if isinstance(taken_trades, list) else taken_trades.copy()
+    rejected_df = pd.DataFrame(rejected_trades) if isinstance(rejected_trades, list) else rejected_trades.copy()
+
+    r_col_taken = "net_r" if "net_r" in taken_df.columns else ("pnl" if "pnl" in taken_df.columns else None)
+    r_col_rej = "net_r" if "net_r" in rejected_df.columns else ("pnl" if "pnl" in rejected_df.columns else None)
+
+    e_r_taken = float(taken_df[r_col_taken].mean()) if (r_col_taken and len(taken_df) > 0) else 0.0
+    e_r_rejected = float(rejected_df[r_col_rej].mean()) if (r_col_rej and len(rejected_df) > 0) else 0.0
+
+    queue_loss = e_r_taken - e_r_rejected
+    is_critical = bool(len(rejected_df) > 0 and e_r_rejected >= e_r_taken)
+
+    warning_msg = None
+    if is_critical:
+        import logging
+        logger = logging.getLogger("portfolio_queue")
+        warning_msg = (
+            f"CRITICAL QUEUE LOSS: Rejected signals E[R]={e_r_rejected:.4f} >= Taken signals E[R]={e_r_taken:.4f}. "
+            "Queue ordering / signal priority rule requires immediate revision."
+        )
+        logger.warning(warning_msg)
+
+    return {
+        "n_taken": len(taken_df),
+        "n_rejected": len(rejected_df),
+        "e_r_taken": round(e_r_taken, 4),
+        "e_r_rejected": round(e_r_rejected, 4),
+        "queue_loss_delta": round(queue_loss, 4),
+        "is_critical": is_critical,
+        "warning": warning_msg,
+    }

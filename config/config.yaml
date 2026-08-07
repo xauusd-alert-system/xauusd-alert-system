@@ -212,9 +212,7 @@ assets:
     # stop 2.0) was tuned for mean-reverting EUR and CUT GBP's recoveries
     # (PF ~0.84). GBP is trending: give it room to run — wide stop (3.0), NO
     # early BE (BE only at TP1), further TP2 (2.5) and TP3 (3.0), lower conf
-    # bar (0.80), horizon 36. Walk-forward 2022-26 (24 folds, honest):
-    # PF_med 2.42, total PnL +138, 17/24 positive folds (see docs/benchmarks.md
-    # §3 "FX v4"). Diagnostics: python -m scripts.diag_gbp_profile
+    # bar (0.80 -> 0.60 legacy adopted), horizon 36.
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
@@ -223,11 +221,9 @@ assets:
     timeframe: H1
     spread_usd: 0.00015
     slippage_usd: 0.0002
-    # 1.0 lot = 100,000 base units (pip ~= $10/lot) -> 0.01 lot = $1000 per price
-    # unit. See XAGUSD comment for why this must be a per-asset override.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.80
+      min_confidence_to_alert: 0.60
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -394,6 +390,7 @@ backtest:
   commission_per_trade: 0.07
   swap_per_night: 0.0
   initial_balance: 100.0
+  volume: 0.10
   max_daily_loss_pct: 5.0
   risk_per_trade_pct: 2.0
   walk_forward:
@@ -442,6 +439,19 @@ deploy_guard:
   tolerance: 0.0
   # Sidecar name used by --backup / --check.
   backup_suffix: ".deploy_guard.bak"
+
+
+# ===== EXECUTION POSITION CONCURRENCY (quant audit Section 5.2B / Task 8) =====
+# Explicit semantics:
+# - per_asset: each single-asset engine (backtest/engine.py:14, model/ensemble_backtest.py:223)
+#   maintains at most ONE open position at a time per asset.
+# - global: account-level risk manager (execution/risk_manager.py:20) limits total concurrent
+#   open positions across all instruments to max_concurrent_positions_global (default 3).
+execution:
+  max_open_positions_mode: per_asset  # per_asset | global
+  max_open_positions_per_asset: 1
+  max_concurrent_positions_global: 3
+  signal_ranking_metric: confidence   # confidence | ev | probability
 
 
 # ===== RISK ENGINE (quant audit 2026-08-07, Claude plan Q6) =====

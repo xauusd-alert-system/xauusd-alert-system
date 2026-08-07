@@ -100,3 +100,40 @@ def hierarchical_risk_parity(returns_df: pd.DataFrame) -> pd.Series:
     inv_diag = 1.0 / np.maximum(diag, 1e-8)
     weights = inv_diag / np.sum(inv_diag)
     return pd.Series(weights, index=returns_df.columns)
+
+
+def validate_scaleout_tranches(
+    base_volume: float,
+    scaleout_ratios: list[float] | tuple[float, ...],
+    min_lot: float = 0.01,
+    lot_step: float = 0.01,
+    raise_on_invalid: bool = False,
+) -> tuple[bool, str, list[float]]:
+    """Validates that each scale-out tranche is an exact multiple of `lot_step`
+    and at least `min_lot` (quant audit Section 5.2A / Task 7).
+
+    With base lot < 0.10, the 50/30/20 scheme produces fractional volumes
+    below 0.01 (e.g. 0.005 / 0.003 / 0.002) which cannot be filled in live MT5.
+    """
+    tranches = [base_volume * r for r in scaleout_ratios]
+    valid = True
+    err_msg = ""
+    for idx, t in enumerate(tranches):
+        if t < min_lot - 1e-9:
+            valid = False
+            err_msg = f"Tranche {idx+1} volume {t:.4f} < min_lot {min_lot:.2f}"
+            break
+        rem = t % lot_step
+        if not (abs(rem) < 1e-6 or abs(rem - lot_step) < 1e-6):
+            valid = False
+            err_msg = f"Tranche {idx+1} volume {t:.4f} is not a multiple of lot_step {lot_step:.2f}"
+            break
+
+    if not valid and raise_on_invalid:
+        raise ValueError(
+            f"Invalid scale-out configuration: base volume {base_volume:.4f} with ratios "
+            f"{scaleout_ratios} yields {err_msg}."
+        )
+
+    quantized = [max(min_lot, round(t / lot_step) * lot_step) for t in tranches]
+    return valid, err_msg, quantized

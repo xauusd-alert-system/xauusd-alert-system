@@ -242,11 +242,13 @@ def compute_ensemble_signal(
     # Масштабирование: 0.50 -> 0.0, 0.50 + ml_confidence_scale -> 1.0
     ml_confidence = min(1.0, max(0.0, (ml_p_max - 0.50) / ml_confidence_scale))
 
-    agree = (rule_vote == ml_vote) and (rule_vote != 0)
+    agree = (rule_vote == ml_vote) or (rule_vote == 0) or (ml_vote == 0)
 
     if agree:
-        blended_confidence = (weight_rule * rule_conf) + (weight_ml * ml_confidence)
-        final_vote = rule_vote
+        final_vote = rule_vote if rule_vote != 0 else ml_vote
+        rule_comp = weight_rule * rule_conf if rule_vote != 0 else 0.0
+        ml_comp = weight_ml * ml_confidence if ml_vote != 0 else 0.0
+        blended_confidence = rule_comp + ml_comp
     else:
         blended_confidence = min(rule_conf, ml_confidence) * 0.3
         final_vote = ml_vote if ml_confidence > rule_conf else rule_vote
@@ -254,10 +256,11 @@ def compute_ensemble_signal(
     suppressed = False
     regime_val = regime.value if hasattr(regime, "value") else str(regime)
 
-    if (regime_val in suppress_regimes) and (blended_confidence < min_regime_confidence):
-        suppressed = True
-        blended_confidence = 0.0
-        final_vote = 0
+    if (regime_val in suppress_regimes):
+        if (rule_vote == 0) or (blended_confidence < min_regime_confidence):
+            suppressed = True
+            blended_confidence = 0.0
+            final_vote = 0
 
     if (regime == RegimeLabel.NO_TRADE) or (final_vote == 0) or (blended_confidence < min_confidence_to_alert):
         bias = "no_trade"
