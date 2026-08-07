@@ -271,6 +271,57 @@ PBO ≤ 0.10 → capital; PBO 0.10–0.20 → shadow/reduced size; > 0.20 → se
 procedure considered overfit. Post-freeze shadow: 3–6 months of untouched
 live-forward data (≥100–150 trades per strategy) before promotion.
 
+## 3e. Second quant audit (Claude 5 Opus) — applied 2026-08-07
+
+The two model answers were compared; Claude 5 Opus's plan was selected (more
+operational: exact formulas, numeric gates, week-by-week work order). What was
+implemented this session:
+
+1. **R-multiplicator metrology** (`backtest/metrics.py`): `trades_to_dataframe`
+   now carries `entry_price` / `initial_stop_price` / `tp1_price` / `volume`;
+   `compute_r_metrics` gives E[R], σ[R], skew/kurtosis of R, payoff geometry
+   (avg win/loss in R, breakeven WR) and the exit-bucket table (count, share,
+   mean R, R contribution). `block_bootstrap_t` (block = holding horizon),
+   `fold_sign_test` (exact binomial, one-sided), `summarize_folds` with the
+   **arithmetic-consistency check** (audit 0.1: median PF > 1 requires ≥ 50%
+   positive VALID folds; empty folds must not pollute one statistic only).
+   `scripts/run_backtest.py` prints the fold summary + sign test + consistency
+   warning on every run (also saved to `logs/backtest_<asset>_fold_summary.csv`).
+2. **Detectability framing adopted**: with σ(R) ≈ 0.35–0.45 the grid's R cap
+   (+0.567 / −1.0) means 600–1500 trades can only resolve E[R] ≥ 0.04–0.05
+   (PF ≈ 1.20–1.30). XAU/BTC PF 1.06–1.07 are below the detection threshold —
+   the goal is PF ≥ 1.2 or "unmeasurable", not more validation.
+3. **Decision gate** (`scripts.deflated_sharpe.py::decision_gate`, printed in
+   every report): block-bootstrap t ≥ 3.0, DSR(N_eff) > 0.95, PBO < 0.30,
+   PF > 1.1 at 1.5× costs, positive folds ≥ 55% of valid, IS→OOS slope ≥ 0.5,
+   locked hold-out (organizational). All conditions simultaneously, else
+   paper/shadow. **Cost stress**: `run_analysis` reruns the current config at
+   1.5× spread/slippage/commission and reports PF under stress.
+4. **CSCV slope**: `cscv_pbo` now also returns `is_oos_slope` (pooled OOS-SR on
+   IS-SR regression across splits; ≥ 0.5 = informative, ~0/negative = overfit).
+5. **Week-1 measurements** (`scripts/diag_r_metrics.py`): per asset, honest
+   walk-forward → R metrics + buckets, `cost_ratio` = (spread + 2·slippage +
+   commission_in_price) / mean_step with the audit's zones (norm < 8–10%,
+   red > 15%), events-per-feature (audit rule ≥ 10; EUR H1 ≈ 120 events / 46
+   features ≈ 2.6 → over-parameterized), MFE/MAE in steps over the horizon per
+   regime — P(MFE ≥ 1/2/3/5) and MAE p50/p80/p90 — as the calibration input for
+   exit geometry (Action 4; no barrier tuned here, only measured), fold sign
+   test. Outputs `logs/diag_r_metrics_<asset>.csv/.json`.
+6. **Pre-registered TF hypotheses** (commented in `config/config.yaml` for
+   XAUUSD/BTCUSD): M5 → M15 ONLY if the real-DB `cost_ratio > 15%` (measure
+   with the diag script on both TFs first). Config not flipped without
+   measurement, per the audit's own rule; XAG stays shadow.
+7. **Decisions confirmed**: no new grids (each trial lowers DSR of everything
+   found), no LSTM/Transformer on 46 tabular features (10²–10³ events per fold
+   vs 10⁵+ needed), meta-labeling only as continuous sizing AFTER an asset
+   passes the gate (target label «TP2 before SL», AUC ≥ 0.55 pre-check, meta
+   features must be NEW information: strategy state, cross-asset z, IV state).
+
+**Where improvement is unlikely (audit §3, adopted):** more features from the
+same OHLCV; LSTM/Transformer; another TP/SL/BE grid; saving XAG; CVD from MT5
+tick volume as alpha; COT as intraday entry; explicit vol targeting on top of
+ATR stops; lot scaling as "making the system profitable".
+
 ---
 
 ## 4. Change Log
@@ -297,3 +348,4 @@ live-forward data (≥100–150 trades per strategy) before promotion.
 | 2026-08-07 | mult | **Multiple-testing assessment tool (priority #1 of the transfer notes)**: new `backtest/deflated_sharpe.py` (PSR / DSR / E[max SR_N] / MinTRL per Bailey & López de Prado 2014; CSCV PBO per Bailey et al. 2015, full-enumeration with seeded sampling cap) + `scripts/deflated_sharpe.py` CLI: runs a per-asset config FAMILY (GBP: current-v4 / v3_early_be / v4a / v4b_trailing / legacy / null) through the honest walk-forward (same per-fold models for every variant), reports SR, PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds + CSCV PBO; `null` = random-prob negative control isolating the ML edge from grid+BE mechanics; synthetic no-DB fallback for tests. Outputs `logs/deflated_sharpe_<asset>.csv/.json`. | Answers «~700 grid combinations — is the winner real?» for every asset (esp. GBP v4 / EUR v3 / XAG). Run on the machine DB: `python -m scripts.deflated_sharpe --asset GBPUSD` (decision rule: dsr_historical ≥ 0.95 AND PBO ≤ 0.3). | `270 passed` (+20: 16 math/unit + 4 script integration) |
 | 2026-08-07 | fix | **Timestamp unit bug (pandas 3.x)**: `series.astype("int64") // 10**9` silently returns MILLISECONDS when the datetime resolution is µs (pandas 3.0 stores non-nano), so `data/ingestion.py::fetch_candles` (API backfill), `realtime/pipeline.py` (MT5 live frame) and every synthetic builder wrote timestamps ~1000× too small — new backfills would produce 0 walk-forward folds and mixed-unit DBs. Added resolution-independent `data/ingestion.to_epoch_seconds()` (timedelta arithmetic) and replaced all 8 call sites (ingestion, pipeline, grid_search, diag, deflated_sharpe, 3 test builders). | Correctness/ops: new backfills and live frames keep true epoch-seconds; regression test locks the behaviour and asserts the legacy idiom is still broken on this pandas (so a future resolution change cannot silently pass). | `271 passed` (+1 regression) |
 | 2026-08-07 | audit | **Quant-audit findings implemented** (3rd-party audit, transfer notes): (1) **labeling bias FIXED** — a same-candle touch of both barriers was hard-coded `-1` (short) in both label generators; now excluded as NaN (OHLC cannot order intrabar touches; audit rule: tick replay or exclude). (2) **N_eff added** (`effective_number_trials`: N_eff = 1+(M−1)(1−ρ̄) + participation ratio); `scripts/deflated_sharpe.py` reports DSR at N_eff AND full N=729, CLI prints ρ̄/N_eff. (3) **CSCV scorecard extended** with OOS probability of loss and IS→OOS degradation of the IS-best config. (4) **New `scripts/exit_profile.py`**: exit-path contribution per asset×regime in money + net R, payoff geometry (avg win/loss R, breakeven WR); `Trade` gained `tp1_hit`/`tp2_hit`/`initial_stop_price` audit fields. (5) **XAGUSD → shadow** (`enabled: false`; all prod paths honor it; research scripts take `--asset` explicitly). (6) Decisions: no new TP/SL/BE grids, no LSTM/Transformer on 46 tabular features; next = meta-sizing on OOF predictions. | Honesty/risk: removes a systematic short bias from training labels; selection-adjusted DSR at defensible N_eff; payoff asymmetry now visible per path; XAG capital parked until outer-OOS return gate. | `283 passed` (was 271; +12: 3 label-bias, 3 N_eff, 1 CSCV, 1 run-analysis, 5 exit-profile incl. main) |
+| 2026-08-07 | audit2 | **Second quant audit (Claude 5 Opus plan) applied**: (1) R-multiplicator metrology in `backtest/metrics.py` — `trades_to_dataframe` extended (entry_price/initial_stop_price/tp1_price/volume), `compute_r_metrics` (E[R], σ[R], skew/kurt, payoff geometry, exit buckets in R), `block_bootstrap_t`, `fold_sign_test`, `summarize_folds` + arithmetic-consistency check (audit 0.1: median PF > 1 vs positive-VALID-folds). `run_backtest` prints/saves the fold summary on every run. (2) Decision gate in `scripts/deflated_sharpe.py` (t≥3.0 block-bootstrap, DSR(N_eff)>0.95, PBO<0.30, PF>1.1 at 1.5× costs, ≥55% positive valid folds, IS→OOS slope ≥0.5, locked hold-out) + cost-stress rerun at 1.5× for the current config. (3) CSCV `is_oos_slope` (pooled OOS-on-IS SR regression across splits). (4) Week-1 measurements `scripts/diag_r_metrics.py`: R metrics + buckets, `cost_ratio` (norm <8–10%, red >15%), events-per-feature (rule ≥10; H1 assets over-parameterized at 46 features), MFE/MAE per regime (P(MFE≥1/2/3/5), MAE p50/p80/p90) as exit-calibration input, fold sign test. (5) Pre-registered commented TF hypotheses XAU/BTC M5→M15 gated on real-DB cost_ratio>15% (config not flipped blindly). (6) Adopted audit §3: no new grids, no LSTM/Transformer, meta-sizing only after the gate with AUC≥0.55 pre-check. | Correctness/risk: cross-asset comparisons now in R (never raw money); a gate that currently fails every asset → paper/shadow until evidence; cost and MFE/MAE measurements replace grid-search guessing. | `300 passed` (was 283; +17: 7 R-metrics, 10 diag/gate/slope) |

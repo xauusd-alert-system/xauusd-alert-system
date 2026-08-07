@@ -217,8 +217,9 @@ def test_run_analysis_deterministic(synthetic_gbp_df):
     variants = {"current": {}, "null": None}
     r1 = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants)
     r2 = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants)
-    assert r1["trials"] == r2["trials"]
-    assert r1["cscv"] == r2["cscv"]
+    # NaN-tolerant comparison (floats may be nan, and nan != nan under ==)
+    assert json.dumps(r1, sort_keys=True, default=str) == json.dumps(
+        r2, sort_keys=True, default=str)
 
 
 def test_run_analysis_raises_without_folds():

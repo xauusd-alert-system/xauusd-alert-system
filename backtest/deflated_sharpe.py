@@ -278,6 +278,8 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
     -------
     dict with keys: pbo (fraction of splits where the IS-best trial is in the
     bottom half OOS), mean_lambda, median_lambda, frac_lambda_positive,
+    is_oos_slope (regression slope of pooled OOS SR on IS SR; >= ~0.5 means
+    IS performance carries information OOS), oos_prob_loss, is_oos_degradation,
     n_splits, n_combinations, n_trials, n_observations.
 
     Interpretation: PBO is the probability that the config that looked best
@@ -325,12 +327,24 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
     lambdas: list[float] = []
     oos_loss_flags: list[bool] = []
     degradations: list[float] = []
+    is_sr_pool: list[float] = []
+    oos_sr_pool: list[float] = []
     for sel in combos:
         is_cols = np.concatenate([blocks[b] for b in sel])
         oos_cols = np.concatenate([blocks[b] for b in range(n_splits) if b not in sel])
         is_perf = M[:, is_cols].mean(axis=1)
         oos_perf = M[:, oos_cols].mean(axis=1)
         n_star = int(np.argmax(is_perf))
+        # Audit metric: OOS-on-IS slope of trial performance (SR-like units).
+        # A slope >= ~0.5 means IS performance carries information about OOS;
+        # ~0 or negative = pure overfitting. Pooled over all trials x splits.
+        if is_cols.shape[0] > 2 and oos_cols.shape[0] > 2:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                sr_is = M[:, is_cols].mean(axis=1) / (M[:, is_cols].std(axis=1) + 1e-12)
+                sr_oos = M[:, oos_cols].mean(axis=1) / (M[:, oos_cols].std(axis=1) + 1e-12)
+            is_sr_pool.extend(sr_is.tolist())
+            oos_sr_pool.extend(sr_oos.tolist())
         # IS -> OOS degradation of the IS-best trial (relative, mean over splits).
         if abs(is_perf[n_star]) > 1e-12:
             degradations.append(float(oos_perf[n_star] / is_perf[n_star] - 1.0))
@@ -346,8 +360,17 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
 
     lambdas = np.asarray(lambdas, dtype=float)
     pbo = float(np.mean(lambdas <= 0.0))
+    # Regression slope of pooled OOS SR on IS SR (sklearn-free least squares).
+    is_oos_slope = float("nan")
+    if len(is_sr_pool) >= 8:
+        x = np.asarray(is_sr_pool, dtype=float)
+        y = np.asarray(oos_sr_pool, dtype=float)
+        x_var = float(np.var(x))
+        if x_var > 1e-12:
+            is_oos_slope = float(np.cov(x, y, ddof=1)[0, 1] / np.var(x, ddof=1))
     return {
         "pbo": pbo,
+        "is_oos_slope": is_oos_slope,
         "mean_lambda": float(np.mean(lambdas)),
         "median_lambda": float(np.median(lambdas)),
         "frac_lambda_positive": float(np.mean(lambdas > 0.0)),

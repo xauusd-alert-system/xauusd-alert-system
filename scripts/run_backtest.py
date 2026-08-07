@@ -193,6 +193,23 @@ def main():
     results_df.to_csv(f"logs/backtest_{args.asset.lower()}.csv", index=False)
     print(f"Saved metrics to logs/backtest_{args.asset.lower()}.csv")
 
+    # Quant audit 0.1: PF-median vs positive-fold arithmetic consistency.
+    # Positive folds MUST be counted over VALID (non-empty) folds; a median
+    # PF > 1 with < 50% positive VALID folds means the two statistics refer
+    # to different fold sets.
+    from backtest.metrics import summarize_folds, fold_sign_test
+    summary = summarize_folds(results)
+    print(f"\nFold summary: {summary['positive_folds_valid']}/{summary['valid_folds']} "
+          f"positive valid folds ({summary['positive_folds_pct_valid']}%) | "
+          f"median PF (valid) = {summary['median_pf_valid']} | "
+          f"empty folds = {summary['n_folds'] - summary['valid_folds']}")
+    st = fold_sign_test(summary["positive_folds_valid"], summary["valid_folds"])
+    print(f"Sign test vs 50%: z={st['z']}, p(one-sided)={st['p_one_sided']}")
+    if summary["inconsistent"]:
+        print(f"WARNING: {summary['note']} -- re-check the aggregate tables "
+              "(positive folds must use valid folds only).")
+    pd.DataFrame([summary]).to_csv(f"logs/backtest_{args.asset.lower()}_fold_summary.csv", index=False)
+
 
 if __name__ == "__main__":
     main()

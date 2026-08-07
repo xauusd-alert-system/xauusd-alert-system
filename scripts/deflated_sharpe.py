@@ -68,6 +68,7 @@ from backtest.deflated_sharpe import (
     cscv_pbo,
     effective_number_trials,
 )
+from backtest.metrics import block_bootstrap_t
 from model.ensemble_backtest import EnsembleBacktester
 from model.trainer import build_training_matrix, train_model, calibrate_model, save_model
 from model.predictor import ModelPredictor
@@ -217,6 +218,25 @@ def _apply_variant(cfg: dict, asset_key: str, overrides: dict | None) -> dict:
     return cfg_v
 
 
+def _apply_cost_mult(cfg: dict, asset_key: str, mult: float) -> dict:
+    """Stress-test costs: multiply spread, slippage and commission by `mult`
+    (audit: the strategy must survive 1.5x costs with PF > 1.1, or it is a bet
+    on the broker not widening spreads). Per-asset overrides first, then the
+    global backtest defaults."""
+    cfg_v = copy.deepcopy(cfg)
+    asset = cfg_v.setdefault("assets", {}).setdefault(asset_key, {})
+    for key in ("spread_usd", "slippage_usd"):
+        if key in asset:
+            asset[key] = float(asset[key]) * mult
+    bt = cfg_v.setdefault("backtest", {})
+    bt["commission_per_trade"] = float(bt.get("commission_per_trade", 0.0)) * mult
+    if "spread_points" in bt:
+        bt["spread_points"] = float(bt["spread_points"]) * mult
+    if "slippage_points" in bt:
+        bt["slippage_points"] = float(bt["slippage_points"]) * mult
+    return cfg_v
+
+
 # ---------------------------------------------------------------------------
 # Per-fold model scoring (real data only; mirrors run_backtest.strategy_fn_factory)
 # ---------------------------------------------------------------------------
@@ -281,7 +301,8 @@ def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
 
 def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
                      historical_trials: int, n_variants: int,
-                     trades_per_year: float, n_eff_historical: float) -> dict:
+                     trades_per_year: float, n_eff_historical: float,
+                     trade_r: list[float] | None = None) -> dict:
     """One row of the DSR report for a single config variant."""
     if not fold_trades:
         return {"variant": name, "n_trades": 0, "n_folds": n_folds, "pos_folds": 0,
@@ -310,10 +331,15 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
     d_hist = deflated_sharpe_ratio(arr, n_trials=historical_trials)
     mtrl = minimum_track_record_length(arr, n_trials=historical_trials)
 
+    valid_folds = int(np.sum([len(ft) > 0 for ft in fold_trades]))
+    t_block = block_bootstrap_t(trade_r) if trade_r and len(trade_r) >= 2 else float("nan")
+
     return {
         "variant": name,
         "n_trades": int(len(arr)),
         "n_folds": n_folds,
+        "valid_folds": valid_folds,
+        "t_block": t_block,
         "pos_folds": int(np.sum([np.sum(ft > 0) > 0 for ft in fold_trades])),
         "total_pnl": round(float(arr.sum()), 2),
         "expectancy": round(float(arr.mean()), 4),
@@ -338,7 +364,8 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
                  historical_trials: int = 729,
                  n_splits: int | None = None,
                  max_folds: int | None = None,
-                 random_seed: int = 42) -> dict:
+                 random_seed: int = 42,
+                 cost_stress: bool = True) -> dict:
     """Run the walk-forward family comparison + DSR/CSCV for one asset.
 
     Returns a plain-python dict (JSON-serializable) with per-trial rows and
@@ -359,10 +386,12 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 
     fold_matrix = []
     trials = []
+    current_r: list[float] = []
     n_eff_historical = float(len(variants))
     for name, overrides in variants.items():
         cfg_v = _apply_variant(cfg, asset_key, overrides)
         fold_trades: list[np.ndarray] = []
+        variant_r: list[float] = []
         for fold_i, fdf in enumerate(frames):
             fdf_run = fdf
             if name == "null":
@@ -377,12 +406,22 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             tdf = trades_to_dataframe(trades)
             pnls = tdf["pnl"].to_numpy(dtype=float) if len(tdf) else np.array([], dtype=float)
             fold_trades.append(pnls)
+            if name == "current":
+                # Per-trade R of the current config (audit: gate needs an
+                # honest block-bootstrap t, which requires trade-level R).
+                for t in trades:
+                    if getattr(t, "initial_stop_price", None):
+                        risk = abs(t.entry_price - t.initial_stop_price) * t.volume * engine.point_value_lot
+                        if risk > 1e-12:
+                            variant_r.append(float(t.pnl / risk))
         n_total = int(sum(len(ft) for ft in fold_trades))
         trades_per_year = n_total / years if years > 0 else 0.0
+        if name == "current":
+            current_r = variant_r
         trials.append(_summarize_trial(
             name, fold_trades, len(windows), historical_trials,
             n_variants=len(variants), trades_per_year=trades_per_year,
-            n_eff_historical=n_eff_historical))
+            n_eff_historical=n_eff_historical, trade_r=variant_r))
         fold_matrix.append([float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades])
 
     fold_arr = np.asarray(fold_matrix, dtype=float)
@@ -396,6 +435,35 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         n_eff_historical = 1.0 + (historical_trials - 1.0) * (1.0 - mean_rho)
     else:
         n_eff_historical = float(historical_trials)
+
+    # Cost stress (audit gate: survive 1.5x costs with PF > 1.1): rerun ONLY
+    # the current variant with spread/slippage/commission x 1.5.
+    stress = None
+    if cost_stress and "current" in variants:
+        cfg_s = _apply_cost_mult(cfg, asset_key, 1.5)
+        cfg_s = _apply_variant(cfg_s, asset_key, variants["current"])
+        stress_fold_pfs = []
+        stress_pnls = []
+        for fdf in frames:
+            cfg_run = merge_asset_cfg(cfg_s, asset_key, "labeling")
+            cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
+            engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
+            trades = engine.run(fdf.reset_index(drop=True))
+            arr = np.array([t.pnl for t in trades], dtype=float)
+            if len(arr) >= 3:
+                wins, losses = arr[arr > 0], arr[arr <= 0]
+                gp, gl = float(wins.sum()), float(-losses.sum())
+                stress_fold_pfs.append((gp / gl) if gl > 0 else 999.0)
+            stress_pnls.extend(arr.tolist())
+        stress = {
+            "cost_mult": 1.5,
+            "n_trades": len(stress_pnls),
+            "total_pnl": round(float(np.sum(stress_pnls)), 2) if stress_pnls else 0.0,
+            "profit_factor": round(float(np.sum(np.maximum(stress_pnls, 0.0)) /
+                                         max(-np.sum(np.minimum(stress_pnls, 0.0)), 1e-12)), 2)
+            if stress_pnls else 0.0,
+            "median_fold_pf": round(float(np.median(stress_fold_pfs)), 2) if stress_fold_pfs else None,
+        }
 
     # Record the effective config of the "current" variant for the report.
     cur_cfg = _apply_variant(cfg, asset_key, variants.get("current"))
@@ -426,6 +494,8 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         },
         "trials": trials,
         "cscv": cscv,
+        "cost_stress": stress,
+        "current_r": current_r,
     }
 
 
@@ -439,6 +509,38 @@ def _fmt(x, width: int = 9, digits: int = 2) -> str:
     if isinstance(x, float):
         return f"{x:.{digits}f}".rjust(width)
     return str(x).rjust(width)
+
+
+def decision_gate(res: dict) -> dict:
+    """Hard admission checklist for live capital (audit, Claude 5 Opus plan).
+
+    All conditions simultaneously:
+      1. block-bootstrap t >= 3.0 on R-multiplicators
+      2. DSR > 0.95 at the defensible N_eff
+      3. PBO < 0.30
+      4. survives 1.5x costs with PF > 1.1
+      5. positive folds >= 55% of VALID folds
+      6. IS->OOS slope >= 0.5
+      7. locked hold-out confirms (not computable here — always 'pending')
+    Returns {condition: bool/None, passed_all}.
+    """
+    cur = next((t for t in res["trials"] if t["variant"] == "current"), None)
+    cscv = res["cscv"]
+    checks = {
+        "block_bootstrap_t >= 3.0": bool(cur is not None and cur.get("t_block", float("nan")) >= 3.0),
+        "DSR(N_eff) > 0.95": bool(cur is not None and cur.get("dsr_neff", float("nan")) > 0.95),
+        "PBO < 0.30": bool(cscv["pbo"] < 0.30),
+        "PF > 1.1 at 1.5x costs": bool(res.get("cost_stress") and res["cost_stress"]["profit_factor"] > 1.1),
+        "positive folds >= 55% valid": bool(
+            cur is not None and cur.get("valid_folds", 0) > 0
+            and cur["pos_folds"] / cur["valid_folds"] >= 0.55),
+        "IS->OOS slope >= 0.5": bool(cscv.get("is_oos_slope") is not None
+                                     and np.isfinite(cscv.get("is_oos_slope", float("nan")))
+                                     and cscv["is_oos_slope"] >= 0.5),
+        "locked hold-out confirms": None,  # organizational, set by the user
+    }
+    known = [v for v in checks.values() if v is not None]
+    return {"checks": checks, "passed_all": bool(known) and all(known)}
 
 
 def print_report(res: dict) -> None:
@@ -483,15 +585,31 @@ def print_report(res: dict) -> None:
           f"median lambda = {c['median_lambda']:+.3f} | frac lambda>0 = "
           f"{c['frac_lambda_positive']:.3f} | OOS prob loss = {c['oos_prob_loss']:.3f} | "
           f"IS->OOS degradation = {c['is_oos_degradation']:+.2%}")
-    if c["pbo"] <= 0.20:
+    if c["pbo"] <= 0.10:
         verdict = "LOW overfit risk: the IS-best config usually wins OOS."
-    elif c["pbo"] <= 0.40:
+    elif c["pbo"] <= 0.20:
         verdict = "MODERATE overfit risk: selection is informative but noisy."
-    elif c["pbo"] <= 0.60:
-        verdict = "HIGH overfit risk: IS-best ~coin flip OOS."
     else:
-        verdict = "VERY HIGH overfit risk: IS-best tends to LOSE OOS."
+        verdict = "HIGH overfit risk: selection procedure considered overfit."
     print(f"  Verdict: {verdict}")
+    slope = c.get("is_oos_slope")
+    if slope is not None and np.isfinite(slope):
+        print(f"  IS->OOS slope = {slope:.2f} ({'informative' if slope >= 0.5 else 'weak/overfit'})")
+
+    # Cost stress + decision gate
+    st = res.get("cost_stress")
+    if st:
+        print(f"\nCost stress x{st['cost_mult']}: n={st['n_trades']} PnL={st['total_pnl']} "
+              f"PF={st['profit_factor']} median fold PF={st['median_fold_pf']} "
+              f"({'PASS' if st['profit_factor'] > 1.1 else 'FAIL'} PF>1.1)")
+    gate = decision_gate(res)
+    print("\nDecision gate (all conditions simultaneously):")
+    for cond, ok in gate["checks"].items():
+        if ok is None:
+            print(f"  [ ] {cond}  (user/organizational)")
+        else:
+            print(f"  [{'x' if ok else ' '}] {cond}")
+    print(f"  => {'PASS -> capital' if gate['passed_all'] else 'FAIL -> paper/shadow only'}")
 
     cur = next((t for t in res["trials"] if t["variant"] == "current"), None)
     if cur is not None:
@@ -519,6 +637,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="Total trials ever tried on this asset's data (deflation N)")
     parser.add_argument("--n-splits", type=int, default=None, help="CSCV split count (default: auto)")
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds (quick runs/tests)")
+    parser.add_argument("--no-cost-stress", action="store_true",
+                        help="Skip the 1.5x-cost stress rerun of the current config")
     parser.add_argument("--out", default=None, help="Output CSV path (default: logs/deflated_sharpe_<asset>.csv)")
     args = parser.parse_args(argv)
 
@@ -551,7 +671,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         res = run_analysis(cfg, args.asset, df, variants=variants,
                            historical_trials=args.historical_trials,
-                           n_splits=args.n_splits, max_folds=args.max_folds)
+                           n_splits=args.n_splits, max_folds=args.max_folds,
+                           cost_stress=not args.no_cost_stress)
     except ValueError as exc:
         raise SystemExit(f"[dsr] {exc}")
 

@@ -79,6 +79,14 @@ assets:
     signal_grid:
       step_min_points: 2.0
       step_max_points: 8.0
+    # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
+    # M5 -> M15 if cost_ratio > 15% on the real DB (measure first:
+    #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M5
+    #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M15
+    # cost_ratio = (spread + 2*slippage + commission_price) / mean_step;
+    # norm < 8-10%, red zone > 15%. Step scales ~sqrt(3) while costs are
+    # fixed, so net expectancy multiplies. Everything else stays frozen.
+    # timeframe: M15
 
   XAGUSD:
     # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).
@@ -142,6 +150,11 @@ assets:
     signal_grid:
       step_min_points: 200.0
       step_max_points: 3000.0
+    # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
+    # M5 -> M15 if cost_ratio > 15% on the real DB (measure first with
+    #   python -m scripts.diag_r_metrics --asset BTCUSD --timeframe M5|M15
+    # norm < 8-10%, red zone > 15%. Everything else stays frozen.
+    # timeframe: M15
 
   EURUSD:
     # FX v3: H1 + early breakeven (0.5 step) + tighter stop (2.0 step) to cut
