@@ -110,9 +110,12 @@ GBP_VARIANTS: dict = {
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
-    "legacy": {  # Phase-0+1 global defaults
+    "legacy": {  # Phase-0+1 global defaults; regime_overrides: None strips the
+        # shipped per-regime policy so the comparison stays honest (patch-value
+        # None = key removal, see _apply_variant).
         "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.0, "tp3_mult": 3.0},
+                        "tp2_mult": 2.0, "tp3_mult": 3.0,
+                        "regime_overrides": None},
         "ensemble": {"min_confidence_to_alert": 0.60},
         "labeling": {"horizon_candles_n": 36},
     },
@@ -132,9 +135,12 @@ GBP_VARIANTS: dict = {
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
-    "regime_fast": {  # audit action 4 pre-registered: early-BE everywhere
+    "regime_fast": {  # audit action 4 pre-registered: early-BE everywhere;
+        # regime_overrides: None cancels the shipped overrides (they made
+        # regime_fast identical to current in the 2026-08-07 run).
         "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 0.5,
-                        "tp2_mult": 2.5, "tp3_mult": 3.0},
+                        "tp2_mult": 2.5, "tp3_mult": 3.0,
+                        "regime_overrides": None},
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
@@ -228,14 +234,25 @@ def _select_variants(asset_key: str, names: str | None) -> dict:
 
 
 def _apply_variant(cfg: dict, asset_key: str, overrides: dict | None) -> dict:
-    """Deep-copy cfg with the variant's per-asset section patches applied."""
+    """Deep-copy cfg with the variant's per-asset section patches applied.
+
+    A patch value of None REMOVES the key from the merged section (needed to
+    cancel an inherited block, e.g. `signal_grid.regime_overrides: null` must
+    strip the overrides the shipped config now carries, so variants like
+    `legacy` are measured against the plain grid instead of silently
+    inheriting the current config's per-regime policy).
+    """
     cfg_v = copy.deepcopy(cfg)
     if not overrides:
         return cfg_v
     asset = cfg_v.setdefault("assets", {}).setdefault(asset_key, {})
     for section, patch in overrides.items():
         merged = copy.deepcopy(asset.get(section, {}))
-        merged.update(patch)
+        for k, v in patch.items():
+            if v is None:
+                merged.pop(k, None)
+            else:
+                merged[k] = v
         asset[section] = merged
     return cfg_v
 
