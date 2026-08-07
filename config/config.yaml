@@ -47,13 +47,16 @@ ensemble:
   # Default false keeps the Phase-0+1 soft-collapse behaviour.
   hard_divergence_veto: false
 
+
 market_data:
   provider: mt5
   timeframe: M5
   closed_candles_only: true
 
+
 general:
   db_path: data/market_data_mt5.sqlite
+
 
 assets:
   XAUUSD:
@@ -86,7 +89,10 @@ assets:
     # cost_ratio = (spread + 2*slippage + commission_price) / mean_step;
     # norm < 8-10%, red zone > 15%. Step scales ~sqrt(3) while costs are
     # fixed, so net expectancy multiplies. Everything else stays frozen.
-    # timeframe: M15
+    # CONFIRMED on the real DB (2026-08-07 measurements): M5 cost_ratio 15.6%
+    # (RED) -> M15 6.1% (OK), E[R] preserved (0.074 vs 0.076).
+    timeframe: M15
+
 
   XAGUSD:
     # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).
@@ -124,6 +130,7 @@ assets:
       step_min_points: 0.1
       step_max_points: 1.0
 
+
   BTCUSD:
     enabled: true
     mt5_symbol: BITCOIN
@@ -155,6 +162,7 @@ assets:
     #   python -m scripts.diag_r_metrics --asset BTCUSD --timeframe M5|M15
     # norm < 8-10%, red zone > 15%. Everything else stays frozen.
     # timeframe: M15
+
 
   EURUSD:
     # FX v3: H1 + early breakeven (0.5 step) + tighter stop (2.0 step) to cut
@@ -194,6 +202,7 @@ assets:
       step_max_points: 0.005
       stop_mult: 2.0
       breakeven_trigger_atr: 0.5
+
 
   GBPUSD:
     # FX v4 (trend-friendly) — FINAL GBPUSD config, result of the protected
@@ -236,6 +245,31 @@ assets:
       breakeven_trigger_atr: 1.0
       tp2_mult: 2.5
       tp3_mult: 3.0
+      # Per-regime exit policy — ENABLED (post-measurements TZ 2026-08-07, step 3).
+      # Adopted as `current` from the pre-registered regime_wide variant after
+      # the real-DB run: regime_wide PF 1.31 vs legacy current 1.20
+      # (n≈529, PnL≈+85); regime_fast measured harmful (-60.6) and is NOT used.
+      # The audit's law: trend regimes run WIDE (no early BE, far targets,
+      # back-loaded scaleout 30/30/40), range regimes manage FAST (early BE,
+      # tight stop, front-loaded 60/40). Note: even with PF 1.31 the decision
+      # gate stays FAIL (cost-stress PF 0.97) -> GBP remains paper/shadow.
+      regime_overrides:
+        trend_up:
+          stop_mult: 4.0
+          breakeven_trigger_atr: 1.0
+          tp2_mult: 2.5
+          tp3_mult: 4.0
+          scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
+        trend_down:
+          stop_mult: 4.0
+          breakeven_trigger_atr: 1.0
+          tp2_mult: 2.5
+          tp3_mult: 4.0
+          scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
+        range:
+          stop_mult: 2.0
+          breakeven_trigger_atr: 0.5
+          scaleout: {tp1_ratio: 0.6, tp2_ratio: 0.4}
     # Stage 4: per-asset model flags (use_regime_feature / include_zero_class)
     model:
       use_regime_feature: true
@@ -247,29 +281,7 @@ assets:
     #   trailing_atr_mult: 2.0
     #   stop_mult: 3.0
     #   breakeven_trigger_atr: 1.0
-    # Per-regime exit policy (audit action 4, PRE-REGISTERED, NOT enabled):
-    # the audit's law — trend regimes run WIDE (no early BE, far targets,
-    # back-loaded scaleout 30/30/40), range regimes manage FAST (early BE,
-    # tight stop, front-loaded 60/40). Values below are placeholders to be
-    # calibrated from MFE/MAE (scripts/exit_calibration.py) on the real DB.
-    # signal_grid:
-    #   regime_overrides:
-    #     trend_up:
-    #       stop_mult: 4.0
-    #       breakeven_trigger_atr: 1.0
-    #       tp2_mult: 2.5
-    #       tp3_mult: 4.0
-    #       scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
-    #     trend_down:
-    #       stop_mult: 4.0
-    #       breakeven_trigger_atr: 1.0
-    #       tp2_mult: 2.5
-    #       tp3_mult: 4.0
-    #       scaleout: {tp1_ratio: 0.3, tp2_ratio: 0.3}
-    #     range:
-    #       stop_mult: 2.0
-    #       breakeven_trigger_atr: 0.5
-    #       scaleout: {tp1_ratio: 0.6, tp2_ratio: 0.4}
+
 
 alerts:
   cooldown_minutes: 15
@@ -277,6 +289,7 @@ alerts:
   # Append a compact metadata line (Conf / Regime / Session) to Telegram
   # signals. Default false keeps the clean ШОРТ/ЛОНГ layout from the spec.
   include_signal_meta: false
+
 
 features:
   ema_periods: [9, 21, 50, 200]
@@ -292,12 +305,14 @@ features:
   structure_lookback: 20
   mtf_reference_timeframes: ["M15", "H1"]
 
+
 regime:
   min_candles_for_regime: 50
   no_trade_volatility_floor: 0.0001
   atr_spike_multiplier: 1.8
   bb_width_compression_pctile: 20
   adx_trend_threshold: 20
+
 
 model:
   random_seed: 42
@@ -324,6 +339,7 @@ model:
   # ModelPredictor from the raw `regime` column, so all consumers work unchanged.
   use_regime_feature: false
 
+
 # ---------------------------------------------------------------------------
 # TRAINING labels (triple-barrier, labeling/label_generator.py). These barrier
 # distances define the SUPERVISED target the models are trained on and are
@@ -339,6 +355,7 @@ labeling:
   tp1_atr_multiplier: 1.0
   tp2_atr_multiplier: 1.8
   tp3_atr_multiplier: 2.8
+
 
 # ---------------------------------------------------------------------------
 # Signal grid spec for Telegram (alerts/formatter.py, realtime/pipeline.py).
@@ -362,10 +379,12 @@ signal_grid:
   step_min_points: null    # lower clamp (null = no clamp)
   step_max_points: null    # upper clamp (null = no clamp)
 
+
 sessions:
   asia: {start: 0, end: 8}
   london: {start: 8, end: 13}
   newyork: {start: 13, end: 22}
+
 
 backtest:
   spread_points: 25
@@ -380,6 +399,7 @@ backtest:
     test_window_days: 50
     step_days: 50
 
+
 # ===== RETRAINING =====
 retraining:
   enabled: true
@@ -393,6 +413,7 @@ retraining:
     day_of_week: "monday"
     hour: 3
     minute: 0
+
 
 # ===== DEPLOY GUARD (Part B Phase 6 / audit #25) =====
 # The nightly retrain must never silently overwrite a good production model with
@@ -420,6 +441,7 @@ deploy_guard:
   # Sidecar name used by --backup / --check.
   backup_suffix: ".deploy_guard.bak"
 
+
 # ===== RISK ENGINE (quant audit 2026-08-07, Claude plan Q6) =====
 # Pre-trade stop-risk sizing + exposure caps (priority 1), drawdown throttle
 # (priority 3). DEFAULT OFF: enabling changes live order sizes, so it is a
@@ -444,17 +466,24 @@ risk:
     - [-0.08, 0.0]
   min_lot: 0.01
 
+
 # ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====
 # A reserved period that RESEARCH must never look at. When enabled, every
 # walk-forward runner (run_backtest / deflated_sharpe / grid_search) refuses
 # to run if any of its test windows overlaps this range unless --allow-locked
 # is passed (which burns the lock). Set it to the most recent ~12 months once
 # the current research round is frozen; inspect it ONE time before deploy.
+# ENABLED (post-measurements TZ 2026-08-07, step 5): the 2022-2025 research
+# round is frozen; 2025-06-01..2026-08-07 is now the locked final-test period.
+# All walk-forward runners will REFUSE to run when their test windows overlap
+# it; passing --allow-locked burns the lock (one-way). New hypotheses must be
+# evaluated on data before 2025-06 only.
 validation:
   locked_holdout:
-    enabled: false
-    start: null        # e.g. "2025-06-01" (ISO date)
-    end: null          # e.g. "2026-08-07"
+    enabled: true
+    start: "2025-06-01"    # ~last 12+ months of the data
+    end: "2026-08-07"
+
 
 # ===== CORRELATION FILTER (динамический) =====
 correlation_filter:

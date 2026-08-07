@@ -36,6 +36,7 @@ from scripts.deflated_sharpe import (
 # PSR / DSR math
 # ---------------------------------------------------------------------------
 
+
 def test_annualized_sharpe_known_value():
     # mean=3, std(ddof=1)=sqrt(2.5)=1.5811 -> 3/1.5811*sqrt(250) = 30.0
     assert annualized_sharpe([1, 2, 3, 4, 5]) == pytest.approx(30.0, abs=1e-9)
@@ -112,6 +113,7 @@ def test_min_trl_infinite_for_negative_edge():
 # CSCV PBO
 # ---------------------------------------------------------------------------
 
+
 def test_cscv_dominant_strategy_pbo_zero():
     """One strategy dominates every fold -> IS-best is always the OOS best too."""
     rng = np.random.default_rng(7)
@@ -161,6 +163,7 @@ def test_cscv_warns_below_four_trials():
 # ---------------------------------------------------------------------------
 # Script integration (synthetic data, no DB)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def synthetic_gbp_df():
@@ -231,12 +234,17 @@ def test_run_analysis_raises_without_folds():
 
 
 def test_main_writes_csv_and_json(tmp_path, monkeypatch):
-    """CLI smoke: no DB in the sandbox -> synthetic fallback path, files written."""
+    """CLI smoke: no DB in the sandbox -> synthetic fallback path, files written.
+
+    --allow-locked: the synthetic frame spans 2022-2026 and therefore overlaps
+    the locked hold-out enabled on 2026-08-07. This test exercises the CLI
+    plumbing (file writing), not the lock itself, so the lock is bypassed.
+    """
     monkeypatch.chdir(tmp_path)
     from scripts.deflated_sharpe import main
     out = str(tmp_path / "dsr_gbp.csv")
     main(["--asset", "GBPUSD", "--variants", "current,null,v3_early_be,v4a",
-          "--max-folds", "2", "--out", out])
+          "--max-folds", "2", "--out", out, "--allow-locked"])
     assert os.path.exists(out)
     assert os.path.exists(out.replace(".csv", ".json"))
     # keep_default_na=False: the literal variant name "null" must not be
@@ -254,6 +262,7 @@ def test_main_writes_csv_and_json(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # N_eff (dependent-trial correction) + CSCV audit extras
 # ---------------------------------------------------------------------------
+
 
 def test_effective_number_trials_perfectly_correlated():
     """Identical trials -> N_eff == 1 (one independent draw)."""
