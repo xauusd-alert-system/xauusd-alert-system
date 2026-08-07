@@ -1,5 +1,5 @@
 """
-Diagnostic for GBPUSD profile under current FX v3 config (early BE, stop 2.0, H1).
+Diagnostic for GBPUSD profile under current FX v4 config (trend-friendly, stop 3.0, BE at TP1, H1).
 - Loads H1 GBPUSD via scripts.train_mt5.build_full_df (with order-flow).
 - Runs EnsembleBacktester with current GBPUSD asset config.
 - Outputs to logs/diag_gbp_profile.csv:
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from config.loader import load_config, get_signal_grid
 from scripts.train_mt5 import build_full_df
 from model.ensemble_backtest import EnsembleBacktester
-from data.ingestion import fetch_mock_candles  # for smoke tests / no DB
+from data.ingestion import fetch_mock_candles, to_epoch_seconds  # for smoke tests / no DB
 
 
 def _make_synthetic_gbp_df(n=2000, price=1.30, atr=0.0015, seed=42):
@@ -37,7 +37,7 @@ def _make_synthetic_gbp_df(n=2000, price=1.30, atr=0.0015, seed=42):
     highs = np.maximum(opens, closes) + np.abs(np.random.randn(n)) * 0.0008 + 0.0002
     lows = np.minimum(opens, closes) - np.abs(np.random.randn(n)) * 0.0008 - 0.0002
     df = pd.DataFrame({
-        "timestamp_utc": (idx.astype("int64") // 10**9).astype("int64"),
+        "timestamp_utc": to_epoch_seconds(idx),
         "open": opens,
         "high": highs,
         "low": lows,
@@ -68,6 +68,20 @@ def main():
         df = build_full_df(
             raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe
         )
+        # Score the frame with the PRODUCTION model so the diagnostics profile
+        # the same entries the live trader would take. Without this the
+        # backtester's ml_p defaults to 0.5 and every signal is declined
+        # (min_ml_probability 0.55) -> the real-data diagnostics find nothing.
+        model_path = asset_cfg.get("model_path")
+        if model_path and os.path.exists(model_path):
+            from model.predictor import ModelPredictor
+            predictor = ModelPredictor(model_path)
+            preds = predictor.predict_proba(df.fillna(0.0))
+            df["ml_p_long"] = preds["p_long"].values
+            df["ml_p_short"] = preds["p_short"].values
+        else:
+            print(f"[diag] WARNING: production model not found at {model_path}; "
+                  "no ML entries will be generated on the real-data slice.")
     except Exception as e:
         print(f"[diag] No usable DB or error ({e}); using synthetic mock for GBPUSD profile.")
         raw = _make_synthetic_gbp_df()
@@ -77,12 +91,12 @@ def main():
         df["ml_p_long"] = np.clip(0.5 + (df["close"].diff().fillna(0) > 0).astype(float) * 0.35 + np.random.randn(len(df)) * 0.1, 0.1, 0.9)
         df["ml_p_short"] = 1.0 - df["ml_p_long"]
 
-    # Use the current GBP config (v3) for diagnostics
+    # Use the current GBP config (v4) for diagnostics
     cfg_gbp = cfg.copy()
     # Ensure we run with asset-specific
     bt = EnsembleBacktester(cfg_gbp, asset_key=asset_key)
 
-    print(f"[diag] Running backtest on {len(df)} rows with current GBPUSD config (v3)...")
+    print(f"[diag] Running backtest on {len(df)} rows with current GBPUSD config (v4)...")
     trades = bt.run(df.reset_index(drop=True))
 
     if not trades:

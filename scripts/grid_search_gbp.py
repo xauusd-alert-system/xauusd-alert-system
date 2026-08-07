@@ -14,6 +14,14 @@ Selection criteria (STRICT, not total PnL):
 
 Writes logs/grid_search_gbp.csv with top-5 and full results.
 
+HONESTY (no look-ahead): every candidate is scored by the SAME per-fold
+strategy as `scripts/run_backtest.py` (strategy_fn_factory) — an XGBoost model
+trained on each fold's TRAIN window only, saved to a temp file (never the
+production model), and scored on the strictly-following test window. There is
+NO future-information injection anywhere in this script (early versions
+injected `close.shift(-6)`-biased probabilities, which made every combination
+look like PF 6-30 / 27/27 positive folds — that path is deleted).
+
 Works on synthetic mock data for tests (no real DB required).
 """
 
@@ -27,10 +35,13 @@ from copy import deepcopy
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
-from scripts.run_backtest import load_asset_history, build_full_df, merge_asset_cfg
-from model.ensemble_backtest import EnsembleBacktester
+from scripts.run_backtest import (
+    load_asset_history,
+    build_full_df,
+    strategy_fn_factory,
+)
+from data.ingestion import to_epoch_seconds
 from backtest.walk_forward import run_walk_forward
-from backtest.metrics import compute_metrics, trades_to_dataframe
 
 
 def _make_synthetic_gbp_wf_df(n=4800, start_price=1.28):
@@ -46,33 +57,28 @@ def _make_synthetic_gbp_wf_df(n=4800, start_price=1.28):
     highs = np.maximum(opens, closes) + np.abs(np.random.randn(n)) * 0.0007
     lows = np.minimum(opens, closes) - np.abs(np.random.randn(n)) * 0.0007
     df = pd.DataFrame({
-        "timestamp_utc": (idx.astype("int64") // 10**9).astype("int64"),
+        "timestamp_utc": to_epoch_seconds(idx),
         "open": opens,
         "high": highs,
         "low": lows,
         "close": closes,
         "volume": (2000 + np.random.randint(-400, 400, n)).astype(float),
         "session": np.random.choice(["london", "newyork"], n),
+        "regime": np.random.choice(
+            ["trend_up", "trend_down", "range", "compression"], n,
+            p=[0.3, 0.3, 0.3, 0.1]),
         "atr": 0.0014,
     })
     df["timestamp"] = idx
     return df
 
 
-def _inject_ml_probs(df: pd.DataFrame, strength: float = 0.28):
-    """Inject directional ML probs biased toward future move (simulates a decent model)."""
-    future_move = (df["close"].shift(-6).fillna(df["close"]) - df["close"]) / (df["atr"] + 1e-9)
-    bias = np.tanh(future_move * 1.8)
-    df = df.copy()
-    df["ml_p_long"] = np.clip(0.5 + bias * strength + np.random.randn(len(df)) * 0.07, 0.05, 0.95)
-    df["ml_p_short"] = 1.0 - df["ml_p_long"]
-    return df
-
-
 def _run_single_config(cfg_base: dict, asset_key: str, df_full: pd.DataFrame,
                        stop_mult: float, be_atr: float, tp2m: float, tp3m: float,
                        min_conf: float, horizon: int) -> dict:
-    """Run walk-forward for one hyper-param combination. Returns aggregate metrics."""
+    """Run HONEST walk-forward for one hyper-param combination (per-fold XGBoost
+    training via run_backtest.strategy_fn_factory, no look-ahead). Returns
+    aggregate metrics."""
     cfg = deepcopy(cfg_base)
     # Force GBPUSD v4-like overrides for search
     gbp = cfg.setdefault("assets", {}).setdefault("GBPUSD", {})
@@ -90,24 +96,18 @@ def _run_single_config(cfg_base: dict, asset_key: str, df_full: pd.DataFrame,
     gbp["ensemble"] = gbp.get("ensemble", {})
     gbp["ensemble"]["min_confidence_to_alert"] = min_conf
 
-    # Build features once (expensive part)
+    # Build features once (expensive part). NOTE: NO ml_p injection here — the
+    # per-fold strategy below trains a real XGBoost on each fold's train window
+    # (strategy_fn_factory from run_backtest, temp-file models only), so every
+    # candidate is scored out-of-sample without any look-ahead.
     try:
         df = build_full_df(cfg, df_full.copy(), db_path="data/market_data_mt5.sqlite", asset_key=asset_key)
     except Exception:
         # Fallback synthetic path already has minimal features
         df = df_full.copy()
 
-    df = _inject_ml_probs(df)
-
-    def strategy_fn(train_df, test_df, cfg_inner):
-        cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "labeling")
-        cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
-        engine = EnsembleBacktester(cfg_inner, asset_key=asset_key)
-        trades = engine.run(test_df.reset_index(drop=True))
-        tdf = trades_to_dataframe(trades)
-        return compute_metrics(tdf)
-
-    results = run_walk_forward(df, cfg, strategy_fn)
+    strategy = strategy_fn_factory(cfg, cfg["assets"][asset_key]["model_path"], asset_key)
+    results = run_walk_forward(df, cfg, strategy)
     if not results:
         return {"n_folds": 0, "median_pf": 0.0, "pos_folds": 0, "total_pnl": 0.0, "expectancy": 0.0}
 

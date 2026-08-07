@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**244/244 + smoke tests**; FX v3 для EUR/GBP + **FX v4 GBPUSD «развернуть подход»** (diag + grid + trailing + per-asset model)).
+**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**271/271**; FX v3 для EUR/GBP + **FX v4 GBPUSD «развернуть подход»** (diag + grid + trailing + per-asset model) + **оценка множественного тестирования** — Deflated Sharpe / CSCV, `python -m scripts.deflated_sharpe --asset <ASSET>`).
 
 ---
 

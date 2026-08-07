@@ -176,9 +176,14 @@ assets:
       breakeven_trigger_atr: 0.5
 
   GBPUSD:
-    # FX v4 (trend-friendly): wider stops, later/no early BE, higher TP3, trailing option.
-    # v3 (early BE) was for mean-reverting EUR; GBP is trending.
-    # Diagnostics + grid-search (protected from overfit) recommended before enabling.
+    # FX v4 (trend-friendly) — FINAL GBPUSD config, result of the protected
+    # grid-search (docs/GBP_FIX_STRATEGY.md). v3's early-BE package (BE 0.5,
+    # stop 2.0) was tuned for mean-reverting EUR and CUT GBP's recoveries
+    # (PF ~0.84). GBP is trending: give it room to run — wide stop (3.0), NO
+    # early BE (BE only at TP1), further TP2 (2.5) and TP3 (3.0), lower conf
+    # bar (0.80), horizon 36. Walk-forward 2022-26 (24 folds, honest):
+    # PF_med 2.42, total PnL +138, 17/24 positive folds (see docs/benchmarks.md
+    # §3 "FX v4"). Diagnostics: python -m scripts.diag_gbp_profile
     enabled: true
     mt5_symbol: GBPUSD
     display_name: GBP/USD
@@ -191,13 +196,13 @@ assets:
     # unit. See XAGUSD comment for why this must be a per-asset override.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.85
+      min_confidence_to_alert: 0.80
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
     labeling:
-      horizon_candles_n: 48
+      horizon_candles_n: 36
       target_atr_multiplier: 1.2
       stop_atr_multiplier: 1.0
       atr_column: atr
@@ -207,19 +212,17 @@ assets:
     signal_grid:
       step_min_points: 0.0005
       step_max_points: 0.006
-      stop_mult: 2.0
-      breakeven_trigger_atr: 0.5
+      stop_mult: 3.0
+      breakeven_trigger_atr: 1.0
+      tp2_mult: 2.5
+      tp3_mult: 3.0
     # Stage 4: per-asset model flags (use_regime_feature / include_zero_class)
     model:
       use_regime_feature: true
       include_zero_class: true
-    # v4a candidate (pure config, only for GBPUSD)
-    # signal_grid:
-    #   stop_mult: 3.0
-    #   breakeven_trigger_atr: 1.0
-    #   tp2_mult: 2.5
-    #   tp3_mult: 4.0
-    # v4b trailing (also requires code path in ensemble_backtest + mt5_trader)
+    # v4b trailing candidate (code path implemented in ensemble_backtest +
+    # mt5_trader; NOT enabled): after TP1+TP2 the 20% remainder is trailed at
+    # trailing*ATR instead of the fixed TP3.
     # signal_grid:
     #   trailing_atr_mult: 2.0
     #   stop_mult: 3.0

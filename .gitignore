@@ -12,6 +12,7 @@ venv/
 
 # Generated logs and results
 logs/*.csv
+logs/*.json
 logs/*.log
 logs/backtest_archive/
 

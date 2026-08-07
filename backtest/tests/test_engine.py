@@ -10,7 +10,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from data.ingestion import fetch_mock_candles
+from data.ingestion import fetch_mock_candles, to_epoch_seconds
 from features.indicators import build_all_indicators
 from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
 from backtest.engine import EventDrivenBacktester, rule_based_signal, Trade
@@ -179,7 +179,7 @@ def test_engine_early_breakeven_limits_loss():
     idx = pd.date_range("2024-01-01", periods=10, freq="h", tz="UTC")
     df = pd.DataFrame(
         {
-            "timestamp_utc": idx.astype("int64") // 10**9,
+            "timestamp_utc": to_epoch_seconds(idx),
             "open": price,
             "high": price,
             "low": price,

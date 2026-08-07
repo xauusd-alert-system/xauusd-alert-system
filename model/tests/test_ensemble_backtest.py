@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from model.ensemble_backtest import EnsembleBacktester
+from data.ingestion import to_epoch_seconds
 
 
 def _cfg(asset_section: dict, bt_slippage_points=5) -> dict:
@@ -47,7 +48,7 @@ def _df(n=400, price=1.10):
     idx = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
     df = pd.DataFrame(
         {
-            "timestamp_utc": idx.astype("int64") // 10**9,
+            "timestamp_utc": to_epoch_seconds(idx),
             "open": price,
             "high": price,
             "low": price,
@@ -247,17 +248,32 @@ def _cfg_with_trailing(trail_mult=2.0):
 
 
 def _trailing_probe_df(n=30, price=1.10, step=0.0003):
-    """After TP1 (+1s) and TP2 (+2s) the price continues up +1.5s then pulls back
-    > trailing*atr (2.0 * step) => trailing exit on the remainder."""
+    """After TP1 (+1s) and TP2 (+2s) the price runs up to +3.5s (bars 8-12),
+    then pulls back > trailing*atr (2.0 * step) on bar 15 => trailing exit on
+    the 20% remainder.
+
+    The probe must respect the engine's conservative INTRABAR semantics:
+    - `_df` starts with low == high == entry, and after TP1 the stop moves to
+      the entry price, so a flat low == entry would scratch the BE stop on the
+      next bar. Bars 3-7 therefore keep their lows strictly ABOVE entry.
+    - The trail stop ratchets to high - 2*ATR (== +1.5s here) on the same bar
+      whose high prints, so any bar with a low below +1.5s exits immediately.
+      Bars 8-14 keep lows at +2.6s (above the ratcheted stop) and only bar 15
+      dips to +1.2s, which is below the stop -> 'trailing' exit.
+    """
     df = _df(n=n, price=price)
-    # TP1 at bar ~2
+    # TP1 at bar ~2 (high touches +1.1s)
     df.loc[2, "high"] = price + 1.1 * step
-    # TP2 at bar ~5
+    # TP2 at bar ~5 (high touches +2.1s)
     df.loc[5, "high"] = price + 2.1 * step
-    # Run higher to +3.5 step
-    df.loc[8:12, "high"] = price + 3.5 * step
-    df.loc[8:12, "close"] = price + 3.4 * step
-    # Pullback > 2.0 * step
+    # After TP1 the stop is at entry: keep lows above entry until the pullback.
+    df.loc[3:7, "low"] = price + 0.6 * step
+    # Run higher to +3.5s: trail stop ratchets to high - 2*ATR = +1.5s; lows
+    # stay above it (2.6s) so the runner survives bars 8-14.
+    df.loc[8:14, "high"] = price + 3.5 * step
+    df.loc[8:14, "low"] = price + 2.6 * step
+    df.loc[8:14, "close"] = price + 3.4 * step
+    # Pullback > 2.0 * step (low drops to +1.2s < trail stop +1.5s)
     df.loc[15, "low"] = price + 3.4 * step - 2.2 * step
     return df
 

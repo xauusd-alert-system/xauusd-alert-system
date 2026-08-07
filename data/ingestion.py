@@ -15,6 +15,23 @@ TIMEFRAME_TO_SECONDS = {
     "H4": 14400,
 }
 
+
+def to_epoch_seconds(dt_series) -> pd.Series:
+    """Convert a datetime Series/Index to integer epoch seconds.
+
+    Resolution-independent replacement for the legacy
+    ``series.astype("int64") // 10**9`` idiom: pandas 2.x stored datetimes at
+    nanosecond resolution, but pandas 3.x can store them at microsecond
+    resolution, so the legacy idiom silently returns MILLISECONDS on pandas
+    3.x (timestamps ~1000x too small). Timedelta arithmetic is exact at every
+    resolution. Naive datetimes are treated as UTC (same assumption the
+    legacy idiom made).
+    """
+    dt = pd.to_datetime(dt_series, utc=True)
+    epoch = pd.Timestamp("1970-01-01", tz="UTC")
+    secs = (dt - epoch) // pd.Timedelta("1s")
+    return secs.astype("int64")
+
 TWELVE_DATA_MAX_OUTPUTSIZE = 5000
 _MIN_SECONDS_BETWEEN_REQUESTS = 60 / 8  # 8 requests/minute free-tier limit
 
@@ -168,7 +185,7 @@ def backfill_historical(timeframe: str, start_date: str, end_date: str, sessions
     for col in ["open", "high", "low", "close"]:
         df[col] = df[col].astype(float)
     df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0) if "volume" in df.columns else 0.0
-    df["timestamp_utc"] = df["datetime"].astype("int64") // 10**9
+    df["timestamp_utc"] = to_epoch_seconds(df["datetime"])
     df = df.drop(columns=["datetime"])
     df = df.drop_duplicates(subset="timestamp_utc").sort_values("timestamp_utc").reset_index(drop=True)
     df = tag_dataframe(df, sessions_config)

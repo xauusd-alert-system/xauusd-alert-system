@@ -157,6 +157,76 @@ Sum `total_pnl` across folds = **−3,438.10**; positive-PnL folds = **0/42**.
 
 ---
 
+## 3b. FX v4 session — final per-asset configs (2022–2026 walk-forward)
+
+Recorded from the FX v3/v4 sessions on the user's real DB
+(`python -m scripts.run_backtest --asset <ASSET>`, honest per-fold XGBoost,
+lot 0.01, real spread/slippage/commission per asset). These are the CURRENT
+shipped configs in `config/config.yaml`.
+
+| Asset | TF | Config | exp | PF (мед) | total PnL | WR | плюс. фолды |
+|-------|----|--------|----:|---------:|----------:|----:|----:|
+| XAUUSD | M5 | стандарт (1/2/3, SL 3) | +0.10 | ~1.07 | +90 | 47% | 19/41 |
+| BTCUSD | M5 | стандарт | +0.09 | ~1.06 | +151 | 73% | 24/42 |
+| XAGUSD | M15 | стандарт | +0.84 | 0.91 | +58 | 65% | 6/14 |
+| EURUSD | H1 | v3: BE=0.5, stop=2.0, conf 0.85, h48 | +0.08 | 1.19 | +30 | 35% | 17/26 |
+| GBPUSD | H1 | v4: stop=3.0, BE=1.0, tp2=2.5, tp3=3.0, conf 0.80, h36 + model flags | +0.12 | 2.42 | +138 | 36% | 17/24 |
+
+Key facts behind these numbers (see `docs/GBP_FIX_STRATEGY.md`, `docs/FX_V3.md`):
+
+- **Costs decide the timeframe.** M5 FX round-trip cost ≈ 98% of the TP1 step;
+  M15/H1 widen the grid so costs eat far less of the target.
+- **Early breakeven is per-asset.** `breakeven_trigger_atr: 0.5` helps
+  mean-reverting EUR (PF 1.19), HURTS trending GBP (PF 0.84 → removed → 2.42).
+  GBP gets room: wide stop (3.0), BE only at TP1, TP2 2.5 / TP3 3.0.
+- **Entry-quality filters (conf 0.92 / EV gate / hard veto) gave no edge** and
+  were reverted for FX (inherited global defaults).
+- XAGUSD PF(мед) < 1 with total PnL > 0: 6/14 positive folds, median fold PF
+  dragged by a few bad folds — the weakest asset; monitor after DSR/CSCV.
+
+> ⚠️ These rows were recorded in the closed sandbox session; **re-run the same
+> commands on the machine DB before acting on them** (configs are now synced to
+> master, so numbers must match).
+
+## 3c. Multiple-testing risk: Deflated Sharpe / CSCV (2026-08-07)
+
+The grid-searches tried ~700 hyper-parameter combinations on the same
+walk-forward folds — every headline number above is the BEST of many draws.
+Selection bias is NOT captured by the metrics tables. The new tool:
+
+    python -m scripts.deflated_sharpe --asset GBPUSD            # full family
+    python -m scripts.deflated_sharpe --asset EURUSD --historical-trials 200
+    python -m scripts.deflated_sharpe --asset XAUUSD --variants current,wide,null
+
+What it computes (math in `backtest/deflated_sharpe.py`, tests in
+`scripts/tests/test_deflated_sharpe.py`):
+
+- **DSR** = probability that the config's true per-trade Sharpe > 0 after
+  deflating by the expected max Sharpe under N trials (Bailey & López de Prado
+  2014), with skew/kurtosis correction. `dsr_trials` uses only the family in
+  the run; `dsr_historical` uses `--historical-trials` (default 729 = the
+  project's total search history). Correlated trials make the full count
+  conservative — the honest direction.
+- **MinTRL** = trades needed before the edge can be told apart from the
+  best-of-N null (also in years).
+- **CSCV PBO** = probability the in-sample-best config is in the bottom half
+  out-of-sample across all half-block splits of the fold-return matrix
+  (Bailey et al. 2015). PBO ≤ 0.2–0.3 with positive mean λ is the healthy
+  regime; PBO > 0.5 means the selection process is overfitting.
+- A **`null` variant** (random 0.5±0.05 probabilities, same rules/grid/session
+  filters) is always included as a negative control: it isolates the ML
+  contribution from the grid+BE mechanics. If `current` and `null` both show
+  DSR ≥ 0.95, the edge lives in the exit mechanics, not the model.
+
+Output: `logs/deflated_sharpe_<asset>.csv` + `.json` (per-trial rows: SR,
+PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds; CSCV summary).
+
+> **Decision rule for each asset:** keep the config only if `dsr_historical ≥
+> 0.95` (or at least clearly above `null`) AND `PBO ≤ 0.3`. XAGUSD (6/14
+> positive folds) and the two FX pairs are the first candidates to test.
+
+---
+
 ## 4. Change Log
 
 | Date (UTC) | Phase | Change | Impact | Test status |
@@ -177,3 +247,6 @@ Sum `total_pnl` across folds = **−3,438.10**; positive-PnL folds = **0/42**.
 | 2026-08-06 | FX v3 | **FX v3 (exit-mechanics package)**
 | 2026-08-06 | FX v4 / GBP fix | **GBPUSD FX v4 «развернуть подход» (трендовый)**: Диагностика + grid-search с защитой от переобучения + трендовые конфиги (v4a/v4b/v4c) + per-asset  флаги. - : H1 + order-flow, , exit dist + "цена раннего БУ" + стоп-хант доля. - : 2-stage (coarse 27 + fine), критерии: median PF >1 + pos folds + ≥10 trades/fold + deferred last-6-folds ≥4/6. - v4a (config): stop=3.0, BE=1.0, tp2=2.5, tp3=4.0. - v4b (code):  (loader + ensemble_backtest + mt5_trader) — остаток 20% после TP2 трейлится. - v4c (config): H4 + horizon=24. - Per-asset model:  +  + retrain support. - GBPUSD config updated (комменты +  + примеры v4). - Новые тесты: trailing exit, per-asset model merge, smoke diag/grid. XAU/XAG/BTC/EUR не тронуты. Глобальные секции без изменений. | Диагностика + защищённый поиск трендовых конфигов для GBP. Реальные результаты — после прогона пользователя (, , ). См. . Критерий успеха: exp>0, med PF>1, ≥10/24 pos folds, ≥4/6 на 2024-26. |  |
 : the var-2 entry filters (0.92 / EV 0.10 / hard veto) did NOT move the needle (EUR exp −0.26 / PF 0.65 / 0/14; GBP exp −0.24 / PF 0.73 / 2/14) — the problem is the EXIT, not the entry: at WR 62–66% a 1:3 grid (TP1 = 1×step, SL = 3×step) is mathematically negative before costs (loss tail −3×step ≈ 6× the average +0.5×step win). FX v3 attacks the tail, only for EURUSD/GBPUSD: per-asset `timeframe: H1` (was M15), `signal_grid.stop_mult: 2.0` (was 3.0), new `signal_grid.breakeven_trigger_atr: 0.5` (early BE: SL moves to entry once price covers 50% of the TP1 distance, BEFORE TP1), `labeling.horizon_candles_n: 48` (was 36), per-asset `ensemble.min_confidence_to_alert: 0.85` WITHOUT `ev_threshold`/`hard_divergence_veto` (var-2 keys removed → inherit global 0/false). Implemented in all three engines: `config/loader.py::get_signal_grid` (new normalized key `breakeven_trigger_atr`, default 1.0), `model/ensemble_backtest.py` (new exit_reason `"breakeven"` when the early trigger fired; default 1.0 = bit-for-bit legacy, so XAU/BTC/XAG unchanged), `backtest/engine.py` (early BE moves the stop; exit labels stay "stop"/"target"/"timeout"), `execution/mt5_trader.py::check_and_move_breakeven` (live per-symbol SL-to-entry via `be_trigger_by_symbol`, only when `be_trigger < 1.0`). 4 new regression tests (ensemble-backtest scratch vs full-stop, engine early-BE limits loss, grid loader default+overrides incl. 0.0, engine 3:1 barrier test now skips stop-dist==0 trades). | Fixes the FX exit mechanics: most would-be −3×step losers become ~0 scratches; real numbers await the user re-measure (`python -m scripts.run_backtest --asset EURUSD/GBPUSD`, see `docs/FX_V3.md`). | `244 passed` (was 240; +4 new tests, 0 regressions) |
+| 2026-08-07 | sync | **Master synced to the user-machine final state**: (1) `assets.GBPUSD` = FX v4 winner (stop 3.0, BE 1.0, tp2 2.5, tp3 3.0, conf 0.80, h36, model flags on) — replaces the v3 early-BE config that CUT GBP recoveries; (2) `scripts/run_backtest.py::strategy_fn_factory` now merges the per-asset `model` section (use_regime_feature / include_zero_class) so the GBP walk-forward trains the same 3-class + regime-feature model the live trader uses (was silently training the global binary model); (3) `scripts/diag_gbp_profile.py` real-data path scores the frame with the PRODUCTION model (was 0.5-default → zero trades → useless diagnostics); (4) `scripts/grid_search_gbp.py` — the leaky `_inject_ml_probs` (close.shift(-6) future bias → PF 6–30 / 27/27) is DELETED; every candidate is now scored by `run_backtest.strategy_fn_factory` (per-fold XGBoost, temp-file models, no look-ahead) as documented in the transfer notes; synthetic builder gained a `regime` column for the honest path; (5) v4b trailing test probe fixed (was touching the BE/trail stop on flat lows — impossible scenario). | Honesty + parity with the machine state: grid-search and backtest numbers now come from the same no-look-ahead machinery; diagnostics profile real model entries. Tests updated accordingly. | `250 passed` (0 regressions, 1 broken trailing test fixed) |
+| 2026-08-07 | mult | **Multiple-testing assessment tool (priority #1 of the transfer notes)**: new `backtest/deflated_sharpe.py` (PSR / DSR / E[max SR_N] / MinTRL per Bailey & López de Prado 2014; CSCV PBO per Bailey et al. 2015, full-enumeration with seeded sampling cap) + `scripts/deflated_sharpe.py` CLI: runs a per-asset config FAMILY (GBP: current-v4 / v3_early_be / v4a / v4b_trailing / legacy / null) through the honest walk-forward (same per-fold models for every variant), reports SR, PSR(0), DSR(n), DSR(729), MinTRL, PF, PnL, positive folds + CSCV PBO; `null` = random-prob negative control isolating the ML edge from grid+BE mechanics; synthetic no-DB fallback for tests. Outputs `logs/deflated_sharpe_<asset>.csv/.json`. | Answers «~700 grid combinations — is the winner real?» for every asset (esp. GBP v4 / EUR v3 / XAG). Run on the machine DB: `python -m scripts.deflated_sharpe --asset GBPUSD` (decision rule: dsr_historical ≥ 0.95 AND PBO ≤ 0.3). | `270 passed` (+20: 16 math/unit + 4 script integration) |
+| 2026-08-07 | fix | **Timestamp unit bug (pandas 3.x)**: `series.astype("int64") // 10**9` silently returns MILLISECONDS when the datetime resolution is µs (pandas 3.0 stores non-nano), so `data/ingestion.py::fetch_candles` (API backfill), `realtime/pipeline.py` (MT5 live frame) and every synthetic builder wrote timestamps ~1000× too small — new backfills would produce 0 walk-forward folds and mixed-unit DBs. Added resolution-independent `data/ingestion.to_epoch_seconds()` (timedelta arithmetic) and replaced all 8 call sites (ingestion, pipeline, grid_search, diag, deflated_sharpe, 3 test builders). | Correctness/ops: new backfills and live frames keep true epoch-seconds; regression test locks the behaviour and asserts the legacy idiom is still broken on this pandas (so a future resolution change cannot silently pass). | `271 passed` (+1 regression) |

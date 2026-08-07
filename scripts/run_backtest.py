@@ -111,6 +111,11 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
     def strategy_fn(train_df, test_df, cfg_inner):
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "labeling")
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
+        # Per-asset model flags (assets.<key>.model: use_regime_feature /
+        # include_zero_class) must reach build_training_matrix, otherwise the
+        # GBPUSD v4 backtest silently trains the GLOBAL binary model instead of
+        # the per-asset 3-class + regime-feature model the live trader uses.
+        cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "model")
 
         X_train, y_train, cols = build_training_matrix(train_df, cfg=cfg_inner)
         test_df_eval = test_df.copy()

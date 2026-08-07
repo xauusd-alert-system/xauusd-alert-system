@@ -110,9 +110,12 @@ class RealtimePipeline:
             from data.mt5_provider import fetch_closed_candles
             raw = fetch_closed_candles(symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles)
             
-            # Приводим метку времени к единому формату UTC epoch seconds
+            # Приводим метку времени к единому формату UTC epoch seconds.
+            # Resolution-independent (pandas 3.x stores datetimes at µs, so the
+            # legacy `astype("int64") // 10**9` would return milliseconds).
             if "timestamp_utc" not in raw.columns:
-                raw["timestamp_utc"] = (raw["timestamp"].astype("int64") // 10**9)
+                from data.ingestion import to_epoch_seconds
+                raw["timestamp_utc"] = to_epoch_seconds(raw["timestamp"])
                 
             df = tag_dataframe(raw, self.cfg["sessions"])
             return df
