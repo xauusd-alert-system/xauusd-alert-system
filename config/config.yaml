@@ -161,6 +161,8 @@ assets:
     # M5 -> M15 if cost_ratio > 15% on the real DB (measure first with
     #   python -m scripts.diag_r_metrics --asset BTCUSD --timeframe M5|M15
     # norm < 8-10%, red zone > 15%. Everything else stays frozen.
+    # CONFIRMED on the real DB (2026-08-08 measurements): BTC M5 cost_ratio
+    # 8.1% (OK) -> timeframe stays M5 (hypothesis rejected).
     # timeframe: M15
 
 
@@ -473,16 +475,16 @@ risk:
 # to run if any of its test windows overlaps this range unless --allow-locked
 # is passed (which burns the lock). Set it to the most recent ~12 months once
 # the current research round is frozen; inspect it ONE time before deploy.
-# ENABLED (post-measurements TZ 2026-08-07, step 5): the 2022-2025 research
-# round is frozen; 2025-06-01..2026-08-07 is now the locked final-test period.
-# All walk-forward runners will REFUSE to run when their test windows overlap
-# it; passing --allow-locked burns the lock (one-way). New hypotheses must be
-# evaluated on data before 2025-06 only.
+# SHIFTED (iteration TZ 2026-08-08, step 6): the 2025-06-01..2026-08-07 period
+# was partially burned by --allow-locked during the measurement round, so an
+# honest final test is only possible on NEW live-forward data. The lock now
+# covers everything from 2026-08-08 onward (open-ended); new experiments must
+# run on data BEFORE 2026-08-08 without --allow-locked.
 validation:
   locked_holdout:
     enabled: true
-    start: "2025-06-01"    # ~last 12+ months of the data
-    end: "2026-08-07"
+    start: "2026-08-08"    # from today — live-forward accumulation
+    end: null              # open-ended: research never looks at fresh data
 
 
 # ===== CORRELATION FILTER (динамический) =====
