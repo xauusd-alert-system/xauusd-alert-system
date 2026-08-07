@@ -96,6 +96,18 @@ def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict 
     use_regime = bool(model_cfg.get("use_regime_feature", False))
 
     available_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
+    # Optional feature-subset override (audit action 2: reduce to 12-15
+    # features for H1 assets with ~120 events per fold). The subset is saved
+    # into the model bundle via available_cols, and ModelPredictor selects
+    # exactly its saved feature_cols at inference, so all consumers work
+    # unchanged. Unknown names in the subset are ignored with a warning.
+    subset = model_cfg.get("feature_subset")
+    if subset:
+        unknown = [f for f in subset if f not in available_cols]
+        if unknown:
+            print(f"[trainer] WARNING: feature_subset entries not available, "
+                  f"ignored: {unknown}")
+        available_cols = [f for f in subset if f in available_cols] or available_cols
     if use_regime:
         # Phase 3: expand the causal `regime` column (already computed by
         # classify_regime_series upstream) into one-hot columns and append them to
@@ -221,7 +233,8 @@ def _create_ensemble_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict)
     return voting
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
+def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
+                sample_weight: np.ndarray | None = None):
     """Train a model according to config 'model.type'."""
     model_cfg = cfg["model"]
     random_state = model_cfg.get("random_seed", 42)
@@ -238,7 +251,15 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
     else:
         model = _get_xgb_classifier(model_cfg, random_state)
 
-    model.fit(X_train, y_train)
+    if sample_weight is not None:
+        sw = np.asarray(sample_weight, dtype=float)
+        if len(sw) != len(y_train):
+            raise ValueError(
+                f"sample_weight length {len(sw)} != y_train length {len(y_train)}")
+        # XGBoost (and RF/LGBM) accept sample_weight in fit.
+        model.fit(X_train, y_train, sample_weight=sw)
+    else:
+        model.fit(X_train, y_train)
     return model
 
 

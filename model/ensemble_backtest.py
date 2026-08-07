@@ -96,6 +96,10 @@ class EnsembleBacktester:
         # "signal_close" enters at the CLOSE of the signal bar itself — this is
         # a look-ahead and MUST only be used for measurement (diag_entry_timing).
         self.fill_mode = str(bt_cfg.get("fill_mode", "next_open"))
+        # Limit-entry mode (audit Q4b): fill at signal_close +/- limit_frac*step
+        # with a `limit_timeout` bar window; unfilled limits are cancelled.
+        self.limit_frac = float(bt_cfg.get("limit_frac", 0.25))
+        self.limit_timeout = int(bt_cfg.get("limit_timeout", 2))
         # Signals that fired while a position was open (one-position-at-a-time
         # constraint) — the queue-loss measurement input.
         self.rejected_signals: List[dict] = []
@@ -143,6 +147,8 @@ class EnsembleBacktester:
         # exited from candle i+1 onwards - same-candle entries never evaluate TP/SL.
         entry_bar: Optional[int] = None
         pending_direction: Optional[int] = None
+        # Limit-entry state: (limit_price, direction, bars_waited)
+        pending_limit: Optional[tuple] = None
 
         tp1_hit = False
         tp2_hit = False
@@ -169,6 +175,61 @@ class EnsembleBacktester:
                 # bar of the sliced frame (open of the bar AFTER the signal).
                 pending_direction = int(forced_direction)
                 forced_direction = None
+
+            # LIMIT-ENTRY MODE (audit Q4b): try to fill the pending limit on
+            # this bar's intrabar range before falling back to market logic.
+            if (open_position is None and pending_limit is not None
+                    and self.fill_mode == "limit"):
+                limit_price, ldir, bars_waited = pending_limit
+                touched = (lows[i] <= limit_price) if ldir == 1 else (highs[i] >= limit_price)
+                if touched:
+                    direction = ldir
+                    entry_price = limit_price
+                    atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                    reg_name = str(regimes[i - 1]) if i > 0 else str(regimes[i])
+                    grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
+                    tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
+                    tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
+                    tp3_mult = float(grid.get("tp3_mult", self.tp3_mult))
+                    stop_mult = float(grid.get("stop_mult", self.stop_mult))
+                    be_trigger = float(grid.get("breakeven_trigger_atr", self.be_trigger_mult))
+                    trail_mult = grid.get("trailing_atr_mult")
+                    scaleout = grid.get("scaleout") or {}
+                    so1 = float(scaleout.get("tp1_ratio", 0.5)) if isinstance(scaleout, dict) else 0.5
+                    so2 = float(scaleout.get("tp2_ratio", 0.3)) if isinstance(scaleout, dict) else 0.3
+                    open_position = Trade(
+                        entry_ts=int(timestamps[i]),
+                        entry_price=entry_price,
+                        direction=direction,
+                        stop_price=entry_price - direction * (atr_val * stop_mult),
+                        tp1_price=entry_price + direction * (atr_val * tp1_mult),
+                        tp2_price=entry_price + direction * (atr_val * tp2_mult),
+                        tp3_price=entry_price + direction * (atr_val * tp3_mult),
+                        initial_stop_price=entry_price - direction * (atr_val * stop_mult),
+                        session=str(sessions[i]),
+                        regime_at_entry=reg_name,
+                        volume=self.volume,
+                        commission=self.commission_per_trade,
+                        swap=0.0,
+                        be_trigger_mult=be_trigger,
+                        trailing_atr_mult=trail_mult,
+                        scaleout1=so1,
+                        scaleout2=so2,
+                    )
+                    entry_bar = i
+                    tp1_hit = False
+                    tp2_hit = False
+                    be_triggered = False
+                    remaining_ratio = 1.0
+                    accumulated_pnl = 0.0
+                    pending_limit = None
+                    pending_direction = None
+                else:
+                    bars_waited += 1
+                    if bars_waited >= self.limit_timeout:
+                        pending_limit = None  # unfilled -> cancelled
+                    else:
+                        pending_limit = (limit_price, ldir, bars_waited)
 
             if open_position is None and pending_direction is not None and pending_direction != 0:
                 direction = pending_direction
@@ -349,6 +410,16 @@ class EnsembleBacktester:
                     asset_key=self.asset_key if hasattr(self, 'asset_key') else "XAUUSD"
                 )
                 pending_direction = {"long": 1, "short": -1, "no_trade": 0}[sig.bias]
+
+                # LIMIT-ENTRY MODE (audit Q4b): convert the pending market
+                # signal into a limit at signal_close +/- limit_frac * step;
+                # fills are attempted intrabar on the next bars (timeout).
+                if (self.fill_mode == "limit" and pending_direction != 0):
+                    ldir = pending_direction
+                    atr_here = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                    limit_price = closes[i] + (self.limit_frac * atr_here * ldir)
+                    pending_limit = (float(limit_price), ldir, 0)
+                    pending_direction = None
 
                 # LOOK-AHEAD MEASUREMENT MODE ONLY: fill at the close of the
                 # SIGNAL bar itself instead of the next bar's open. Any edge

@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**319/319**; FX v3/v4, DSR/CSCV + N_eff + decision gate, R-метрология, look-ahead/queue-loss измерения, per-regime exit policy, журнал испытаний, локированный hold-out; по квант-аудитам 2026-08-07: labeling bias fix, XAGUSD в shadow).
+**Текущий статус:** Все фазы ТЗ, квант-модули и кастомный формат сигналов для Telegram полностью реализованы, отлажены и покрыты тестами (**351/351**; FX v3/v4, DSR/CSCV + N_eff + decision gate, R-метрология, look-ahead/queue-loss, per-regime exit policy, журнал испытаний, hold-out; полный набор по квант-аудиту Claude: fractional diff, purged CV + uniqueness, MDA-отбор фич, meta-precheck, event-tail, time-stop, портфель (ENB/CRP/kill-switch), risk engine, лимитные входы; labeling bias fix; XAGUSD в shadow).
 
 ---
 

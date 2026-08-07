@@ -116,6 +116,28 @@ GBP_VARIANTS: dict = {
         "ensemble": {"min_confidence_to_alert": 0.60},
         "labeling": {"horizon_candles_n": 36},
     },
+    "regime_wide": {  # audit action 4 pre-registered: trend->wide, range->fast
+        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
+                        "tp2_mult": 2.5, "tp3_mult": 3.0,
+                        "regime_overrides": {
+                            "trend_up": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
+                                         "tp2_mult": 2.5, "tp3_mult": 4.0,
+                                         "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
+                            "trend_down": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
+                                           "tp2_mult": 2.5, "tp3_mult": 4.0,
+                                           "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
+                            "range": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
+                                      "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4}},
+                        }},
+        "ensemble": {"min_confidence_to_alert": 0.80},
+        "labeling": {"horizon_candles_n": 36},
+    },
+    "regime_fast": {  # audit action 4 pre-registered: early-BE everywhere
+        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 0.5,
+                        "tp2_mult": 2.5, "tp3_mult": 3.0},
+        "ensemble": {"min_confidence_to_alert": 0.80},
+        "labeling": {"horizon_candles_n": 36},
+    },
     "null": None,
 }
 

@@ -175,6 +175,14 @@ def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0,
     skew_r = float(_safe_skew(r))
     kurt_r = float(_safe_kurt(r))
     be_wr = 100.0 * avg_loss / (avg_win + avg_loss) if (avg_win + avg_loss) > 0 else float("nan")
+    # Profit concentration (audit Q7): share of total R from the best 5%/1% trades.
+    top5 = 0.0
+    top1 = 0.0
+    total_r = float(r.sum())
+    if total_r > 0 and len(r) >= 20:
+        srt = np.sort(r)[::-1]
+        top5 = float(srt[: max(1, len(srt) // 20)].sum()) / total_r
+        top1 = float(srt[: max(1, len(srt) // 100)].sum()) / total_r
     return {
         "n": int(len(tdf)),
         "mean_r": round(float(r.mean()), 4),
@@ -186,6 +194,8 @@ def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0,
         "breakeven_wr_pct": round(be_wr, 1),
         "actual_wr_pct": round(100.0 * float(np.mean(r > 0)), 1),
         "net_expectancy_r": round(float(r.mean()), 4),
+        "top5_concentration_pct": round(100.0 * top5, 1),
+        "top1_concentration_pct": round(100.0 * top1, 1),
         "buckets": buckets,
     }
 
