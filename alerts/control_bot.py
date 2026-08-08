@@ -1,16 +1,35 @@
 """
 Telegram Control Bot — interactive panel to manage the running trader.
 
-Runs in a background thread via long-polling. All mutating commands
-(/pause, /resume, /closeall) are restricted to TELEGRAM_ADMIN_CHAT_ID
-so random users cannot control the bot.
+Runs INSIDE the trader process in a background thread via long-polling, using
+the SAME TELEGRAM_BOT_TOKEN as the alert sender (TelegramAlertBot) — one token,
+one process, one getUpdates consumer, so no Telegram polling conflict. Do NOT
+run a second polling bot with the same token in parallel
+(e.g. scripts/telegram_admin.py) — Telegram rejects concurrent getUpdates
+("Conflict: terminated by other getUpdates request").
+
+Authorization: every command that touches account/position data
+(/status, /positions, /metrics, /why, /account) and every mutating command
+(/pause, /resume, /closeall) is restricted to the admin chat
+(TELEGRAM_ADMIN_CHAT_ID, falling back to TELEGRAM_CHAT_ID — the same chat the
+alerts are sent to). Fail-closed: without a configured admin id nothing
+sensitive is served.
+
+The status commands (/status, /why, /metrics <period>, /account) are strictly
+READ-ONLY: they go through alerts/status_commands.py, which only calls
+positions_get / account_info / history_deals_get / terminal_info / initialize.
+No command in the status path can open, close or modify an order.
 
 Commands
 --------
 /start   — welcome message
 /help    — list all commands
-/status  — account equity, balance, open positions count, paused flag
+/status  — trader mode, account summary, open positions with floating P&L in $ and R
 /positions — list every open position with entry, current price, PnL
+/why <ASSET> — why the position in <ASSET> was opened (verbatim entry context)
+/metrics — 📊 institutional microstructure metrics (SMC / Smart Money)
+/metrics today|week — closed-trade stats (count, WR, PF, expectancy, P&L)
+/account — balance, equity, margin, margin level, floating & today's realized P&L
 /pause   — set trader.dry_run = True (orders logged, not sent)
 /resume  — set trader.dry_run = False
 /closeall — market-close every open position (emergency stop)
@@ -107,20 +126,38 @@ class TelegramControlBot:
         text = (msg.get("text") or "").strip()
         if not text.startswith("/"):
             return
-        cmd = text.split()[0].lower().split("@")[0]   # strip /cmd@botname
-        logger.info("Command '%s' from chat_id=%s", cmd, chat_id)
-        self._dispatch(cmd, chat_id)
+        parts = text.split()
+        cmd = parts[0].lower().split("@")[0]   # strip /cmd@botname
+        args = tuple(parts[1:])
+        logger.info("Command '%s' (args=%s) from chat_id=%s", cmd, args, chat_id)
+        try:
+            self._dispatch(cmd, chat_id, args)
+        except Exception:
+            # One bad command must never kill the polling loop (and with it the
+            # trader process's only command channel).
+            logger.exception("Dispatch failed for command %r", cmd)
+            self._send(chat_id, "❌ Internal error while handling the command. See logs.")
 
     # ------------------------------------------------------------------
     # Command dispatcher
     # ------------------------------------------------------------------
-    def _dispatch(self, cmd: str, chat_id: str) -> None:
+    # Commands exposing account/position data — admin-only (same chat the
+    # alerts go to). Mutating commands were already admin-only; this extends
+    # the same fail-closed guard to read-outs of sensitive data.
+    ADMIN_COMMANDS = frozenset({
+        "/status", "/positions", "/metrics", "/why", "/account",
+        "/pause", "/resume", "/closeall",
+    })
+
+    def _dispatch(self, cmd: str, chat_id: str, args: tuple = ()) -> None:
         handlers = {
             "/start":     self._cmd_start,
             "/help":      self._cmd_help,
             "/status":    self._cmd_status,
             "/metrics":   self._cmd_metrics,
             "/positions": self._cmd_positions,
+            "/why":       self._cmd_why,
+            "/account":   self._cmd_account,
             "/pause":     self._cmd_pause,
             "/resume":    self._cmd_resume,
             "/closeall":  self._cmd_closeall,
@@ -129,11 +166,12 @@ class TelegramControlBot:
         if fn is None:
             self._send(chat_id, "❓ Unknown command. Type /help for the list.")
             return
-        # Mutating commands require admin auth
-        if cmd in ("/pause", "/resume", "/closeall") and not self._is_admin(chat_id):
+        # Authorization is checked at the START of every sensitive handler —
+        # before any MT5 or file access happens (fail-closed).
+        if cmd in self.ADMIN_COMMANDS and not self._is_admin(chat_id):
             self._send(chat_id, "⛔ Unauthorised. This command is restricted to the bot owner.")
             return
-        fn(chat_id)
+        fn(chat_id, args)
 
     def _is_admin(self, chat_id: str) -> bool:
         # HIGH 34: fail-closed. If no admin id is configured, mutating commands
@@ -151,27 +189,52 @@ class TelegramControlBot:
     # ------------------------------------------------------------------
     # Individual command handlers
     # ------------------------------------------------------------------
-    def _cmd_start(self, chat_id: str) -> None:
+    def _require_admin(self, chat_id: str) -> bool:
+        """Authorization guard invoked at the START of every sensitive handler
+        (defense in depth on top of the dispatcher check): refuse commands from
+        any chat other than the alert recipient/owner, before any MT5 or file
+        access. Fail-closed when no admin id is configured."""
+        if not self._is_admin(chat_id):
+            self._send(chat_id, "⛔ Unauthorised. This command is restricted to the bot owner.")
+            return False
+        return True
+
+    def _cmd_start(self, chat_id: str, args: tuple = ()) -> None:
         self._send(chat_id,
             "🤖 *XAUUSD AutoTrader Control Panel*\n\n"
             "Use /help to see available commands.",
             parse_mode="Markdown",
         )
 
-    def _cmd_help(self, chat_id: str) -> None:
+    def _cmd_help(self, chat_id: str, args: tuple = ()) -> None:
         self._send(chat_id,
             "📖 *Available commands:*\n"
-            "/status — account summary & trader state\n"
-            "/metrics — 📊 институциональные микроструктурные метрики (SMC / Smart Money)\n"
+            "/status — trader state + open positions (P&L в $ и в R)\n"
             "/positions — all open positions\n"
+            "/why <ASSET> — почему открыта позиция (контекст входа из сигнала)\n"
+            "/metrics — 📊 институциональные микроструктурные метрики (SMC / Smart Money)\n"
+            "/metrics today|week — статистика закрытых сделок (WR, PF, expectancy, P&L)\n"
+            "/account — баланс, equity, маржа, плавающий и дневной реализованный P&L\n"
             "/pause — enable dry-run (stop sending orders)\n"
             "/resume — disable dry-run (orders go live again)\n"
             "/closeall — ⚠️ emergency close ALL open positions\n"
-            "/help — this message",
+            "/help — this message\n\n"
+            "🔒 Команды с данными счёта (/status, /positions, /metrics, /why, /account) "
+            "и мутирующие команды доступны только владельцу бота и работают в режиме "
+            "«только чтение» (status-команды не могут открывать/закрывать ордера).",
             parse_mode="Markdown",
         )
 
-    def _cmd_metrics(self, chat_id: str) -> None:
+    def _cmd_metrics(self, chat_id: str, args: tuple = ()) -> None:
+        # /metrics today|week -> closed-trade statistics (read-only MT5 history).
+        # Bare /metrics keeps the pre-existing institutional SMC report.
+        if args:
+            period = str(args[0]).lower()
+            if period not in ("today", "week"):
+                self._send(chat_id, "❓ Использование: /metrics [today|week]")
+                return
+            self._cmd_metrics_period(chat_id, period)
+            return
         try:
             from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
             from simulation.provider import SimulationProvider
@@ -193,29 +256,116 @@ class TelegramControlBot:
         except Exception as exc:
             self._send(chat_id, f"❌ Metrics error: {exc}")
 
-    def _cmd_status(self, chat_id: str) -> None:
+    def _cmd_status(self, chat_id: str, args: tuple = ()) -> None:
+        """Trader mode + account summary + every open position with floating
+        P&L in account currency AND in R (vs the initial stop recorded at
+        entry). Read-only: no MT5 state is mutated."""
+        if not self._require_admin(chat_id):
+            return
         try:
-            import MetaTrader5 as mt5
-            info = mt5.account_info()
-            positions = mt5.positions_get(magic=self.trader.magic_number) or []
-            paused = "⏸ DRY-RUN (paused)" if self.trader.dry_run else "▶️ LIVE"
-            if info:
-                msg = (
-                    f"📊 *Trader Status*\n"
-                    f"Mode: {paused}\n"
-                    f"Balance: `${info.balance:,.2f}`\n"
-                    f"Equity:  `${info.equity:,.2f}`\n"
-                    f"Profit:  `${info.profit:+,.2f}`\n"
-                    f"Open positions: `{len(positions)}`\n"
-                    f"Assets enabled: `{len(self.trader.pipelines)}`"
-                )
-            else:
-                msg = f"Mode: {paused}\nMT5 not connected."
+            from alerts import status_commands as sc
+            if not sc.ensure_mt5_connection():
+                self._send(chat_id, "⚠️ MT5 терминал недоступен — статус получить нельзя.")
+                return
+            m = sc.get_mt5()
+            info = m.account_info()
+            # ALL open positions across assets on the account (per spec), not
+            # only this bot's magic — manual/foreign positions are shown too,
+            # mapped to an internal asset key when the symbol is configured.
+            positions = list(m.positions_get() or [])
+            contexts = sc.load_position_contexts()
+            cfg = getattr(self.trader, "cfg", {})
+            msg = sc.format_status_report(
+                info, positions, contexts, cfg,
+                dry_run=bool(getattr(self.trader, "dry_run", False)),
+                n_assets=len(getattr(self.trader, "pipelines", {}) or {}),
+            )
+            # Plain text on purpose: the message embeds model-generated
+            # reasoning/regime strings that could break Markdown parsing.
+            self._send(chat_id, msg)
         except Exception as exc:
-            msg = f"❌ Status error: {exc}"
-        self._send(chat_id, msg, parse_mode="Markdown")
+            logger.exception("/status failed")
+            self._send(chat_id, f"❌ Status error: {exc}")
 
-    def _cmd_positions(self, chat_id: str) -> None:
+    def _cmd_why(self, chat_id: str, args: tuple = ()) -> None:
+        """/why <ASSET> — explain why the open position in <ASSET> was entered,
+        verbatim from the entry context journal written at order time.
+        Read-only; never fabricates a reason when no context was recorded."""
+        if not self._require_admin(chat_id):
+            return
+        if not args:
+            known = ", ".join(sorted((getattr(self.trader, "cfg", {}) or {}).get("assets", {}).keys()))
+            self._send(chat_id, f"❓ Использование: /why <ASSET>  (например: /why XAUUSD)\nИзвестные активы: {known or 'n/a'}")
+            return
+        asset_key = str(args[0]).upper()
+        try:
+            from alerts import status_commands as sc
+            cfg = getattr(self.trader, "cfg", {}) or {}
+            asset_cfg = cfg.get("assets", {}).get(asset_key)
+            if not asset_cfg:
+                known = ", ".join(sorted(cfg.get("assets", {}).keys()))
+                self._send(chat_id, f"❓ Неизвестный актив «{asset_key}». Известные: {known or 'n/a'}")
+                return
+            mt5_symbol = asset_cfg.get("mt5_symbol", asset_key)
+            if not sc.ensure_mt5_connection():
+                self._send(chat_id, "⚠️ MT5 терминал недоступен — контекст получить нельзя.")
+                return
+            m = sc.get_mt5()
+            positions = list(m.positions_get(symbol=mt5_symbol) or [])
+            position = positions[0] if positions else None
+            if len(positions) > 1:
+                logger.warning("/why %s: %d open positions; explaining #%s",
+                               asset_key, len(positions), getattr(position, "ticket", "?"))
+            contexts = sc.load_position_contexts()
+            context = contexts.get(str(getattr(position, "ticket", ""))) if position else None
+            msg = sc.format_why_report(asset_key, mt5_symbol, position, context)
+            if len(positions) > 1:
+                msg += f"\n\n(Открыто позиций по {asset_key}: {len(positions)}; показан контекст первой — #{getattr(position, 'ticket', '?')})"
+            self._send(chat_id, msg)  # plain text: embeds model reasoning
+        except Exception as exc:
+            logger.exception("/why failed")
+            self._send(chat_id, f"❌ Why error: {exc}")
+
+    def _cmd_metrics_period(self, chat_id: str, period: str) -> None:
+        """/metrics today|week — closed-trade statistics from deal history.
+        Read-only (history_deals_get only)."""
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from alerts import status_commands as sc
+            if not sc.ensure_mt5_connection():
+                self._send(chat_id, "⚠️ MT5 терминал недоступен — метрики получить нельзя.")
+                return
+            dt_from, dt_to, label = sc.period_range(period)
+            deals = sc.fetch_deals_between(dt_from, dt_to)
+            contexts = sc.load_position_contexts()
+            cfg = getattr(self.trader, "cfg", {})
+            msg = sc.format_metrics_report(deals, contexts, cfg, label)
+            self._send(chat_id, msg)
+        except Exception as exc:
+            logger.exception("/metrics %s failed", period)
+            self._send(chat_id, f"❌ Metrics error: {exc}")
+
+    def _cmd_account(self, chat_id: str, args: tuple = ()) -> None:
+        """/account — balance, equity, margin, margin level, floating P&L and
+        today's realized P&L. Read-only (account_info + history_deals_get)."""
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from alerts import status_commands as sc
+            if not sc.ensure_mt5_connection():
+                self._send(chat_id, "⚠️ MT5 терминал недоступен — данные счёта получить нельзя.")
+                return
+            m = sc.get_mt5()
+            info = m.account_info()
+            realized = sc.realized_pnl_today()
+            msg = sc.format_account_report(info, realized)
+            self._send(chat_id, msg)
+        except Exception as exc:
+            logger.exception("/account failed")
+            self._send(chat_id, f"❌ Account error: {exc}")
+
+    def _cmd_positions(self, chat_id: str, args: tuple = ()) -> None:
         try:
             import MetaTrader5 as mt5
             positions = mt5.positions_get(magic=self.trader.magic_number) or []
@@ -234,17 +384,17 @@ class TelegramControlBot:
         except Exception as exc:
             self._send(chat_id, f"❌ Positions error: {exc}")
 
-    def _cmd_pause(self, chat_id: str) -> None:
+    def _cmd_pause(self, chat_id: str, args: tuple = ()) -> None:
         self.trader.dry_run = True
         logger.info("Trader PAUSED via Telegram (dry_run=True)")
         self._send(chat_id, "⏸ Trader *paused*. No new orders will be sent. Use /resume to re-enable.", parse_mode="Markdown")
 
-    def _cmd_resume(self, chat_id: str) -> None:
+    def _cmd_resume(self, chat_id: str, args: tuple = ()) -> None:
         self.trader.dry_run = False
         logger.info("Trader RESUMED via Telegram (dry_run=False)")
         self._send(chat_id, "▶️ Trader *resumed*. Live orders are active.", parse_mode="Markdown")
 
-    def _cmd_closeall(self, chat_id: str) -> None:
+    def _cmd_closeall(self, chat_id: str, args: tuple = ()) -> None:
         try:
             import MetaTrader5 as mt5
             positions = mt5.positions_get(magic=self.trader.magic_number) or []

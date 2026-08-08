@@ -15,6 +15,10 @@ logs/*.csv
 logs/*.json
 logs/*.log
 logs/backtest_archive/
+# Live position entry-context journal for the Telegram status commands
+# (already covered by logs/*.json; listed explicitly as it contains trade context)
+logs/live_positions.json
+logs/live_positions.json.tmp
 
 # Local backups, trained artifacts, and generated analysis output
 backup/
