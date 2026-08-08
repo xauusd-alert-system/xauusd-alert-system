@@ -5,6 +5,7 @@ Includes Automatic Stops-Level & Digits Adjuster for BTCUSD and Altcoins.
 """
 import os
 import sys
+import json
 import time
 import logging
 from datetime import datetime, timezone
@@ -25,6 +26,69 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger("multi_asset_trader")
+
+
+# Entry-context journal for the Telegram status commands (/status, /why in
+# alerts/control_bot.py + alerts/status_commands.py). Keyed by MT5 position
+# ticket. Overridable via env so tests/ops can redirect it. NOTE: keep in sync
+# with alerts.status_commands.LIVE_POSITIONS_PATH (importing the trader from
+# the alert layer would pull the whole ML stack into the bot).
+LIVE_POSITIONS_PATH = os.getenv("LIVE_POSITIONS_PATH", "logs/live_positions.json")
+
+
+def record_position_context(ticket: int, asset_key: str, signal: dict,
+                            path: str = LIVE_POSITIONS_PATH) -> None:
+    """Persist the entry context for a just-opened position, keyed by MT5
+    ticket, so the status commands can answer "why did we enter" without
+    touching the trading logic. Overwrites the whole open-position map
+    (small N, no DB needed)."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data[str(ticket)] = {
+        "asset_key": asset_key,
+        "opened_at_utc": datetime.now(timezone.utc).isoformat(),
+        "bias": signal.get("bias"),
+        "confidence": signal.get("confidence"),
+        "regime": signal.get("regime"),
+        "reasoning_summary": signal.get("reasoning_summary"),
+        "entry_zone": signal.get("entry_zone"),
+        "invalidation": signal.get("invalidation"),
+        "targets": signal.get("targets"),
+        "session": signal.get("session"),
+    }
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, default=str)
+    os.replace(tmp_path, path)  # atomic write
+
+
+def purge_closed_position_context(ticket: int, path: str = LIVE_POSITIONS_PATH) -> None:
+    """Remove a ticket's context once the position is closed, keeping the
+    file small. Called from wherever the trader detects closure."""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(data, dict):
+        return
+    data.pop(str(ticket), None)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, default=str)
+    os.replace(tmp_path, path)
 
 
 class MultiAssetMT5Trader:
@@ -216,6 +280,14 @@ class MultiAssetMT5Trader:
         logger.info(f"=== BE CHECK: found {len(positions) if positions else 0} positions (magic={self.magic_number}) ===")
 
         if not positions:
+            # All previously tracked tickets are gone -> every position we knew
+            # about is closed; drop their entry contexts as well (kept in sync
+            # with the close-detector path below).
+            for _ticket in list(self.active_trades.keys()):
+                try:
+                    purge_closed_position_context(_ticket)
+                except Exception as e:
+                    logger.error(f"Position context purge failed for #{_ticket}: {e}")
             self.active_trades = {}
             return
 
@@ -385,6 +457,10 @@ class MultiAssetMT5Trader:
             finally:
                 self.signal_features.pop(ticket, None)
                 self.last_close_pnl.pop(ticket, None)
+                try:
+                    purge_closed_position_context(ticket)
+                except Exception as e:
+                    logger.error(f"Position context purge failed for #{ticket}: {e}")
 
             if total_pnl < 0:
                 self.streak_losses[symbol] = self.streak_losses.get(symbol, 0) + 1
@@ -585,6 +661,15 @@ class MultiAssetMT5Trader:
             except Exception as e:
                 logger.error(f"Trade entry logging failed for #{pos_ticket}: {e}")
 
+            # Persist the entry context (bias/confidence/regime/reasoning) keyed by
+            # position ticket so the Telegram /status and /why commands can explain
+            # the trade later. Read-only side channel; failures must never break
+            # the trading path.
+            try:
+                record_position_context(pos_ticket, asset_key, signal)
+            except Exception as e:
+                logger.error(f"Position context logging failed for #{pos_ticket}: {e}")
+
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)
         else:
@@ -657,8 +742,24 @@ class MultiAssetMT5Trader:
 
 if __name__ == "__main__":
     trader = MultiAssetMT5Trader()
+    # Start the Telegram control/status bot INSIDE the trader process using the
+    # same TELEGRAM_BOT_TOKEN as the alerts (no second process, no second token,
+    # so no getUpdates conflict). Optional: if the token is not configured the
+    # trader keeps running with alert sending only. Do NOT run another polling
+    # bot with this token at the same time (e.g. scripts/telegram_admin.py).
+    control_bot = None
+    try:
+        from alerts.control_bot import TelegramControlBot
+
+        control_bot = TelegramControlBot(trader)
+        control_bot.start()
+    except Exception as e:
+        logger.warning(f"Telegram control bot not started ({e}); trader/alerts unaffected.")
+        control_bot = None
     try:
         trader.run_loop()
     except KeyboardInterrupt:
+        if control_bot is not None:
+            control_bot.stop()
         shutdown_mt5()
         print("Trader stopped safely.")

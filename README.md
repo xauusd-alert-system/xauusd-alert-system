@@ -36,7 +36,7 @@ MT5 candles ─▶ features ─▶ regime ─▶ model ─▶ ensemble/meta-filt
 | Backtest | `backtest/` | Event-driven backtester + walk-forward harness + metrics |
 | Realtime | `realtime/` | The inference pipeline and a FastAPI `/signal` service |
 | Execution | `execution/` | Live MT5 auto-trader, breakeven/partial-TP management, institutional risk manager / circuit breaker |
-| Alerts | `alerts/` | Telegram alert bot + interactive control bot (`/pause`, `/resume`, `/closeall`) |
+| Alerts | `alerts/` | Telegram alert bot + interactive control bot (read-only status: `/status`, `/why <ASSET>`, `/metrics [today\|week]`, `/account`; control: `/pause`, `/resume`, `/closeall`) |
 | Simulation | `simulation/` | A virtual limit-order-book market + MT5 shim for deterministic, offline end-to-end runs |
 | Scripts | `scripts/` | Backfill, train, backtest, simulate, overnight retrain, deploy guard, reporting |
 

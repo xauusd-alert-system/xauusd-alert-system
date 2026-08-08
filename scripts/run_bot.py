@@ -13,13 +13,16 @@ Usage
 
 Telegram commands once running
 ------------------------------
-    /start     welcome
-    /help      list commands
-    /status    equity / balance / mode
-    /positions all open positions with PnL
-    /pause     switch to dry-run (no live orders)
-    /resume    switch back to live
-    /closeall  emergency close all positions
+    /start       welcome
+    /help        list commands
+    /status      trader mode + open positions with P&L in $ and R (read-only)
+    /positions   all open positions with PnL (read-only)
+    /why ASSET   why the position was opened — verbatim entry context (read-only)
+    /metrics     institutional SMC metrics; /metrics today|week closed-trade stats
+    /account     balance/equity/margin/floating + today's realized P&L (read-only)
+    /pause       switch to dry-run (no live orders)
+    /resume      switch back to live
+    /closeall    emergency close all positions
 """
 import os
 import sys
@@ -77,7 +80,8 @@ def main() -> None:
         "\n"
         "=================================================\n"
         " Telegram Control Bot running. Commands:\n"
-        "   /status      /positions  /pause  /resume  /closeall\n"
+        "   /status  /why <ASSET>  /metrics [today|week]  /account\n"
+        "   /positions  /pause  /resume  /closeall\n"
         "================================================="
     )
 
