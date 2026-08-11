@@ -134,3 +134,63 @@ def test_mtf_merge_asof_never_uses_future_htf_candle():
             if len(actual_htf_row) > 0:
                 assert actual_htf_row["timestamp_utc"].iloc[0] <= row["timestamp_utc"], \
                     "Look-ahead detected: merge_asof pulled a future HTF candle!"
+
+
+# ---------------------------------------------------------------------------
+# N2 (audit 2026-08-10): extend no-look-ahead coverage to the modules the
+# original suite skipped (order_flow, smart_money_metrics, fractional_diff,
+# regime). Same truncation methodology.
+# ---------------------------------------------------------------------------
+
+def test_order_flow_features_no_lookahead():
+    """order_flow features at row i must be identical whether computed on the
+    full frame or a frame truncated at i (past the CVD anchoring window)."""
+    from features.order_flow import add_order_flow_features
+    df = _sample_df(n=300)
+    df["atr"] = 0.5
+    full = add_order_flow_features(df, cvd_window=100)
+    i = 200
+    trunc = add_order_flow_features(df.iloc[:i + 1].copy(), cvd_window=100)
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
+                "order_flow_imbalance_50", "vwap", "dist_vwap_atr"):
+        assert np.isclose(full[col].iloc[i], trunc[col].iloc[i], rtol=1e-6,
+                          equal_nan=True), f"Look-ahead in order_flow column {col}"
+
+
+def test_smart_money_metrics_no_lookahead():
+    """Institutional metrics use df.tail(window), reading only recent bars: a
+    truncated frame must give the same result at row i as the full frame."""
+    from features.smart_money_metrics import compute_institutional_metrics
+    df = _sample_df(n=300)
+    df["atr"] = 0.5
+    full = compute_institutional_metrics(df)
+    trunc = compute_institutional_metrics(df.iloc[:250].copy())
+    # Both operate on the last 30 bars; when those bars coincide, the metrics
+    # (which only depend on the trailing slice) must be identical.
+    assert full["delta_confidence"] == trunc["delta_confidence"]
+    assert full["manipulation_index"] == trunc["manipulation_index"]
+
+
+def test_fractional_diff_no_lookahead():
+    """frac_diff uses fixed weights (independent of data length), so truncation
+    invariance holds by construction."""
+    from features.fractional_diff import frac_diff
+    df = _sample_df(n=300)
+    full = frac_diff(df["close"], d=0.5)
+    i = 150
+    trunc = frac_diff(df["close"].iloc[:i + 1], d=0.5)
+    assert np.isclose(full.iloc[i], trunc.iloc[i], rtol=1e-6, equal_nan=True)
+
+
+def test_regime_classifier_no_lookahead():
+    """classify_regime_series at row i must be identical to a truncated run."""
+    from regime.classifier import classify_regime_series
+    from features.indicators import build_all_indicators
+    from regime.classifier import add_regime_indicators
+    df = _sample_df(n=300)
+    df = build_all_indicators(df, CFG)
+    df = add_regime_indicators(df, CFG)
+    full = classify_regime_series(df, CFG)
+    i = 250
+    trunc = classify_regime_series(df.iloc[:i + 1].copy(), CFG)
+    assert full.iloc[i] == trunc.iloc[i], "Look-ahead in regime classification"

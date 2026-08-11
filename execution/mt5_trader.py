@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import time
+import math
 import logging
 from datetime import datetime, timezone
 import MetaTrader5 as mt5
@@ -15,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config, get_env, get_signal_grid
-from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles
+from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles, _TIMEFRAMES
 from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
 from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
@@ -91,15 +92,60 @@ def purge_closed_position_context(ticket: int, path: str = LIVE_POSITIONS_PATH) 
     os.replace(tmp_path, path)
 
 
+def positions_get_by_magic(symbol: str = None, magic: int = None):
+    """Return positions, optionally filtered by symbol and magic, using only the
+    parameters the REAL MetaTrader5 Python API accepts.
+
+    W9/N3 (audit 2026-08-10): the production code previously called
+    `mt5.positions_get(magic=...)`, but the real API only accepts `symbol`,
+    `group` and `ticket` — there is no `magic` argument. The test shim added it,
+    so tests/simulation passed while the live terminal raised TypeError (or
+    returned positions unfiltered). The magic filter is therefore applied in
+    Python via `pos.magic`, which every real MT5 position object exposes.
+    """
+    try:
+        if symbol is not None:
+            positions = mt5.positions_get(symbol=symbol)
+        else:
+            positions = mt5.positions_get()
+    except Exception as e:  # pragma: no cover - defensive, mirrors prior behaviour
+        logger.error(f"positions_get failed: {e}")
+        return None
+    if not positions:
+        return positions
+    if magic is None:
+        return positions
+    return [p for p in positions if getattr(p, "magic", None) == magic]
+
+
 class MultiAssetMT5Trader:
     def __init__(self):
         self.cfg = load_config()
-        self.risk_manager = InstitutionalRiskManager(self.cfg)
         self.bot = TelegramAlertBot(self.cfg)
 
         self.magic_number = 777111
-        self.volume = 0.01
         self.dry_run = os.getenv("DRY_RUN") == "1"
+        # W8/W9: risk manager reads limits from config `execution.*` and counts
+        # only our own positions (filtered by magic), not foreign/manual ones.
+        self.risk_manager = InstitutionalRiskManager(self.cfg, magic=self.magic_number)
+        # W2: live volume comes from config (assets.<key>.volume or backtest.volume)
+        # instead of a hard-coded 0.01 that made the 50/30/20 scale-out
+        # unimplementable (round(0.5*0.01,2)=0.01 closed the whole position).
+        default_volume = self.cfg.get("backtest", {}).get("volume", 0.10)
+        self.volume = float(self.cfg.get("execution", {}).get("volume", default_volume))
+        # N11 (audit 2026-08-10): the scale-out lot validator was only invoked in
+        # the backtester, so a live base lot whose 50/30/20 tranches are below the
+        # MT5 volume_step went unnoticed. Fail fast at startup when the live
+        # volume cannot be partial-closed (raise_on_invalid=True).
+        from execution.portfolio_allocator import validate_scaleout_tranches
+        is_valid, err_msg, _ = validate_scaleout_tranches(
+            self.volume, [0.5, 0.3, 0.2],
+            min_lot=0.01, lot_step=0.01, raise_on_invalid=True,
+        )
+        if not is_valid:
+            raise ValueError(
+                f"Live scale-out configuration invalid for volume={self.volume}: {err_msg}"
+            )
 
         self.pipelines = {}
         assets = self.cfg.get("assets", {})
@@ -114,12 +160,27 @@ class MultiAssetMT5Trader:
         self.be_state = {}
         self.active_trades = {}
         self.streak_losses = {}
+        # W10 (audit 2026-08-10): the per-position management state (TP1/TP2/TP3
+        # targets, tp1_hit/tp2_hit, be_done, trailing_active) used to live only in
+        # memory, so a process restart dropped partial/breakeven management for any
+        # still-open position. It is now persisted so a restart picks up where the
+        # previous process left off. Runtime file under logs/ (gitignored).
+        self.management_state_path = os.getenv(
+            "MANAGEMENT_STATE_PATH", "logs/live_management_state.json"
+        )
+        self._load_management_state()
 
         # Early-breakeven trigger per MT5 symbol (signal_grid.breakeven_trigger_atr).
         # < 1.0 moves the stop to entry before TP1 (protects mean-reverting FX from
         # the 3x-step loss tail); 1.0 = legacy (BE only at TP1).
         self.be_trigger_by_symbol = {}
         self.trailing_atr_mult_by_symbol = {}
+        # T11 (audit 2026-08-10): map each MT5 symbol to the MT5 timeframe enum of
+        # its asset's trading timeframe (XAU M15, EUR/GBP H1, etc.), so the bar
+        # polling below matches the timeframe each asset actually trades. Before
+        # this, the loop polled TIMEFRAME_M5 for EVERY asset, re-querying an H1
+        # signal every 5 minutes.
+        self.symbol_timeframe = {}
         for asset_key, a_cfg in assets.items():
             sym = a_cfg.get("mt5_symbol")
             if sym:
@@ -127,6 +188,8 @@ class MultiAssetMT5Trader:
                 self.be_trigger_by_symbol[sym] = float(grid.get("breakeven_trigger_atr", 1.0))
                 # v4b trailing (None = legacy)
                 self.trailing_atr_mult_by_symbol[sym] = grid.get("trailing_atr_mult")
+                tf = a_cfg.get("timeframe") or self.cfg.get("market_data", {}).get("timeframe", "M5")
+                self.symbol_timeframe[sym] = _TIMEFRAMES.get(tf, mt5.TIMEFRAME_M5)
 
         # CRIT 5: path to the executed-trades SQLite DB (the same file used by
         # scripts/retrain_with_real_trades.py). Overridable via env for tests.
@@ -145,6 +208,40 @@ class MultiAssetMT5Trader:
         self.corr_update_interval = self.corr_filter_cfg.get("update_interval_minutes", 60)
         self.corr_matrix = {}
         self.corr_last_update = 0
+
+    # ------------------------------------------------------------------ W10
+    def _save_management_state(self):
+        """Persist per-position management state so a restart keeps managing
+        open positions (TP targets, partial-hit flags, BE/trailing flags)."""
+        if not self.active_trades:
+            # Nothing open -> leave any stale file; the close-detector purges
+            # entries when positions close.
+            return
+        directory = os.path.dirname(self.management_state_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        tmp_path = self.management_state_path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(self.active_trades, f, indent=2, default=str)
+            os.replace(tmp_path, self.management_state_path)
+        except OSError as e:
+            logger.error(f"Failed to persist management state: {e}")
+
+    def _load_management_state(self):
+        """Restore persisted per-position management state on startup."""
+        if not os.path.exists(self.management_state_path):
+            return
+        try:
+            with open(self.management_state_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                self.active_trades = {
+                    str(k): v for k, v in data.items()
+                    if isinstance(v, dict) and v.get("tp1") is not None
+                }
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Could not read management state {self.management_state_path}: {e}")
 
     def _normalize_stops(self, symbol: str, side: str, price: float, raw_sl: float, raw_tp: float):
         """Возвращает (sl, tp) с учётом требований MT5."""
@@ -237,7 +334,7 @@ class MultiAssetMT5Trader:
         self._update_corr_matrix()
 
         direction = 1 if bias == "long" else -1
-        positions = mt5.positions_get(magic=self.magic_number)
+        positions = positions_get_by_magic(magic=self.magic_number)
         if not positions:
             return False
 
@@ -275,7 +372,7 @@ class MultiAssetMT5Trader:
     def check_and_move_breakeven(self):
         if not mt5.initialize():
             return
-        positions = mt5.positions_get(magic=self.magic_number)
+        positions = positions_get_by_magic(magic=self.magic_number)
         current_tickets = set()
         logger.info(f"=== BE CHECK: found {len(positions) if positions else 0} positions (magic={self.magic_number}) ===")
 
@@ -351,22 +448,25 @@ class MultiAssetMT5Trader:
                         trade_data["be_done"] = True
                         logger.info(f"EARLY BREAKEVEN [{symbol}] SL moved to entry (trigger {be_trigger})")
 
-            # Частичные закрытия (без изменений, как в предыдущей версии)
+            # Частичные закрытия. W2: each tranche is quantized to the broker's
+            # volume_step/volume_min (so a 0.01 base lot no longer closes the whole
+            # position as "TP1 (50%)" or issues a zero-volume TP2 order); a tranche
+            # below the minimum is skipped and the remainder stays on the broker TP.
+            # W12: tp1_hit/tp2_hit advance only after the partial close is accepted.
             if pos.type == 0:
                 if tp1 is not None and not tp1_hit and current_price >= tp1:
-                    close_vol = round(original_volume * 0.5, 2)
-                    if pos.volume >= close_vol:
-                        self._close_partial_position(pos, tick.bid, close_vol, "TP1 (50%)")
-                        trade_data["tp1_hit"] = True
-                        target_sl = round(pos.price_open + (10 ** -digits), digits)
-                        min_sl = current_price - self._get_min_dist(symbol, tick, info)
-                        if target_sl < min_sl:
-                            target_sl = min_sl
-                        self._modify_sl_tp(pos, target_sl, pos.tp)
+                    close_vol = self._scaleout_volume(symbol, info, original_volume, 0.5)
+                    if close_vol > 0:
+                        if self._close_partial_position(pos, tick.bid, close_vol, "TP1 (50%)"):
+                            trade_data["tp1_hit"] = True
+                            target_sl = round(pos.price_open + (10 ** -digits), digits)
+                            min_sl = current_price - self._get_min_dist(symbol, tick, info)
+                            if target_sl < min_sl:
+                                target_sl = min_sl
+                            self._modify_sl_tp(pos, target_sl, pos.tp)
                 elif tp2 is not None and tp1_hit and not tp2_hit and current_price >= tp2:
-                    close_vol = round(original_volume * 0.3, 2)
-                    if pos.volume >= close_vol:
-                        self._close_partial_position(pos, tick.bid, close_vol, "TP2 (30%)")
+                    close_vol = self._scaleout_volume(symbol, info, original_volume, 0.3)
+                    if close_vol > 0 and self._close_partial_position(pos, tick.bid, close_vol, "TP2 (30%)"):
                         trade_data["tp2_hit"] = True
                 elif tp3 is not None and tp2_hit and current_price >= tp3:
                     self._close_partial_position(pos, tick.bid, pos.volume, "TP3 (20%)")
@@ -401,22 +501,25 @@ class MultiAssetMT5Trader:
                         pass
             else:
                 if tp1 is not None and not tp1_hit and current_price <= tp1:
-                    close_vol = round(original_volume * 0.5, 2)
-                    if pos.volume >= close_vol:
-                        self._close_partial_position(pos, tick.ask, close_vol, "TP1 (50%)")
-                        trade_data["tp1_hit"] = True
-                        target_sl = round(pos.price_open - (10 ** -digits), digits)
-                        min_sl = current_price + self._get_min_dist(symbol, tick, info)
-                        if target_sl > min_sl:
-                            target_sl = min_sl
-                        self._modify_sl_tp(pos, target_sl, pos.tp)
+                    close_vol = self._scaleout_volume(symbol, info, original_volume, 0.5)
+                    if close_vol > 0:
+                        if self._close_partial_position(pos, tick.ask, close_vol, "TP1 (50%)"):
+                            trade_data["tp1_hit"] = True
+                            target_sl = round(pos.price_open - (10 ** -digits), digits)
+                            min_sl = current_price + self._get_min_dist(symbol, tick, info)
+                            if target_sl > min_sl:
+                                target_sl = min_sl
+                            self._modify_sl_tp(pos, target_sl, pos.tp)
                 elif tp2 is not None and tp1_hit and not tp2_hit and current_price <= tp2:
-                    close_vol = round(original_volume * 0.3, 2)
-                    if pos.volume >= close_vol:
-                        self._close_partial_position(pos, tick.ask, close_vol, "TP2 (30%)")
+                    close_vol = self._scaleout_volume(symbol, info, original_volume, 0.3)
+                    if close_vol > 0 and self._close_partial_position(pos, tick.ask, close_vol, "TP2 (30%)"):
                         trade_data["tp2_hit"] = True
                 elif tp3 is not None and tp2_hit and current_price <= tp3:
                     self._close_partial_position(pos, tick.ask, pos.volume, "TP3 (20%)")
+
+        # W10: persist any management-state changes (partial closes, BE, trailing)
+        # so a restart keeps managing open positions correctly.
+        self._save_management_state()
 
         # Детектор закрытия
         closed_tickets = set(self.active_trades.keys()) - current_tickets
@@ -477,11 +580,39 @@ class MultiAssetMT5Trader:
             logger.info(close_msg)
             self.bot.send_text_message(close_msg)
 
+        # W10: reflect closed-ticket removal in the persisted management state.
+        self._save_management_state()
+
     def _get_min_dist(self, symbol: str, tick, info) -> float:
         stops_level = info.trade_stops_level * info.point
         freeze_level = info.trade_freeze_level * info.point
         spread = abs(tick.ask - tick.bid)
         return max(stops_level, freeze_level, spread + 30 * info.point)
+
+    def _scaleout_volume(self, symbol: str, info, original_volume: float,
+                         ratio: float) -> float:
+        """Tranche volume to close, quantized to the broker's lot step.
+
+        W2/N11 (audit 2026-08-10): the previous code did `round(original*0.5, 2)`,
+        which for a 0.01 base lot produces 0.01 (closing the WHOLE position as
+        "TP1 (50%)") and for TP2 produces 0.0 (a zero-volume order). MT5 requires
+        volume to be a multiple of `volume_step` and >= `volume_min`, so we
+        round DOWN to the lot step and return 0 (skip the tranche, keep the
+        remainder managed by the broker TP) when the tranche is below the
+        minimum fillable volume.
+        """
+        step = float(getattr(info, "volume_step", 0.01) or 0.01)
+        min_lot = float(getattr(info, "volume_min", step) or step)
+        raw = original_volume * ratio
+        tranche = math.floor(raw / step) * step
+        if tranche < min_lot - 1e-9 or tranche <= 0.0:
+            logger.warning(
+                f"[{symbol}] Scale-out tranche {ratio} of {original_volume} "
+                f"lots = {raw:.4f} < min fillable {min_lot:.2f} (step {step:.2f}); "
+                f"skipping partial close and keeping remainder on the broker TP."
+            )
+            return 0.0
+        return round(tranche, 6)
 
     def _modify_sl_tp(self, pos, new_sl, new_tp):
         request = {
@@ -501,6 +632,15 @@ class MultiAssetMT5Trader:
             logger.debug(f"Modify failed: {res.comment} ({res.retcode})")
 
     def _close_partial_position(self, pos, price, volume, label):
+        """Close a partial volume. Returns True only if the order was accepted
+        (retcode == TRADE_RETCODE_DONE).
+
+        W12 (audit 2026-08-10): callers previously set tp1_hit/tp2_hit BEFORE
+        checking the retcode, so a rejected partial (requote, trade_freeze,
+        volume) was forever treated as executed — leaving the position full-size,
+        without breakeven and without a retry. Success is now signalled by the
+        return value and the state is advanced only on real execution.
+        """
         close_type = mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -517,12 +657,13 @@ class MultiAssetMT5Trader:
         }
         if self.dry_run:
             logger.info(f"[DRY RUN] Would close partial {label}: {request}")
-            return
+            return True  # dry-run: treated as filled for state-advance purposes
         res = mt5.order_send(request)
         if res.retcode == mt5.TRADE_RETCODE_DONE:
             logger.info(f"✅ Closed {label} for #{pos.ticket} ({volume} lots)")
-        else:
-            logger.error(f"❌ Partial close failed {label} for #{pos.ticket}: {res.comment} ({res.retcode})")
+            return True
+        logger.error(f"❌ Partial close failed {label} for #{pos.ticket}: {res.comment} ({res.retcode})")
+        return False
 
     def execute_signal(self, asset_key: str, signal: dict):
         bias = signal["bias"]
@@ -549,7 +690,7 @@ class MultiAssetMT5Trader:
             return
         validate_symbol(mt5_symbol)
 
-        positions = mt5.positions_get(symbol=mt5_symbol, magic=self.magic_number)
+        positions = positions_get_by_magic(symbol=mt5_symbol, magic=self.magic_number)
         if positions:
             return
 
@@ -601,7 +742,7 @@ class MultiAssetMT5Trader:
             # on open, so this stays correct (and backward compatible) in both worlds.
             pos_ticket = int(result.order)
             try:
-                opened = mt5.positions_get(symbol=mt5_symbol, magic=self.magic_number)
+                opened = positions_get_by_magic(symbol=mt5_symbol, magic=self.magic_number)
                 if opened:
                     pos_ticket = int(opened[-1].ticket)
             except Exception as e:  # pragma: no cover - defensive fallback
@@ -638,6 +779,9 @@ class MultiAssetMT5Trader:
                 "tp1_hit": False,
                 "tp2_hit": False,
             }
+            # W10: persist the new position's management state immediately so a
+            # restart before the next BE check still knows its TP targets.
+            self._save_management_state()
 
             # CRIT 5: persist the entry so check_and_move_breakeven() can log the close
             # against the same row, feeding scripts/retrain_with_real_trades.py.
@@ -678,8 +822,39 @@ class MultiAssetMT5Trader:
                 f"request={request}"
             )
 
+    def _validate_contract_sizes(self):
+        """T8 (audit 2026-08-10): warn when a symbol's live contract size or
+        volume step does not match what the config/backtest assumes. The money
+        math (point_value_lot) and the fillable scale-out tranches (volume_step)
+        are hard-coded in config; reading them from the terminal catches broker
+        or server changes that would otherwise silently shift PnL or block
+        partial closes."""
+        assets = self.cfg.get("assets", {})
+        for asset_key, a_cfg in assets.items():
+            symbol = a_cfg.get("mt5_symbol")
+            if not symbol:
+                continue
+            info = mt5.symbol_info(symbol)
+            if not info:
+                continue
+            cfg_pvl = a_cfg.get("point_value_lot")
+            live_contract = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
+            if cfg_pvl and live_contract > 0 and abs(cfg_pvl - live_contract) > 1e-6:
+                logger.warning(
+                    f"[{asset_key}] config point_value_lot={cfg_pvl} does not match "
+                    f"live trade_contract_size={live_contract} for {symbol}. "
+                    f"Money PnL may be mis-scaled."
+                )
+            live_step = float(getattr(info, "volume_step", 0.0) or 0.0)
+            if live_step > 0 and abs(self.volume * 0.5 % live_step) > 1e-9:
+                logger.warning(
+                    f"[{asset_key}] 50% scale-out of live volume {self.volume} is not a "
+                    f"multiple of volume_step {live_step}; partial close may be skipped."
+                )
+
     def run_loop(self):
         initialize_mt5()
+        self._validate_contract_sizes()
         self.check_and_move_breakeven()
         logger.info(f"🚀 MULTI-ASSET AUTO-TRADER STARTED WITH FULL TELEGRAM NOTIFICATIONS ({len(self.pipelines)} Assets Enabled)")
         if self.dry_run:
@@ -704,7 +879,10 @@ class MultiAssetMT5Trader:
                     continue
                 symbol = a_cfg["mt5_symbol"]
                 try:
-                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 1, 1)
+                    # T11: poll each asset at ITS OWN timeframe (the one it trades
+                    # and its pipeline uses), not a global M5.
+                    tf_enum = self.symbol_timeframe.get(symbol, mt5.TIMEFRAME_M5)
+                    rates = mt5.copy_rates_from_pos(symbol, tf_enum, 1, 1)
                     if rates is not None and len(rates) > 0:
                         t = rates[0]["time"]
                         if t > current_bar_time:
@@ -717,9 +895,9 @@ class MultiAssetMT5Trader:
                 continue
 
             if current_bar_time != last_bar_time:
-                logger.info(f"New M5 bar detected: {current_bar_time} (last: {last_bar_time})")
+                logger.info(f"New bar detected: {current_bar_time} (last: {last_bar_time})")
                 last_bar_time = current_bar_time
-                logger.info("--- Analyzing newly closed M5 candle across all assets ---")
+                logger.info("--- Analyzing newly closed candle across all assets ---")
                 for asset_key, pipeline in self.pipelines.items():
                     start = time.time()
                     try:

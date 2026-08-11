@@ -73,24 +73,35 @@ def calculate_lot_size(
     Money at Risk per 1.0 Lot = Stop Distance * Point Value per Lot
     Lot Size = Risk Amount / Money at Risk per Lot
     """
+    # N7 (audit 2026-08-10): never round UP to min_lot. A risk-based size below
+    # the broker minimum is NOT tradeable and must be skipped by the caller
+    # (matches execution/risk_sizer.lots_for_risk's "never round up"). Forcing
+    # min_lot here would exceed the intended risk-per-trade. Returns 0.0 for
+    # degenerate inputs so callers can treat 0 as "skip".
     if stop_loss_distance <= 0 or point_value_lot <= 0 or account_equity <= 0:
-        return min_lot
+        return 0.0
 
     risk_amount = account_equity * (risk_pct / 100.0)
     risk_per_full_lot = stop_loss_distance * point_value_lot
 
     if risk_per_full_lot <= 0:
-        return min_lot
+        return 0.0
 
     raw_lots = risk_amount / risk_per_full_lot
-    # Quantize to lot_step
+    # Quantize DOWN to lot_step (never exceed the intended risk).
     stepped_lots = np.floor(raw_lots / lot_step) * lot_step
-    return float(np.clip(stepped_lots, min_lot, max_lot))
+    return float(np.clip(stepped_lots, 0.0, max_lot))
 
 
 def hierarchical_risk_parity(returns_df: pd.DataFrame) -> pd.Series:
     """
-    Computes Hierarchical Risk Parity (HRP) portfolio weights from asset returns.
+    Computes portfolio weights from asset returns.
+
+    N8 (audit 2026-08-10): this is NOT true Hierarchical Risk Parity — there is
+    no correlation clustering or recursive bisection; it returns plain
+    inverse-variance weights (inv_diag / sum(inv_diag)). The name is retained for
+    backward compatibility but callers must not rely on HRP properties. The risk
+    layer that would use it is disabled (risk.enabled: false).
     """
     if returns_df.empty or returns_df.shape[1] == 1:
         return pd.Series([1.0], index=returns_df.columns if not returns_df.empty else ["default"])

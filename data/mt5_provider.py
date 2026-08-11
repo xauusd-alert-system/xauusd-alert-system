@@ -50,7 +50,7 @@ def validate_symbol(symbol: str) -> None:
             f"{code} {message}"
         )
 
-def _normalize_rates(rates) -> pd.DataFrame:
+def _normalize_rates(rates, server_offset_hours: float = 0.0) -> pd.DataFrame:
     if rates is None or len(rates) == 0:
         raise MT5ProviderError(f"MT5 returned no candle data: {mt5.last_error()}")
 
@@ -58,8 +58,26 @@ def _normalize_rates(rates) -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(df["time"], unit="s", utc=True)
     df = df.rename(columns={"tick_volume": "volume"})
 
+    # N10 (audit 2026-08-10): MT5 bar timestamps are in the BROKER-SERVER timezone,
+    # not UTC. The code previously declared them UTC with no offset, so session
+    # tagging and the range tail-cut were silently shifted (e.g. EET/EEST = UTC+2/+3)
+    # and the offset even "floats" across EU/US DST transitions. When a non-zero
+    # server_time_offset_hours is configured, shift the raw server timestamps to
+    # true UTC before they are used for session tagging / labeling / range slicing.
+    if server_offset_hours:
+        df["timestamp"] = df["timestamp"] - pd.Timedelta(hours=float(server_offset_hours))
+
+    # N10: preserve `spread` and `real_volume` (broker-reported) when present in
+    # the MT5 array. These were previously dropped, even though the actual broker
+    # spread is exactly what an honest cost model (W1) needs. Optional columns do
+    # not break the required-column contract below.
+    if "spread" in df.columns:
+        df["spread"] = pd.to_numeric(df["spread"], errors="coerce")
+    if "real_volume" in df.columns:
+        df["real_volume"] = pd.to_numeric(df["real_volume"], errors="coerce")
+
     required = ["timestamp", "open", "high", "low", "close", "volume"]
-    df = df[required].copy()
+    df = df[required + [c for c in ("spread", "real_volume") if c in df.columns]].copy()
 
     for column in ("open", "high", "low", "close", "volume"):
         df[column] = pd.to_numeric(df[column], errors="coerce")
@@ -81,6 +99,7 @@ def fetch_closed_candles(
     symbol: str,
     timeframe: str,
     count: int,
+    server_offset_hours: float = 0.0,
 ) -> pd.DataFrame:
     """Fetch only completed bars; MT5 position 0 is intentionally excluded."""
     if timeframe not in _TIMEFRAMES:
@@ -98,7 +117,7 @@ def fetch_closed_candles(
         count,
     )
 
-    return _normalize_rates(rates)
+    return _normalize_rates(rates, server_offset_hours=server_offset_hours)
 
 
 def fetch_candles_range(
@@ -106,8 +125,14 @@ def fetch_candles_range(
     timeframe: str,
     start_utc: datetime,
     end_utc: datetime,
+    server_offset_hours: float = 0.0,
 ) -> pd.DataFrame:
-    """Fetch MT5 bars in a UTC range, excluding a currently forming bar."""
+    """Fetch MT5 bars in a UTC range, excluding a currently forming bar.
+
+    server_offset_hours: broker-server timezone offset (hours) added to the UTC
+    range bounds when talking to MT5, which treats datetimes as SERVER time
+    (N10). The returned bars are normalized to true UTC.
+    """
     if timeframe not in _TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
@@ -122,14 +147,24 @@ def fetch_candles_range(
     start_utc = start_utc.astimezone(timezone.utc)
     end_utc = end_utc.astimezone(timezone.utc)
 
+    # N10: MT5's copy_rates_range interprets the datetimes as SERVER time, so the
+    # requested UTC bounds must be shifted by the server offset to select the same
+    # wall-clock window.
+    if server_offset_hours:
+        start_server = start_utc + pd.Timedelta(hours=float(server_offset_hours))
+        end_server = end_utc + pd.Timedelta(hours=float(server_offset_hours))
+    else:
+        start_server = start_utc
+        end_server = end_utc
+
     rates = mt5.copy_rates_range(
         symbol,
         _TIMEFRAMES[timeframe],
-        start_utc,
-        end_utc,
+        start_server,
+        end_server,
     )
 
-    df = _normalize_rates(rates)
+    df = _normalize_rates(rates, server_offset_hours=server_offset_hours)
 
     now_utc = pd.Timestamp.now(tz="UTC")
     tf_minutes = {

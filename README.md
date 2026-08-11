@@ -45,6 +45,7 @@ MT5 candles ─▶ features ─▶ regime ─▶ model ─▶ ensemble/meta-filt
 - **[Technical Specification / Техническое Задание (ТЗ)](TZ.md)** (`TZ.md` / `docs/TZ.md`): исчерпывающее техническое описание всех подсистем, формул, потоков данных, риск-менеджмента и контрактов исполнения.
 - **[TODO & Roadmap (План работ и статус)](TODO.md)** (`TODO.md` / `docs/TODO.md`): матрица готовности подсистем, чеклист развертывания и дорожная карта развития (Phase 0–6 completed, Phase 7+ roadmap).
 - **[Strategy Benchmarks & Validation](docs/benchmarks.md)** (`docs/benchmarks.md`): протокол честной валидации без утечек данных, walk-forward бейзлайны по активам и журнал изменений.
+- **[Audit 2026-08-10 — Fix Status](docs/AUDIT_FIXES_2026-08-10.md)**: таблица «находка → статус» по независимому квант-аудиту (SWOT/методология), с пояснением, какие пункты исправлены кодом, а какие только задокументированы.
 
 ## Requirements
 
@@ -75,6 +76,27 @@ switches live in `.env` (see `.env.example`). Per-asset overrides for the
 ensemble thresholds, contract sizes, slippage, and labeling sit under the
 `assets:` section of the YAML.
 
+## Configuration reference (highlights)
+
+Everything lives in [`config/config.yaml`](config/config.yaml). Key switches:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `assets.<key>.enabled` | — | Whether the asset trades live / is loaded. |
+| `assets.<key>.timeframe` | `M5` | Per-asset bar timeframe (XAU `M15`, EUR/GBP `H1`). |
+| `assets.<key>.point_value_lot` | `100` | USD notional per 1.0 lot per 1.0 price unit (XAG `5000`, EUR/GBP `100000`, BTC `1`). |
+| `assets.<key>.spread_usd` / `slippage_usd` | — | Per-asset transaction costs (mirrors MT5's instrument-specific values). |
+| `ensemble.min_ml_probability` / `ml_confidence_floor` / `crypto_night_min_probability` | `0.55 / 0.62 / 0.58` | Ensemble probability thresholds (previously hard-coded). |
+| `ensemble.use_sentiment_guard` | `false` | Optional macro-sentiment veto wiring `data/sentiment_analyzer.py` into the signal path. |
+| `ensemble.apply_news_guard_in_backtest` | `false` | News guard is enforced live but not in backtests (no historical calendar feed) — see note. |
+| `execution.volume` | `backtest.volume` (`0.10`) | Live order lots (must make 50/30/20 tranches fillable). |
+| `execution.max_daily_trades_per_asset` / `max_concurrent_positions_global` | `10 / 3` | Risk-manager limits (read from config, not hard-coded). |
+| `backtest.walk_forward.embargo_candles` | `0` | Extra purge/embargo between train and test windows (W3). |
+| `market_data.server_time_offset_hours` | `0` | Broker-server→UTC offset for MT5 bar timestamps (N10). |
+
+Per-asset overrides (thresholds, contract sizes, slippage, labeling, signal grid,
+and risk) sit under the `assets:` section of the YAML.
+
 ## Common tasks
 
 ```bash
@@ -103,7 +125,7 @@ python -m scripts.overnight
 
 ## Testing & CI
 
-The suite (173 tests at time of writing) is run with `pytest -q` from the repo
+The suite (**435 tests**) is run with `pytest -q` from the repo
 root — `pyproject.toml` sets `pythonpath = ["."]` so the packages import without
 installation. A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the
 suite on every push to `master` and every pull request.

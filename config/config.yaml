@@ -1,9 +1,42 @@
 ensemble:
   min_confidence_to_alert: 0.60
+  # W15 (audit 2026-08-10): these probabilities were previously hard-coded
+  # defaults inside model/ensemble.py with no entry in config.yaml, so the
+  # thresholds that decide the flow of trades were invisible and not reproducible
+  # across machines. Now declared here (defaults equal the old hard-coded values).
+  #   min_ml_probability      - bare ML-probability floor for a day signal
+  #   ml_confidence_floor     - p_max mapped to confidence: 0.50 -> 0.0, floor -> 1.0
+  #   crypto_night_min_probability - elevated bar for BTC in the Asia session
+  min_ml_probability: 0.55
+  ml_confidence_floor: 0.62
+  crypto_night_min_probability: 0.58
   min_regime_confidence: 0.60
   use_news_guard: true
   news_buffer_before_min: 30
   news_buffer_after_min: 30
+  # W14 (audit 2026-08-10): the news guard is enforced in the live trading path,
+  # but backtest bars older than ~7 days are skipped by is_news_red_zone() because
+  # there is no HISTORICAL economic-calendar feed. So backtests do not model news
+  # impact for most of the sample (live does). This is an inherent data-source
+  # limitation, not a code bug; record it when comparing live vs backtest trade
+  # counts/tails. Enable `apply_news_guard_in_backtest` only if you wire in a
+  # historical calendar feed.
+  apply_news_guard_in_backtest: false
+  # W17 (audit 2026-08-10): OPTIONAL macro sentiment veto that wires
+  # data/sentiment_analyzer.py into the trading path (it previously only surfaced
+  # in the dashboard). Default OFF preserves the exact baseline behaviour; enable
+  # only after validating that the lexicon veto does not hurt live results.
+  use_sentiment_guard: false
+  sentiment_veto_threshold: 0.5
+  # W16 (audit 2026-08-10): cross-asset comparability caveat. The per-asset
+  # `min_confidence_to_alert` (0.70/0.85/0.60/...) is applied to a BLENDED
+  # confidence whose scale differs by asset, and 3-class models (GBP) leave
+  # residual mass on a no_trade class, so an absolute threshold like "0.85" is
+  # NOT a probability and is not directly comparable across assets. Tuning is
+  # per-asset on purpose; keep each asset's bar calibrated on ITS OWN signal
+  # distribution. `model.normalize_probs` can force p_long+p_short=1 for the
+  # 3-class path if you want a common probability scale (changes which signals
+  # fire -> revalidate before enabling).
   suppress_regimes:
     - compression
     - reversal_watch
@@ -52,6 +85,13 @@ market_data:
   provider: mt5
   timeframe: M5
   closed_candles_only: true
+  # N10 (audit 2026-08-10): MT5 bar timestamps are in the BROKER-SERVER timezone,
+  # not UTC (FxPro EET/EEST = UTC+2/+3, and the offset floats across EU/US DST
+  # transitions). When non-zero, the provider shifts raw server timestamps to true
+  # UTC and adjusts range bounds accordingly, so session tagging / labeling / the
+  # range tail-cut are not silently shifted. Default 0 preserves legacy behaviour
+  # (server treated as UTC); set it to the measured broker offset once known.
+  server_time_offset_hours: 0
 
 
 general:
@@ -149,7 +189,18 @@ assets:
     # symbol_overrides BTCUSD=1.0).
     point_value_lot: 1
     ensemble:
-      min_confidence_to_alert: 0.62
+      # Entry parameters (owner request 2026-08-11, "adapt BTC entry to current
+      # market"). These per-asset overrides make the BTC entry bar explicit and
+      # tunable against the current high-vol regime instead of silently inheriting
+      # the global values. The signal-quality floor is raised (fewer, higher
+      # conviction entries) and the crypto-night bar is kept strict. Validate on
+      # live data and re-run the decision gate before committing capital; do NOT
+      # tune these from a single fresh snapshot.
+      min_confidence_to_alert: 0.66
+      min_ml_probability: 0.60
+      ml_confidence_floor: 0.68
+      crypto_night_min_probability: 0.62
+      ev_threshold: 0.05
       suppress_sessions: []
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.20
@@ -357,17 +408,22 @@ labeling:
 
 # ---------------------------------------------------------------------------
 # Signal grid spec for Telegram (alerts/formatter.py, realtime/pipeline.py).
-# Equal-step grid: step = step_points (if set) else 1.0 * ATR, clamped to
-# [step_min_points, step_max_points]; TP1 = entry ± 1*step, TP2 = ±2*step,
-# TP3 = ±3*step, Stop = entry ∓ 3*step (risk:TP3 = 1:1, BE on TP1).
-# Per-asset overrides live in assets.<key>.signal_grid (e.g. clamps tuned to
-# each instrument's price scale).
+# ASYMMETRIC grid (owner request 2026-08-11): step = step_points (if set) else
+# 1.0 * ATR, clamped to [step_min_points, step_max_points]; TP1 = entry ± 1*step,
+# TP2 = ±1.5*step, TP3 = ±2*step, Stop = entry ∓ 2*step (risk:TP3 = 1:1,
+# BE on TP1). This is TIGHTER than the previous equal-step (2/3/3) grid so
+# profits are banked faster and per-trade risk (stop distance) is reduced, at
+# the cost of giving winners less room. Per-asset overrides live in
+# assets.<key>.signal_grid; assets that override mults (EUR stop 2.0, GBP 3.0
+# with regime overrides) keep their own deliberately-tuned values.
+# NOTE: this changes live TP/SL distances — re-run backtests before trusting
+# new numbers (see docs/benchmarks.md).
 # ---------------------------------------------------------------------------
 signal_grid:
   tp1_mult: 1.0
-  tp2_mult: 2.0
-  tp3_mult: 3.0
-  stop_mult: 3.0
+  tp2_mult: 1.5
+  tp3_mult: 2.0
+  stop_mult: 2.0
   # Early breakeven: move the stop to entry once price reaches this fraction
   # of the TP1 distance in our favor. 1.0 = legacy (BE only when TP1 hits);
   # values < 1.0 (e.g. 0.5) protect mean-reverting assets (FX) from the
@@ -397,6 +453,10 @@ backtest:
     train_window_days: 300
     test_window_days: 50
     step_days: 50
+    # W3 (audit 2026-08-10): extra embargo buffer (in candles) dropped from the
+    # tail of each train window on top of the labeling-horizon purge, to account
+    # for serial correlation of features across the train/test boundary.
+    embargo_candles: 0
 
 
 # ===== RETRAINING =====
@@ -451,6 +511,14 @@ execution:
   max_open_positions_mode: per_asset  # per_asset | global
   max_open_positions_per_asset: 1
   max_concurrent_positions_global: 3
+  # Daily cap on NEW trades per asset (circuit-breaker budget). Read by
+  # execution/risk_manager.py (W8) instead of a hard-coded 10.
+  max_daily_trades_per_asset: 10
+  # Live order volume in lots. Read by execution/mt5_trader.py (W2) instead of a
+  # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
+  # it falls back to backtest.volume (default 0.10, which yields fillable
+  # tranches 0.05 / 0.03 / 0.02).
+  volume: 0.10
   signal_ranking_metric: confidence   # confidence | ev | probability
 
 

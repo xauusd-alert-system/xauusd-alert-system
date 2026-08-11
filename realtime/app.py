@@ -6,6 +6,7 @@ Macro AI news sentiment, visual charts, and interactive bot controls.
 from __future__ import annotations
 import os
 import logging
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -21,6 +22,7 @@ from backtest.monte_carlo import MonteCarloSimulator
 from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
 from alerts.chart_renderer import ChartRenderer
 from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
+from alerts import status_commands as sc
 
 logger = logging.getLogger("realtime_app")
 
@@ -90,16 +92,49 @@ def get_signal(n_candles: int = 300, asset: str = "XAUUSD"):
 
 @app.get("/api/status")
 def get_status():
-    """Returns current system and account metrics."""
+    """Returns current system and account metrics (real MT5 when available)."""
+    account = None
+    positions = []
+    if sc.ensure_mt5_connection():
+        try:
+            m = sc.get_mt5()
+            account = m.account_info()
+            positions = list(m.positions_get() or [])
+        except Exception as exc:
+            logger.warning("Could not fetch live status: %s", exc)
+    balance = float(getattr(account, "balance", 100000.0) or 0.0) if account else 100000.0
+    equity = float(getattr(account, "equity", 100000.0) or 0.0) if account else 100000.0
     return {
         "status": "online",
         "data_mode": DATA_MODE,
-        "balance": 100000.0,
-        "equity": 100000.0,
-        "open_positions_count": 0,
+        "balance": balance,
+        "equity": equity,
+        "floating_pnl": (equity - balance) if account else 0.0,
+        "open_positions_count": len(positions),
         "circuit_breaker": False,
         "trading_paused": TRADING_PAUSED,
     }
+
+
+@app.get("/api/metrics")
+def get_metrics(period: str = "week"):
+    """Real closed-trade statistics (owner request 2026-08-11) for the dashboard.
+
+    period in {today, week, 2week, month, 3month, all}. Reuses the read-only
+    status_commands pipeline (history_deals_get) so it reflects actual executed
+    trades when MT5 is connected, else returns an empty result.
+    """
+    if period not in ("today", "week", "2week", "month", "3month", "all"):
+        period = "week"
+    if not sc.ensure_mt5_connection():
+        return {"period": period, "period_label": sc.PERIODS.get(period, ""),
+                "n": 0, "available": False}
+    dt_from, dt_to, label = sc.period_range(period)
+    deals = sc.fetch_deals_between(dt_from, dt_to) if dt_from else sc.fetch_deals_between(
+        datetime(1970, 1, 1, tzinfo=timezone.utc), dt_to)
+    contexts = sc.load_position_contexts()
+    m = sc.compute_deal_metrics(deals, contexts=contexts, cfg=CFG)
+    return {"period": period, "period_label": label, "available": True, **m}
 
 
 @app.get("/api/matrix")

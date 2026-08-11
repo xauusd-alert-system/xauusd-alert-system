@@ -71,14 +71,30 @@ def compute_metrics(trades_df: pd.DataFrame) -> dict:
     # Expectancy ($ per trade)
     expectancy = pnls.mean()
 
-    # Sharpe & Sortino (Annualized based on ~250 trading days)
+    # Sharpe & Sortino (annualized by the ACTUAL per-year trade frequency when the
+    # entry timestamps are available, else fall back to ~250 trading days).
+    # T7 (audit 2026-08-10): the previous hard-coded sqrt(250) made per-trade
+    # Sharpe/Sortino incomparable across assets with very different trade counts
+    # (XAU ~2200 trades/yr vs EUR on H1 an order of magnitude fewer), so a
+    # cross-asset table was meaningless. Annualizing by the realized trade
+    # frequency yields a common scale: sharpe = mean/std * sqrt(trades_per_year).
+    annual = 250.0
+    if "entry_ts" in trades_df.columns and len(trades_df) >= 2:
+        ts = trades_df["entry_ts"].to_numpy(dtype=float)
+        span_secs = float(ts.max() - ts.min())
+        if span_secs > 0 and np.isfinite(span_secs):
+            span_years = span_secs / (365.25 * 86400.0)
+            tpy = len(trades_df) / span_years if span_years > 0 else 250.0
+            if tpy > 0 and np.isfinite(tpy):
+                annual = tpy
+
     mean_pnl = pnls.mean()
     std_pnl = pnls.std()
-    sharpe_ratio = (mean_pnl / std_pnl * np.sqrt(250)) if std_pnl > 0 else 0.0
+    sharpe_ratio = (mean_pnl / std_pnl * np.sqrt(annual)) if std_pnl > 0 else 0.0
 
     downside_pnls = pnls[pnls < 0]
     downside_std = downside_pnls.std() if len(downside_pnls) > 0 else 0.0
-    sortino_ratio = (mean_pnl / downside_std * np.sqrt(250)) if downside_std > 0 else 0.0
+    sortino_ratio = (mean_pnl / downside_std * np.sqrt(annual)) if downside_std > 0 else 0.0
 
     # Drawdown
     cum_pnl = np.cumsum(pnls)
@@ -157,7 +173,16 @@ def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0,
 
     tdf = trades_df.copy()
     tdf["risk_price"] = (tdf["entry_price"] - tdf["initial_stop_price"]).abs()
-    tdf["risk_money"] = tdf["risk_price"] * volume * point_value_lot
+    # W7: when the trade frame carries a per-trade `volume` column (as
+    # trades_to_dataframe does for EnsembleBacktester trades), honour it instead
+    # of the single scalar `volume` default that matches no asset. Different
+    # instruments use different lot sizes, so a scalar default silently scales
+    # R by the wrong multiplier.
+    if "volume" in tdf.columns and tdf["volume"].notna().any():
+        vol = tdf["volume"].fillna(volume)
+    else:
+        vol = pd.Series(float(volume), index=tdf.index)
+    tdf["risk_money"] = tdf["risk_price"] * vol.astype(float) * point_value_lot
     tdf = tdf[tdf["risk_money"] > 1e-12]
     if len(tdf) == 0:
         return empty

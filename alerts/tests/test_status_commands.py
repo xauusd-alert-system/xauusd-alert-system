@@ -175,7 +175,10 @@ def test_why_with_context_prints_reasoning_verbatim():
     msg = sc.format_why_report("XAUUSD", "GOLD", pos, ENTRY_CTX)
     assert ENTRY_CTX["reasoning_summary"] in msg      # дословно
     assert "73.0%" in msg                              # confidence 0.73 -> %
-    assert "trend_up" in msg and "london" in msg       # regime + session
+    # regime/session are humanized (owner request 2026-08-11) — raw keys still
+    # appear alongside, but the human-readable wording must be present.
+    assert "восходящий тренд" in msg or "trend_up" in msg
+    assert "лондонская" in msg or "london" in msg
     assert "2001.5" in msg and "2002.5" in msg         # entry zone
     assert "1990" in msg                               # invalidation
     assert "2006" in msg and "2010" in msg and "2014" in msg  # targets
@@ -246,10 +249,13 @@ def test_compute_deal_metrics_r_only_where_risk_known():
 def test_format_metrics_report_totals_and_per_asset():
     msg = sc.format_metrics_report(_metrics_deals(), {}, CFG, "сегодня (UTC)")
     assert "сегодня (UTC)" in msg
-    assert "WR 66.7%" in msg
-    assert "PF 2.75" in msg
-    assert "+35.00" in msg
+    # Extended detail format (owner request 2026-08-11): humanized labels.
+    assert "66.7%" in msg                        # win rate
+    assert "2.75" in msg                         # profit factor
+    assert "+35.00" in msg                       # total pnl
     assert "XAUUSD (GOLD)" in msg               # per-asset line uses internal key
+    # New extended fields present
+    assert "Макс. просадка" in msg or "просадка" in msg
 
 
 def test_format_metrics_report_no_deals():
@@ -450,7 +456,8 @@ def test_metrics_command_today_end_to_end(monkeypatch, tmp_path):
     bot._handle_update({"message": {"chat": {"id": 4242}, "text": "/metrics today"}})
     msg = last_text(captured)
     assert "сегодня (UTC)" in msg
-    assert "WR 66.7%" in msg and "PF 2.75" in msg and "+35.00" in msg
+    # Extended detail format: humanized labels + numbers.
+    assert "66.7%" in msg and "2.75" in msg and "+35.00" in msg
 
 
 def test_metrics_command_bad_period(monkeypatch):
@@ -525,3 +532,62 @@ def test_status_module_is_read_only():
                       "TRADE_ACTION_DEAL", "TRADE_ACTION_SLTP",
                       "position_close", "Close("):
         assert forbidden not in src, f"mutating call {forbidden!r} found in status_commands.py"
+
+
+def test_period_range_extended_periods():
+    """Owner request 2026-08-11: /metrics supports 2week/month/3month/all."""
+    now = datetime(2026, 8, 8, 15, 30, tzinfo=timezone.utc)
+    assert sc.period_range("2week", now=now)[2] == "последние 14 дней (UTC)"
+    assert sc.period_range("month", now=now)[2] == "последние 30 дней (UTC)"
+    assert sc.period_range("3month", now=now)[2] == "последние 90 дней (UTC)"
+    # "all" -> no lower bound (None) so the whole history is included.
+    dt_from, dt_to, label = sc.period_range("all", now=now)
+    assert dt_from is None and dt_to == now
+    assert "вся история" in label
+
+
+def test_compute_deal_metrics_extended_fields():
+    """Extended statistics present: avg win/loss, max dd, best/worst, consec."""
+    m = sc.compute_deal_metrics(_metrics_deals())
+    assert m["avg_win"] == pytest.approx((50.0 + 5.0) / 2)
+    assert m["avg_loss"] == pytest.approx(-20.0)
+    assert m["best_trade"] == pytest.approx(50.0)
+    assert m["worst_trade"] == pytest.approx(-20.0)
+    assert m["max_drawdown"] <= 0.0
+    assert m["max_consec_losses"] >= 0
+
+
+def test_metrics_bare_uses_real_pipeline_when_available(monkeypatch):
+    """Owner request 2026-08-11: bare /metrics must prefer REAL candles from the
+    trader's pipeline (get_frame) and label the source, falling back to synthetic
+    only when no live frame is available."""
+    import pandas as pd
+    import numpy as np
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+    monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "4242")
+    trader_cfg = {**CFG, "assets": {"XAUUSD": {**CFG["assets"]["XAUUSD"], "enabled": True}}}
+    trader = NS(magic_number=1, dry_run=False, pipelines={}, cfg=trader_cfg)
+
+    # Fake pipeline exposing get_frame -> real path (well-formed OHLCV so the
+    # SMC metrics compute; the source label is what we assert).
+    n = 120
+    rng = np.random.default_rng(0)
+    o = 2000.0 + np.cumsum(rng.normal(0, 1, n))
+    c = o + rng.normal(0, 0.5, n)
+    df = pd.DataFrame({
+        "open": o,
+        "high": np.maximum(o, c) + 1.0,
+        "low": np.minimum(o, c) - 1.0,
+        "close": c,
+        "volume": 100.0,
+    })
+    class FakePipeline:
+        def get_frame(self, n=100, build_features=False):
+            return df
+    trader.pipelines = {"XAUUSD": FakePipeline()}
+    bot = TelegramControlBot(trader)
+    captured = CapturedSends()
+    monkeypatch.setattr(bot, "_send", captured)
+    bot._dispatch("/metrics", "4242", ())
+    msg = last_text(captured)
+    assert "РЕАЛЬНЫЙ" in msg or "real" in msg.lower()

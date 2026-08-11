@@ -127,8 +127,8 @@ def test_walk_forward_runner_calls_strategy_per_fold():
 
 
 def test_engine_barriers_follow_signal_grid():
-    """The engine's ATR-scaled barriers must mirror the signal grid (equal-step
-    spec: stop = 3*step, TP1 = 1*step -> stop/target distance ratio = 3.0),
+    """The engine's ATR-scaled barriers must mirror the signal grid (asymmetric
+    spec: stop = 2*step, TP1 = 1*step -> stop/target distance ratio = 2.0),
     not the training-label barriers (target 1.2 / stop 1.0)."""
     df = _prepared_df()
     engine = EventDrivenBacktester(CFG)
@@ -143,9 +143,10 @@ def test_engine_barriers_follow_signal_grid():
             continue
         assert stop_dist > 0 and target_dist > 0
         # Both barriers are sized off the SAME ATR at entry, so the ratio is
-        # exactly stop_mult / tp1_mult = 3.0 for the shipped signal grid.
-        assert np.isclose(stop_dist / target_dist, 3.0, rtol=1e-6), (
-            f"expected stop/target = 3.0 (signal grid), got {stop_dist / target_dist:.4f}"
+        # exactly stop_mult / tp1_mult = 2.0 for the shipped asymmetric grid
+        # (owner request 2026-08-11: TP1=1, stop=2).
+        assert np.isclose(stop_dist / target_dist, 2.0, rtol=1e-6), (
+            f"expected stop/target = 2.0 (asymmetric signal grid), got {stop_dist / target_dist:.4f}"
         )
 
 
@@ -198,3 +199,26 @@ def test_engine_early_breakeven_limits_loss():
     for t in trades:
         assert t.exit_reason == "stop"
         assert t.pnl > -0.0005  # scratched at breakeven, not a full 3-step loss
+
+
+def test_walk_forward_purges_train_rows_whose_labels_overlap_test():
+    """W3: train rows whose triple-barrier label window reaches into the test
+    window must be purged (their future information would otherwise leak)."""
+    df = _prepared_df(n=3000)
+
+    def spy(train_df, test_df, cfg):
+        return {"n_trades": 0, "total_pnl": 0.0, "profit_factor": 1.0}
+
+    test_cfg = {**CFG, "backtest": {**CFG["backtest"],
+                                    "walk_forward": {"train_window_days": 5,
+                                                     "test_window_days": 2,
+                                                     "step_days": 2}}}
+    results = run_walk_forward(df, test_cfg, spy)
+    assert results
+    first = results[0]
+    w = first["window"]
+    full_train = df[(df["timestamp_utc"] >= w.train_start_ts) &
+                    (df["timestamp_utc"] < w.train_end_ts)]
+    # The purged train set must be strictly smaller than the full window.
+    assert first["purged_train_rows"] < len(full_train)
+    assert first["purged_train_rows"] > 0

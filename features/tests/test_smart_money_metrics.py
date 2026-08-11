@@ -83,3 +83,21 @@ def test_compute_institutional_metrics_and_formatting(sample_market_df):
     assert "SMF Ratio:" in report
     assert "Liquidity Grab:" in report
     assert "Delta Confidence:" in report
+
+
+def test_delta_confidence_very_high_is_reachable():
+    """N9: with a very strong, consistent delta the level must be VERY HIGH
+    (previously unreachable because the looser HIGH branch ran first)."""
+    import numpy as np
+    import pandas as pd
+    # 30 bars, consistently buying (close near high -> positive signed delta),
+    # strong cumulative slope relative to volume.
+    n = 30
+    df = pd.DataFrame({
+        "high": [100.0] * n,
+        "low": [99.0] * n,
+        "close": [99.9] * n,   # pos_in_bar ~ (99.9-99)/(100-99) = 0.9 -> positive
+        "volume": [1.0] * n,
+    })
+    level, _ = calculate_delta_confidence(df)
+    assert level == "VERY HIGH"

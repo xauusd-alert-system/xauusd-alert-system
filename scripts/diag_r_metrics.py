@@ -86,23 +86,37 @@ def _mfe_mae(df: pd.DataFrame, horizon: int, atr_col: str = "atr") -> pd.DataFra
     return pd.DataFrame({"mfe": mfe, "mae": mae}, index=df.index)
 
 
-def _signal_mask(df: pd.DataFrame) -> np.ndarray:
+def _signal_mask(df: pd.DataFrame, cfg: dict = None, asset_key: str = None) -> np.ndarray:
     """Rows where the ensemble would actually open a trade (same gates as
-    EnsembleBacktester): regime not suppressed, session allowed, ml prob
-    above the 0.55 minimum. Conservative approximation of 'all signals'."""
+    EnsembleBacktester): regime not suppressed, session allowed, ml prob above the
+    per-asset minimum. N5 (audit 2026-08-10): this previously hard-coded 0.55 and
+    {compression, reversal_watch}, so the MFE/MAE table was computed on a signal
+    set that did NOT match the tradable set (it included the suppressed `range`
+    regime and everything below the real per-asset bar). Now it reads the same
+    per-asset ensemble config the live trader uses."""
     from regime.classifier import RegimeLabel
     mask = np.zeros(len(df), dtype=bool)
     p_longs = df.get("ml_p_long", pd.Series(0.5, index=df.index)).to_numpy(dtype=float)
     p_shorts = df.get("ml_p_short", pd.Series(0.5, index=df.index)).to_numpy(dtype=float)
     regimes = df["regime"].to_numpy() if "regime" in df.columns else np.full(len(df), "range")
-    suppressed = {"compression", "reversal_watch", "no_trade"}
+
+    if cfg and asset_key:
+        merged = merge_asset_cfg(cfg, asset_key, "ensemble")
+        ens = merged.get("ensemble", {})
+        min_conf = float(ens.get("min_confidence_to_alert", 0.55))
+        suppressed = set(ens.get("suppress_regimes", ["compression", "reversal_watch", "range"]))
+    else:
+        min_conf = 0.55
+        suppressed = {"compression", "reversal_watch", "no_trade", "range"}
+    suppressed.add("no_trade")
+
     for i in range(len(df)):
         reg = regimes[i]
         if isinstance(reg, RegimeLabel):
             reg = reg.value
         if str(reg) in suppressed:
             continue
-        if max(p_longs[i], p_shorts[i]) < 0.55:
+        if max(p_longs[i], p_shorts[i]) < min_conf:
             continue
         mask[i] = True
     return mask
@@ -159,7 +173,7 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             })
         # MFE/MAE for all signal rows in this fold
         mm = _mfe_mae(fdf, horizon)
-        sig = _signal_mask(fdf)
+        sig = _signal_mask(fdf, cfg=cfg, asset_key=asset_key)
         regs = fdf["regime"].to_numpy() if "regime" in fdf.columns else np.full(len(fdf), "range")
         for i in np.where(sig)[0]:
             reg = regs[i]
@@ -279,6 +293,12 @@ def _pf(pnls: np.ndarray) -> float:
 
 def print_report(d: dict) -> None:
     a = d["asset"]
+    # O1/§4.6 (audit 2026-08-10): the fail-open synthetic fallback must be loud.
+    # Previously the `synthetic` flag only landed in the JSON sidecar, so the
+    # printed report and the CSV looked like real measurements.
+    if d.get("synthetic"):
+        print("\n!!! ⚠️ SYNTHETIC DEMO DATA — RESULTS ARE NOT REAL !!!")
+        print("    Real DB was not available; a biased synthetic signal was used.\n")
     print(f"\n=== Week-1 diagnostics: {a} ===")
     print(f"Folds: {d['n_folds']} (valid {d['n_valid_folds']}) | trades: {d['n_trades']} | "
           f"features: {d['n_features']} | events/feature: {d['events_per_feature']} "
@@ -357,11 +377,16 @@ def main(argv: list[str] | None = None) -> None:
 
     os.makedirs("logs", exist_ok=True)
     out_csv = args.out or f"logs/diag_r_metrics_{args.asset.lower()}.csv"
-    d["trades"].to_csv(out_csv, index=False)
+    out_df = d["trades"].copy()
+    if synthetic:
+        # O1/§4.6: flag the artifact itself so a saved CSV cannot be mistaken for
+        # a real measurement on a fresh clone (no DB present -> synthetic fallback).
+        out_df["synthetic"] = synthetic
+    out_df.to_csv(out_csv, index=False)
     summary = {k: v for k, v in d.items() if k != "trades"}
     with open(out_csv.replace(".csv", ".json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, default=str)
-    print(f"[diag] per-trade CSV -> {out_csv}")
+    print(f"[diag] per-trade CSV -> {out_csv}" + (" (SYNTHETIC)" if synthetic else ""))
 
 
 if __name__ == "__main__":

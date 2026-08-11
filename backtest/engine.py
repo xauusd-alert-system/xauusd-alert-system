@@ -59,21 +59,35 @@ class EventDrivenBacktester:
     the live execution grid rather than the training-label barriers.
     """
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, asset_key: str = None):
         self.cfg = cfg
+        self.asset_key = asset_key
+        asset_cfg = cfg.get("assets", {}).get(asset_key, {}) if asset_key else {}
         bt_cfg = cfg["backtest"]
         lab_cfg = cfg["labeling"]
-        self.spread = bt_cfg["spread_points"] / 100.0  # points -> USD price units (see config note)
-        self.slippage = bt_cfg["slippage_points"] / 100.0
+        # W6 (audit 2026-08-10): honour the per-asset spread/slippage overrides
+        # (assets.<key>.spread_usd / slippage_usd) exactly like ensemble_backtest,
+        # instead of always applying the global backtest defaults (0.25 spread /
+        # 0.05 slippage) that made FX runs garbage (~460 pips of slippage).
+        self.spread = asset_cfg.get("spread_usd", bt_cfg["spread_points"] / 100.0)
+        self.slippage = asset_cfg.get("slippage_usd", bt_cfg["slippage_points"] / 100.0)
         self.balance = bt_cfg["initial_balance"]
         self.risk_pct = bt_cfg["risk_per_trade_pct"] / 100.0
         self.horizon_n = int(lab_cfg["horizon_candles_n"])
+        # W5 (audit 2026-08-10): this engine used to report PnL in price units
+        # (direction * price_delta) while ensemble_backtest reports account money
+        # (price_pnl * volume * point_value_lot), making baseline vs ensemble
+        # tables incomparable. Align it: money = price_pnl * volume * pvl.
+        self.volume = float(bt_cfg.get("volume", 0.10))
+        self.point_value_lot = float(
+            asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0))
+        )
 
         # Barrier distances come from the SIGNAL GRID (signal_grid:, per-asset
         # overrides allowed) so backtest exits mirror the live Telegram/MT5 grid
         # (TP1 = 1*step, stop = 3*step) instead of the training-label barriers.
         # Legacy labeling keys are kept as fallback for minimal/test configs.
-        grid_cfg = get_signal_grid(cfg)
+        grid_cfg = get_signal_grid(cfg, asset_cfg)
         # Early breakeven trigger (fraction of the target distance). 1.0 = legacy.
         self.be_trigger_mult = float(grid_cfg.get("breakeven_trigger_atr", 1.0))
         self.progress_stop_enabled = bool(grid_cfg.get("progress_stop_enabled", False))
@@ -213,7 +227,7 @@ class EventDrivenBacktester:
                     open_position.exit_ts = int(timestamps[i])
                     open_position.exit_price = exit_price
                     open_position.exit_reason = exit_reason
-                    open_position.pnl = direction * (exit_price - open_position.entry_price)
+                    open_position.pnl = direction * (exit_price - open_position.entry_price) * self.volume * self.point_value_lot
                     self.balance += open_position.pnl
                     self.equity_curve.append(self.balance)
                     self.trades.append(open_position)

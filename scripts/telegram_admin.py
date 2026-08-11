@@ -22,6 +22,7 @@ import telegram
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config, get_env
+from execution.mt5_trader import positions_get_by_magic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -422,7 +423,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             await update.message.reply_text(text)
         return
 
-    positions = mt5.positions_get(magic=777111)
+    positions = positions_get_by_magic(magic=777111)
     if not positions:
         text = "📭 Открытых позиций нет."
     else:
@@ -587,7 +588,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Ошибка подключения к MT5.", reply_markup=get_back_keyboard())
             return
         acc = mt5.account_info()
-        positions = mt5.positions_get(magic=777111)
+        positions = positions_get_by_magic(magic=777111)
         status_text = (
             f"📊 **СОСТОЯНИЕ СЧЕТА MT5**\n\n"
             f"💰 Баланс: `${acc.balance:.2f}` | Средства: `${acc.equity:.2f}`\n"

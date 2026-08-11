@@ -390,3 +390,61 @@ def test_simulate_blocked_entry_uses_honest_next_open():
     assert t is not None
     assert t.entry_price == pytest.approx(df["open"].iloc[3], abs=1e-9)
     assert t.direction == 1
+
+
+# ---------------------------------------------------------------------------
+# Audit W1 + W4 (quant audit 2026-08-10)
+#   W1: exit costs (half-spread + slippage) must be charged on EVERY exit, so
+#       the round trip is a full spread + two slippages (entry already pays
+#       half-spread + one slippage). Before this, exit costs were not charged.
+#   W4: a same-candle double-touch of the ORIGINAL stop and a take-profit must
+#       resolve conservatively as a full stop loss (not a TP scaleout + BE gift).
+# ---------------------------------------------------------------------------
+
+def test_exit_costs_charged_on_timeout():
+    """W1: a timeout exit must book the exit half-spread + slippage.
+
+    With spread_usd=0.0004 and slippage_usd=0.0002 on a flat 1.10 path, entry is
+    at open + spread/2 + slippage = 1.1004 and a long exit at close (1.10) pays
+    bid minus slippage: 1.10 - (0.0002 + 0.0002) = 1.0996. The round-trip cost is
+    therefore a full spread + two slippages instead of the previous half-spread +
+    one slippage (which understated losses on every trade)."""
+    cfg = _cfg({"slippage_usd": 0.0002, "spread_usd": 0.0004, "point_value_lot": 100000})
+    cfg["backtest"]["commission_per_trade"] = 0.0
+    cfg["labeling"]["horizon_candles_n"] = 3  # force a quick timeout exit
+    # Wide grid so the flat path (price 1.10) neither hits TP nor the stop and
+    # instead closes on the timeout at the flat close.
+    cfg["signal_grid"] = {"stop_mult": 5.0, "tp1_mult": 3.0, "breakeven_trigger_atr": 1.0}
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    trades = bt.run(_df(n=20))
+    timeout = [t for t in trades if t.exit_reason == "timeout"]
+    assert timeout, "expected at least one timeout exit"
+    t = timeout[0]
+    entry = t.entry_price
+    assert entry == pytest.approx(1.10 + 0.0002 + 0.0002, abs=1e-9)  # +spread/2 + slippage
+    exit_costed = 1.10 - (0.0004 / 2.0 + 0.0002)  # long exit pays bid minus slippage
+    expected_pnl = 1.0 * (exit_costed - entry) * 0.01 * 100000
+    assert t.pnl == pytest.approx(expected_pnl, abs=1e-6)
+
+
+def test_same_candle_tp1_and_original_stop_is_conservative_full_stop():
+    """W4: a bar piercing BOTH TP1 and the original stop is a full stop loss,
+    not a 50% TP1 scaleout + breakeven gift on the remainder."""
+    cfg = _cfg({"slippage_usd": 0.0, "spread_usd": 0.0})
+    cfg["backtest"]["commission_per_trade"] = 0.0
+    cfg["signal_grid"] = {"stop_mult": 3.0, "tp1_mult": 1.0, "breakeven_trigger_atr": 1.0}
+    cfg["labeling"]["horizon_candles_n"] = 100
+    bt = EnsembleBacktester(cfg, asset_key="TEST")
+    step = 0.0003
+    df = _df(n=10, price=1.10)
+    # Huge-range bar 2 that touches TP1 (+1.5s) AND the original stop (-4s).
+    df.loc[2, "high"] = 1.10 + 1.5 * step
+    df.loc[2, "low"] = 1.10 - 4.0 * step
+    trades = bt.run(df.head(4))
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.exit_reason == "stop"
+    # money scale = volume * point_value_lot = 0.01 * 100 = 1.0
+    assert t.pnl == pytest.approx(1.0 * (1.10 - 3.0 * step - 1.10), abs=1e-12)
+    # No partial TP1 was banked: tp1_hit must stay False and the full stop distance booked.
+    assert t.tp1_hit is False
