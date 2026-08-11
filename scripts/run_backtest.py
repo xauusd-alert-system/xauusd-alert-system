@@ -121,7 +121,23 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
         test_df_eval = test_df.copy()
 
         if len(X_train) >= 30 and y_train.nunique() >= 2:
-            base = train_model(X_train, y_train, cfg_inner)
+            # W3 (audit 2026-08-10): weight training rows by average label
+            # uniqueness so overlapping horizon-labels don't over-represent the
+            # information that is actually unique (Lopez de Prado, AFML ch.4).
+            # run_walk_forward has already purged the tail rows whose labels
+            # reach into the test window; uniqueness weights handle the residual
+            # overlap among the surviving rows. Weights are keyed by the train
+            # frame's positional index and aligned to the rows build_training_matrix
+            # actually keeps (it drops NaN-label/feature rows).
+            from model.uniqueness import average_uniqueness_weights
+            horizon = int(cfg_inner.get("labeling", {}).get("horizon_candles_n", 36))
+            try:
+                uniq = average_uniqueness_weights(len(train_df), horizon)
+                w_series = pd.Series(uniq, index=train_df.index)
+                sw = w_series.reindex(X_train.index).fillna(1.0).to_numpy()
+            except Exception:
+                sw = None
+            base = train_model(X_train, y_train, cfg_inner, sample_weight=sw)
             calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
             # Save to a temp file only; do not touch the production model.
             tmp_fd, tmp_path = tempfile.mkstemp(
@@ -228,7 +244,7 @@ def main():
         log_trial(
             experiment="run_backtest",
             asset=args.asset,
-            params={"timeframe": timeframe, "db_path": db_path},
+            params={"timeframe": timeframe, "db_path": args.db_path},
             metrics={"n_folds": summary["n_folds"], "valid_folds": summary["valid_folds"],
                      "positive_folds_valid": summary["positive_folds_valid"],
                      "median_pf_valid": summary["median_pf_valid"],

@@ -157,7 +157,16 @@ def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0,
 
     tdf = trades_df.copy()
     tdf["risk_price"] = (tdf["entry_price"] - tdf["initial_stop_price"]).abs()
-    tdf["risk_money"] = tdf["risk_price"] * volume * point_value_lot
+    # W7: when the trade frame carries a per-trade `volume` column (as
+    # trades_to_dataframe does for EnsembleBacktester trades), honour it instead
+    # of the single scalar `volume` default that matches no asset. Different
+    # instruments use different lot sizes, so a scalar default silently scales
+    # R by the wrong multiplier.
+    if "volume" in tdf.columns and tdf["volume"].notna().any():
+        vol = tdf["volume"].fillna(volume)
+    else:
+        vol = pd.Series(float(volume), index=tdf.index)
+    tdf["risk_money"] = tdf["risk_price"] * vol.astype(float) * point_value_lot
     tdf = tdf[tdf["risk_money"] > 1e-12]
     if len(tdf) == 0:
         return empty

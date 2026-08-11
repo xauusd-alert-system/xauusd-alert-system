@@ -9,6 +9,7 @@ introduces an actual trained model that MUST be fit only on the train window and
 evaluated only on the immediately following test window - never on data that
 overlaps or precedes what was used for fitting.
 """
+import numpy as np
 import pandas as pd
 from typing import Callable, List, Dict
 from dataclasses import dataclass
@@ -61,14 +62,38 @@ def run_walk_forward(df: pd.DataFrame, cfg: dict,
     wf_cfg = cfg["backtest"]["walk_forward"]
     windows = generate_windows(df, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"])
 
+    # W3 (audit 2026-08-10): triple-barrier labels of the LAST `horizon` bars of a
+    # train window resolve INSIDE the following test window (test_start == train_end),
+    # so those train rows leak future information. We purge them (drop the tail of
+    # train whose label window reaches into test) plus an optional extra embargo
+    # buffer for serial feature correlation. This makes the effective training set
+    # honest and, together with sample weights, keeps DSR/PBO/block-bootstrap-t from
+    # being computed on an inflated effective N.
+    horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 0))
+    embargo = int(wf_cfg.get("embargo_candles", 0))
+    ts_all = df["timestamp_utc"].values
+    diffs = np.diff(ts_all)
+    diffs = diffs[diffs > 0]
+    bar_secs = int(np.median(diffs)) if len(diffs) else 1
+
     results = []
     for w in windows:
         train_df = df[(df["timestamp_utc"] >= w.train_start_ts) & (df["timestamp_utc"] < w.train_end_ts)]
         test_df = df[(df["timestamp_utc"] >= w.test_start_ts) & (df["timestamp_utc"] < w.test_end_ts)]
         if len(test_df) == 0:
             continue
+        # Purge train rows whose label window [t, t + horizon*bar] overlaps test.
+        if horizon > 0 and len(train_df):
+            purge_cutoff = w.test_start_ts - horizon * bar_secs
+            train_df = train_df[train_df["timestamp_utc"] <= purge_cutoff]
+            if embargo > 0:
+                train_df = train_df[train_df["timestamp_utc"] <= purge_cutoff - embargo * bar_secs]
+        # Positional index so uniqueness sample weights (computed over the
+        # surviving train rows) align with the rows build_training_matrix keeps.
+        train_df = train_df.reset_index(drop=True)
         fold_result = strategy_fn(train_df, test_df, cfg)
         fold_result["window"] = w
+        fold_result["purged_train_rows"] = int(len(train_df))
         results.append(fold_result)
 
     return results

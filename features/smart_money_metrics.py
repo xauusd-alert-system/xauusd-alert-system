@@ -222,12 +222,15 @@ def calculate_delta_confidence(df: pd.DataFrame) -> tuple[str, str]:
 
     dir_party = "Покупатели" if slope > 0 else "Продавцы"
     
-    if norm_slope > 0.4 and consistency > 0.65:
-        level = "HIGH"
-        text = f"уверенность модели в направлении дельты высокая. {dir_party} контролируют рынок на старших таймфреймах."
-    elif norm_slope > 0.6 and consistency > 0.75:
+    # N9 (audit 2026-08-10): VERY HIGH must be checked BEFORE HIGH, otherwise the
+    # stricter threshold (norm_slope>0.6, consistency>0.75) is nested inside the
+    # looser one (norm_slope>0.4, consistency>0.65) and can never be reached.
+    if norm_slope > 0.6 and consistency > 0.75:
         level = "VERY HIGH"
         text = f"сверхвысокая уверенность в дельте. Полный институциональный контроль ({dir_party})."
+    elif norm_slope > 0.4 and consistency > 0.65:
+        level = "HIGH"
+        text = f"уверенность модели в направлении дельты высокая. {dir_party} контролируют рынок на старших таймфреймах."
     elif norm_slope > 0.2:
         level = "MEDIUM"
         text = f"умеренная уверенность в дельте. Преимущество на стороне {dir_party}."

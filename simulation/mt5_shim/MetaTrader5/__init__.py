@@ -321,14 +321,36 @@ def pd_timestamp(value) -> datetime:
 
 def positions_get(
     symbol: Optional[str] = None,
-    magic: Optional[int] = None,
+    group: Optional[str] = None,
+    ticket: Optional[int] = None,
     *args,
     **kwargs,
 ) -> Optional[list]:
-    """Return open positions (optionally filtered by symbol/magic)."""
+    """Return open positions, mirroring the REAL MetaTrader5 Python API.
+
+    The real API accepts only `symbol`, `group` and `ticket` — there is NO
+    `magic` parameter. This shim previously accepted `magic` and filtered on it,
+    which let production code call `positions_get(magic=...)` that would raise
+    TypeError on a live terminal (audit N3/W9). To keep the shim an honest test
+    double we now match the real signature and explicitly reject `magic`, so any
+    production code that regresses to the old call fails here exactly as it
+    would on a real terminal. Callers must filter by `pos.magic` in Python (see
+    execution.mt5_trader.positions_get_by_magic).
+    """
+    if "magic" in kwargs:
+        raise TypeError(
+            "positions_get() got an unexpected keyword argument 'magic' "
+            "(real MT5 API: symbol/group/ticket only; filter by pos.magic instead)"
+        )
     if _STATE is None:
         return None
-    positions = _STATE.get_positions(symbol=symbol, magic=magic)
+    if symbol is None and group is None and ticket is None:
+        positions = _STATE.get_positions()
+    elif ticket is not None:
+        pos = _STATE.get_position(int(ticket))
+        positions = [pos] if pos is not None else []
+    else:
+        positions = _STATE.get_positions(symbol=symbol)
     return positions or None
 
 

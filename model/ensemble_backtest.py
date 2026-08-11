@@ -140,6 +140,16 @@ class EnsembleBacktester:
     def _apply_slippage(self, price: float, direction: int) -> float:
         return price + (self.slippage * direction)
 
+    def _apply_exit_cost(self, price: float, direction: int) -> float:
+        """Price actually received/paid on exit: the barrier level adjusted for
+        the bid/ask half-spread and slippage, both adverse to the closing
+        direction. Entry already pays half-spread + one slippage; charging the
+        other half on exit makes the round-trip cost a full spread + two
+        slippages (audit W1). Before this, exit costs were not charged at all,
+        so every benchmark systematically overstated expectancy by up to ~0.5
+        spread + 1 slippage per trade (a large fraction of edge for FX)."""
+        return price + (self.spread / 2.0 + self.slippage) * -direction
+
     def _money(self, price_pnl: float) -> float:
         """Convert a price-space PnL to account money using lot size and contract multiplier."""
         return price_pnl * self.volume * self.point_value_lot
@@ -319,9 +329,24 @@ class EnsembleBacktester:
                     step_secs = 1.0
                 candles_held = int((timestamps[i] - open_position.entry_ts) / step_secs)
 
+                # W4 (conservative): if the SAME bar pierces both the ORIGINAL
+                # (pre-BE / pre-TP1) stop and any take-profit, the intrabar order
+                # of touches is unknowable, so we assume the stop hit first -> the
+                # whole position books a full stop loss rather than a TP scaleout +
+                # breakeven gift. Mirrors backtest/engine.py's conservative
+                # double-touch rule. Computed here so the early-BE / scaleout blocks
+                # below cannot pre-empt it (BE=1.0 otherwise fires on the same bar).
+                double_touch_stop = (
+                    hit_stop
+                    and open_position.stop_price == open_position.initial_stop_price
+                    and not tp1_hit
+                    and not be_triggered
+                    and (hit_tp1 or hit_tp2 or hit_tp3)
+                )
+
                 # 0. EARLY BREAKEVEN (configurable): move the stop to entry as soon as
                 # price reaches be_trigger_mult * (TP1 distance) in our favor — BEFORE TP1.
-                if not tp1_hit and not be_triggered:
+                if not double_touch_stop and not tp1_hit and not be_triggered:
                     be_level = (open_position.entry_price
                                 + direction * open_position.be_trigger_mult
                                 * (open_position.tp1_price - open_position.entry_price))
@@ -330,18 +355,22 @@ class EnsembleBacktester:
                         be_triggered = True
 
                 # 1. TP1 -> scaleout1 закрываем, Стоп в БЕЗУБЫТОК
-                if not tp1_hit and hit_tp1:
+                if not double_touch_stop and not tp1_hit and hit_tp1:
                     tp1_hit = True
                     # HIGH 7: convert price-space PnL to money via volume * point_value_lot.
-                    pnl_tp1 = self._money(open_position.scaleout1 * direction * (open_position.tp1_price - open_position.entry_price))
+                    # W1: charge the exit cost (half-spread + slippage) on the scaleout.
+                    exit_price_tp1 = self._apply_exit_cost(open_position.tp1_price, direction)
+                    pnl_tp1 = self._money(open_position.scaleout1 * direction * (exit_price_tp1 - open_position.entry_price))
                     accumulated_pnl += pnl_tp1
                     remaining_ratio = 1.0 - open_position.scaleout1
                     open_position.stop_price = open_position.entry_price  # BREAKEVEN
 
                 # 2. TP2 -> scaleout2 закрываем
-                if tp1_hit and not tp2_hit and hit_tp2:
+                if not double_touch_stop and tp1_hit and not tp2_hit and hit_tp2:
                     tp2_hit = True
-                    pnl_tp2 = self._money(open_position.scaleout2 * direction * (open_position.tp2_price - open_position.entry_price))
+                    # W1: charge the exit cost (half-spread + slippage) on the scaleout.
+                    exit_price_tp2 = self._apply_exit_cost(open_position.tp2_price, direction)
+                    pnl_tp2 = self._money(open_position.scaleout2 * direction * (exit_price_tp2 - open_position.entry_price))
                     accumulated_pnl += pnl_tp2
                     remaining_ratio = 1.0 - open_position.scaleout1 - open_position.scaleout2
 
@@ -376,31 +405,54 @@ class EnsembleBacktester:
                         if prog_atr < self.progress_stop_atr:
                             hit_progress_stop = True
 
-                if hit_tp3:
+                # W4 (conservative): full-position stop on the same-candle
+                # double-touch (original stop + any TP) detected above.
+                if double_touch_stop:
+                    exit_reason = "stop"
+                    # W1: charge the exit cost on the full position.
+                    exit_price = self._apply_exit_cost(open_position.stop_price, direction)
+                    pnl_stop = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
+                    accumulated_pnl += pnl_stop
+                elif hit_stop and hit_tp3:
+                    # W4 (conservative): same-candle double-touch between TP3 and the
+                    # current (post-BE) stop -> assume the stop hit first (matches
+                    # engine.py). Trailing is itself a stop-based exit, so it is not
+                    # re-labelled.
+                    exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
+                    exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
+                    exit_price = self._apply_exit_cost(open_position.stop_price, direction)
+                    pnl_stop = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
+                    accumulated_pnl += pnl_stop
+                elif hit_tp3:
                     exit_reason = "tp3_runner"
-                    pnl_tp3 = self._money(remaining_ratio * direction * (open_position.tp3_price - open_position.entry_price))
+                    # W1: charge the exit cost on the final remainder.
+                    exit_price = self._apply_exit_cost(open_position.tp3_price, direction)
+                    pnl_tp3 = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
                     accumulated_pnl += pnl_tp3
-                    exit_price = self._apply_slippage(open_position.tp3_price, -direction)
                 elif trailing_exit:
                     exit_reason = "trailing"
-                    pnl_trail = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))
+                    # W1: charge the exit cost on the final remainder.
+                    exit_price = self._apply_exit_cost(open_position.stop_price, direction)
+                    pnl_trail = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
                     accumulated_pnl += pnl_trail
-                    exit_price = self._apply_slippage(open_position.stop_price, -direction)
                 elif hit_stop:
                     exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
-                    pnl_stop = self._money(remaining_ratio * direction * (open_position.stop_price - open_position.entry_price))
+                    # W1: charge the exit cost on the final remainder.
+                    exit_price = self._apply_exit_cost(open_position.stop_price, direction)
+                    pnl_stop = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
                     accumulated_pnl += pnl_stop
-                    exit_price = self._apply_slippage(open_position.stop_price, -direction)
                 elif hit_progress_stop:
                     exit_reason = "progress_stop"
-                    pnl_prog = self._money(remaining_ratio * direction * (closes[i] - open_position.entry_price))
+                    # W1: charge the exit cost on the final remainder.
+                    exit_price = self._apply_exit_cost(closes[i], direction)
+                    pnl_prog = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
                     accumulated_pnl += pnl_prog
-                    exit_price = self._apply_slippage(closes[i], -direction)
                 elif candles_held >= self.horizon_n:
                     exit_reason = "timeout"
-                    pnl_time = self._money(remaining_ratio * direction * (closes[i] - open_position.entry_price))
+                    # W1: charge the exit cost on the final remainder.
+                    exit_price = self._apply_exit_cost(closes[i], direction)
+                    pnl_time = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
                     accumulated_pnl += pnl_time
-                    exit_price = self._apply_slippage(closes[i], -direction)
 
                 if exit_reason is not None:
                     # Учитываем комиссию и своп (уже в денежных единицах)

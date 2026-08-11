@@ -127,3 +127,21 @@ def test_summarize_folds_consistency_flag():
     # hand-crafted inconsistent stats: median PF reports >1 while fold PnL says
     # only 1/4 positive -> the note must be set
     assert s2["median_pf_valid"] is not None
+
+
+def test_compute_r_metrics_honors_per_trade_volume_column():
+    """W7: a per-trade `volume` column (as trades_to_dataframe produces) must be
+    used for risk_money instead of the scalar default that matches no asset."""
+    tdf = pd.DataFrame({
+        "entry_price": [1.30, 1.30],
+        "initial_stop_price": [1.297, 1.297],
+        "pnl": [1.0, 1.0],
+        "volume": [0.01, 0.02],
+        "exit_reason": ["tp3_runner", "tp3_runner"],
+    })
+    # risk_price = 0.003
+    # trade 1: risk_money = 0.003 * 0.01 * 100000 = 3.0  -> R = 1/3
+    # trade 2: risk_money = 0.003 * 0.02 * 100000 = 6.0  -> R = 1/6
+    r = compute_r_metrics(tdf, point_value_lot=100000, volume=0.01)
+    assert r["n"] == 2
+    assert r["mean_r"] == pytest.approx((1 / 3 + 1 / 6) / 2, abs=1e-6)

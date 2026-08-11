@@ -38,6 +38,7 @@ import MetaTrader5 as mt5
 from simulation.simulator import MarketSimulator, load_simulation_config
 from simulation.virtual_state import VirtualState, DEAL_ENTRY_IN, DEAL_ENTRY_OUT
 from data import mt5_provider
+from execution.mt5_trader import positions_get_by_magic
 
 
 # ----------------------------------------------------------------------
@@ -133,7 +134,7 @@ def test_order_send_deal_opens_position(world):
 
     # --- HIGH 22 path: resolve the genuine position ticket via positions_get(),
     # --- exactly as execution/mt5_trader.execute_signal does in production.
-    positions = mt5.positions_get(symbol="XAUUSD", magic=777111)
+    positions = positions_get_by_magic(symbol="XAUUSD", magic=777111)
     assert positions is not None
     assert len(positions) == 1
     pos = positions[0]
@@ -172,7 +173,7 @@ def test_order_send_returns_distinct_order_and_position_tickets(world):
     # Order ticket is a small monotonic counter (not the 100001+ position space).
     assert 1 <= res1.order < 100001
 
-    pos = mt5.positions_get(symbol="XAUUSD", magic=777111)[0]
+    pos = positions_get_by_magic(symbol="XAUUSD", magic=777111)[0]
     assert pos.ticket != res1.order
     assert pos.ticket >= 100001  # position ticket namespace
     assert res1.deal >= 200001  # deal ticket namespace
@@ -200,7 +201,7 @@ def test_order_send_returns_distinct_order_and_position_tickets(world):
     assert res2.deal != res1.deal
 
     # Two open positions, resolved purely via positions_get.
-    positions = mt5.positions_get(symbol="XAUUSD", magic=777111)
+    positions = positions_get_by_magic(symbol="XAUUSD", magic=777111)
     assert len(positions) == 2
 
     # Every position ticket is distinct from every order ticket returned so far.
@@ -259,7 +260,7 @@ def test_order_send_deal_with_position_closes_and_updates_balance(world):
     )
     # Order ticket != position ticket; resolve the real position id like
     # execution/mt5_trader.execute_signal does (HIGH 22).
-    pos_id = mt5.positions_get(symbol="XAUUSD", magic=777111)[0].ticket
+    pos_id = positions_get_by_magic(symbol="XAUUSD", magic=777111)[0].ticket
     balance_before = state.balance
 
     # Close partial 0.05 @ 2410 -> +$50 on 0.05 lots * 100 contract * $10 move.
@@ -321,7 +322,7 @@ def test_history_deals_get_returns_in_and_out(world):
     )
     # Order ticket != position ticket; resolve the real position id via
     # positions_get (this is exactly the production HIGH 22 code path).
-    pos_id = mt5.positions_get(symbol="XAUUSD", magic=777111)[0].ticket
+    pos_id = positions_get_by_magic(symbol="XAUUSD", magic=777111)[0].ticket
 
     mt5.order_send(
         {
@@ -367,7 +368,7 @@ def test_account_info_equity_includes_floating_pnl(world):
         }
     )
     # Order ticket != position ticket; resolve via positions_get (HIGH 22).
-    pos = mt5.positions_get(symbol="XAUUSD", magic=777111)[0]
+    pos = positions_get_by_magic(symbol="XAUUSD", magic=777111)[0]
 
     # At the open price floating PnL = 0, equity == balance.
     pos.price_current = 2400.0
@@ -491,3 +492,23 @@ def test_circuit_breaker_anchor_rolls_on_bar_close(cfg):
     assert sim.paused is False
     # After the last bar close the anchor tracks the current mid exactly.
     assert sim._cb_anchor == pytest.approx(sim.current_mid_price, rel=1e-9)
+
+
+def test_positions_get_rejects_magic_like_real_api():
+    """N3/W9: the shim must mirror the REAL MT5 API, which has no `magic`
+    parameter. Passing magic= raises TypeError here exactly as it would on a
+    live terminal, so production code can't silently regress to the old call.
+    """
+    import MetaTrader5 as mt5_real
+    with pytest.raises(TypeError):
+        mt5_real.positions_get(symbol="XAUUSD", magic=777111)
+
+
+def test_positions_get_by_magic_filters_in_python():
+    """W9: the production helper positions_get_by_magic filters by pos.magic in
+    Python (no magic= kwarg), so it works against both the shim and the real API.
+    """
+    from execution.mt5_trader import positions_get_by_magic
+    # No state initialized -> returns None (mirrors real API "no positions").
+    assert positions_get_by_magic(symbol="XAUUSD", magic=777111) is None or \
+        positions_get_by_magic(symbol="XAUUSD", magic=777111) == []

@@ -397,6 +397,10 @@ backtest:
     train_window_days: 300
     test_window_days: 50
     step_days: 50
+    # W3 (audit 2026-08-10): extra embargo buffer (in candles) dropped from the
+    # tail of each train window on top of the labeling-horizon purge, to account
+    # for serial correlation of features across the train/test boundary.
+    embargo_candles: 0
 
 
 # ===== RETRAINING =====
@@ -451,6 +455,14 @@ execution:
   max_open_positions_mode: per_asset  # per_asset | global
   max_open_positions_per_asset: 1
   max_concurrent_positions_global: 3
+  # Daily cap on NEW trades per asset (circuit-breaker budget). Read by
+  # execution/risk_manager.py (W8) instead of a hard-coded 10.
+  max_daily_trades_per_asset: 10
+  # Live order volume in lots. Read by execution/mt5_trader.py (W2) instead of a
+  # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
+  # it falls back to backtest.volume (default 0.10, which yields fillable
+  # tranches 0.05 / 0.03 / 0.02).
+  volume: 0.10
   signal_ranking_metric: confidence   # confidence | ev | probability
 
 

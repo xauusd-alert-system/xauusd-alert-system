@@ -29,6 +29,19 @@ class TelegramAlertBot:
         self._alerts_sent_today = 0
         self._current_day = datetime.now(timezone.utc).date()
 
+    def _redact(self, text: str) -> str:
+        """Strip the bot token from a log/exception message.
+
+        requests exception strings include the request URL, which contains the
+        bot token (https://api.telegram.org/bot<TOKEN>/sendMessage). Logging that
+        raw would leak the token to anyone who can read the log file, granting
+        control of the /closeall control bot. Replace every occurrence of the
+        token with a placeholder.
+        """
+        if not self.bot_token:
+            return text
+        return text.replace(self.bot_token, "<REDACTED>")
+
     def send_text_message(self, text: str) -> bool:
         """Sends a direct custom text message to Telegram."""
         if not self.base_url or not self.chat_id:
@@ -43,7 +56,7 @@ class TelegramAlertBot:
             response.raise_for_status()
             return True
         except Exception as e:
-            logger.error(f"Failed to send Telegram text message: {e}")
+            logger.error(f"Failed to send Telegram text message: {self._redact(str(e))}")
             return False
 
     def _reset_daily_counter_if_needed(self):

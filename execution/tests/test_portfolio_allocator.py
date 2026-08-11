@@ -53,3 +53,18 @@ def test_hierarchical_risk_parity():
     weights = hierarchical_risk_parity(returns)
     assert np.isclose(weights.sum(), 1.0)
     assert weights["EURUSD"] > weights["BTCUSD"]
+
+
+def test_calculate_lot_size_never_rounds_up_to_minimum():
+    """N7: a risk-based size below min_lot must NOT be rounded up to min_lot
+    (that would exceed the intended per-trade risk). It returns 0 to signal
+    'skip', matching risk_sizer.lots_for_risk's 'never round up' rule."""
+    lots = calculate_lot_size(
+        account_equity=100.0,      # tiny account
+        risk_pct=0.25,             # 0.25% -> $0.25 risk
+        stop_loss_distance=5.0,
+        point_value_lot=100.0,
+        min_lot=0.01,
+    )
+    # raw = 0.25 / (5*100) = 0.0005 < min_lot -> must NOT be clipped to 0.01
+    assert lots == 0.0
