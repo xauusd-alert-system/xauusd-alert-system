@@ -22,6 +22,7 @@ from model.trainer import (
     train_model,
     calibrate_model,
     save_model,
+    DegenerateLabelSpaceError,
 )
 from model.predictor import ModelPredictor
 from model.ensemble_backtest import EnsembleBacktester
@@ -119,6 +120,12 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
 
         X_train, y_train, cols = build_training_matrix(train_df, cfg=cfg_inner)
         test_df_eval = test_df.copy()
+        # Neutral 0.5/0.5 is the baseline for every row: it can never pass a
+        # filter, so any fold we fail to model contributes no trades instead of
+        # a bogus signal.
+        test_df_eval["ml_p_long"] = 0.5
+        test_df_eval["ml_p_short"] = 0.5
+        calibrated = None
 
         if len(X_train) >= 30 and y_train.nunique() >= 2:
             # W3 (audit 2026-08-10): weight training rows by average label
@@ -137,8 +144,20 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
                 sw = w_series.reindex(X_train.index).fillna(1.0).to_numpy()
             except Exception:
                 sw = None
-            base = train_model(X_train, y_train, cfg_inner, sample_weight=sw)
-            calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
+            try:
+                base = train_model(X_train, y_train, cfg_inner, sample_weight=sw)
+                calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
+            except DegenerateLabelSpaceError as exc:
+                # Data condition, not a defect: this window cannot produce a model
+                # whose probabilities decode into an honest p_long/p_short (see
+                # model.trainer._normalize_label_space). Previously the raw XGBoost
+                # "Invalid classes inferred from unique values of `y`" ValueError
+                # escaped here and aborted the WHOLE multi-fold/multi-asset run.
+                # Degrade just this fold to "no signal" and keep going, loudly.
+                print(f"[run_backtest] WARNING: fold degraded to no-signal -- {exc}")
+                calibrated = None
+
+        if calibrated is not None:
             # Save to a temp file only; do not touch the production model.
             tmp_fd, tmp_path = tempfile.mkstemp(
                 prefix="wf_model_", suffix=".joblib"
@@ -174,9 +193,6 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
             except Exception:
                 test_df_eval["ml_p_long"] = 0.5
                 test_df_eval["ml_p_short"] = 0.5
-        else:
-            test_df_eval["ml_p_long"] = 0.5
-            test_df_eval["ml_p_short"] = 0.5
 
         from backtest.metrics import trades_to_dataframe, compute_metrics
 

@@ -149,6 +149,129 @@ def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict 
     return X, y, available_cols
 
 
+class DegenerateLabelSpaceError(ValueError):
+    """
+    Raised when the observed training labels cannot yield a model whose
+    probability columns ModelPredictor is able to decode into p_short / p_long.
+
+    This is a DATA condition (a training window that simply does not contain a
+    given outcome), not a code defect, so callers that iterate over many windows
+    (walk-forward backtests) are expected to catch it and treat that window as
+    "no signal" instead of aborting the whole run.
+    """
+
+
+# Semantic class codes emitted by build_training_matrix in three-class mode.
+_CLS_SHORT = 0
+_CLS_NO_TRADE = 1
+_CLS_LONG = 2
+
+
+def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
+    """
+    Map the semantic label space onto a CONTIGUOUS, decodable one.
+
+    Why this exists
+    ---------------
+    build_training_matrix encodes the three-class model as {0: short,
+    1: no_trade, 2: long}. XGBoost's scikit-learn wrapper requires the observed
+    class labels to be exactly [0, 1, ..., n_classes-1] and infers n_classes
+    from `np.unique(y)` of the data it is handed, so a training window that
+    contains no `no_trade` rows arrives as classes [0, 2] and fit() dies with
+
+        ValueError: Invalid classes inferred from unique values of `y`.
+                    Expected: [0 1], got [0 2]
+
+    That killed the entire GBPUSD walk-forward run at the first such fold (the
+    three-class asset). The triple-barrier labeller only emits label 0 when
+    NEITHER barrier is touched inside the horizon, which on H1/36-bar settings
+    is rare, so this window is common rather than exotic.
+
+    Mapping
+    -------
+    Three-class mode ({0: short, 1: no_trade, 2: long}):
+      * {0, 1, 2} -> unchanged. ModelPredictor sees class 2 and decodes
+        p_short / p_no_trade / p_long.
+      * {0, 2}    -> remapped {0 -> 0, 2 -> 1}. The no_trade class was never
+        observed, so the honest model is a BINARY short/long one; the remap is
+        exactly the binary encoding ModelPredictor already decodes as
+        p_short = P(class 0), p_long = P(class 1). No no_trade mass exists,
+        which is truthful: no such example was in the training window.
+      * {0, 1} / {1, 2} -> refused. Here an entire trade DIRECTION is missing
+        while no_trade is present. Such a fit produces two columns whose second
+        one is P(no_trade), which ModelPredictor's binary branch would decode as
+        p_long (or p_short) -- a silently WRONG directional probability. Better
+        to raise and let the caller degrade the window explicitly.
+
+    Binary mode ({0: short, 1: long}) is already contiguous and passes through.
+
+    Returns (y_normalized, info) where info carries observability flags.
+    """
+    model_cfg = (cfg or {}).get("model", {}) if cfg else {}
+    include_zero = bool(model_cfg.get("include_zero_class", False))
+
+    y = pd.Series(y)
+    observed = {int(v) for v in pd.unique(y.dropna())}
+    info = {
+        "include_zero_class": include_zero,
+        "observed_classes": sorted(observed),
+        "no_trade_class_absent": False,
+        "remapped": False,
+    }
+
+    if len(observed) < 2:
+        raise DegenerateLabelSpaceError(
+            f"training labels contain a single class {sorted(observed)}; a "
+            "directional model needs at least two classes"
+        )
+
+    if not include_zero:
+        # Binary encoding is {0: short, 1: long} -- note that here 1 means LONG,
+        # not no_trade, so the three-class constants deliberately are not reused.
+        if observed <= {0, 1}:
+            return y.astype(int), info
+        raise DegenerateLabelSpaceError(
+            f"binary training labels must be a subset of {{0, 1}}, got "
+            f"{sorted(observed)}"
+        )
+
+    if observed == {_CLS_SHORT, _CLS_NO_TRADE, _CLS_LONG}:
+        return y.astype(int), info
+
+    if observed == {_CLS_SHORT, _CLS_LONG}:
+        logger.warning(
+            "normalize_label_space: include_zero_class=true but this training "
+            "window has NO no_trade rows (classes [0, 2]); remapping to a "
+            "binary short/long model {0->0, 2->1}. XGBoost cannot fit "
+            "non-contiguous classes, and p_no_trade would be meaningless here."
+        )
+        info["no_trade_class_absent"] = True
+        info["remapped"] = True
+        return y.astype(int).map({_CLS_SHORT: 0, _CLS_LONG: 1}).astype(int), info
+
+    if observed in ({_CLS_SHORT, _CLS_NO_TRADE}, {_CLS_NO_TRADE, _CLS_LONG}):
+        missing = "long (2)" if observed == {_CLS_SHORT, _CLS_NO_TRADE} else "short (0)"
+        raise DegenerateLabelSpaceError(
+            f"three-class training labels {sorted(observed)} keep the no_trade "
+            f"class (1) but contain no {missing} outcomes, so the fitted model "
+            "cannot express both trade directions and its second probability "
+            "column would be decoded as the wrong side; refusing to train"
+        )
+
+    raise DegenerateLabelSpaceError(
+        f"three-class training labels must be a subset of {{0, 1, 2}}, got "
+        f"{sorted(observed)}"
+    )
+
+
+def normalize_label_space(y: pd.Series, cfg: dict = None) -> pd.Series:
+    """
+    Public wrapper around _normalize_label_space returning only the labels.
+    See _normalize_label_space for the full rationale and mapping table.
+    """
+    return _normalize_label_space(y, cfg)[0]
+
+
 def time_ordered_split(X: pd.DataFrame, y: pd.Series, train_ratio: float) -> tuple:
     """Split strictly by row order (time-ordered), never shuffled, to avoid temporal leakage."""
     n = len(X)
@@ -233,9 +356,17 @@ def _create_ensemble_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict)
     return voting
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
-                sample_weight: np.ndarray | None = None):
-    """Train a model according to config 'model.type'."""
+def _fit_classifier(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
+                    sample_weight: np.ndarray | None = None):
+    """
+    Build and fit the configured classifier on an ALREADY label-normalized y.
+
+    Kept separate from train_model so calibrate_model can refit internally
+    without running _normalize_label_space a second time: the mapping is not
+    idempotent by value (a normalized binary {0, 1} is indistinguishable from a
+    three-class window holding only {short, no_trade}), so it must be applied
+    exactly once per training set.
+    """
     model_cfg = cfg["model"]
     random_state = model_cfg.get("random_seed", 42)
     model_type = model_cfg.get("type", "xgboost").lower()
@@ -260,6 +391,25 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
         model.fit(X_train, y_train, sample_weight=sw)
     else:
         model.fit(X_train, y_train)
+    return model
+
+
+def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
+                sample_weight: np.ndarray | None = None):
+    """
+    Train a model according to config 'model.type'.
+
+    The label space is normalized first (see _normalize_label_space): XGBoost
+    refuses non-contiguous classes, so a three-class training window that holds
+    no `no_trade` rows is fitted as a binary short/long model instead of
+    aborting. Windows where an entire direction is missing raise
+    DegenerateLabelSpaceError so the caller can skip them explicitly.
+    """
+    y_train, label_info = _normalize_label_space(y_train, cfg)
+    model = _fit_classifier(X_train, y_train, cfg, sample_weight=sample_weight)
+    # Observability, mirroring the _is_honest_placeholder convention: record when
+    # a three-class asset was actually fitted as binary for lack of no_trade rows.
+    model._label_space_no_trade_absent = bool(label_info["no_trade_class_absent"])
     return model
 
 
@@ -290,6 +440,11 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     `_is_honest_placeholder` attribute.
     """
     method = cfg["model"]["calibration_method"]
+    # Normalize ONCE here (never again downstream): CalibratedClassifierCV refits
+    # the estimator on raw label slices of this y, so the labels it forwards to
+    # XGBoost must already be contiguous. Internal refits below therefore use
+    # _fit_classifier, not train_model.
+    y_train, _label_info = _normalize_label_space(y_train, cfg)
     horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 24))
     # Calibration needs a modest number of rows to be stable; keep it conservative so
     # short training sets in tests/backtests still function.
@@ -304,7 +459,7 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
             "(n=%d < fit=%d + purge=%d + calib=%d); applying identity calibration.",
             n, min_fit, horizon, min_calib,
         )
-        base = train_model(X_train, y_train, cfg)  # deterministic refit, same seed
+        base = _fit_classifier(X_train, y_train, cfg)  # deterministic refit, same seed
         _attach_noop_calibration(base, method_invalid=True)
         return base
 
@@ -317,14 +472,29 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     X_calib = X_train.iloc[fit_end + horizon:]       # purge gap of `horizon` rows in between
     y_calib = y_train.iloc[fit_end + horizon:]
 
-    if len(X_fit) < 2 or y_fit.nunique() < 2:
-        logger.warning("calibrate_model: calibration-fit slice is degenerate; identity calibration.")
-        base = train_model(X_train, y_train, cfg)  # refit on full set (deterministic seed)
+    # Both slices must carry the FULL class set, not merely "2+ classes". A slice
+    # that drops one class of a three-class window would (a) hand XGBoost the same
+    # non-contiguous labels that crash fit() and (b) leave CalibratedClassifierCV
+    # fitting a per-class sigmoid against a probability column that does not exist.
+    # For the binary space this is equivalent to the previous nunique() < 2 check,
+    # so the two-class path behaves exactly as before.
+    full_classes = set(y_train.unique())
+    if len(X_fit) < 2 or set(y_fit.unique()) != full_classes:
+        logger.warning(
+            "calibrate_model: calibration-fit slice is degenerate "
+            "(classes %s vs full %s); identity calibration.",
+            sorted(set(y_fit.unique())), sorted(full_classes),
+        )
+        base = _fit_classifier(X_train, y_train, cfg)  # refit on full set (deterministic seed)
         _attach_noop_calibration(base, method_invalid=True)
         return base
-    if len(X_calib) < 5 or y_calib.nunique() < 2:
-        logger.warning("calibrate_model: calibration held-out slice lacks class diversity; identity calibration.")
-        base = train_model(X_train, y_train, cfg)
+    if len(X_calib) < 5 or set(y_calib.unique()) != full_classes:
+        logger.warning(
+            "calibrate_model: calibration held-out slice lacks class diversity "
+            "(classes %s vs full %s); identity calibration.",
+            sorted(set(y_calib.unique())), sorted(full_classes),
+        )
+        base = _fit_classifier(X_train, y_train, cfg)
         _attach_noop_calibration(base, method_invalid=True)
         return base
 
