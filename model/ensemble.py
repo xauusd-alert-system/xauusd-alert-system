@@ -31,6 +31,11 @@ def _rule_confidence_component(rule_vote: int) -> float:
     return 1.0 if rule_vote != 0 else 0.0
 
 
+def bias_for_veto(vote: int) -> str:
+    """Map an ensemble vote to a human-readable direction for reasoning text."""
+    return "long" if vote == 1 else ("short" if vote == -1 else "no_trade")
+
+
 def compute_ensemble_signal(
     regime: RegimeLabel,
     ml_p_long: float,
@@ -261,6 +266,45 @@ def compute_ensemble_signal(
             suppressed = True
             blended_confidence = 0.0
             final_vote = 0
+
+    # W17 (audit 2026-08-10): OPTIONAL macro sentiment veto. The sentiment
+    # analyzer (data/sentiment_analyzer.py) was only surfaced in the dashboard and
+    # never reached the trading path, despite TZ.md describing it as part of the
+    # system. When `use_sentiment_guard` is enabled, a strong High-Impact event
+    # whose headline sentiment OPPOSES the signal's direction vetoes the trade.
+    # Default OFF keeps the exact baseline behaviour; it is a documented, opt-in
+    # layer so the module is no longer dead code. Fails open (never blocks) on
+    # feed errors.
+    if ens_cfg.get("use_sentiment_guard", False) and final_vote != 0:
+        try:
+            from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
+            veto_threshold = float(ens_cfg.get("sentiment_veto_threshold", 0.5))
+            if timestamp_utc is not None:
+                sent = MacroNewsSentimentAnalyzer().red_zone_event_sentiment(
+                    timestamp_utc,
+                    buffer_before_minutes=int(ens_cfg.get("news_buffer_before_min", 30)),
+                    buffer_after_minutes=int(ens_cfg.get("news_buffer_after_min", 30)),
+                )
+                if sent["in_red_zone"] and abs(sent["score"]) >= veto_threshold:
+                    # sentiment positive -> against a short; negative -> against a long
+                    sentiment_opposes = (final_vote == 1 and sent["score"] < 0) or \
+                                        (final_vote == -1 and sent["score"] > 0)
+                    if sentiment_opposes:
+                        return EnsembleSignal(
+                            bias="no_trade",
+                            confidence=0.0,
+                            rule_vote=rule_vote,
+                            ml_p_long=float(ml_p_long),
+                            ml_p_short=float(ml_p_short),
+                            regime=regime_val,
+                            suppressed_by_meta_filter=True,
+                            reasoning_summary=(
+                                f"Sentiment veto: event '{sent['title']}' sentiment "
+                                f"{sent['bias']} ({sent['score']:+.2f}) opposes {bias_for_veto(final_vote)}"
+                            ),
+                        )
+        except Exception as e:
+            logger.warning("Sentiment guard check failed; proceeding without veto: %s", e)
 
     if (regime == RegimeLabel.NO_TRADE) or (final_vote == 0) or (blended_confidence < min_confidence_to_alert):
         bias = "no_trade"

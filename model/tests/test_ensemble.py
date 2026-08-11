@@ -190,3 +190,28 @@ def test_per_asset_override_effective_cfg_in_pipeline():
     assert gbp_pipe.effective_cfg["ensemble"].get("min_confidence_to_alert") == pytest.approx(0.60)
     assert gbp_pipe.effective_cfg["ensemble"].get("ev_threshold", 0) == pytest.approx(0)
     assert gbp_pipe.effective_cfg["ensemble"].get("hard_divergence_veto", False) is False
+
+
+def test_sentiment_veto_blocks_opposing_signal_when_enabled(monkeypatch):
+    """W17: with use_sentiment_guard enabled, a strong bearish event vetoes a
+    long signal. When disabled, the same signal passes unchanged."""
+    from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
+
+    def fake_sentiment(self, *a, **k):
+        return {"score": -0.8, "bias": "bearish", "title": "hawkish Fed", "in_red_zone": True}
+    monkeypatch.setattr(MacroNewsSentimentAnalyzer, "red_zone_event_sentiment", fake_sentiment)
+
+    # Enabled -> long vetoed by bearish sentiment.
+    cfg_on = _base_cfg()
+    cfg_on["ensemble"]["use_sentiment_guard"] = True
+    cfg_on["ensemble"]["news_buffer_before_min"] = 30
+    cfg_on["ensemble"]["news_buffer_after_min"] = 30
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_on,
+                                  session="london", timestamp_utc=1000000000)
+    assert sig.bias == "no_trade"
+
+    # Disabled -> baseline long preserved.
+    cfg_off = _base_cfg()
+    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_off,
+                                   session="london", timestamp_utc=1000000000)
+    assert sig2.bias == "long"

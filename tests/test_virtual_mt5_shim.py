@@ -426,7 +426,12 @@ def test_copy_rates_from_pos_structured_array_mt5_provider_compat(world):
     # The exact path used by data/mt5_provider.fetch_closed_candles.
     df = mt5_provider._normalize_rates(rates)
     assert isinstance(df, pd.DataFrame)
-    assert list(df.columns) == ["timestamp", "open", "high", "low", "close", "volume"]
+    # N10: spread/real_volume are now preserved (they were dropped before),
+    # so the column set is the required core plus the optional broker fields.
+    required = ["timestamp", "open", "high", "low", "close", "volume"]
+    assert all(c in df.columns for c in required)
+    assert "spread" in df.columns
+    assert "real_volume" in df.columns
     assert len(df) == len(rates)
     assert df["close"].iloc[-1] > 0
 

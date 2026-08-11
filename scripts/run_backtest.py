@@ -151,15 +151,26 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
             try:
-                # Phase 3: cols may include regime_<label> one-hot columns that the
-                # eval frame does not carry (it has the raw causal `regime` column).
-                # ModelPredictor re-synthesizes regime_* from `regime` at inference
-                # time, so pass the whole raw frame; fillna keeps warm-up NaN rows
-                # non-crashing exactly as before, and predict_proba ignores any
-                # non-feature columns (it selects only its saved feature_cols).
-                preds = predictor.predict_proba(test_df_eval.fillna(0.0))
-                test_df_eval["ml_p_long"] = preds["p_long"].values
-                test_df_eval["ml_p_short"] = preds["p_short"].values
+                # W13 (audit 2026-08-10): warm-up rows carry NaN features. The
+                # previous fillna(0.0) scored them as VALID 0.0-feature rows (0.0
+                # is meaningful for z-score features), so the backtest opened
+                # extra trades at the start of each test window that the live
+                # trader (which returns no_trade on incomplete features) never
+                # sees. To match live behaviour, rows with any NaN in the model's
+                # feature columns are set to the NEUTRAL 0.5/0.5 (never a signal),
+                # and only complete rows are predicted.
+                feat_cols = [c for c in cols if c in test_df_eval.columns]
+                complete = test_df_eval[feat_cols].notna().all(axis=1) if feat_cols \
+                    else pd.Series(True, index=test_df_eval.index)
+                test_df_eval["ml_p_long"] = 0.5
+                test_df_eval["ml_p_short"] = 0.5
+                if complete.any():
+                    # Phase 3: pass the full frame; ModelPredictor re-synthesizes
+                    # regime_* one-hot columns from the raw `regime` column and
+                    # selects only its saved feature_cols.
+                    preds = predictor.predict_proba(test_df_eval[complete])
+                    test_df_eval.loc[complete, "ml_p_long"] = preds["p_long"].values
+                    test_df_eval.loc[complete, "ml_p_short"] = preds["p_short"].values
             except Exception:
                 test_df_eval["ml_p_long"] = 0.5
                 test_df_eval["ml_p_short"] = 0.5

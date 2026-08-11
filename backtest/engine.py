@@ -74,6 +74,14 @@ class EventDrivenBacktester:
         self.balance = bt_cfg["initial_balance"]
         self.risk_pct = bt_cfg["risk_per_trade_pct"] / 100.0
         self.horizon_n = int(lab_cfg["horizon_candles_n"])
+        # W5 (audit 2026-08-10): this engine used to report PnL in price units
+        # (direction * price_delta) while ensemble_backtest reports account money
+        # (price_pnl * volume * point_value_lot), making baseline vs ensemble
+        # tables incomparable. Align it: money = price_pnl * volume * pvl.
+        self.volume = float(bt_cfg.get("volume", 0.10))
+        self.point_value_lot = float(
+            asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0))
+        )
 
         # Barrier distances come from the SIGNAL GRID (signal_grid:, per-asset
         # overrides allowed) so backtest exits mirror the live Telegram/MT5 grid
@@ -219,7 +227,7 @@ class EventDrivenBacktester:
                     open_position.exit_ts = int(timestamps[i])
                     open_position.exit_price = exit_price
                     open_position.exit_reason = exit_reason
-                    open_position.pnl = direction * (exit_price - open_position.entry_price)
+                    open_position.pnl = direction * (exit_price - open_position.entry_price) * self.volume * self.point_value_lot
                     self.balance += open_position.pnl
                     self.equity_curve.append(self.balance)
                     self.trades.append(open_position)

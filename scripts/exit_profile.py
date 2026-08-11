@@ -87,25 +87,34 @@ def build_exit_profile(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             f"No walk-forward folds produced for {asset_key} "
             f"({len(df_full)} rows).")
 
+    from backtest.metrics import trades_to_dataframe
+
     rows = []
     for fold_i, fdf in enumerate(frames):
         cfg_run = merge_asset_cfg(cfg, asset_key, "labeling")
         cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
         engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
         trades = engine.run(fdf.reset_index(drop=True))
-        for t in trades:
-            init_stop = t.initial_stop_price
-            risk_dist = abs(t.entry_price - init_stop) if init_stop else 0.0
-            risk_money = risk_dist * t.volume * engine.point_value_lot
-            net_r = float(t.pnl / risk_money) if risk_money > 0 else float("nan")
+        # N6 (audit 2026-08-10): derive per-trade fields from the SAME
+        # trades_to_dataframe used by compute_r_metrics, so the per-trade net_r
+        # and the aggregate R numbers below cannot drift apart (a fourth
+        # independent copy of the R formula previously lived here).
+        tdf = trades_to_dataframe(trades)
+        for _, row in tdf.iterrows():
+            init_stop = row["initial_stop_price"]
+            risk_dist = abs(row["entry_price"] - init_stop) if init_stop else 0.0
+            vol = row["volume"] if pd.notna(row["volume"]) else engine.volume
+            risk_money = risk_dist * vol * engine.point_value_lot
+            net_r = float(row["pnl"] / risk_money) if risk_money > 0 else float("nan")
             rows.append({
                 "fold": fold_i,
-                "regime": t.regime_at_entry,
-                "direction": t.direction,
-                "exit_reason": t.exit_reason,
-                "path": classify_path(t.exit_reason, t.tp1_hit, t.tp2_hit),
+                "regime": row["regime_at_entry"],
+                "direction": row["direction"],
+                "exit_reason": row["exit_reason"],
+                "path": classify_path(row["exit_reason"], row.get("tp1_hit", False),
+                                      row.get("tp2_hit", False)),
                 "net_r": round(net_r, 4),
-                "pnl": round(float(t.pnl), 4),
+                "pnl": round(float(row["pnl"]), 4),
             })
 
     trades_df = pd.DataFrame(rows)

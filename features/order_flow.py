@@ -7,11 +7,19 @@ import numpy as np
 import pandas as pd
 
 
-def cumulative_volume_delta(df: pd.DataFrame) -> pd.Series:
+def cumulative_volume_delta(df: pd.DataFrame, window: int = 100) -> pd.Series:
     """
-    Estimates Volume Delta from candle anatomy:
-    Calculates buy vs sell volume split based on close location within the bar range
-    and accumulates it causally over time.
+    Estimates Volume Delta from candle anatomy.
+
+    N1 (audit 2026-08-10): the raw `delta_vol.cumsum()` accumulates from the START
+    of whatever window is passed in, so the CVD level depended on the frame length
+    — the same bar got a different feature value in the backtest fold frame vs the
+    live pipeline window (train/serve skew). We now anchor CVD to a fixed trailing
+    `window` of bars: cvd[i] = sum(delta_vol) over [i-window+1, i]. For bars past
+    the anchoring window this value is invariant to the total frame length, so the
+    distribution the model sees at inference matches training. Rows within the
+    first `window` bars are a partial-sum warm-up (handled as neutral by the
+    inference path).
     """
     hl_range = (df["high"] - df["low"]).replace(0, np.nan)
     # Location of close inside the candle range (-1.0 to +1.0)
@@ -21,7 +29,16 @@ def cumulative_volume_delta(df: pd.DataFrame) -> pd.Series:
     # Delta volume estimate: signed portion of volume
     vol = df["volume"].fillna(0.0)
     delta_vol = close_loc * vol
-    return delta_vol.cumsum()
+    cum = delta_vol.cumsum()
+    if window is not None and window > 0 and len(df) > 0:
+        # cvd[i] = cum[i] - cum[i - window]; for i >= window this is the fixed
+        # trailing-window cumulative delta (frame-length invariant).
+        anchored = cum - cum.shift(window)
+        # Warm-up partial sums keep cum from frame start (their values are not
+        # used by the trading path once NaN features are neutralized upstream).
+        anchored.iloc[:window] = cum.iloc[:window]
+        return anchored.fillna(0.0)
+    return cum
 
 
 def order_flow_imbalance(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -71,12 +88,15 @@ def volume_weighted_average_price(
     return vwap, vwap_upper, vwap_lower
 
 
-def add_order_flow_features(df: pd.DataFrame) -> pd.DataFrame:
+def add_order_flow_features(df: pd.DataFrame, cvd_window: int = 100) -> pd.DataFrame:
     """
     Computes and attaches all order flow and microstructure features causally.
+
+    cvd_window: fixed trailing window (bars) the CVD level is anchored to so it is
+    invariant to frame length (N1). Pass the same value at train and inference.
     """
     out = df.copy()
-    out["cvd"] = cumulative_volume_delta(out)
+    out["cvd"] = cumulative_volume_delta(out, window=cvd_window)
     out["cvd_slope_10"] = out["cvd"].diff(10).fillna(0.0)
     out["order_flow_imbalance_14"] = order_flow_imbalance(out, period=14)
     out["order_flow_imbalance_50"] = order_flow_imbalance(out, period=50)
