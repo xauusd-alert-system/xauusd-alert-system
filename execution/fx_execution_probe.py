@@ -63,7 +63,8 @@ def _open_positions(symbol: str):
 
 
 def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
-                  csv_path: str, execute: bool) -> dict:
+                  csv_path: str, execute: bool, manage_connection: bool = True,
+                  max_spread_pips: float | None = None) -> dict:
     """Run one deliberately short, independently logged demo execution probe."""
     if asset not in ALLOWED_ASSETS:
         raise ValueError(f"asset must be one of {sorted(ALLOWED_ASSETS)}, got {asset!r}")
@@ -74,7 +75,8 @@ def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
     if execute and os.getenv("FX_PROBE_CONFIRM") != "YES":
         raise RuntimeError("Refusing to send an order. Set FX_PROBE_CONFIRM=YES explicitly.")
 
-    initialize_mt5()
+    if manage_connection:
+        initialize_mt5()
     try:
         if not _is_demo_account():
             raise RuntimeError("Refusing FX probe: connected MT5 account is not DEMO.")
@@ -90,6 +92,13 @@ def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
         tick = mt5.symbol_info_tick(asset)
         if tick is None:
             raise RuntimeError(f"No quote for {asset}")
+        pip_size = 0.0001  # EURUSD/GBPUSD are both standard USD-quoted FX pairs.
+        spread_pips = (float(tick.ask) - float(tick.bid)) / pip_size
+        if max_spread_pips is not None and spread_pips > max_spread_pips:
+            raise RuntimeError(
+                f"Refusing probe: {asset} spread {spread_pips:.2f} pips exceeds "
+                f"configured limit {max_spread_pips:.2f} pips"
+            )
         order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
         entry_price = tick.ask if side == "buy" else tick.bid
         row = {
@@ -158,7 +167,65 @@ def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
         _append_row(csv_path, row)
         return row
     finally:
-        shutdown_mt5()
+        if manage_connection:
+            shutdown_mt5()
+
+
+class FXProbeScheduler:
+    """Bounded scheduler for empirical demo-only FX execution samples.
+
+    It never scores or follows the ML model: one scheduled sample is a short
+    buy/sell round trip used only to estimate broker cost. State stays in memory
+    because a restart may safely delay a sample; the CSV is the source of truth.
+    """
+    def __init__(self, cfg: dict):
+        probe_cfg = cfg.get("execution", {}).get("fx_execution_probes", {})
+        self.enabled = bool(probe_cfg.get("enabled", False))
+        self.assets = list(probe_cfg.get("assets", []))
+        self.volume = float(probe_cfg.get("volume", 0.01))
+        self.hold_seconds = float(probe_cfg.get("hold_seconds", 2.0))
+        self.interval_seconds = float(probe_cfg.get("min_interval_minutes", 120)) * 60
+        self.daily_limit = int(probe_cfg.get("max_probes_per_asset_per_day", 4))
+        self.max_spread_pips = dict(probe_cfg.get("max_spread_pips", {}))
+        self.csv_path = str(probe_cfg.get("log_path", "logs/fx_execution_probes.csv"))
+        self.last_probe_at = {asset: 0.0 for asset in self.assets}
+        self.daily_counts = {}
+        self.next_index = 0
+
+    def _eligible_session(self) -> bool:
+        hour = datetime.now(timezone.utc).hour
+        # The application tags London 08:00-13:00 and NY 13:00-22:00 UTC.
+        return 8 <= hour < 22
+
+    def maybe_run(self) -> dict | None:
+        if not self.enabled or not self.assets or not self._eligible_session():
+            return None
+        now = time.time()
+        day = datetime.now(timezone.utc).date().isoformat()
+        for _ in range(len(self.assets)):
+            asset = self.assets[self.next_index % len(self.assets)]
+            self.next_index += 1
+            count_key = (day, asset)
+            if self.daily_counts.get(count_key, 0) >= self.daily_limit:
+                continue
+            if now - self.last_probe_at.get(asset, 0.0) < self.interval_seconds:
+                continue
+            side = "buy" if self.daily_counts.get(count_key, 0) % 2 == 0 else "sell"
+            try:
+                row = execute_probe(
+                    asset=asset, side=side, volume=self.volume,
+                    hold_seconds=self.hold_seconds, csv_path=self.csv_path,
+                    execute=True, manage_connection=False,
+                    max_spread_pips=self.max_spread_pips.get(asset),
+                )
+            except Exception as exc:
+                # A rejected/no-quote sample must not spin every two seconds.
+                self.last_probe_at[asset] = now
+                return {"asset": asset, "status": "skipped", "reason": str(exc)}
+            self.last_probe_at[asset] = now
+            self.daily_counts[count_key] = self.daily_counts.get(count_key, 0) + 1
+            return row
+        return None
 
 
 def main() -> None:

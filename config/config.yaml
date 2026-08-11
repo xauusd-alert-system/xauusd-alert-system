@@ -515,6 +515,19 @@ execution:
   # Refuse model-driven execution on any non-demo terminal. Keep this true until
   # a separate, explicit real-money deployment review.
   require_demo_account: true
+  # Autonomous execution-quality sample, not a signal strategy. The runner opens
+  # and closes a 0.01-lot EURUSD/GBPUSD demo position after 2 seconds only during
+  # London/NY, with a hard daily cap and spread ceiling. It also requires the
+  # FX_PROBE_CONFIRM=YES environment safeguard before sending anything.
+  fx_execution_probes:
+    enabled: true
+    assets: [EURUSD, GBPUSD]
+    volume: 0.01
+    hold_seconds: 2
+    min_interval_minutes: 120
+    max_probes_per_asset_per_day: 4
+    max_spread_pips: {EURUSD: 0.8, GBPUSD: 1.2}
+    log_path: logs/fx_execution_probes.csv
   max_open_positions_mode: per_asset  # per_asset | global
   max_open_positions_per_asset: 1
   max_concurrent_positions_global: 3

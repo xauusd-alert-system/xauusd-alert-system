@@ -175,6 +175,14 @@ class MultiAssetMT5Trader:
                 except Exception as e:
                     logger.warning(f"Could not load pipeline for {asset_key}: {e}")
 
+        # FX probes are deliberately isolated from model execution: they create
+        # bounded, short-lived demo samples to calibrate spread/slippage for the
+        # unapproved EURUSD/GBPUSD strategies.
+        from execution.fx_execution_probe import FXProbeScheduler
+        self.fx_probe_scheduler = FXProbeScheduler(self.cfg)
+        if self.dry_run:
+            self.fx_probe_scheduler.enabled = False
+
         self.be_state = {}
         self.active_trades = {}
         self.streak_losses = {}
@@ -890,6 +898,15 @@ class MultiAssetMT5Trader:
                     self.check_and_move_breakeven()
                 except Exception as e:
                     logger.error(f"Breakeven check error: {e}")
+
+            # Independent cost-calibration samples; never uses an ML signal and
+            # remains hard-bounded by the scheduler's session/rate/spread limits.
+            try:
+                probe = self.fx_probe_scheduler.maybe_run()
+                if probe is not None:
+                    logger.info("[fx-probe] %s", probe)
+            except Exception as e:
+                logger.error("[fx-probe] scheduler error: %s", e)
 
             current_bar_time = 0
             for asset_key, a_cfg in self.cfg["assets"].items():
