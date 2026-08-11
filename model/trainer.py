@@ -51,6 +51,18 @@ import joblib
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("model_trainer")
 
+# A walk-forward run can hit the same data-quality fallback in every fold. Keep
+# its logs actionable instead of printing an identical warning dozens of times.
+_WARNED_PREFIXES: set[str] = set()
+
+
+def _warn_once(prefix: str, message: str, *args) -> None:
+    """Emit a warning at most once per process for a logical warning family."""
+    if prefix in _WARNED_PREFIXES:
+        return
+    _WARNED_PREFIXES.add(prefix)
+    logger.warning(message, *args)
+
 
 FEATURE_COLUMNS = [
     "ema_9", "ema_21", "ema_50", "ema_200", "rsi", "macd_line", "macd_signal", "macd_hist",
@@ -239,12 +251,17 @@ def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
         return y.astype(int), info
 
     if observed == {_CLS_SHORT, _CLS_LONG}:
-        logger.warning(
-            "normalize_label_space: include_zero_class=true but this training "
-            "window has NO no_trade rows (classes [0, 2]); remapping to a "
-            "binary short/long model {0->0, 2->1}. XGBoost cannot fit "
-            "non-contiguous classes, and p_no_trade would be meaningless here."
-        )
+        # run_backtest normally detects this condition before building y and
+        # makes the fold binary. Keep the shared training entry point safe for
+        # production callers too, but do not spam this expected fold-local path.
+        if not model_cfg.get("include_zero_class_effectively_binary", False):
+            _warn_once(
+                "normalize_label_space:no_trade_absent",
+                "normalize_label_space: include_zero_class=true but this training "
+                "window has NO no_trade rows (classes [0, 2]); remapping to a "
+                "binary short/long model {0->0, 2->1}. XGBoost cannot fit "
+                "non-contiguous classes, and p_no_trade would be meaningless here.",
+            )
         info["no_trade_class_absent"] = True
         info["remapped"] = True
         return y.astype(int).map({_CLS_SHORT: 0, _CLS_LONG: 1}).astype(int), info
@@ -454,7 +471,8 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     n = len(X_train)
     if n < min_fit + horizon + min_calib + 1:
         # Too small for a valid purged split: rebuild base on the full set, no-op calibration.
-        logger.warning(
+        _warn_once(
+            "calibrate_model:insufficient_purged_data",
             "calibrate_model: insufficient data for a purged calibration split "
             "(n=%d < fit=%d + purge=%d + calib=%d); applying identity calibration.",
             n, min_fit, horizon, min_calib,
@@ -480,7 +498,8 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     # so the two-class path behaves exactly as before.
     full_classes = set(y_train.unique())
     if len(X_fit) < 2 or set(y_fit.unique()) != full_classes:
-        logger.warning(
+        _warn_once(
+            "calibrate_model:degenerate_fit_slice",
             "calibrate_model: calibration-fit slice is degenerate "
             "(classes %s vs full %s); identity calibration.",
             sorted(set(y_fit.unique())), sorted(full_classes),
@@ -489,7 +508,8 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
         _attach_noop_calibration(base, method_invalid=True)
         return base
     if len(X_calib) < 5 or set(y_calib.unique()) != full_classes:
-        logger.warning(
+        _warn_once(
+            "calibrate_model:heldout_slice_lacks_diversity",
             "calibrate_model: calibration held-out slice lacks class diversity "
             "(classes %s vs full %s); identity calibration.",
             sorted(set(y_calib.unique())), sorted(full_classes),

@@ -205,6 +205,26 @@ def _gbp_three_class_cfg():
     return cfg
 
 
+def test_absent_no_trade_downgrades_only_the_effective_fold_config():
+    """The policy remains three-class in cfg; only a sparse fold becomes binary."""
+    import copy
+    from scripts.run_backtest import _maybe_downgrade_three_class, merge_asset_cfg
+
+    cfg = _gbp_three_class_cfg()
+    effective = merge_asset_cfg(copy.deepcopy(cfg), "GBPUSD", "model")
+    sparse = _gbp_like_fold_df(120, labels=[1, -1])
+    downgraded = _maybe_downgrade_three_class(effective, sparse, "GBPUSD")
+
+    assert downgraded is not effective
+    assert downgraded["model"]["include_zero_class"] is False
+    assert downgraded["model"]["include_zero_class_effectively_binary"] is True
+    assert effective["model"]["include_zero_class"] is True
+    assert cfg["assets"]["GBPUSD"]["model"]["include_zero_class"] is True
+
+    supported = _gbp_like_fold_df(120, labels=[1, -1, 0, 0])
+    assert _maybe_downgrade_three_class(effective, supported, "GBPUSD") is effective
+
+
 def test_walk_forward_fold_without_no_trade_class_does_not_crash(capsys):
     """Fold labels are only +1/-1 -> three-class y is {0: short, 2: long} with no
     no_trade row. This used to abort the whole GBP backtest; it must now train and
