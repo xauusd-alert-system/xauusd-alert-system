@@ -16,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config, get_env, get_signal_grid
-from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles
+from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles, _TIMEFRAMES
 from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
 from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
@@ -175,6 +175,12 @@ class MultiAssetMT5Trader:
         # the 3x-step loss tail); 1.0 = legacy (BE only at TP1).
         self.be_trigger_by_symbol = {}
         self.trailing_atr_mult_by_symbol = {}
+        # T11 (audit 2026-08-10): map each MT5 symbol to the MT5 timeframe enum of
+        # its asset's trading timeframe (XAU M15, EUR/GBP H1, etc.), so the bar
+        # polling below matches the timeframe each asset actually trades. Before
+        # this, the loop polled TIMEFRAME_M5 for EVERY asset, re-querying an H1
+        # signal every 5 minutes.
+        self.symbol_timeframe = {}
         for asset_key, a_cfg in assets.items():
             sym = a_cfg.get("mt5_symbol")
             if sym:
@@ -182,6 +188,8 @@ class MultiAssetMT5Trader:
                 self.be_trigger_by_symbol[sym] = float(grid.get("breakeven_trigger_atr", 1.0))
                 # v4b trailing (None = legacy)
                 self.trailing_atr_mult_by_symbol[sym] = grid.get("trailing_atr_mult")
+                tf = a_cfg.get("timeframe") or self.cfg.get("market_data", {}).get("timeframe", "M5")
+                self.symbol_timeframe[sym] = _TIMEFRAMES.get(tf, mt5.TIMEFRAME_M5)
 
         # CRIT 5: path to the executed-trades SQLite DB (the same file used by
         # scripts/retrain_with_real_trades.py). Overridable via env for tests.
@@ -871,7 +879,10 @@ class MultiAssetMT5Trader:
                     continue
                 symbol = a_cfg["mt5_symbol"]
                 try:
-                    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 1, 1)
+                    # T11: poll each asset at ITS OWN timeframe (the one it trades
+                    # and its pipeline uses), not a global M5.
+                    tf_enum = self.symbol_timeframe.get(symbol, mt5.TIMEFRAME_M5)
+                    rates = mt5.copy_rates_from_pos(symbol, tf_enum, 1, 1)
                     if rates is not None and len(rates) > 0:
                         t = rates[0]["time"]
                         if t > current_bar_time:
@@ -884,9 +895,9 @@ class MultiAssetMT5Trader:
                 continue
 
             if current_bar_time != last_bar_time:
-                logger.info(f"New M5 bar detected: {current_bar_time} (last: {last_bar_time})")
+                logger.info(f"New bar detected: {current_bar_time} (last: {last_bar_time})")
                 last_bar_time = current_bar_time
-                logger.info("--- Analyzing newly closed M5 candle across all assets ---")
+                logger.info("--- Analyzing newly closed candle across all assets ---")
                 for asset_key, pipeline in self.pipelines.items():
                     start = time.time()
                     try:

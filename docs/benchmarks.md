@@ -18,8 +18,8 @@ walk-forward backtests and tracks model-improvement changes (Part B, Phases 0-6)
 | `n_trades` | Number of closed trades in the sample |
 | `win_rate` | % of trades with pnl > 0 |
 | `profit_factor` | Gross profit / |gross loss| (999.0 if no losses) |
-| `sharpe_ratio` | Mean/std of per-trade pnl, annualized (sqrt(250)) |
-| `sortino_ratio` | Mean/downside-std of per-trade pnl, annualized |
+| `sharpe_ratio` | Mean/std of per-trade pnl, annualized by the actual per-year trade frequency (`sqrt(trades_per_year)`), falling back to `sqrt(250)` when timestamps are unavailable (T7) |
+| `sortino_ratio` | Mean/downside-std of per-trade pnl, annualized by the same frequency |
 | `expectancy` | Mean pnl per trade ($) |
 | `max_drawdown` | Min running drawdown of cumulative pnl ($, <= 0) |
 | `total_pnl` | Cumulative pnl at end of sample ($) |

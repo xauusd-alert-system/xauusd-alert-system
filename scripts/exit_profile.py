@@ -160,6 +160,9 @@ def _aggregate(tdf: pd.DataFrame) -> dict:
 
 def print_report(prof: dict) -> None:
     a = prof["asset"]
+    # O1/§4.6: loud marker when the fail-open synthetic fallback was used.
+    if prof.get("synthetic"):
+        print("\n!!! ⚠️ SYNTHETIC DEMO DATA — RESULTS ARE NOT REAL !!!\n")
     print(f"\n=== Exit-path profile: {a} ({prof['n_folds']} folds, {prof['n_trades']} trades) ===")
     o = prof["overall"]
     pay = o.get("payoff", {})
@@ -228,7 +231,10 @@ def main(argv: list[str] | None = None) -> None:
 
     os.makedirs("logs", exist_ok=True)
     out_csv = args.out or f"logs/exit_profile_{args.asset.lower()}.csv"
-    prof["trades"].to_csv(out_csv, index=False)
+    out_df = prof["trades"].copy()
+    if synthetic:
+        out_df["synthetic"] = True  # O1/§4.6: flag the artifact itself
+    out_df.to_csv(out_csv, index=False)
     # Summary sidecar (JSON-serializable aggregates)
     import json
     summary = {k: v for k, v in prof.items() if k != "trades"}

@@ -293,6 +293,12 @@ def _pf(pnls: np.ndarray) -> float:
 
 def print_report(d: dict) -> None:
     a = d["asset"]
+    # O1/§4.6 (audit 2026-08-10): the fail-open synthetic fallback must be loud.
+    # Previously the `synthetic` flag only landed in the JSON sidecar, so the
+    # printed report and the CSV looked like real measurements.
+    if d.get("synthetic"):
+        print("\n!!! ⚠️ SYNTHETIC DEMO DATA — RESULTS ARE NOT REAL !!!")
+        print("    Real DB was not available; a biased synthetic signal was used.\n")
     print(f"\n=== Week-1 diagnostics: {a} ===")
     print(f"Folds: {d['n_folds']} (valid {d['n_valid_folds']}) | trades: {d['n_trades']} | "
           f"features: {d['n_features']} | events/feature: {d['events_per_feature']} "
@@ -371,11 +377,16 @@ def main(argv: list[str] | None = None) -> None:
 
     os.makedirs("logs", exist_ok=True)
     out_csv = args.out or f"logs/diag_r_metrics_{args.asset.lower()}.csv"
-    d["trades"].to_csv(out_csv, index=False)
+    out_df = d["trades"].copy()
+    if synthetic:
+        # O1/§4.6: flag the artifact itself so a saved CSV cannot be mistaken for
+        # a real measurement on a fresh clone (no DB present -> synthetic fallback).
+        out_df["synthetic"] = synthetic
+    out_df.to_csv(out_csv, index=False)
     summary = {k: v for k, v in d.items() if k != "trades"}
     with open(out_csv.replace(".csv", ".json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, default=str)
-    print(f"[diag] per-trade CSV -> {out_csv}")
+    print(f"[diag] per-trade CSV -> {out_csv}" + (" (SYNTHETIC)" if synthetic else ""))
 
 
 if __name__ == "__main__":

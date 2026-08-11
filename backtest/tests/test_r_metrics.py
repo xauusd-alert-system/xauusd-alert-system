@@ -145,3 +145,28 @@ def test_compute_r_metrics_honors_per_trade_volume_column():
     r = compute_r_metrics(tdf, point_value_lot=100000, volume=0.01)
     assert r["n"] == 2
     assert r["mean_r"] == pytest.approx((1 / 3 + 1 / 6) / 2, abs=1e-6)
+
+
+def test_compute_metrics_sharpe_annualizes_by_actual_frequency():
+    """T7: Sharpe/Sortino must annualize by the ACTUAL trade frequency (trades
+    per year), not a fixed sqrt(250), so assets with different trade counts are
+    comparable on a common scale."""
+    import numpy as np
+    from backtest.metrics import compute_metrics
+
+    def mk(n, step_secs):
+        # Flat PnL: mean 1.0, std 0 -> both ratios 0.0. Use a small variation.
+        rng = np.random.default_rng(0)
+        pnls = rng.normal(1.0, 0.5, n)
+        entry_ts = [1000000 + i * step_secs for i in range(n)]
+        return compute_metrics(pd.DataFrame({"pnl": pnls, "entry_ts": entry_ts}))
+
+    # Fast trader: 2200 trades/year (step = 2.3h * 365). Slow trader: 220/year.
+    fast = mk(2200, 3600 * 2.3)
+    slow = mk(220, 3600 * 23)
+    # Both have identical per-trade mean/std -> the fast trader must report a
+    # ~sqrt(10) higher annualized Sharpe than the slow one, matching the actual
+    # frequency difference rather than both sharing sqrt(250).
+    ratio = fast["sharpe_ratio"] / slow["sharpe_ratio"]
+    assert ratio > 2.5, f"expected ~sqrt(10) ~= 3.16, got {ratio:.2f}"
+    assert ratio < 4.0

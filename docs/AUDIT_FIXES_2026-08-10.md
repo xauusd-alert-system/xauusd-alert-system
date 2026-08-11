@@ -32,7 +32,9 @@ documented with an explicit reason they were not silently changed.
 | N9 | `VERY HIGH` branch unreachable in `calculate_delta_confidence` | `features/smart_money_metrics.py`: check order fixed. Test added. |
 | N10 | MT5 server-time treated as UTC; `spread`/`real_volume` dropped | `data/mt5_provider.py`: optional `server_time_offset_hours`; preserves `spread`/`real_volume`. Config updated. Test updated. |
 | N11 | Scale-out validator only in backtest | `execution/mt5_trader.py`: startup validation `raise_on_invalid=True`. |
+| T7 | Sharpe/Sortino annualized by fixed sqrt(250) regardless of trade frequency | `backtest/metrics.py`: annualizes by the ACTUAL per-year trade frequency (`sqrt(trades_per_year)` from the entry timestamps), with a 250 fallback. Test added. |
 | T8 | Broker contract size hard-coded in config | `execution/mt5_trader.py`: `_validate_contract_sizes()` warns on mismatch with live `trade_contract_size` / `volume_step`. |
+| T11 | Bar-poll hard-coded to M5 for every asset (H1 signals re-queried every 5 min) | `execution/mt5_trader.py`: polls each symbol at its OWN asset timeframe (per-asset `timeframe`), not a global M5. |
 
 ## Documented (methodology / data-dependent — not code bugs)
 
@@ -42,8 +44,20 @@ documented with an explicit reason they were not silently changed.
 | W14 | News guard only in live (no historical news feed) | Backtest bars >~7 days are skipped by `is_news_red_zone()`; no historical calendar feed exists. Documented in `config.yaml` (`apply_news_guard_in_backtest`). |
 | W16 | Confidence thresholds incomparable across assets | Per-asset `min_confidence_to_alert` applied to a blended scale; 3-class models leave residual mass. Documented in `config.yaml`; `normalize_probs` is the opt-in lever (requires revalidation). |
 | W17 | `sentiment_analyzer` dead in trading path | FIXED as an OPTIONAL default-off veto (`use_sentiment_guard`) + dashboard. Test added. |
-| T1–T7, T9–T12 | Benchmark-table integrity, Sharpe annualization, walk-forward overlap, doc test-count divergence, single-process, bar-poll timeframe | These require re-running on the real DB (not present in this clone) or are documentation. Changing benchmark numbers without a re-run would fake results. `W3` (overlap) and `T7` (Sharpe units) are partly code — `W3` is fixed. |
+| T1–T6, T9, T10, T12 | Benchmark-table integrity, walk-forward fold overlap treated as independent, doc test-count divergence, single-process, news-feed breadth | These require re-running on the real DB (not present in this clone) or are operational/documentation. Changing benchmark numbers without a re-run would fake results. `W3` (overlap) is fixed in code. `T7` and `T11` are now fixed in code (see above). |
 | N4 | `cost_ratio` full round-trip vs PnL half | RESOLVED by W1 (both now use full round-trip). |
+
+## Opportunities (O1–O7)
+
+| ID | Opportunity | Status |
+|----|-------------|--------|
+| O1 | Diag scripts (`diag_r_metrics`, `exit_profile`) fall back to synthetic biased data with the flag only in a JSON sidecar | PARTIALLY FIXED: the synthetic marker is now printed loudly and written into the CSV artifact itself, so a fresh clone cannot mistake it for real measurements. Running them on the real DB requires the DB (not in this clone). |
+| O2 | Fix W1+W4 re-solves the baselines | DONE (W1, W4 fixed in code). Re-running baselines needs the real DB. |
+| O3 | BTCUSD candidate for capital | Requires real-DB re-measurement and the decision gate; not code. |
+| O4 | Portfolio/risk layer implemented but disabled (`risk.enabled: false`) | Documented (see `TZ.md` §3.6 / README). Enabling changes live order sizes, so it is an explicit opt-in step, not silently turned on. |
+| O5 | `fill_mode` / queue-loss measurement already in the engine | Already present (`ensemble_backtest.py`); measurement run needs real data. |
+| O6 | Locked hold-out (2026-08-08 onward) is the one honest path | Config/documented; requires live-forward data accumulation. |
+| O7 | Read contract size from the terminal instead of trusting config | DONE via T8 (`_validate_contract_sizes` reads `trade_contract_size`/`volume_step` and warns on mismatch). |
 
 ## Retraining required after these changes
 
@@ -55,4 +69,7 @@ models must be retrained before trusting new results:
 
 ## Verification
 
-`python -m pytest` -> **435 passed** (baseline on snapshot was 408).
+`python -m pytest` -> **436 passed** (baseline on snapshot was 408).
+
+Updated in the follow-up round: `T7` (frequency-based Sharpe/Sortino), `T11`
+(per-asset bar polling), and `O1` (loud synthetic marker in diag reports/CSVs).
