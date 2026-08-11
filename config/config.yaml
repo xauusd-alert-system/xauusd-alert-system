@@ -508,6 +508,13 @@ deploy_guard:
 # - global: account-level risk manager (execution/risk_manager.py:20) limits total concurrent
 #   open positions across all instruments to max_concurrent_positions_global (default 3).
 execution:
+  # Production order routing is deliberately limited to the two assets currently
+  # approved for demo model trading. EURUSD/GBPUSD are sampled only by
+  # `execution.fx_execution_probe` until their measured-cost OOS gate passes.
+  enabled_assets: [XAUUSD, BTCUSD]
+  # Refuse model-driven execution on any non-demo terminal. Keep this true until
+  # a separate, explicit real-money deployment review.
+  require_demo_account: true
   max_open_positions_mode: per_asset  # per_asset | global
   max_open_positions_per_asset: 1
   max_concurrent_positions_global: 3
