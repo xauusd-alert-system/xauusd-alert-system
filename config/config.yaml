@@ -14,12 +14,29 @@ ensemble:
   use_news_guard: true
   news_buffer_before_min: 30
   news_buffer_after_min: 30
+  # W14 (audit 2026-08-10): the news guard is enforced in the live trading path,
+  # but backtest bars older than ~7 days are skipped by is_news_red_zone() because
+  # there is no HISTORICAL economic-calendar feed. So backtests do not model news
+  # impact for most of the sample (live does). This is an inherent data-source
+  # limitation, not a code bug; record it when comparing live vs backtest trade
+  # counts/tails. Enable `apply_news_guard_in_backtest` only if you wire in a
+  # historical calendar feed.
+  apply_news_guard_in_backtest: false
   # W17 (audit 2026-08-10): OPTIONAL macro sentiment veto that wires
   # data/sentiment_analyzer.py into the trading path (it previously only surfaced
   # in the dashboard). Default OFF preserves the exact baseline behaviour; enable
   # only after validating that the lexicon veto does not hurt live results.
   use_sentiment_guard: false
   sentiment_veto_threshold: 0.5
+  # W16 (audit 2026-08-10): cross-asset comparability caveat. The per-asset
+  # `min_confidence_to_alert` (0.70/0.85/0.60/...) is applied to a BLENDED
+  # confidence whose scale differs by asset, and 3-class models (GBP) leave
+  # residual mass on a no_trade class, so an absolute threshold like "0.85" is
+  # NOT a probability and is not directly comparable across assets. Tuning is
+  # per-asset on purpose; keep each asset's bar calibrated on ITS OWN signal
+  # distribution. `model.normalize_probs` can force p_long+p_short=1 for the
+  # 3-class path if you want a common probability scale (changes which signals
+  # fire -> revalidate before enabling).
   suppress_regimes:
     - compression
     - reversal_watch
