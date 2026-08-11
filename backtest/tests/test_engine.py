@@ -127,8 +127,8 @@ def test_walk_forward_runner_calls_strategy_per_fold():
 
 
 def test_engine_barriers_follow_signal_grid():
-    """The engine's ATR-scaled barriers must mirror the signal grid (equal-step
-    spec: stop = 3*step, TP1 = 1*step -> stop/target distance ratio = 3.0),
+    """The engine's ATR-scaled barriers must mirror the signal grid (asymmetric
+    spec: stop = 2*step, TP1 = 1*step -> stop/target distance ratio = 2.0),
     not the training-label barriers (target 1.2 / stop 1.0)."""
     df = _prepared_df()
     engine = EventDrivenBacktester(CFG)
@@ -143,9 +143,10 @@ def test_engine_barriers_follow_signal_grid():
             continue
         assert stop_dist > 0 and target_dist > 0
         # Both barriers are sized off the SAME ATR at entry, so the ratio is
-        # exactly stop_mult / tp1_mult = 3.0 for the shipped signal grid.
-        assert np.isclose(stop_dist / target_dist, 3.0, rtol=1e-6), (
-            f"expected stop/target = 3.0 (signal grid), got {stop_dist / target_dist:.4f}"
+        # exactly stop_mult / tp1_mult = 2.0 for the shipped asymmetric grid
+        # (owner request 2026-08-11: TP1=1, stop=2).
+        assert np.isclose(stop_dist / target_dist, 2.0, rtol=1e-6), (
+            f"expected stop/target = 2.0 (asymmetric signal grid), got {stop_dist / target_dist:.4f}"
         )
 
 

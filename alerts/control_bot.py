@@ -212,8 +212,8 @@ class TelegramControlBot:
             "/status — trader state + open positions (P&L в $ и в R)\n"
             "/positions — all open positions\n"
             "/why <ASSET> — почему открыта позиция (контекст входа из сигнала)\n"
-            "/metrics — 📊 институциональные микроструктурные метрики (SMC / Smart Money)\n"
-            "/metrics today|week — статистика закрытых сделок (WR, PF, expectancy, P&L)\n"
+            "/metrics — 📊 микроструктурные метрики по РЕАЛЬНОМУ рынку (SMC / Smart Money)\n"
+            "/metrics today|week|2week|month|3month|all — подробная статистика закрытых сделок\n"
             "/account — баланс, equity, маржа, плавающий и дневной реализованный P&L\n"
             "/pause — enable dry-run (stop sending orders)\n"
             "/resume — disable dry-run (orders go live again)\n"
@@ -226,32 +226,61 @@ class TelegramControlBot:
         )
 
     def _cmd_metrics(self, chat_id: str, args: tuple = ()) -> None:
-        # /metrics today|week -> closed-trade statistics (read-only MT5 history).
-        # Bare /metrics keeps the pre-existing institutional SMC report.
+        # /metrics <period> -> closed-trade statistics (read-only MT5 history).
+        # Bare /metrics -> institutional SMC metrics computed on REAL candles when
+        # a live pipeline can provide them, else the pre-existing synthetic demo
+        # with an explicit NOT-REAL marker (owner request 2026-08-11: tie metrics
+        # to the real market instead of always using the simulator).
         if args:
             period = str(args[0]).lower()
-            if period not in ("today", "week"):
-                self._send(chat_id, "❓ Использование: /metrics [today|week]")
-                return
-            self._cmd_metrics_period(chat_id, period)
+            if period in ("today", "week", "2week", "month", "3month", "all"):
+                self._cmd_metrics_period(chat_id, period)
+            else:
+                self._send(chat_id, "❓ Использование: /metrics [today|week|2week|month|3month|all]")
             return
         try:
             from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
-            from simulation.provider import SimulationProvider
-            candles = SimulationProvider.get().get_candles("M5", n=100)
-            if candles.empty or len(candles) < 10:
-                # Default institutional setup
-                metrics = {
-                    "manipulation_index": {"display": "7/10", "text": "высокий уровень манипуляций сохраняется. Крупные игроки продолжают активно работать в этом диапазоне."},
-                    "zone_strength": {"display": "18%", "text": "зона крайне слабая. Текущий уровень не является серьёзной поддержкой, вероятность ухода ниже высокая."},
-                    "smf_ratio": {"display": "2.34", "text": "институционалы доминируют над розницей с коэффициентом 2.3 к 1. Умные деньги продолжают давить вниз."},
-                    "liquidity_grab": {"display": "8/10", "text": "активная охота за ликвидностью. Именно это объясняет резкие движения на локальных уровнях перед продолжением тренда."},
-                    "delta_confidence": {"display": "HIGH", "text": "уверенность модели в направлении дельты высокая. Продавцы контролируют рынок на старших таймфреймах."},
-                }
-                msg = format_institutional_metrics_report(metrics)
-            else:
-                metrics = compute_institutional_metrics(candles)
-                msg = format_institutional_metrics_report(metrics)
+            candles = None
+            source = "synthetic"
+            # Prefer REAL candles from the running trader's pipeline (any enabled
+            # asset) so the SMC metrics reflect the current market, not the shim.
+            pipeline_cfg = getattr(self.trader, "cfg", None) or {}
+            for asset_key, a_cfg in (pipeline_cfg.get("assets") or {}).items():
+                if not a_cfg.get("enabled", False):
+                    continue
+                try:
+                    pip = getattr(self.trader, "pipelines", {}).get(asset_key)
+                    if pip is not None and hasattr(pip, "get_frame"):
+                        frame = pip.get_frame(n=100)
+                        if frame is not None and len(frame) >= 10:
+                            candles = frame
+                            source = f"real:{asset_key}"
+                            break
+                except Exception:
+                    continue
+            if candles is None or len(candles) < 10:
+                # Fallback: synthetic demo (explicitly labelled).
+                from simulation.provider import SimulationProvider
+                try:
+                    candles = SimulationProvider.get().get_candles("M5", n=100)
+                except Exception:
+                    candles = None
+                if candles is None or len(candles) < 10:
+                    metrics = {
+                        "manipulation_index": {"display": "n/a", "text": "нет данных."},
+                        "zone_strength": {"display": "n/a", "text": "нет данных."},
+                        "smf_ratio": {"display": "n/a", "text": "нет данных."},
+                        "liquidity_grab": {"display": "n/a", "text": "нет данных."},
+                        "delta_confidence": {"display": "n/a", "text": "нет данных."},
+                    }
+                    msg = "📊 *Метрики по софту на текущий момент*\n\n_Нет данных ни по реальному рынку, ни по симулятору._\n" + format_institutional_metrics_report(metrics)
+                    self._send(chat_id, msg, parse_mode="Markdown")
+                    return
+                source = "synthetic"
+            metrics = compute_institutional_metrics(candles)
+            label = "РЕАЛЬНЫЙ РЫНОК" if source != "synthetic" else "СИМУЛЯТОР (НЕ реальные данные)"
+            msg = format_institutional_metrics_report(metrics)
+            msg += f"\n\n_Источник свечей: {label} ({source})_"
             self._send(chat_id, msg, parse_mode="Markdown")
         except Exception as exc:
             self._send(chat_id, f"❌ Metrics error: {exc}")

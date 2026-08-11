@@ -104,6 +104,20 @@ class RealtimePipeline:
             merged_model.update(asset_model)
             self.effective_cfg["model"] = merged_model
 
+    def get_frame(self, n_candles: int = 100, build_features: bool = False) -> pd.DataFrame:
+        """Return a raw (or feature-built) DataFrame of the asset's real candles.
+
+        Owner request 2026-08-11: lets /metrics and the web dashboard compute
+        SMC/institutional metrics on REAL market data (via the live pipeline)
+        instead of only the synthetic simulator. build_features=False returns the
+        tagged OHLCV frame (sufficient for microstructure metrics); True runs the
+        full feature build.
+        """
+        df = self._fetch_data_frame(self.timeframe, n_candles)
+        if build_features:
+            return self._build_features(df)
+        return df
+
     def _fetch_data_frame(self, timeframe: str, n_candles: int) -> pd.DataFrame:
         """Fetches and prepares DataFrame directly from MT5 (live) or Mock generator."""
         if self.data_mode == "live":

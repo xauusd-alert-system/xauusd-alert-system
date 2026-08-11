@@ -325,20 +325,87 @@ def format_why_report(asset_key: str, mt5_symbol: str, position,
         return f"{header}\n\n{CONTEXT_UNAVAILABLE}\n{CONTEXT_HELP}"
 
     reasoning = context.get("reasoning_summary") or "(reasoning_summary пуст)"
+
+    # --- Readable entry-parameter breakdown (owner request 2026-08-11) ---
+    bias = context.get("bias", "n/a")
+    bias_word = {"long": "КУПЛЯ (покупка, ставка на рост)", "short": "ПРОДАЖА (ставка на снижение)"}.get(str(bias).lower(), str(bias))
+    entry_zone = context.get("entry_zone")
+    invalidation = context.get("invalidation")
+    targets = context.get("targets") or []
+    entry_ref = entry_zone[1] if entry_zone else context.get("entry_price")
+    inv_txt = _fmt_price(invalidation) if invalidation is not None else "н/д"
+    tgt_txt = " / ".join(_fmt_price(t) for t in targets) if targets else "н/д"
+
+    # Risk:reward per level (price distance), plain-language.
+    rr_lines = []
+    if invalidation is not None and entry_ref is not None:
+        try:
+            risk = abs(float(entry_ref) - float(invalidation))
+            if risk > 0:
+                rr_lines.append(
+                    f"• Риск (до стопа): ≈{_fmt_price(risk)} пунктов"
+                )
+                for i, t in enumerate(targets[:3], start=1):
+                    reward = abs(float(t) - float(entry_ref))
+                    rr_lines.append(
+                        f"• Цель TP{i}: {_fmt_price(t)}  →  прибыль ≈ {reward / risk:.2f} к риску (на 1 ед. риска)"
+                    )
+        except (TypeError, ValueError):
+            rr_lines = []
+
+    session_map = {
+        "asia": "азиатская сессия (обычно спокойная, низкая ликвидность)",
+        "london": "лондонская сессия (высокая ликвидность, старт европейской торговли)",
+        "new_york": "нью-йоркская сессия (пик ликвидности, пересечение с Европой)",
+        "off_session": "вне торговых сессий (низкая ликвидность)",
+    }
+    session_txt = session_map.get(str(context.get("session", "")).lower(), context.get("session", "н/д"))
+    regime_txt = {
+        "trend_up": "восходящий тренд",
+        "trend_down": "нисходящий тренд",
+        "range": "боковик/диапазон",
+        "compression": "сжатие волатильности",
+        "reversal_watch": "потенциальный разворот",
+    }.get(str(context.get("regime", "")).lower(), context.get("regime", "н/д"))
+
+    conf = context.get("confidence")
+    conf_txt = _fmt_conf(conf)
+    conf_hint = ""
+    if conf is not None:
+        try:
+            c = float(conf)
+            pct = c * 100.0 if -1.0 <= c <= 1.0 else c
+            conf_hint = " (сигнал достаточно уверенный)" if pct >= 60 else " (уверенность средняя — торгуйте осторожнее)"
+        except (TypeError, ValueError):
+            pass
+
     lines = [
         header,
         "",
-        "Причина входа (дословно из сигнала):",
-        f"«{reasoning}»",
+        "НАПРАВЛЕНИЕ",
+        f"• {bias_word}  — уверенность модели: {conf_txt}{conf_hint}",
         "",
-        f"Bias: {context.get('bias', 'n/a')} | Confidence: {_fmt_conf(context.get('confidence'))}",
-        f"Regime: {context.get('regime', 'n/a')} | Session: {context.get('session', 'n/a')}",
-        f"Entry zone: {_fmt_price_list(context.get('entry_zone'))}",
-        f"Invalidation (стоп): {_fmt_price(context.get('invalidation'))}",
-        f"Targets: {_fmt_price_list(context.get('targets'))}",
-        f"Открыта (UTC): {context.get('opened_at_utc', 'n/a')}",
+        "КОНТЕКСТ РЫНКА",
+        f"• Режим рынка: {regime_txt}",
+        f"• Торговая сессия: {session_txt}",
+        f"• Дословная причина из сигнала: «{reasoning}»",
+        "",
+        "ПЛАН ВХОДА / ВЫХОДА",
+        f"• Зона входа: {_fmt_price_list(entry_zone)}",
+        f"• Стоп-лосс (защита от убытка): {inv_txt}",
+        f"• Цели прибыли (TP1/TP2/TP3): {tgt_txt}",
     ]
-    return "\n".join(lines)
+    if rr_lines:
+        lines.append("")
+        lines.append("РИСК / ПРИБЫЛЬ")
+        lines.extend(rr_lines)
+    lines.append("")
+    lines.append("• Шаг сетки (ATR-шаг): " + _fmt_price(context.get("step")) if context.get("step") is not None else "")
+    lines.append(f"• Открыта (UTC): {context.get('opened_at_utc', 'n/a')}")
+    lines.append("")
+    lines.append("Простыми словами: модель оценила, что движение в сторону входа вероятнее, чем обратное; стоп защищает от убытка, а цели фиксируют прибыль по мере движения цены.")
+    # Drop any empty trailing lines gracefully
+    return "\n".join([l for l in lines if l])
 
 
 # ---------------------------------------------------------------------------
@@ -404,14 +471,28 @@ def realized_pnl_today(now: Optional[datetime] = None) -> float:
 PERIODS = {
     "today": "сегодня (UTC)",
     "week": "последние 7 дней (UTC)",
+    "2week": "последние 14 дней (UTC)",
+    "month": "последние 30 дней (UTC)",
+    "3month": "последние 90 дней (UTC)",
+    "all": "вся история (UTC)",
 }
+# Which /metrics period keys exist (ordered for /help).
+PERIOD_KEYS = ["today", "week", "2week", "month", "3month", "all"]
 
 
 def period_range(kind: str, now: Optional[datetime] = None):
     """(dt_from, dt_to, human_label) for a /metrics period key."""
     now = now or datetime.now(timezone.utc)
-    if kind == "week":
-        return now - timedelta(days=7), now, PERIODS["week"]
+    days = {
+        "week": 7,
+        "2week": 14,
+        "month": 30,
+        "3month": 90,
+    }.get(kind)
+    if days is not None:
+        return now - timedelta(days=days), now, PERIODS[kind]
+    if kind == "all":
+        return None, now, PERIODS["all"]
     return now.replace(hour=0, minute=0, second=0, microsecond=0), now, PERIODS["today"]
 
 
@@ -465,6 +546,29 @@ def compute_deal_metrics(deals, contexts: Optional[dict] = None,
             if r is not None:
                 r_values.append(r)
 
+    # Extended statistics (owner request 2026-08-11, detailed per-period stats).
+    avg_win = (sum(wins) / len(wins)) if wins else 0.0
+    avg_loss = (sum(losses) / len(losses)) if losses else 0.0
+
+    # Max consecutive losses + max drawdown of cumulative PnL.
+    max_consec_losses = 0
+    run = 0
+    cum = 0.0
+    running_max = float("-inf")
+    max_dd = 0.0
+    for p in pnls:
+        if p < 0:
+            run += 1
+            max_consec_losses = max(max_consec_losses, run)
+        else:
+            run = 0
+        cum += p
+        running_max = max(running_max, cum)
+        max_dd = min(max_dd, cum - running_max)
+
+    best = max(pnls) if n else 0.0
+    worst = min(pnls) if n else 0.0
+
     return {
         "n": n,
         "wins": len(wins),
@@ -473,6 +577,12 @@ def compute_deal_metrics(deals, contexts: Optional[dict] = None,
         "profit_factor": profit_factor,
         "expectancy": expectancy,
         "total_pnl": total_pnl,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "max_consec_losses": max_consec_losses,
+        "max_drawdown": max_dd,
+        "best_trade": best,
+        "worst_trade": worst,
         "mean_r": (sum(r_values) / len(r_values)) if r_values else None,
         "n_r": len(r_values),
     }
@@ -495,8 +605,24 @@ def _fmt_metrics_line(label: str, m: dict) -> str:
     )
 
 
+def _fmt_metrics_detail(m: dict) -> str:
+    """Extended detail block for one metrics bucket (owner request 2026-08-11)."""
+    pf = m["profit_factor"]
+    pf_txt = "∞" if pf == float("inf") else (f"{pf:.2f}" if pf is not None else "—")
+    r_txt = f"{m['mean_r']:+.2f} R (n={m['n_r']})" if m.get("mean_r") is not None else "n/a"
+    return "\n".join([
+        f"  Сделок: {m['n']} | Побед: {m['wins']} | Поражений: {m['losses']}",
+        f"  Win rate: {m['win_rate_pct']:.1f}% | Profit factor: {pf_txt}",
+        f"  Средний выигрыш: ${_fmt_money(m['avg_win'])} | Средний убыток: ${_fmt_money(m['avg_loss'])}",
+        f"  Expectancy: ${_fmt_money(m['expectancy'])} | Средний R: {r_txt}",
+        f"  Лучшая сделка: ${_fmt_money(m['best_trade'])} | Худшая: ${_fmt_money(m['worst_trade'])}",
+        f"  Макс. подряд убытков: {m['max_consec_losses']} | Макс. просадка: ${_fmt_money(m['max_drawdown'])}",
+        f"  Итоговый P&L: ${_fmt_money(m['total_pnl'])}",
+    ])
+
+
 def format_metrics_report(deals, contexts: dict, cfg: dict, period_label: str) -> str:
-    """/metrics <period>: per-asset and total closed-trade statistics."""
+    """/metrics <period>: per-asset and total closed-trade statistics (detailed)."""
     total = compute_deal_metrics(deals, contexts=contexts, cfg=cfg)
     header = f"📈 Метрики закрытых сделок — {period_label}"
     if total["n"] == 0:
@@ -510,10 +636,14 @@ def format_metrics_report(deals, contexts: dict, cfg: dict, period_label: str) -
         label = f"{label} ({symbol})" if label else symbol
         by_asset.setdefault(label, []).append(d)
 
-    lines = [header, _fmt_metrics_line("Σ Всего", total)]
+    lines = [header, "━━━━━━━━━━━━", "Σ ВСЕГО"]
+    lines.append(_fmt_metrics_detail(total))
     for label in sorted(by_asset):
         m = compute_deal_metrics(by_asset[label], contexts=contexts, cfg=cfg)
-        lines.append(_fmt_metrics_line(f"  • {label}", m))
+        lines.append("━━━━━━━━━━━━")
+        lines.append(f"• {label}")
+        lines.append(_fmt_metrics_detail(m))
+    lines.append("━━━━━━━━━━━━")
     lines.append("Сделка = закрывающий (OUT) дил; частичные TP учитываются отдельными реализациями.")
     return "\n".join(lines)
 

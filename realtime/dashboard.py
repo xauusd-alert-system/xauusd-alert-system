@@ -287,6 +287,68 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- 📈 Real Trade Statistics (owner request 2026-08-11) -->
+        <div class="glass-card p-6 border-l-4 border-l-emerald-500">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-chart-line text-emerald-400"></i> Реальная статистика закрытых сделок
+                </h2>
+                <div class="flex items-center gap-2">
+                    <select id="metrics-period" onchange="loadMetrics()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5">
+                        <option value="today">Сегодня</option>
+                        <option value="week" selected>7 дней</option>
+                        <option value="2week">14 дней</option>
+                        <option value="month">30 дней</option>
+                        <option value="3month">90 дней</option>
+                        <option value="all">Вся история</option>
+                    </select>
+                    <button onclick="loadMetrics()" class="text-xs text-slate-400 hover:text-slate-200 transition flex items-center gap-1">
+                        <i class="fas fa-sync-alt"></i> Обновить
+                    </button>
+                </div>
+            </div>
+            <div id="metrics-available" class="hidden text-xs text-amber-400 mb-3">
+                ⚠️ MT5 не подключён — реальных данных нет. Запустите на машине с терминалом.
+            </div>
+            <div id="metrics-grid" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Сделок</div>
+                    <div id="m-n" class="text-xl font-bold text-slate-100 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Win rate</div>
+                    <div id="m-wr" class="text-xl font-bold text-emerald-400 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Profit factor</div>
+                    <div id="m-pf" class="text-xl font-bold text-amber-300 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Итоговый P&L</div>
+                    <div id="m-pnl" class="text-xl font-bold text-slate-100 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Средний выигрыш</div>
+                    <div id="m-awin" class="text-lg font-bold text-emerald-400 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Средний убыток</div>
+                    <div id="m-aloss" class="text-lg font-bold text-rose-400 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Макс. просадка</div>
+                    <div id="m-dd" class="text-lg font-bold text-rose-300 mt-1">—</div>
+                </div>
+                <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700">
+                    <div class="text-slate-400 font-sans text-[11px] uppercase">Подряд убытков</div>
+                    <div id="m-consec" class="text-lg font-bold text-slate-100 mt-1">—</div>
+                </div>
+            </div>
+            <div class="mt-3 text-[11px] text-slate-400">
+                <span id="m-period-label"></span> &bull; Expectancy <span id="m-exp" class="text-slate-300 font-mono">—</span> &bull; Лучшая <span id="m-best" class="text-emerald-400 font-mono">—</span> &bull; Худшая <span id="m-worst" class="text-rose-400 font-mono">—</span>
+            </div>
+        </div>
+
         <!-- Footer -->
         <footer class="text-center text-slate-500 text-xs py-4">
             xauusd-alert-system &bull; Causal ML Inference Pipeline &bull; Purged Time-Split Calibration &bull; 204 Passed Tests
@@ -455,9 +517,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        async function loadMetrics() {
+            const period = (document.getElementById("metrics-period") || {value:"week"}).value;
+            const m = await fetchJSON("/api/metrics?period=" + period);
+            const availEl = document.getElementById("metrics-available");
+            if (!m) return;
+            if (m.available === false) {
+                availEl.classList.remove("hidden");
+                return;
+            }
+            availEl.classList.add("hidden");
+            const set = (id, val, cls) => { const el = document.getElementById(id); if(el){ el.innerText = val; if(cls) el.className = cls; } };
+            const money = (v) => "$" + Number(v||0).toLocaleString('en-US', {minimumFractionDigits:2});
+            set("m-n", m.n ?? "—");
+            set("m-wr", (m.win_rate_pct!=null ? m.win_rate_pct.toFixed(1) + "%" : "—"), "text-xl font-bold text-emerald-400 mt-1");
+            set("m-pf", (m.profit_factor==null ? "—" : (m.profit_factor===Infinity ? "∞" : Number(m.profit_factor).toFixed(2))), "text-xl font-bold text-amber-300 mt-1");
+            const pnlColor = m.total_pnl>=0 ? "text-emerald-400" : "text-rose-400";
+            set("m-pnl", money(m.total_pnl), "text-xl font-bold " + pnlColor + " mt-1");
+            set("m-awin", money(m.avg_win), "text-lg font-bold text-emerald-400 mt-1");
+            set("m-aloss", money(m.avg_loss), "text-lg font-bold text-rose-400 mt-1");
+            set("m-dd", money(m.max_drawdown), "text-lg font-bold text-rose-300 mt-1");
+            set("m-consec", m.max_consec_losses ?? "—");
+            set("m-exp", money(m.expectancy));
+            set("m-best", money(m.best_trade));
+            set("m-worst", money(m.worst_trade));
+            set("m-period-label", m.period_label ? ("Период: " + m.period_label) : "");
+        }
+
         // Initialize chart and polling
         loadChart("XAUUSD");
         refreshData();
+        loadMetrics();
         setInterval(refreshData, 5000);
     </script>
 </body>

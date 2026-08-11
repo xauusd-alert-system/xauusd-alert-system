@@ -189,7 +189,18 @@ assets:
     # symbol_overrides BTCUSD=1.0).
     point_value_lot: 1
     ensemble:
-      min_confidence_to_alert: 0.62
+      # Entry parameters (owner request 2026-08-11, "adapt BTC entry to current
+      # market"). These per-asset overrides make the BTC entry bar explicit and
+      # tunable against the current high-vol regime instead of silently inheriting
+      # the global values. The signal-quality floor is raised (fewer, higher
+      # conviction entries) and the crypto-night bar is kept strict. Validate on
+      # live data and re-run the decision gate before committing capital; do NOT
+      # tune these from a single fresh snapshot.
+      min_confidence_to_alert: 0.66
+      min_ml_probability: 0.60
+      ml_confidence_floor: 0.68
+      crypto_night_min_probability: 0.62
+      ev_threshold: 0.05
       suppress_sessions: []
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.20
@@ -397,17 +408,22 @@ labeling:
 
 # ---------------------------------------------------------------------------
 # Signal grid spec for Telegram (alerts/formatter.py, realtime/pipeline.py).
-# Equal-step grid: step = step_points (if set) else 1.0 * ATR, clamped to
-# [step_min_points, step_max_points]; TP1 = entry ± 1*step, TP2 = ±2*step,
-# TP3 = ±3*step, Stop = entry ∓ 3*step (risk:TP3 = 1:1, BE on TP1).
-# Per-asset overrides live in assets.<key>.signal_grid (e.g. clamps tuned to
-# each instrument's price scale).
+# ASYMMETRIC grid (owner request 2026-08-11): step = step_points (if set) else
+# 1.0 * ATR, clamped to [step_min_points, step_max_points]; TP1 = entry ± 1*step,
+# TP2 = ±1.5*step, TP3 = ±2*step, Stop = entry ∓ 2*step (risk:TP3 = 1:1,
+# BE on TP1). This is TIGHTER than the previous equal-step (2/3/3) grid so
+# profits are banked faster and per-trade risk (stop distance) is reduced, at
+# the cost of giving winners less room. Per-asset overrides live in
+# assets.<key>.signal_grid; assets that override mults (EUR stop 2.0, GBP 3.0
+# with regime overrides) keep their own deliberately-tuned values.
+# NOTE: this changes live TP/SL distances — re-run backtests before trusting
+# new numbers (see docs/benchmarks.md).
 # ---------------------------------------------------------------------------
 signal_grid:
   tp1_mult: 1.0
-  tp2_mult: 2.0
-  tp3_mult: 3.0
-  stop_mult: 3.0
+  tp2_mult: 1.5
+  tp3_mult: 2.0
+  stop_mult: 2.0
   # Early breakeven: move the stop to entry once price reaches this fraction
   # of the TP1 distance in our favor. 1.0 = legacy (BE only when TP1 hits);
   # values < 1.0 (e.g. 0.5) protect mean-reverting assets (FX) from the
