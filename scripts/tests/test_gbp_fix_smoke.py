@@ -147,3 +147,110 @@ def test_get_signal_grid_regime_overrides():
 
     other = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="trend_down")
     assert other["stop_mult"] == 3.0  # no override -> base grid
+
+
+# ---------------------------------------------------------------------------
+# Regression: GBPUSD walk-forward must survive a fold whose three-class label
+# window is missing a class.
+#
+# GBPUSD is the include_zero_class=true asset ({0: short, 1: no_trade, 2: long}).
+# The triple-barrier labeller only emits label 0 when NEITHER barrier is touched
+# inside the horizon, which on the H1/36-bar GBP settings is rare - so a fold can
+# easily contain zero no_trade rows. XGBoost then received non-contiguous classes
+# [0, 2] and raised
+#     ValueError: Invalid classes inferred from unique values of `y`.
+#                 Expected: [0 1], got [0 2]
+# which propagated out of strategy_fn -> run_walk_forward -> main and killed the
+# WHOLE run (every remaining fold and asset was lost).
+# ---------------------------------------------------------------------------
+
+def _gbp_like_fold_df(n, labels, seed=5):
+    """Minimal GBP-shaped frame carrying what strategy_fn needs: a few model
+    features, the raw `regime` column (GBP sets use_regime_feature=true), the
+    OHLCV/session columns EnsembleBacktester consumes, and a chosen label cycle."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2022-01-01", periods=n, freq="1h", tz="UTC")
+    drift = rng.normal(scale=0.0006, size=n).cumsum()
+    close = 1.28 + drift
+    df = pd.DataFrame({
+        "timestamp_utc": to_epoch_seconds(idx),
+        "open": close + rng.normal(scale=0.0002, size=n),
+        "high": close + np.abs(rng.normal(scale=0.0007, size=n)),
+        "low": close - np.abs(rng.normal(scale=0.0007, size=n)),
+        "close": close,
+        "volume": 2000.0,
+        "session": "london",
+        "regime": rng.choice(["trend_up", "trend_down", "range"], n),
+        "atr": 0.0014,
+        # a handful of real FEATURE_COLUMNS names so build_training_matrix has
+        # something to train on
+        "ema_9": close,
+        "rsi": rng.uniform(20, 80, n),
+        "macd_line": rng.normal(scale=0.0003, size=n),
+        "adx": rng.uniform(10, 40, n),
+    })
+    df["timestamp"] = idx
+    df["label"] = [labels[i % len(labels)] for i in range(n)]
+    return df
+
+
+def _gbp_three_class_cfg():
+    cfg = load_config()
+    import copy as _copy
+    cfg = _copy.deepcopy(cfg)
+    # GBPUSD already ships model.include_zero_class=true; assert it so this test
+    # keeps guarding the real configuration rather than a local invention.
+    assert cfg["assets"]["GBPUSD"]["model"]["include_zero_class"] is True
+    return cfg
+
+
+def test_walk_forward_fold_without_no_trade_class_does_not_crash(capsys):
+    """Fold labels are only +1/-1 -> three-class y is {0: short, 2: long} with no
+    no_trade row. This used to abort the whole GBP backtest; it must now train and
+    return metrics for the fold."""
+    from scripts.run_backtest import strategy_fn_factory
+    from model.trainer import build_training_matrix
+    from scripts.run_backtest import merge_asset_cfg
+
+    cfg = _gbp_three_class_cfg()
+    train_df = _gbp_like_fold_df(400, labels=[1, -1], seed=5)
+    test_df = _gbp_like_fold_df(120, labels=[1, -1], seed=6)
+
+    # Guard the guard: this fold must really reach the trainer with the
+    # non-contiguous {0, 2} label space, otherwise the test would pass merely by
+    # taking the "too little data" neutral shortcut and prove nothing.
+    probe = merge_asset_cfg(cfg, "GBPUSD", "model")
+    X_probe, y_probe, _ = build_training_matrix(train_df, cfg=probe)
+    assert len(X_probe) >= 30
+    assert sorted(int(v) for v in y_probe.unique()) == [0, 2]
+
+    strategy_fn = strategy_fn_factory(cfg, model_path="unused", asset_key="GBPUSD")
+    result = strategy_fn(train_df, test_df, cfg)
+
+    assert isinstance(result, dict)
+    assert "profit_factor" in result
+    # It TRAINED - it did not silently fall back to the no-signal path.
+    assert "degraded to no-signal" not in capsys.readouterr().out
+
+
+def test_walk_forward_fold_missing_a_direction_degrades_to_no_signal(capsys):
+    """Fold labels are only -1/0 -> three-class y is {0: short, 1: no_trade} with
+    NO long outcome. Such a model cannot express p_long, so the fold must be
+    degraded to neutral 0.5/0.5 (no trades) with a visible warning - never a
+    crash and never a mis-decoded probability."""
+    from scripts.run_backtest import strategy_fn_factory
+
+    cfg = _gbp_three_class_cfg()
+    train_df = _gbp_like_fold_df(400, labels=[-1, 0], seed=5)
+    test_df = _gbp_like_fold_df(120, labels=[-1, 0], seed=6)
+
+    strategy_fn = strategy_fn_factory(cfg, model_path="unused", asset_key="GBPUSD")
+    result = strategy_fn(train_df, test_df, cfg)
+
+    assert isinstance(result, dict)
+    out = capsys.readouterr().out
+    assert "degraded to no-signal" in out, out
+    # Neutral probabilities can never pass the ensemble filters -> empty fold.
+    # (compute_metrics reports the count as `n_trades`.)
+    assert result["n_trades"] == 0

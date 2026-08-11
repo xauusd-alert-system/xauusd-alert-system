@@ -345,3 +345,124 @@ def test_predictor_raises_on_nan_input(tmp_path):
     bad_row[cols[0]] = np.nan
     with pytest.raises(ValueError):
         predictor.predict_proba(bad_row)
+
+
+# ---------------------------------------------------------------------------
+# Regression: three-class label space with a MISSING class.
+#
+# build_training_matrix encodes the three-class model as {0: short, 1: no_trade,
+# 2: long}. XGBoost's sklearn wrapper infers n_classes from np.unique(y) and
+# demands contiguous labels [0..n-1], so a training window holding no no_trade
+# rows arrives as classes [0, 2] and fit() died with
+#     ValueError: Invalid classes inferred from unique values of `y`.
+#                 Expected: [0 1], got [0 2]
+# which aborted the entire GBPUSD (the three-class asset) walk-forward run.
+# ---------------------------------------------------------------------------
+
+from model.trainer import (  # noqa: E402
+    normalize_label_space,
+    DegenerateLabelSpaceError,
+)
+
+THREE_CLASS_CFG = {
+    "model": {"include_zero_class": True, "type": "xgboost",
+              "calibration_method": "sigmoid", "random_seed": 42},
+    "labeling": {"horizon_candles_n": 36},
+}
+BINARY_CFG = {
+    "model": {"include_zero_class": False, "type": "xgboost",
+              "calibration_method": "sigmoid", "random_seed": 42},
+    "labeling": {"horizon_candles_n": 36},
+}
+
+
+def _directional_xy(n=600, seed=7):
+    """Feature 'a' fully determines the direction, so p_long must track it."""
+    rng = np.random.default_rng(seed)
+    a = rng.normal(size=n)
+    X = pd.DataFrame({"ema_9": a, "rsi": rng.normal(size=n),
+                      "atr": rng.normal(size=n), "macd_line": rng.normal(size=n)})
+    return a, X
+
+
+def test_normalize_label_space_passthrough_cases():
+    """Full three-class and plain binary spaces are already contiguous and must
+    be handed to the model untouched (no silent relabeling)."""
+    y3 = pd.Series([0, 1, 2] * 10)
+    assert sorted(normalize_label_space(y3, THREE_CLASS_CFG).unique()) == [0, 1, 2]
+
+    y2 = pd.Series([0, 1] * 15)
+    assert sorted(normalize_label_space(y2, BINARY_CFG).unique()) == [0, 1]
+
+
+def test_normalize_label_space_without_no_trade_remaps_to_binary():
+    """{0: short, 2: long} (no no_trade row in the window) must collapse onto the
+    binary encoding {0: short, 1: long} that ModelPredictor already decodes,
+    preserving WHICH rows are long and which are short."""
+    y = pd.Series([0, 2, 2, 0, 2])
+    out = normalize_label_space(y, THREE_CLASS_CFG)
+    assert sorted(out.unique()) == [0, 1]
+    # short rows stay short, long rows stay long (order preserved, not inverted)
+    assert list(out) == [0, 1, 1, 0, 1]
+
+
+def test_normalize_label_space_refuses_when_a_direction_is_missing():
+    """no_trade present but an entire DIRECTION absent: the fitted model's second
+    probability column would be P(no_trade), which the binary decode path would
+    report as p_long/p_short - a silently wrong directional probability. Must
+    raise instead so the caller can skip the window."""
+    for labels in ([0, 1, 1, 0], [1, 2, 2, 1]):
+        with pytest.raises(DegenerateLabelSpaceError):
+            normalize_label_space(pd.Series(labels), THREE_CLASS_CFG)
+
+
+def test_normalize_label_space_refuses_single_class():
+    with pytest.raises(DegenerateLabelSpaceError):
+        normalize_label_space(pd.Series([1, 1, 1]), THREE_CLASS_CFG)
+    with pytest.raises(DegenerateLabelSpaceError):
+        normalize_label_space(pd.Series([0, 0, 0]), BINARY_CFG)
+
+
+def test_three_class_window_without_no_trade_trains_and_keeps_direction(tmp_path):
+    """End-to-end regression for the GBPUSD crash: a three-class config whose
+    window contains only short/long rows must now train, calibrate, save and
+    predict - and p_long must still mean LONG."""
+    a, X = _directional_xy()
+    y = pd.Series(np.where(a > 0, 2, 0), index=X.index)  # {0, 2}: no no_trade
+    assert sorted(y.unique()) == [0, 2]
+
+    base = train_model(X, y, THREE_CLASS_CFG)          # used to raise ValueError
+    assert list(base.classes_) == [0, 1]
+    assert base._label_space_no_trade_absent is True
+
+    calibrated = calibrate_model(base, X, y, THREE_CLASS_CFG)
+    model_path = str(tmp_path / "degenerate_three_class.joblib")
+    save_model(calibrated, list(X.columns), model_path)
+
+    preds = ModelPredictor(model_path).predict_proba(X)
+    # Decoded on the binary path: no no_trade mass was ever observed.
+    assert set(preds.columns) == {"p_short", "p_long"}
+    assert np.allclose(preds["p_short"] + preds["p_long"], 1.0, atol=1e-6)
+    # Direction semantics preserved through the remap.
+    assert preds.loc[a > 1.0, "p_long"].mean() > preds.loc[a < -1.0, "p_long"].mean()
+
+
+def test_full_three_class_window_still_exposes_no_trade(tmp_path):
+    """The remap must NOT leak into healthy windows: with all three classes
+    present the model stays 3-class and still reports p_no_trade."""
+    a, X = _directional_xy(seed=11)
+    y = pd.Series(np.select([a > 0.5, a < -0.5], [2, 0], default=1), index=X.index)
+    assert sorted(y.unique()) == [0, 1, 2]
+
+    base = train_model(X, y, THREE_CLASS_CFG)
+    assert list(base.classes_) == [0, 1, 2]
+    assert base._label_space_no_trade_absent is False
+
+    calibrated = calibrate_model(base, X, y, THREE_CLASS_CFG)
+    model_path = str(tmp_path / "healthy_three_class.joblib")
+    save_model(calibrated, list(X.columns), model_path)
+
+    preds = ModelPredictor(model_path).predict_proba(X)
+    assert {"p_short", "p_no_trade", "p_long"} == set(preds.columns)
+    assert np.allclose(preds.sum(axis=1), 1.0, atol=1e-6)
+    assert preds.loc[a > 1.0, "p_long"].mean() > preds.loc[a < -1.0, "p_long"].mean()
