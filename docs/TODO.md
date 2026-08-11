@@ -124,7 +124,7 @@ GOLD | ЗОЛОТО | XAUUSD
 
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **244 passed in ~20s** (100% green; +4 FX v3 regression теста: ранний BE → скретч / полный стоп по дефолту в ensemble-backtest, ранний BE в rule-движке, loader default+overrides).
+- [x] **Тестовый набор:** `pytest -q` — **244 passed in ~20s** (100% green; +4 FX v3 regression теста: ранний BE → скретч / полный стоп по дефолту в ensemble-backtest, ранний BE в rule-движке, loader default+overrides). *(историческая отметка на момент FX v3; текущий счёт — 435 passed, см. `README.md`)*.
 - [x] **Веб-дашборд реального времени:** `http://localhost:8000/dashboard` — **ONLINE**.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.
