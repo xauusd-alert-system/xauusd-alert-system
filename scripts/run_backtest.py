@@ -101,6 +101,39 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
     return df
 
 
+def _maybe_downgrade_three_class(cfg_inner: dict, train_df: pd.DataFrame,
+                                asset_key: str) -> dict:
+    """Use a binary model for this fold when three-class no-trade labels are absent.
+
+    The configured three-class semantics remain intact for production and for folds
+    that have enough no-trade examples.  A fold with virtually none cannot support
+    a calibrated no-trade probability, however; making it explicitly binary avoids
+    both repeated {0,2} remap warnings and identity-only calibration.
+    """
+    model_cfg = cfg_inner.get("model", {})
+    if not model_cfg.get("include_zero_class", False) or "label" not in train_df:
+        return cfg_inner
+
+    asset_model = cfg_inner.get("assets", {}).get(asset_key, {}).get("model", {})
+    minimum = float(asset_model.get("min_no_trade_frac", model_cfg.get("min_no_trade_frac", 0.01)))
+    labels = train_df["label"].dropna()
+    no_trade_fraction = float((labels == 0).mean()) if len(labels) else 0.0
+    if no_trade_fraction >= minimum:
+        return cfg_inner
+
+    downgraded = copy.deepcopy(cfg_inner)
+    downgraded.setdefault("model", {})["include_zero_class"] = False
+    # This marker is deliberately fold-local: it documents why a configured
+    # three-class model was fit as binary without changing the asset's policy.
+    downgraded["model"]["include_zero_class_effectively_binary"] = True
+    print(
+        "[run_backtest] INFO: %s fold has %.3f%% no_trade labels (< %.3f%%); "
+        "using calibrated binary short/long model for this fold."
+        % (asset_key, no_trade_fraction * 100, minimum * 100)
+    )
+    return downgraded
+
+
 def strategy_fn_factory(cfg, model_path: str, asset_key: str):
     # HIGH 11: walk-forward folds must NEVER overwrite the production model file.
     # Saving each fold's model to the prod path destroys the deployed model used by
@@ -117,6 +150,7 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
         # GBPUSD v4 backtest silently trains the GLOBAL binary model instead of
         # the per-asset 3-class + regime-feature model the live trader uses.
         cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "model")
+        cfg_inner = _maybe_downgrade_three_class(cfg_inner, train_df, asset_key)
 
         X_train, y_train, cols = build_training_matrix(train_df, cfg=cfg_inner)
         test_df_eval = test_df.copy()

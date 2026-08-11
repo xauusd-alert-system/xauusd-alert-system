@@ -125,6 +125,17 @@ class MultiAssetMT5Trader:
 
         self.magic_number = 777111
         self.dry_run = os.getenv("DRY_RUN") == "1"
+        self.require_demo_account = bool(self.cfg.get("execution", {}).get("require_demo_account", False))
+        if self.require_demo_account and not self.dry_run:
+            initialize_mt5()
+            account = mt5.account_info()
+            demo_mode = getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", None)
+            if account is None or demo_mode is None or getattr(account, "trade_mode", None) != demo_mode:
+                shutdown_mt5()
+                raise RuntimeError(
+                    "Execution is locked: execution.require_demo_account=true and the connected "
+                    "MT5 account is not a demo account. Set DRY_RUN=1 to inspect signals only."
+                )
         # W8/W9: risk manager reads limits from config `execution.*` and counts
         # only our own positions (filtered by magic), not foreign/manual ones.
         self.risk_manager = InstitutionalRiskManager(self.cfg, magic=self.magic_number)
@@ -149,13 +160,28 @@ class MultiAssetMT5Trader:
 
         self.pipelines = {}
         assets = self.cfg.get("assets", {})
+        # `enabled` permits an asset in research/data pipelines. Execution can
+        # be narrower: this prevents unvalidated assets from becoming tradeable
+        # simply because their data collection is enabled.
+        allowed_assets = self.cfg.get("execution", {}).get("enabled_assets")
+        self.execution_assets = set(allowed_assets) if allowed_assets else {
+            key for key, value in assets.items() if value.get("enabled", False)
+        }
         for asset_key, a_cfg in assets.items():
-            if a_cfg.get("enabled", False):
+            if a_cfg.get("enabled", False) and asset_key in self.execution_assets:
                 try:
                     self.pipelines[asset_key] = RealtimePipeline(asset_key=asset_key, cfg=self.cfg, data_mode="live")
                     logger.info(f"Loaded pipeline for {asset_key}")
                 except Exception as e:
                     logger.warning(f"Could not load pipeline for {asset_key}: {e}")
+
+        # FX probes are deliberately isolated from model execution: they create
+        # bounded, short-lived demo samples to calibrate spread/slippage for the
+        # unapproved EURUSD/GBPUSD strategies.
+        from execution.fx_execution_probe import FXProbeScheduler
+        self.fx_probe_scheduler = FXProbeScheduler(self.cfg)
+        if self.dry_run:
+            self.fx_probe_scheduler.enabled = False
 
         self.be_state = {}
         self.active_trades = {}
@@ -873,9 +899,18 @@ class MultiAssetMT5Trader:
                 except Exception as e:
                     logger.error(f"Breakeven check error: {e}")
 
+            # Independent cost-calibration samples; never uses an ML signal and
+            # remains hard-bounded by the scheduler's session/rate/spread limits.
+            try:
+                probe = self.fx_probe_scheduler.maybe_run()
+                if probe is not None:
+                    logger.info("[fx-probe] %s", probe)
+            except Exception as e:
+                logger.error("[fx-probe] scheduler error: %s", e)
+
             current_bar_time = 0
             for asset_key, a_cfg in self.cfg["assets"].items():
-                if not a_cfg.get("enabled", False):
+                if not a_cfg.get("enabled", False) or asset_key not in self.execution_assets:
                     continue
                 symbol = a_cfg["mt5_symbol"]
                 try:
