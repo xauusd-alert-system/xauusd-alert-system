@@ -57,13 +57,38 @@ def _compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 def add_regime_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Adds adx, plus_di, minus_di, bb_width_percentile, atr_ratio columns needed for classification."""
+    """Adds adx, plus_di, minus_di, bb_width_percentile, atr_ratio columns needed for classification.
+
+    A3 (audit 2026-08-12): this module is the SINGLE OWNER of
+    `bb_width_percentile`, which is a 0..100 rolling-50 percentile RANK - the
+    scale `regime.bb_width_compression_pctile` (20) is expressed in, and the
+    scale the trained model feature of the same name has always carried in
+    production. features/indicators.py used to publish a 0..1 rolling-100
+    min-max under the identical name and this function silently overwrote it,
+    so the meaning of the column depended on call order. That series now lives
+    in `bb_width_minmax_100`.
+    """
     out = df.copy()
     adx_period = cfg["features"]["atr_period"]  # reuse ATR period config for ADX smoothing consistency
     adx, plus_di, minus_di = _compute_adx(out, adx_period)
     out["adx"] = adx
     out["plus_di"] = plus_di
     out["minus_di"] = minus_di
+
+    # A3 guard: refuse to overwrite a 0..1 `bb_width_percentile` a second time.
+    # A genuine rank column can never max out at <= 1.0 (min_periods=20 makes the
+    # smallest possible non-NaN rank 100/20 = 5.0), so a <= 1.0 maximum means the
+    # frame was built by a stale features/indicators.py that still publishes the
+    # min-max series under this name. Fail loudly instead of masking it.
+    if "bb_width_percentile" in out.columns:
+        existing = pd.to_numeric(out["bb_width_percentile"], errors="coerce").dropna()
+        if len(existing) and float(existing.max()) <= 1.0:
+            raise ValueError(
+                "bb_width_percentile arrived on a 0..1 scale, so it is still being "
+                "produced by features/indicators.build_all_indicators. That column "
+                "must be published as `bb_width_minmax_100`; `bb_width_percentile` "
+                "is the 0..100 regime rank owned by regime/classifier.py (audit A3)."
+            )
 
     # bb_width must already exist (from features/indicators.py::build_all_indicators)
     if "bb_width" in out.columns:
@@ -108,6 +133,11 @@ def classify_regime_row(row: pd.Series, cfg: dict) -> RegimeLabel:
         return RegimeLabel.REVERSAL_WATCH
 
     # Gate 4: compression - Bollinger width in bottom percentile -> squeeze, breakout pending
+    #
+    # A3: `bb_width_percentile` is the 0..100 rank written by add_regime_indicators,
+    # which is the scale bb_width_compression_pctile (20) is expressed in. Never
+    # compare this threshold against the 0..1 `bb_width_minmax_100` series - every
+    # value there is below 20, which would label every single bar COMPRESSION.
     bb_pctile = row.get("bb_width_percentile", np.nan)
     if not pd.isna(bb_pctile) and bb_pctile < regime_cfg["bb_width_compression_pctile"]:
         return RegimeLabel.COMPRESSION
