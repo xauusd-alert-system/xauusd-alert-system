@@ -1,4 +1,4 @@
-ensemble:
+﻿ensemble:
   min_confidence_to_alert: 0.60
   # W15 (audit 2026-08-10): these probabilities were previously hard-coded
   # defaults inside model/ensemble.py with no entry in config.yaml, so the
@@ -112,16 +112,22 @@ assets:
     # deviation (20 pts, instrument-specific), never a global absolute slippage.
     slippage_usd: 0.05
     ensemble:
-      min_confidence_to_alert: 0.70
+      # Recalculated 2026-08-12 for rule/ml 0.10/0.90 (was 0.15/0.85): bar 0.71
+      # keeps the effective p_max admission cuts as close as possible to the old
+      # semantics under the new blend (agree path 0.5777 -> 0.5816, rule-neutral
+      # path 0.5988 -> 0.5949; +/-0.4pp minimax split). Note the bar applies to a
+      # BLENDED score, so a weight change without a bar change silently moves both
+      # cuts (at 0.70 kept: agree +0.24pp stricter, neutral -0.55pp looser).
+      min_confidence_to_alert: 0.71
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
-      rule_weight: 0.15
-      ml_weight: 0.85
+      rule_weight: 0.10
+      ml_weight: 0.90
     # Equal-step signal grid clamps (price points). Gold M5 ATR ~3-7 -> keep the
     # step inside 2..8 pts so extreme ATR cannot produce absurd TP/SL levels.
     signal_grid:
-      step_min_points: 2.0
-      step_max_points: 8.0
+      step_min_points: 3.0
+      step_max_points: 9.0
     # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
     # M5 -> M15 if cost_ratio > 15% on the real DB (measure first:
     #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M5
@@ -196,18 +202,23 @@ assets:
       # conviction entries) and the crypto-night bar is kept strict. Validate on
       # live data and re-run the decision gate before committing capital; do NOT
       # tune these from a single fresh snapshot.
-      min_confidence_to_alert: 0.66
+      # Recalculated 2026-08-12 for rule/ml 0.10/0.90 (was 0.20/0.80): bar 0.68 is
+      # the minimax-equivalent of the old 0.66 under the new blend (agree p_max
+      # cut 0.6035 -> 0.6160, rule-neutral 0.6485 -> 0.6360; +/-1.25pp split).
+      # Keeping 0.66 with the new weights would have made the trend-agree path
+      # +0.85pp stricter and the rule-neutral path -1.65pp looser.
+      min_confidence_to_alert: 0.68
       min_ml_probability: 0.60
       ml_confidence_floor: 0.68
       crypto_night_min_probability: 0.62
       ev_threshold: 0.05
       suppress_sessions: []
       suppress_regimes: [compression, reversal_watch]
-      rule_weight: 0.20
-      ml_weight: 0.80
+      rule_weight: 0.10
+      ml_weight: 0.90
     signal_grid:
-      step_min_points: 200.0
-      step_max_points: 3000.0
+      step_min_points: 20.0
+      step_max_points: 50.0
     # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
     # M5 -> M15 if cost_ratio > 15% on the real DB (measure first with
     #   python -m scripts.diag_r_metrics --asset BTCUSD --timeframe M5|M15
@@ -547,7 +558,7 @@ execution:
 # (priority 3). DEFAULT OFF: enabling changes live order sizes, so it is a
 # separate, audited step (execution/risk_sizer.py implements the math).
 risk:
-  enabled: false
+  enabled: true
   # fraction of equity risked per trade on a full stop-out (audit: 0.002-0.0025)
   risk_per_trade_pct: 0.0025
   # correlated-cluster stop-risk cap (fraction of equity)
@@ -564,7 +575,7 @@ risk:
     - [-0.04, 0.75]
     - [-0.06, 0.50]
     - [-0.08, 0.0]
-  min_lot: 0.01
+  min_lot: 0.1
 
 
 # ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====
