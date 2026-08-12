@@ -255,17 +255,31 @@ class MultiAssetMT5Trader:
             logger.error(f"Failed to persist management state: {e}")
 
     def _load_management_state(self):
-        """Restore persisted per-position management state on startup."""
+        """Restore persisted per-position management state on startup.
+
+        JSON object keys are always strings, but every runtime path uses INT
+        MT5 tickets (pos.ticket, check_and_move_breakeven's current_tickets,
+        the close detector's set difference). Restoring string keys made a
+        still-open ticket "unknown" (it was re-registered with tp1=None, losing
+        its TP targets) and dropped the stale string key into the close
+        detector, where history_deals_get(position="<str>") blew up and took
+        the whole detection cycle (incl. Telegram close notifications) down
+        with it after every restart. Coerce back to int."""
         if not os.path.exists(self.management_state_path):
             return
         try:
             with open(self.management_state_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                self.active_trades = {
-                    str(k): v for k, v in data.items()
-                    if isinstance(v, dict) and v.get("tp1") is not None
-                }
+                loaded = {}
+                for k, v in data.items():
+                    if not isinstance(v, dict) or v.get("tp1") is None:
+                        continue
+                    try:
+                        loaded[int(k)] = v
+                    except (TypeError, ValueError):
+                        logger.warning(f"Skipping management-state entry with non-ticket key {k!r}")
+                self.active_trades = loaded
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Could not read management state {self.management_state_path}: {e}")
 
@@ -400,19 +414,25 @@ class MultiAssetMT5Trader:
             return
         positions = positions_get_by_magic(magic=self.magic_number)
         current_tickets = set()
-        logger.info(f"=== BE CHECK: found {len(positions) if positions else 0} positions (magic={self.magic_number}) ===")
 
-        if not positions:
-            # All previously tracked tickets are gone -> every position we knew
-            # about is closed; drop their entry contexts as well (kept in sync
-            # with the close-detector path below).
-            for _ticket in list(self.active_trades.keys()):
-                try:
-                    purge_closed_position_context(_ticket)
-                except Exception as e:
-                    logger.error(f"Position context purge failed for #{_ticket}: {e}")
-            self.active_trades = {}
+        # CRITICAL: mt5.positions_get() returns None ONLY on an API error, and an
+        # EMPTY tuple () when there are simply no open positions left. The old
+        # `if not positions: ...; return` branch conflated the two and, worse,
+        # wiped self.active_trades and returned BEFORE the close detector below
+        # ever ran. So whenever the last (usually only) open position was closed
+        # by the broker TP/SL, the Telegram "TRADE CLOSED" message, the
+        # log_trade_close persistence and the loss-streak tracking were all
+        # silently skipped. Now: on API error we keep state and retry next tick;
+        # on an empty list we fall THROUGH to the close detector, which reports
+        # every tracked ticket as closed.
+        if positions is None:
+            logger.warning(
+                f"=== BE CHECK: positions_get failed (MT5 API error); keeping "
+                f"management state, skipping this tick (magic={self.magic_number}) ==="
+            )
             return
+
+        logger.info(f"=== BE CHECK: found {len(positions)} positions (magic={self.magic_number}) ===")
 
         for pos in positions:
             ticket = pos.ticket
@@ -547,12 +567,21 @@ class MultiAssetMT5Trader:
         # so a restart keeps managing open positions correctly.
         self._save_management_state()
 
-        # Детектор закрытия
+        # Детектор закрытия. Срабатывает и когда закрылась одна позиция из
+        # нескольких, и — после фикса выше — когда закрылась ПОСЛЕДНЯЯ (тогда
+        # positions пуст и current_tickets пуст, значит все отслеживаемые тикеты
+        # попадают сюда и уведомление в Telegram уходит).
         closed_tickets = set(self.active_trades.keys()) - current_tickets
         for ticket in closed_tickets:
             trade_info = self.active_trades.pop(ticket, {})
             symbol = trade_info.get("symbol", "ASSET")
-            history_deals = mt5.history_deals_get(position=ticket)
+            # A failing history lookup must never abort the close handling of
+            # the remaining tickets (nor the Telegram notification below).
+            try:
+                history_deals = mt5.history_deals_get(position=ticket)
+            except Exception as e:
+                logger.error(f"history_deals_get failed for #{ticket}: {e}")
+                history_deals = None
             total_pnl = 0.0
             if history_deals:
                 total_pnl = sum(d.profit + d.swap + d.commission for d in history_deals)
