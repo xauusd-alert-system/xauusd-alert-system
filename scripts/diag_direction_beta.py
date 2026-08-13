@@ -2,30 +2,39 @@
 
 WHY THIS EXISTS
 ---------------
-The deflated-Sharpe run over the 12 pre-lock folds (2026-08-13, XAUUSD M15,
---end-date 2026-08-08) reported:
+The deflated-Sharpe run over the 12 pre-lock folds (2026-08-14, XAUUSD M15,
+--end-date 2026-08-08, honest engine and honest fold slicing) reported:
 
-    variant   n_tr     PnL   WR%    PF   DSR(Nef)  +folds
-    current    472  6386.4  34.1  4.19       0.87    6/12
-    null       922 10202.9  48.8  1.45       0.84   12/12
+    variant   n_tr     PnL   WR%    PF   DSR(729)  +folds
+    current    365  -396.5  63.3  0.97       0.00    4/12
+    null       859  -967.6  66.0  0.98       0.00    6/12
 
 `null` is the negative control: random 0.5+/-0.05 probabilities, no model at
-all. It traded twice as often as the shipped config, earned more money, and was
-profitable in every single fold. A coin flip cannot out-perform a signal unless
-the money is coming from somewhere other than the signal.
+all. It trades more than twice as often as the shipped config and loses about
+the same 1.1 per trade. A model that cannot beat a coin flip is not selecting
+anything, so the question is where the P&L actually comes from.
 
-There are exactly three places it can come from, and the metrics logged today
+There are exactly three places it can come from, and the headline metrics
 cannot tell them apart:
 
-1. DIRECTION BIAS x MARKET DRIFT. If the engine is structurally net long and
-   gold rose across the sample, the PnL is beta. Measured here as the per-fold
-   long/short split next to a buy-and-hold benchmark computed on the SAME test
-   window with the SAME lot size and contract multiplier, plus the correlation
-   between fold PnL and that benchmark.
+1. DIRECTION BIAS x MARKET DRIFT. If the engine is structurally one-sided and
+   the sample drifts, the PnL is beta with a sign. Measured here as the
+   per-fold long/short split next to a buy-and-hold benchmark computed on the
+   SAME test window with the SAME lot size and contract multiplier, plus the
+   correlation between fold PnL and that benchmark.
 2. EXIT POLICY. On TP1 the stop moves to entry, so most would-be losers book a
    scratch worth roughly the round-trip cost instead of a full stop. Measured
    here as an exit-reason histogram with PnL attribution.
 3. SIGNAL. Whatever is left once 1 and 2 are accounted for.
+
+SUPERSEDED NUMBERS
+------------------
+Earlier revisions of this docstring quoted `current 472 / +6386.4` and
+`null 922 / +10202.9`. Both are void: the first came from the breakeven sign
+bug (short stops were booked as scratches, commit 8ee9476), the second from
+fold slicing that leaked the label horizon into training and invented warm-up
+trades from fillna(0.0) probabilities (commit 0b242ff). The question this
+script asks did not change; only the numbers did.
 
 HONESTY
 -------
@@ -60,9 +69,58 @@ from scripts.run_backtest import (
 from scripts.deflated_sharpe import _build_fold_frames
 from model.ensemble_backtest import EnsembleBacktester
 
+# A correlation at or above this magnitude means the folds are essentially a
+# geared bet on the sample drift, in one direction or the other.
+BETA_STRONG = 0.6
+# Below this magnitude drift explains little enough to be set aside.
+BETA_PARTIAL = 0.3
+
 
 def _pnl(trades) -> float:
     return float(sum(float(t.pnl) for t in trades)) if trades else 0.0
+
+
+def beta_verdict(corr: float) -> list[str]:
+    """Render the market-beta verdict for a fold-PnL / buy-and-hold correlation.
+
+    The verdict is a function of MAGNITUDE, with the sign reported separately.
+    A large negative correlation is market dependence just as much as a large
+    positive one: it means the book is systematically on the wrong side of the
+    drift, and its fold results are still explained by the market rather than
+    by selection. The pre-fix ladder tested `corr >= 0.6` / `corr >= 0.3` and
+    therefore printed "not explained by market drift" for corr = -0.653, which
+    was the single most misleading line in the whole diagnostic.
+
+    Returns the lines to print, so the wording can be asserted in tests.
+    """
+    if not np.isfinite(corr):
+        return ["   -> correlation unavailable; beta cannot be ruled in or out."]
+
+    strength = abs(corr)
+    same_side = corr > 0
+
+    if strength >= BETA_STRONG:
+        if same_side:
+            return [
+                "   -> fold results TRACK the market: the PnL is largely BETA, not edge.",
+                "      The book is on the same side as the drift, so folds win when the",
+                "      market runs and the signal gets credit for the trend.",
+            ]
+        return [
+            "   -> fold results run OPPOSITE to the market: this is still BETA, with the",
+            "      sign inverted, and it is worse than being flat.",
+            "      The book is systematically on the wrong side of the drift, so the folds",
+            "      lose most in exactly the windows where the market moved most.",
+        ]
+
+    if strength >= BETA_PARTIAL:
+        side = "same side as" if same_side else "opposite side to"
+        return [
+            f"   -> partial market dependence ({side} the drift); edge is not cleanly",
+            "      separated from drift.",
+        ]
+
+    return ["   -> fold results are not explained by market drift."]
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -178,13 +236,8 @@ def main(argv: list[str] | None = None) -> None:
         corr_s = "n/a (too few traded folds)"
     print(f"\n1. MARKET BETA")
     print(f"   corr(fold PnL, buy-and-hold) = {corr_s}")
-    if np.isfinite(corr):
-        if corr >= 0.6:
-            print("   -> fold results track the market: the PnL is largely BETA, not edge.")
-        elif corr >= 0.3:
-            print("   -> partial market dependence; edge is not cleanly separated from drift.")
-        else:
-            print("   -> fold results are not explained by market drift.")
+    for line in beta_verdict(corr):
+        print(line)
     long_share = 100.0 * tot_long / tot_n if tot_n else 0.0
     print(f"   long share = {long_share:.1f}% of {tot_n} trades "
           f"({'directionally biased' if abs(long_share - 50.0) >= 10.0 else 'roughly balanced'})")
