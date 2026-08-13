@@ -218,18 +218,54 @@ def test_order_flow_features_no_lookahead():
                           equal_nan=True), f"Look-ahead in order_flow column {col}"
 
 
+# Widest trailing slice read by any helper in features/smart_money_metrics.py
+# (calculate_zone_strength uses window=50). Any frame at least this long must
+# already contain every bar the metrics are allowed to look at.
+SMC_WIDEST_WINDOW = 50
+
+
 def test_smart_money_metrics_no_lookahead():
-    """Institutional metrics use df.tail(window), reading only recent bars: a
-    truncated frame must give the same result at row i as the full frame."""
+    """Institutional metrics must depend ONLY on the trailing bars they read.
+
+    Every calculate_* helper slices df.tail(window) with window <= 50, so the
+    returned dict has to be invariant to how much OLDER history is prepended.
+    The frame END is therefore pinned while the frame START is varied.
+
+    The previous version of this test moved the end as well (full frame ended
+    at bar 300, truncated frame at bar 250), so it compared two completely
+    different stretches of market and could not prove anything about
+    causality. It passed on synthetic candles by luck and started failing the
+    moment it was pointed at real XAUUSD history -- the failure was the test's,
+    not the code's.
+
+    Sensitivity: the public API returns QUANTISED scores (1..10 and 5..95), so
+    a frame-length dependence smaller than one quantum is invisible here.
+    Measured on 60 random windows with injected defects, this form catches
+    frame-anchored computations -- the OBV / bb_width / asia-range bug class
+    fixed in Layer 0 -- on 93% of windows, and threshold-normalisation drift on
+    8%. It is a guard against the former, not a proof against the latter.
+    """
     from features.smart_money_metrics import compute_institutional_metrics
     df = _sample_df(n=300)
     df["atr"] = 0.5
-    full = compute_institutional_metrics(df)
-    trunc = compute_institutional_metrics(df.iloc[:250].copy())
-    # Both operate on the last 30 bars; when those bars coincide, the metrics
-    # (which only depend on the trailing slice) must be identical.
-    assert full["delta_confidence"] == trunc["delta_confidence"]
-    assert full["manipulation_index"] == trunc["manipulation_index"]
+    short_len = SMC_WIDEST_WINDOW + 10
+    assert len(df) >= short_len + 35, "need enough bars to vary the frame start"
+
+    checked = 0
+    for end in range(short_len + 5, len(df) + 1, 30):
+        long_frame = df.iloc[:end].copy().reset_index(drop=True)
+        short_frame = df.iloc[end - short_len:end].copy().reset_index(drop=True)
+        assert len(long_frame) > len(short_frame), "frames must differ in length"
+        full = compute_institutional_metrics(long_frame)
+        trunc = compute_institutional_metrics(short_frame)
+        for key in full:
+            assert full[key] == trunc[key], (
+                f"Look-ahead in smart-money metric {key!r}: prepending "
+                f"{end - short_len} older bars changed it at frame end {end} "
+                f"({full[key]!r} != {trunc[key]!r})"
+            )
+        checked += 1
+    assert checked >= 5, f"expected several anchor points, checked {checked}"
 
 
 def test_fractional_diff_no_lookahead():

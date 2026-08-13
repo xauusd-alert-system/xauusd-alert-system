@@ -23,7 +23,7 @@ from regime.classifier import add_regime_indicators, classify_regime_series
 from labeling.label_generator import generate_labels_from_config
 from model.trainer import (
     build_training_matrix,
-    time_ordered_split,
+    purged_time_ordered_split,
     train_model,
     calibrate_model,
     save_model,
@@ -102,7 +102,17 @@ def main():
         raise SystemExit(f"Need both classes present for {args.symbol}; got only one class.")
 
     train_ratio = cfg["model"].get("train_ratio", 0.8)
-    X_train, X_test, y_train, y_test = time_ordered_split(X, y, train_ratio)
+    # Purge the boundary. The labels of the last `horizon` training rows are
+    # decided by bars that fall inside the test window, and rolling features
+    # (obv, atr_percentile, bb_width_percentile) carry state across the split,
+    # which `embargo` covers. Only the training side shrinks - the test slice is
+    # identical to the unpurged one, so metrics stay comparable across this fix.
+    # backtest/walk_forward.py already does this; production training did not.
+    horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 0))
+    embargo = int(cfg.get("backtest", {}).get("walk_forward", {}).get("embargo_candles", 0))
+    X_train, X_test, y_train, y_test = purged_time_ordered_split(
+        X, y, train_ratio, horizon=horizon, embargo=embargo
+    )
 
     base = train_model(X_train, y_train, cfg)
     calibrated = calibrate_model(base, X_train, y_train, cfg)
@@ -113,6 +123,7 @@ def main():
     print(f"rows_featured={len(df)}")
     print(f"rows_labeled_binary={len(X)}")
     print(f"train_rows={len(X_train)}")
+    print(f"purge_gap_rows={horizon + embargo} (horizon={horizon} embargo={embargo})")
     print(f"test_rows={len(X_test)}")
     print(f"class_counts={y.value_counts().to_dict()}")
     print(f"saved_model={args.output}")
