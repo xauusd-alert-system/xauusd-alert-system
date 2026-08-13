@@ -4,6 +4,8 @@ Label generator for supervised learning.
 Supports:
 - fixed barriers: absolute target/stop distances
 - atr_scaled barriers: target/stop distances derived from the row's ATR
+- traded_event barriers: the event the execution engine actually resolves
+  (protective level before stop), see generate_labels_traded_event
 
 CRITICAL NO-LOOK-AHEAD WARNING:
 This module is intentionally forward-looking for OFFLINE labeling only.
@@ -109,6 +111,274 @@ def generate_labels_atr_scaled(
         labels[i] = outcome
 
     return pd.Series(labels, index=df.index, name="label")
+
+
+# ---------------------------------------------------------------------------
+# A10: labels for the event the execution engine actually resolves.
+# ---------------------------------------------------------------------------
+
+def _execution_costs(cfg: dict, asset_key: str) -> tuple:
+    """(spread, slippage) in absolute price units, resolved exactly like
+    EnsembleBacktester.__init__ does: per-asset spread_usd / slippage_usd with a
+    fallback to the global *_points values divided by 100."""
+    bt_cfg = cfg.get("backtest", {})
+    asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+    spread = asset_cfg.get("spread_usd", bt_cfg.get("spread_points", 25) / 100.0)
+    slippage = asset_cfg.get("slippage_usd", bt_cfg.get("slippage_points", 5) / 100.0)
+    return float(spread), float(slippage)
+
+
+def generate_labels_traded_event(
+    df: pd.DataFrame,
+    cfg: dict,
+    asset_key: str = "XAUUSD",
+    direction: int = 1,
+    horizon_n: int = None,
+    include_costs: bool = True,
+    require_net_positive: bool = True,
+    use_regime_overrides: bool = True,
+) -> pd.Series:
+    """Binary label for the event EnsembleBacktester actually resolves.
+
+    WHY THIS EXISTS (A10)
+    ---------------------
+    The training label and the traded trade were describing different events.
+    Labels came from the triple barrier (target 1.2 ATR, stop 1.0 ATR, horizon
+    36). The trade resolves against the signal grid: TP1 at 1.0 ATR banks 50%
+    and moves the stop to entry, TP3 at 2.0 ATR runs the remainder, and the
+    stop sits at 2.0 ATR. Measured over the 12 pre-lock folds, 80.7% of exits
+    were post-TP1 breakeven scratches, 15.9% were TP3 runners and only 3.2%
+    were full stops -- so the old label described the outcome of 3.2% of
+    trades. A model trained on it cannot express a preference about the trade
+    that is actually placed.
+
+    THE EVENT
+    ---------
+    label = 1  the protective level is touched before the stop. Once that
+               happens the stop moves to entry, so the trade can no longer take
+               the full 2x loss: it is either a scratch or a runner.
+    label = 0  the stop is touched first -> full loss.
+    label = NaN neither barrier resolves within the horizon (timeout), ATR is
+               missing/nonpositive, or the event is not tradable net of costs.
+
+    The protective level is breakeven_trigger_atr * (TP1 distance), which is the
+    level the engine uses to move the stop to entry. With the legacy
+    breakeven_trigger_atr = 1.0 it coincides with TP1; assets configured with an
+    early breakeven (e.g. FX at 0.5) get their own, nearer level.
+
+    FIDELITY TO THE ENGINE
+    ----------------------
+    - Alignment: the label is stored on the SIGNAL bar, while the entry is the
+      NEXT bar's open. This matches fill_mode="next_open", so a model consuming
+      causal features at the signal bar is answering the question that will
+      actually be asked of it.
+    - Entry price: the next bar's open plus half-spread plus one slippage, both
+      adverse, exactly as _apply_slippage and the entry block do.
+    - Barrier widths: ATR of the ENTRY bar (the engine reads atrs[i] at the
+      entry bar), multiplied by the grid's tp1_mult / stop_mult.
+    - Grid resolution: get_signal_grid with the per-asset section, and when
+      use_regime_overrides is set, the regime of the SIGNAL bar, which is the
+      regime the engine passes (regimes[i - 1] at entry bar i).
+    - Same-bar double touch resolves to the stop, mirroring the engine's
+      conservative double_touch_stop rule. Barrier crossing is tested against
+      raw highs/lows because exit costs change the money booked, not which
+      level is reached first.
+    - Exits are scanned from the bar after entry, since the engine never
+      evaluates barriers on the entry bar itself.
+
+    COSTS (A12)
+    -----------
+    require_net_positive drops events whose TP1 distance cannot cover the
+    round-trip cost (a full spread plus two slippages). Reaching a target that
+    does not pay for its own execution is not a favourable outcome, and
+    labelling it 1 is how a backtest quietly manufactures edge on tight-range
+    assets. On gold the cost is ~0.35 against an ATR of several dollars, so this
+    is a no-op there and a real filter on FX.
+
+    Returns a Series named "label_traded" aligned to df.index.
+    """
+    from config.loader import get_signal_grid
+
+    if int(direction) not in (1, -1):
+        raise ValueError(f"direction must be +1 or -1, got {direction!r}")
+    dir_ = int(direction)
+
+    lab_cfg = cfg.get("labeling", {})
+    asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+    atr_col = lab_cfg.get("atr_column", "atr")
+    if atr_col not in df.columns:
+        raise ValueError(f"ATR column {atr_col!r} missing from frame")
+    horizon = int(horizon_n if horizon_n is not None else lab_cfg.get("horizon_candles_n", 36))
+    spread, slippage = _execution_costs(cfg, asset_key)
+    round_trip = spread + 2.0 * slippage
+
+    base_grid = get_signal_grid(cfg, asset_cfg)
+    grid_cache = {None: base_grid}
+
+    def _grid_for(regime_name):
+        if not use_regime_overrides or regime_name is None:
+            return base_grid
+        if regime_name not in grid_cache:
+            grid_cache[regime_name] = get_signal_grid(cfg, asset_cfg, regime=regime_name)
+        return grid_cache[regime_name]
+
+    n = len(df)
+    opens = df["open"].values
+    highs = df["high"].values
+    lows = df["low"].values
+    atrs = df[atr_col].values
+    has_regime = use_regime_overrides and ("regime" in df.columns)
+    regimes = df["regime"].values if has_regime else None
+
+    labels = np.full(n, np.nan)
+
+    for s in range(n - 1):
+        entry_bar = s + 1
+        if entry_bar + 1 >= n:
+            break
+
+        atr_e = atrs[entry_bar]
+        if pd.isna(atr_e) or atr_e <= 0:
+            continue
+        atr_e = float(atr_e)
+
+        if has_regime:
+            reg = regimes[s]
+            reg_name = reg.value if hasattr(reg, "value") else str(reg)
+        else:
+            reg_name = None
+        grid = _grid_for(reg_name)
+        tp1_mult = float(grid.get("tp1_mult", 1.0))
+        stop_mult = float(grid.get("stop_mult", 3.0))
+        be_trigger = float(grid.get("breakeven_trigger_atr", 1.0))
+
+        tp1_distance = atr_e * tp1_mult
+        if require_net_positive and tp1_distance <= round_trip:
+            # The first target cannot pay for its own execution.
+            continue
+
+        entry = float(opens[entry_bar])
+        if include_costs:
+            entry = entry + dir_ * (spread / 2.0) + dir_ * slippage
+
+        protect_level = entry + dir_ * be_trigger * tp1_distance
+        stop_level = entry - dir_ * atr_e * stop_mult
+
+        last_bar = min(n - 1, entry_bar + horizon)
+        outcome = np.nan
+        for j in range(entry_bar + 1, last_bar + 1):
+            if dir_ == 1:
+                hit_protect = highs[j] >= protect_level
+                hit_stop = lows[j] <= stop_level
+            else:
+                hit_protect = lows[j] <= protect_level
+                hit_stop = highs[j] >= stop_level
+
+            if hit_stop and hit_protect:
+                # Intrabar order unknowable -> assume the stop, like the engine.
+                outcome = 0.0
+                break
+            if hit_protect:
+                outcome = 1.0
+                break
+            if hit_stop:
+                outcome = 0.0
+                break
+
+        labels[s] = outcome
+
+    return pd.Series(labels, index=df.index, name="label_traded")
+
+
+def generate_labels_traded_direction(
+    df: pd.DataFrame,
+    cfg: dict,
+    asset_key: str = "XAUUSD",
+    **kwargs,
+) -> pd.Series:
+    """Which SIDE is the better bet under the real trade geometry.
+
+    Evaluates generate_labels_traded_event for both directions and keeps only
+    bars where the two sides disagree:
+
+        label = 1   long reaches its protective level first, short does not
+        label = 0   short reaches its protective level first, long does not
+        label = NaN both sides resolve the same way (or either is unresolved)
+
+    The NaN share is the headline diagnostic. The protective level sits at 1x
+    ATR while the stop sits at 2x ATR, so both directions usually resolve
+    favourably within 36 bars; every such bar carries no information about which
+    side to take. If NaN dominates, no direction model trained on this geometry
+    can work, and the fix is the geometry (or a meta-label on trade quality),
+    not a better classifier.
+
+    Emitted with name "label" so it is drop-in for the binary {0: short,
+    1: long} head that model/predictor.py expects.
+    """
+    long_lab = generate_labels_traded_event(df, cfg, asset_key, direction=1, **kwargs).values
+    short_lab = generate_labels_traded_event(df, cfg, asset_key, direction=-1, **kwargs).values
+
+    out = np.full(len(df), np.nan)
+    resolved = (~np.isnan(long_lab)) & (~np.isnan(short_lab))
+    out[resolved & (long_lab == 1.0) & (short_lab == 0.0)] = 1.0
+    out[resolved & (long_lab == 0.0) & (short_lab == 1.0)] = 0.0
+    return pd.Series(out, index=df.index, name="label")
+
+
+def traded_event_summary(
+    df: pd.DataFrame,
+    cfg: dict,
+    asset_key: str = "XAUUSD",
+    **kwargs,
+) -> dict:
+    """Base rates of the traded event, per side and for the direction choice.
+
+    Interpretation guide:
+    - `long_favourable_pct` / `short_favourable_pct` are the unconditional
+      probabilities of reaching the protective level before the stop. The live
+      backtest achieved 96.8% on its 472 selected entries. If these
+      unconditional rates are also ~97%, the entry selection contributed
+      nothing and the result is pure barrier geometry. If they are near the
+      driftless random-walk value of stop/(protect+stop), the selection was
+      doing something.
+    - `direction_defined_pct` is how often the two sides disagree, i.e. the
+      fraction of the sample that carries any directional information at all.
+    - `direction_long_share_pct` is the class balance of that subset. Because
+      the ensemble compares p against absolute constants (0.55 / 0.62 / 0.71),
+      any deviation from 50% here becomes a permanent directional bias in
+      production.
+    """
+    long_lab = generate_labels_traded_event(df, cfg, asset_key, direction=1, **kwargs)
+    short_lab = generate_labels_traded_event(df, cfg, asset_key, direction=-1, **kwargs)
+    dir_lab = generate_labels_traded_direction(df, cfg, asset_key, **kwargs)
+
+    def _side(lab):
+        valid = lab.dropna()
+        total = len(valid)
+        return {
+            "resolved": total,
+            "unresolved": int(lab.isna().sum()),
+            "favourable_pct": float((valid == 1.0).sum() / total * 100) if total else float("nan"),
+        }
+
+    long_s = _side(long_lab)
+    short_s = _side(short_lab)
+    dir_valid = dir_lab.dropna()
+
+    return {
+        "rows": int(len(df)),
+        "long_resolved": long_s["resolved"],
+        "long_unresolved": long_s["unresolved"],
+        "long_favourable_pct": long_s["favourable_pct"],
+        "short_resolved": short_s["resolved"],
+        "short_unresolved": short_s["unresolved"],
+        "short_favourable_pct": short_s["favourable_pct"],
+        "direction_defined": int(len(dir_valid)),
+        "direction_defined_pct": float(len(dir_valid) / len(df) * 100) if len(df) else float("nan"),
+        "direction_long_share_pct": (
+            float((dir_valid == 1.0).sum() / len(dir_valid) * 100) if len(dir_valid) else float("nan")
+        ),
+    }
 
 
 def generate_labels_from_config(df: pd.DataFrame, cfg: dict) -> pd.Series:
