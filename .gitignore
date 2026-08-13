@@ -46,5 +46,11 @@ compact_project_code.pdf
 # One-off local migration/patch script
 fix_ingestion.py
 
-# SQLite databases
+# SQLite databases and their transient sidecar files.
+# *.sqlite alone does NOT match the -wal / -shm suffixes, which is how
+# data/market_data_mt5.sqlite-{wal,shm} ended up committed. A tracked sidecar
+# aborts every branch switch made while the database is open.
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
