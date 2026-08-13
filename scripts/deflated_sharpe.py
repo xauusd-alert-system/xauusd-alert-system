@@ -30,12 +30,16 @@ Design (honesty requirements, mirroring `scripts/run_backtest.py`):
   the family evaluated in this run (smaller, milder deflation). Correlated
   trials (same folds) make the effective N smaller, so using the full count
   is the conservative direction.
+- `--end-date` stops the sample before `validation.locked_holdout` so the gate
+  can be computed WITHOUT `--allow-locked`. Burning the lock to compute the
+  gate would invalidate condition 7 of the gate itself.
 
 Usage (real data, user machine):
 
     python -m scripts.deflated_sharpe --asset GBPUSD
     python -m scripts.deflated_sharpe --asset EURUSD --historical-trials 200
     python -m scripts.deflated_sharpe --asset XAUUSD --variants current,wide,null
+    python -m scripts.deflated_sharpe --asset XAUUSD --end-date 2026-08-08
 
 Without a DB the script falls back to SYNTHETIC demo data (biased probs by
 design, so the machinery demonstrably detects a real edge) — the numbers are
@@ -57,7 +61,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from config.loader import load_config, get_signal_grid
 from data.ingestion import to_epoch_seconds
-from scripts.run_backtest import load_asset_history, build_full_df, merge_asset_cfg
+from scripts.run_backtest import (
+    load_asset_history,
+    build_full_df,
+    merge_asset_cfg,
+    truncate_before,
+)
 from backtest.walk_forward import generate_windows
 from backtest.metrics import trades_to_dataframe, compute_metrics
 from backtest.deflated_sharpe import (
@@ -617,6 +626,8 @@ def print_report(res: dict) -> None:
     print(f"Walk-forward: {res['n_folds']} folds over ~{res['years']} years | "
           f"trials in family: {res['n_trials']} | historical trials (deflation): "
           f"{res['historical_trials']}")
+    if res.get("end_date"):
+        print(f"Sample truncated at {res['end_date']} (locked hold-out NOT touched)")
     cc = res["current_config"]
     print("Current config: grid=" + str({k: v for k, v in cc["signal_grid"].items()
                                          if v is not None}) +
@@ -712,6 +723,11 @@ def main(argv: list[str] | None = None) -> None:
                         help="Do not append this run to logs/trial_journal.csv")
     parser.add_argument("--allow-locked", action="store_true",
                         help="Allow test windows overlapping the locked hold-out")
+    parser.add_argument("--end-date", default=None,
+                        help="Drop candles at or after this UTC date (YYYY-MM-DD) before "
+                             "building features, so the gate can be computed without "
+                             "burning the locked hold-out. Same semantics as "
+                             "scripts/run_backtest.py --end-date.")
     parser.add_argument("--out", default=None, help="Output CSV path (default: logs/deflated_sharpe_<asset>.csv)")
     args = parser.parse_args(argv)
 
@@ -727,12 +743,18 @@ def main(argv: list[str] | None = None) -> None:
     synthetic = False
     try:
         raw = load_asset_history(db_path, timeframe, args.asset)
+        # Same cut as run_backtest: applied to the RAW frame so no rolling
+        # feature window absorbs a post-cutoff candle.
+        if args.end_date:
+            raw = truncate_before(raw, args.end_date, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[dsr] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
         print(f"[dsr] WARNING: cannot load real data ({exc.__class__.__name__}: {exc})")
         print("[dsr] Falling back to SYNTHETIC demo data — results are NOT real.")
+        if args.end_date:
+            print("[dsr] NOTE: --end-date does not apply to synthetic data.")
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)
@@ -761,6 +783,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"[dsr] {exc}")
 
     res["synthetic"] = synthetic
+    res["end_date"] = args.end_date
     print_report(res)
 
     os.makedirs("logs", exist_ok=True)
@@ -773,7 +796,8 @@ def main(argv: list[str] | None = None) -> None:
             experiment="deflated_sharpe",
             asset=args.asset,
             params={"variants": args.variants or "all",
-                    "historical_trials": args.historical_trials},
+                    "historical_trials": args.historical_trials,
+                    "end_date": args.end_date},
             metrics={"dsr_historical": next((t["dsr_historical"] for t in res["trials"]
                                              if t["variant"] == "current"), None),
                      "pbo": res["cscv"]["pbo"],
