@@ -13,7 +13,9 @@ realtime/pipeline.py at inference time (it doesn't exist yet, by construction, l
 
 Train/test split is TIME-ORDERED (not shuffled) to respect temporal causality -
 shuffling would let the model implicitly learn from "future" rows relative to some
-test rows, which is a subtle but real leakage risk in time series ML.
+test rows, which is a subtle but real leakage risk in time series ML. Time ordering
+alone is not sufficient, however: see purged_time_ordered_split below for why the
+rows adjacent to the split boundary must also be dropped.
 
 Probability calibration (isotonic or sigmoid) is applied on top of raw XGBoost
 probabilities because tree ensembles are often poorly calibrated out-of-the-box -
@@ -298,6 +300,57 @@ def time_ordered_split(X: pd.DataFrame, y: pd.Series, train_ratio: float) -> tup
     return X_train, X_test, y_train, y_test
 
 
+def purged_time_ordered_split(
+    X: pd.DataFrame,
+    y: pd.Series,
+    train_ratio: float,
+    horizon: int = 0,
+    embargo: int = 0,
+) -> tuple:
+    """
+    Time-ordered split that ALSO drops the training rows whose labels reach into
+    the test set.
+
+    time_ordered_split above is causally ordered but not causally clean. Under
+    triple-barrier labelling, row i's label is decided by bars i+1 .. i+horizon,
+    so the last `horizon` rows of the training slice were labelled by outcomes
+    that occur inside the test window: the model is scored on bars it has
+    already been shown the answer for. `embargo` drops a further block on top,
+    because rolling features carry state across the boundary - obv,
+    atr_percentile and bb_width_percentile each look back ~100 bars, so a test
+    row near the split shares most of its window with the last training rows.
+
+    Only the TRAINING side shrinks. The test slice is exactly what
+    time_ordered_split returns for the same train_ratio, which is what makes
+    before/after metrics comparable rather than merely similar.
+
+    backtest/walk_forward.run_walk_forward has always purged this way; this
+    function applies the same rule to the path that produces the model that is
+    actually deployed, so the two stop disagreeing about what "out of sample"
+    means.
+
+    horizon: labeling.horizon_candles_n
+    embargo: backtest.walk_forward.embargo_candles
+    """
+    n = len(X)
+    split_idx = int(n * train_ratio)
+    gap = max(0, int(horizon)) + max(0, int(embargo))
+    train_end = max(0, split_idx - gap)
+
+    if train_end == 0 and split_idx > 0:
+        _warn_once(
+            "purged_time_ordered_split:gap_ate_training_set",
+            "purged_time_ordered_split: purge gap (%d rows) is not smaller than "
+            "the training slice (%d rows), so NO training data survives. Reduce "
+            "backtest.walk_forward.embargo_candles or supply more history.",
+            gap, split_idx,
+        )
+
+    X_train, X_test = X.iloc[:train_end], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:train_end], y.iloc[split_idx:]
+    return X_train, X_test, y_train, y_test
+
+
 def _get_xgb_classifier(model_cfg: dict, random_state: int):
     """Create XGBoost classifier with conservative regularization."""
     params = {
@@ -463,10 +516,22 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     # _fit_classifier, not train_model.
     y_train, _label_info = _normalize_label_space(y_train, cfg)
     horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 24))
-    # Calibration needs a modest number of rows to be stable; keep it conservative so
-    # short training sets in tests/backtests still function.
-    min_fit = max(30, min(200, len(X_train) // 3 // 2))  # ~ 1/6 of data, lower-bounded
-    min_calib = max(20, min(100, len(X_train) // 6 // 2))  # ~ 1/12 of data, lower-bounded
+    # Slice sizes are PROPORTIONAL, never capped. The previous form was
+    #     min_fit   = max(30, min(200, len(X_train) // 3 // 2))
+    #     min_calib = max(20, min(100, len(X_train) // 6 // 2))
+    # and those min(200, ...) / min(100, ...) ceilings meant that every training
+    # set larger than ~1200 rows calibrated on exactly 100 rows regardless of how
+    # much history it had. On the real XAUUSD M15 set that was 100 rows out of
+    # 48738 (0.2%): the sigmoid fitted on it collapsed the probability spread,
+    # coverage at p>=0.55 reached 98% and the short side stopped firing at every
+    # configured threshold. Shares preserve the original intent (an earlier fit
+    # slice, a trailing held-out slice) while letting the calibrator scale with
+    # the data. The lower bounds keep short test/backtest windows working.
+    _cal_cfg = cfg.get("model", {})
+    _fit_share = float(_cal_cfg.get("calibration_fit_min_share", 0.60))
+    _holdout_share = float(_cal_cfg.get("calibration_holdout_share", 0.15))
+    min_fit = max(30, int(len(X_train) * _fit_share))
+    min_calib = max(20, int(len(X_train) * _holdout_share))
 
     n = len(X_train)
     if n < min_fit + horizon + min_calib + 1:
