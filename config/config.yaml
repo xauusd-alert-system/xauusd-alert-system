@@ -467,7 +467,7 @@ backtest:
     # W3 (audit 2026-08-10): extra embargo buffer (in candles) dropped from the
     # tail of each train window on top of the labeling-horizon purge, to account
     # for serial correlation of features across the train/test boundary.
-    embargo_candles: 0
+    embargo_candles: 100
 
 
 # ===== RETRAINING =====

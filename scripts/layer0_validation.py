@@ -660,16 +660,43 @@ def main():
             print(f"\nFATAL: {args.db_path} does not exist.")
             return 2
 
+        src_mb = os.path.getsize(args.db_path) / 1e6
+        wal_mb = sum(os.path.getsize(args.db_path + s) / 1e6
+                     for s in ("-wal", "-shm") if os.path.exists(args.db_path + s))
+        print(f"source size    : {src_mb:.1f} MB"
+              + (f"  (+{wal_mb:.1f} MB uncheckpointed WAL)" if wal_mb else ""))
+
         db_in_use = args.db_path
         if not args.no_db_copy:
+            import pathlib
+            import sqlite3
             scratch = tempfile.mkdtemp(prefix="layer0_db_")
             db_in_use = os.path.join(scratch, os.path.basename(args.db_path))
-            shutil.copy2(args.db_path, db_in_use)
-            for suffix in ("-wal", "-shm"):
-                if os.path.exists(args.db_path + suffix):
-                    shutil.copy2(args.db_path + suffix, db_in_use + suffix)
+            # sqlite's online-backup API, not a file copy: it takes a
+            # transactionally consistent snapshot and folds in any WAL content.
+            # A plain copy of the main file can silently miss everything that
+            # still lives in the -wal, which looks exactly like an empty table.
+            method = "sqlite backup api"
+            try:
+                uri = pathlib.Path(args.db_path).resolve().as_uri() + "?mode=ro"
+                src = sqlite3.connect(uri, uri=True)
+                dst = sqlite3.connect(db_in_use)
+                with dst:
+                    src.backup(dst)
+                dst.close()
+                src.close()
+            except Exception as exc:
+                method = f"file copy (backup api failed: {exc})"
+                shutil.copy2(args.db_path, db_in_use)
+                for suffix in ("-wal", "-shm"):
+                    if os.path.exists(args.db_path + suffix):
+                        shutil.copy2(args.db_path + suffix, db_in_use + suffix)
             size_mb = os.path.getsize(db_in_use) / 1e6
-            print(f"read from copy : {db_in_use}  ({size_mb:.1f} MB; original untouched)")
+            print(f"read from copy : {db_in_use}")
+            print(f"                 {size_mb:.1f} MB via {method}; original untouched")
+            if src_mb and size_mb < src_mb * 0.5:
+                print("WARNING: the snapshot is less than half the source size. "
+                      "Check that no writer is holding the database.")
 
         # Inventory first: guessing the stored symbol name wastes a whole run.
         try:
