@@ -17,9 +17,13 @@ edge real, or the best draw of many? Two complementary answers:
 
 Design (honesty requirements, mirroring `scripts/run_backtest.py`):
 
-- Strictly time-ordered walk-forward windows; per-fold models are trained on
-  the train window ONLY and saved to temp files (HIGH 11: production models
-  are never touched).
+- Strictly time-ordered walk-forward windows, sliced by the SHARED
+  `backtest.walk_forward.split_fold_frames`, so the label-horizon purge and the
+  embargo apply here exactly as they do in the reported backtest. A harness that
+  skips the purge fits on rows whose labels resolve inside its own test window
+  and then calls the result out-of-sample.
+- Per-fold models are trained on the train window ONLY and saved to temp files
+  (HIGH 11: production models are never touched).
 - The SAME per-fold model scores every config variant of an asset, so the
   variant comparison isolates the config (grid/conf/BE) — not model noise.
 - A "null" variant (random 0.5±noise probabilities, no model) is always
@@ -66,9 +70,13 @@ from scripts.run_backtest import (
     build_full_df,
     merge_asset_cfg,
     truncate_before,
+    _maybe_downgrade_three_class,
 )
-from backtest.walk_forward import generate_windows
+from backtest.walk_forward import generate_windows, split_fold_frames, bar_seconds
 from backtest.metrics import trades_to_dataframe, compute_metrics
+# NOTE: backtest.deflated_sharpe also exports a `decision_gate`, but this module
+# defines its own (the 7-condition admission checklist below). Importing both put
+# two different functions under one name, with the local def silently winning.
 from backtest.deflated_sharpe import (
     annualized_sharpe,
     probabilistic_sharpe_ratio,
@@ -77,12 +85,17 @@ from backtest.deflated_sharpe import (
     cscv_pbo,
     effective_number_trials,
     n_eff_participation_ratio,
-    decision_gate,
 )
 from model.uniqueness import compute_trade_uniqueness, average_uniqueness_weights
 from backtest.metrics import block_bootstrap_t
 from model.ensemble_backtest import EnsembleBacktester
-from model.trainer import build_training_matrix, train_model, calibrate_model, save_model
+from model.trainer import (
+    build_training_matrix,
+    train_model,
+    calibrate_model,
+    save_model,
+    DegenerateLabelSpaceError,
+)
 from model.predictor import ModelPredictor
 
 # ---------------------------------------------------------------------------
@@ -300,36 +313,85 @@ def _apply_cost_mult(cfg: dict, asset_key: str, mult: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Per-fold model scoring (real data only; mirrors run_backtest.strategy_fn_factory)
+# Per-fold model scoring (real data only; MUST match run_backtest.strategy_fn)
 # ---------------------------------------------------------------------------
 
 def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
                 asset_key: str) -> pd.DataFrame:
     """Train an XGBoost on the train window ONLY (temp-file model, never the
-    production file) and return the test frame augmented with ml_p_*."""
+    production file) and return the test frame augmented with ml_p_*.
+
+    Parity requirement (harness reconciliation 2026-08-14): this must score a
+    fold the same way `scripts/run_backtest.strategy_fn_factory` does, or the
+    decision gate and the reported backtest describe two different systems. On
+    XAUUSD M15 with `--end-date 2026-08-08` they disagreed by 6x (318 trades /
+    -2415.20 here versus 365 trades / -396.55 there) because this function used
+    to fit without uniqueness sample weights, skip the per-asset model section
+    and predict on `test_df.fillna(0.0)` — which scores warm-up rows whose
+    features are NaN as valid 0.0-feature rows (0.0 is a meaningful value for a
+    z-score feature) and opens trades the live trader can never take.
+    """
     cfg_inner = merge_asset_cfg(cfg, asset_key, "labeling")
     cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
+    # Per-asset model flags (use_regime_feature / include_zero_class) must reach
+    # build_training_matrix, otherwise a per-asset 3-class model is measured as
+    # the global binary one.
+    cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "model")
+    cfg_inner = _maybe_downgrade_three_class(cfg_inner, train_df, asset_key)
+
     X_train, y_train, cols = build_training_matrix(train_df, cfg=cfg_inner)
     test_df_eval = test_df.copy()
+    # Neutral 0.5/0.5 is the baseline for every row: it can never pass a filter,
+    # so a fold we fail to model contributes no trades instead of a bogus signal.
+    test_df_eval["ml_p_long"] = 0.5
+    test_df_eval["ml_p_short"] = 0.5
+    calibrated = None
+
     if len(X_train) >= 30 and y_train.nunique() >= 2:
-        base = train_model(X_train, y_train, cfg_inner)
-        calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
-        tmp_fd, tmp_path = tempfile.mkstemp(prefix="wf_model_", suffix=".joblib")
-        os.close(tmp_fd)
+        # Weight training rows by average label uniqueness so overlapping
+        # horizon-labels do not over-represent the information that is actually
+        # unique (Lopez de Prado, AFML ch.4). split_fold_frames has already
+        # purged the tail rows whose labels reach into the test window; the
+        # weights handle the residual overlap among the survivors.
+        horizon = int(cfg_inner.get("labeling", {}).get("horizon_candles_n", 36))
         try:
-            save_model(calibrated, cols, tmp_path)
-            predictor = ModelPredictor(tmp_path)
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        try:
-            preds = predictor.predict_proba(test_df_eval.fillna(0.0))
-            test_df_eval["ml_p_long"] = preds["p_long"].values
-            test_df_eval["ml_p_short"] = preds["p_short"].values
+            uniq = average_uniqueness_weights(len(train_df), horizon)
+            w_series = pd.Series(uniq, index=train_df.index)
+            sw = w_series.reindex(X_train.index).fillna(1.0).to_numpy()
         except Exception:
-            test_df_eval["ml_p_long"] = 0.5
-            test_df_eval["ml_p_short"] = 0.5
-    else:
+            sw = None
+        try:
+            base = train_model(X_train, y_train, cfg_inner, sample_weight=sw)
+            calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
+        except DegenerateLabelSpaceError as exc:
+            # Data condition, not a defect: degrade THIS fold to "no signal"
+            # instead of aborting the whole multi-variant run.
+            print(f"[dsr] WARNING: fold degraded to no-signal -- {exc}")
+            calibrated = None
+
+    if calibrated is None:
+        return test_df_eval
+
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="wf_model_", suffix=".joblib")
+    os.close(tmp_fd)
+    try:
+        save_model(calibrated, cols, tmp_path)
+        predictor = ModelPredictor(tmp_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    try:
+        # W13: rows with any NaN in the model's feature columns stay NEUTRAL
+        # instead of being filled with 0.0, matching both the live trader and
+        # run_backtest.strategy_fn.
+        feat_cols = [c for c in cols if c in test_df_eval.columns]
+        complete = test_df_eval[feat_cols].notna().all(axis=1) if feat_cols \
+            else pd.Series(True, index=test_df_eval.index)
+        if complete.any():
+            preds = predictor.predict_proba(test_df_eval[complete])
+            test_df_eval.loc[complete, "ml_p_long"] = preds["p_long"].values
+            test_df_eval.loc[complete, "ml_p_short"] = preds["p_short"].values
+    except Exception:
         test_df_eval["ml_p_long"] = 0.5
         test_df_eval["ml_p_short"] = 0.5
     return test_df_eval
@@ -337,22 +399,29 @@ def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
 
 def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
                        max_folds: int | None) -> tuple[list, list]:
-    """Slice walk-forward test windows; score them with per-fold models unless
-    the frame already carries injected ml_p_* (synthetic demo)."""
+    """Slice walk-forward windows with the SHARED honest splitter and score them
+    with per-fold models unless the frame already carries injected ml_p_*
+    (synthetic demo).
+
+    `split_fold_frames` receives the UNMERGED cfg on purpose: that is what
+    `run_walk_forward` passes, so both harnesses purge with the same horizon.
+    (A per-asset `labeling.horizon_candles_n` override is therefore ignored by
+    the purge on BOTH paths — tracked separately; fixing it here alone would
+    re-open the very divergence this commit closes.)
+    """
     wf_cfg = cfg["backtest"]["walk_forward"]
     windows = generate_windows(
         df, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"])
     if max_folds is not None and len(windows) > max_folds:
         windows = windows[:max_folds]
+    secs = bar_seconds(df)
     frames = []
     for w in windows:
-        test_df = df[(df["timestamp_utc"] >= w.test_start_ts) &
-                     (df["timestamp_utc"] < w.test_end_ts)].copy()
+        train_df, test_df = split_fold_frames(df, cfg, w, bar_secs=secs)
+        test_df = test_df.copy()
         if "ml_p_long" in df.columns:
             frames.append(test_df)
         else:
-            train_df = df[(df["timestamp_utc"] >= w.train_start_ts) &
-                          (df["timestamp_utc"] < w.train_end_ts)]
             frames.append(_score_fold(train_df, test_df, cfg, asset_key))
     return windows, frames
 
@@ -408,7 +477,13 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
         "n_folds": n_folds,
         "valid_folds": valid_folds,
         "t_block": t_block,
-        "pos_folds": int(np.sum([np.sum(ft > 0) > 0 for ft in fold_trades])),
+        # A POSITIVE fold is a fold that MADE MONEY. This used to be
+        # `np.sum(ft > 0) > 0`, i.e. "the fold contains at least one winning
+        # trade", which is true of essentially every non-empty fold - including
+        # every fold of the random-probability `null` control (12/12). That made
+        # the gate's "positive folds >= 55% valid" condition vacuous, and it was
+        # the only condition the XAUUSD family ever passed.
+        "pos_folds": int(np.sum([float(ft.sum()) > 0.0 for ft in fold_trades])),
         "total_pnl": round(float(arr.sum()), 2),
         "expectancy": round(float(arr.mean()), 4),
         "win_rate": round(100.0 * float(np.mean(arr > 0)), 1),
@@ -596,7 +671,7 @@ def decision_gate(res: dict) -> dict:
       2. DSR > 0.95 at the defensible N_eff
       3. PBO < 0.30
       4. survives 1.5x costs with PF > 1.1
-      5. positive folds >= 55% of VALID folds
+      5. positive folds >= 55% of VALID folds (positive = positive fold PnL)
       6. IS->OOS slope >= 0.5
       7. locked hold-out confirms (not computable here — always 'pending')
     Returns {condition: bool/None, passed_all}.
