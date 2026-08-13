@@ -56,6 +56,27 @@ def load_asset_history(db_path: str, timeframe: str, asset_key: str) -> pd.DataF
     return df
 
 
+def truncate_before(raw_df: pd.DataFrame, end_date: str, asset_key: str) -> pd.DataFrame:
+    """Drop candles at or after `end_date` (UTC, YYYY-MM-DD).
+
+    Must be applied to the RAW frame, before features are built: truncating a
+    feature frame would leave rolling-window state that had already absorbed
+    post-cutoff candles, which is precisely the look-ahead this project has been
+    removing elsewhere.
+    """
+    cutoff_ts = int(pd.Timestamp(end_date, tz="UTC").timestamp())
+    before_rows = len(raw_df)
+    out = raw_df[raw_df["timestamp_utc"] < cutoff_ts].reset_index(drop=True)
+    if out.empty:
+        raise SystemExit(f"No {asset_key} candles strictly before {end_date}")
+    print(
+        f"--end-date {end_date}: kept {len(out)}/{before_rows} candles "
+        f"(dropped {before_rows - len(out)} at or after the cutoff); "
+        f"last bar {out['timestamp'].iloc[-1]}"
+    )
+    return out
+
+
 def merge_asset_cfg(cfg: dict, asset_key: str, section: str) -> dict:
     """Возвращает cfg с объединённым указанным section (ensemble/labeling/model) из asset_cfg."""
     asset_cfg = cfg.get("assets", {}).get(asset_key, {})
@@ -247,6 +268,11 @@ def main():
                         help="Do not append this run to logs/trial_journal.csv")
     parser.add_argument("--allow-locked", action="store_true",
                         help="Allow test windows overlapping the locked hold-out")
+    parser.add_argument("--end-date", default=None,
+                        help="Drop candles at or after this UTC date (YYYY-MM-DD) before "
+                             "building features. Use this to keep a research run strictly "
+                             "before validation.locked_holdout instead of burning the "
+                             "hold-out with --allow-locked.")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -260,6 +286,8 @@ def main():
     timeframe = asset_cfg.get("timeframe") or args.timeframe
 
     raw = load_asset_history(args.db_path, timeframe, args.asset)
+    if args.end_date:
+        raw = truncate_before(raw, args.end_date, args.asset)
     df = build_full_df(cfg, raw, db_path=args.db_path, asset_key=args.asset)
 
     print(f"Loaded {len(df)} rows for {args.asset} from {args.db_path}")
@@ -305,7 +333,10 @@ def main():
         log_trial(
             experiment="run_backtest",
             asset=args.asset,
-            params={"timeframe": timeframe, "db_path": args.db_path},
+            # end_date is journalled so a shortened run can never later be
+            # mistaken for a full-sample one.
+            params={"timeframe": timeframe, "db_path": args.db_path,
+                    "end_date": args.end_date},
             metrics={"n_folds": summary["n_folds"], "valid_folds": summary["valid_folds"],
                      "positive_folds_valid": summary["positive_folds_valid"],
                      "median_pf_valid": summary["median_pf_valid"],
