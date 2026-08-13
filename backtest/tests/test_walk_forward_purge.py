@@ -8,6 +8,13 @@ XAUUSD sample the reported backtest and the decision gate disagreed by 6x
 the single slicing path; these tests fail the moment someone re-derives the
 boundaries by hand again.
 
+Boundary convention, since it is easy to get wrong (it was, in the first version
+of this file): the purge cutoff is INCLUSIVE. A bar standing exactly
+`horizon + embargo` bars before the test window survives, because its label
+resolves `embargo` bars before the first test bar and therefore leaks nothing.
+So the *distance* is `horizon + embargo` bars while the number of *dropped rows*
+is `horizon + embargo - 1`. Assert the invariant, then derive the count from it.
+
 Deliberately dependency-light: pandas + numpy only, no model stack, so this runs
 anywhere pytest runs.
 """
@@ -62,6 +69,11 @@ def _raw_train(df: pd.DataFrame, w) -> pd.DataFrame:
               (df["timestamp_utc"] < w.train_end_ts)]
 
 
+def _dropped(horizon: int = HORIZON, embargo: int = EMBARGO) -> int:
+    """Rows removed by an inclusive cutoff placed `horizon + embargo` bars back."""
+    return horizon + embargo - 1
+
+
 def test_bar_seconds_detects_the_sampling_grid():
     assert bar_seconds(_df()) == BAR_SECS
 
@@ -71,26 +83,41 @@ def test_bar_seconds_survives_a_degenerate_frame():
     assert bar_seconds(pd.DataFrame({"close": [1.0, 2.0]})) == 1
 
 
-def test_purge_removes_exactly_horizon_plus_embargo_bars():
+def test_last_surviving_label_ends_one_full_embargo_before_the_test_window():
+    """The invariant the purge exists for. Everything else is arithmetic."""
     df = _df()
     cfg = _cfg()
     windows = generate_windows(df, TRAIN_DAYS, TEST_DAYS, STEP_DAYS)
     assert windows, "fixture must produce at least one window"
-    w = windows[0]
+    for w in windows:
+        purged = purge_train_frame(_raw_train(df, w), w.test_start_ts, cfg, BAR_SECS)
+        last_kept = int(purged["timestamp_utc"].max())
+        label_end = last_kept + HORIZON * BAR_SECS
+        assert (w.test_start_ts - label_end) == EMBARGO * BAR_SECS
+        assert (w.test_start_ts - last_kept) == (HORIZON + EMBARGO) * BAR_SECS
+
+
+def test_purge_drops_horizon_plus_embargo_minus_one_rows():
+    df = _df()
+    cfg = _cfg()
+    w = generate_windows(df, TRAIN_DAYS, TEST_DAYS, STEP_DAYS)[0]
     raw = _raw_train(df, w)
     purged = purge_train_frame(raw, w.test_start_ts, cfg, BAR_SECS)
-    assert len(purged) == len(raw) - (HORIZON + EMBARGO)
-    gap_bars = (w.test_start_ts - int(purged["timestamp_utc"].max())) / BAR_SECS
-    assert gap_bars == HORIZON + EMBARGO
+    assert len(purged) == len(raw) - _dropped()
 
 
 def test_embargo_zero_purges_only_the_label_horizon():
+    """With no embargo the last surviving label ends exactly ON the first test bar,
+    which is the 1-bar touch the embargo exists to remove - hence embargo: 100 in
+    config.yaml. Pinned so the degenerate case stays visible."""
     df = _df()
     cfg = _cfg(embargo=0)
     w = generate_windows(df, TRAIN_DAYS, TEST_DAYS, STEP_DAYS)[0]
     raw = _raw_train(df, w)
     purged = purge_train_frame(raw, w.test_start_ts, cfg, BAR_SECS)
-    assert len(purged) == len(raw) - HORIZON
+    last_kept = int(purged["timestamp_utc"].max())
+    assert last_kept + HORIZON * BAR_SECS == w.test_start_ts
+    assert len(purged) == len(raw) - _dropped(embargo=0)
 
 
 def test_zero_horizon_disables_the_purge():
@@ -162,4 +189,5 @@ def test_reported_purged_train_rows_is_the_purged_count():
     windows = generate_windows(df, TRAIN_DAYS, TEST_DAYS, STEP_DAYS)
     for w, r in zip(windows, results):
         raw = _raw_train(df, w)
-        assert r["purged_train_rows"] == len(raw) - (HORIZON + EMBARGO)
+        assert r["purged_train_rows"] == len(raw) - _dropped()
+        assert r["purged_train_rows"] < len(raw)
