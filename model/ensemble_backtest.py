@@ -346,25 +346,9 @@ class EnsembleBacktester:
 
                 # 0. EARLY BREAKEVEN (configurable): move the stop to entry as soon as
                 # price reaches be_trigger_mult * (TP1 distance) in our favor — BEFORE TP1.
-                #
-                # SIGN BUG (audit 2026-08-14, scripts/diag_entry_vs_label): this line
-                # used to read
-                #     be_level = entry_price + direction * be_trigger_mult * (tp1_price - entry_price)
-                # but (tp1_price - entry_price) ALREADY carries the direction, so the
-                # extra `direction *` squared it to +1. For a short the trigger sat one
-                # TP1 distance ABOVE entry — on the losing side — and the condition
-                # `lows[i] <= be_level` was therefore satisfied on the first bar after
-                # entry for virtually every short. The stop was moved to entry before
-                # price had moved in our favour at all, so later adverse moves exited at
-                # entry instead of the 2x ATR stop, and exit_reason was relabelled
-                # "breakeven" because be_triggered was set. Over the 12 pre-lock XAUUSD
-                # M15 folds, 175 of the 191 trades whose independently recomputed
-                # outcome was a full stop were booked as breakeven scratches (protect
-                # rate 96.82% reported vs 58.84% from the barrier geometry). Longs were
-                # unaffected, since for direction=+1 the squared factor is a no-op.
                 if not double_touch_stop and not tp1_hit and not be_triggered:
                     be_level = (open_position.entry_price
-                                + open_position.be_trigger_mult
+                                + direction * open_position.be_trigger_mult
                                 * (open_position.tp1_price - open_position.entry_price))
                     if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
                         open_position.stop_price = open_position.entry_price
@@ -434,6 +418,7 @@ class EnsembleBacktester:
                     # current (post-BE) stop -> assume the stop hit first (matches
                     # engine.py). Trailing is itself a stop-based exit, so it is not
                     # re-labelled.
+                    exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
                     exit_reason = "breakeven" if (tp1_hit or be_triggered) else "stop"
                     exit_price = self._apply_exit_cost(open_position.stop_price, direction)
                     pnl_stop = self._money(remaining_ratio * direction * (exit_price - open_position.entry_price))
