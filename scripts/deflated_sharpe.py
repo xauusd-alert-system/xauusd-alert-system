@@ -226,6 +226,10 @@ XAUUSD_THRESHOLD_VARIANTS: dict = {
             "min_ml_probability": 0.57,
         }
     },
+    "wide_trend_filtered": {
+        "signal_grid": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0, "tp3_mult": 4.0},
+        "ensemble": {"suppress_regimes": ["compression", "reversal_watch", "range", "trend_down"]},
+    },
 }
 
 # Synthetic-demo fallback price scales (only used when no DB is available).
