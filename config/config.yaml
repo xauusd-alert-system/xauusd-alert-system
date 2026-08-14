@@ -524,13 +524,13 @@ execution:
   # Production order routing is deliberately limited to the two assets currently
   # approved for demo model trading. EURUSD/GBPUSD are sampled only by
   # `execution.fx_execution_probe` until their measured-cost OOS gate passes.
-  
+
   # Audit 2026-08-15: XAUUSD execution temporarily disabled. The current
   # shipped XAUUSD config fails the decision gate (cost stress PF 0.93,
   # t_block -0.34). The pre-registered candidate wide_trend_filtered will
   # be eligible only after live-forward validation on 50+ trades.
   # Until then XAUUSD stays paper/shadow.
-  enabled_assets: [BTCUSD]
+  enabled_assets: []
   # Refuse model-driven execution on any non-demo terminal. Keep this true until
   # a separate, explicit real-money deployment review.
   require_demo_account: true
