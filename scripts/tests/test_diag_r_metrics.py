@@ -151,19 +151,20 @@ def test_run_analysis_cost_stress_and_gate(synthetic_gbp_df):
     # exceed the number of folds that traded at all.
     assert cur["valid_folds"] <= cur["traded_folds"] <= cur["n_folds"]
     assert "median_fold_pnl" in cur
+    assert "total_pnl_ex_best" in cur
     gate = decision_gate(res)
     assert set(gate["checks"]) == {
         "block_bootstrap_t >= 3.0", "DSR(N_eff) > 0.95", "PBO < 0.20",
         "PF > 1.1 at 1.5x costs",
-        "folds: total PnL > 0, median valid fold > 0, 55% positive",
+        "folds: total PnL > 0, PnL ex-best fold > 0, 55% positive",
         "IS->OOS slope >= 0.5", "locked hold-out confirms"}
     assert gate["checks"]["locked hold-out confirms"] is None
     # The gate must publish WHICH leg of the fold condition failed; a bare
     # boolean is what let "57.1% positive folds" stand in for a result.
     fh = gate["fold_health"]
-    assert {"total_pnl_positive", "median_fold_positive",
+    assert {"total_pnl_positive", "ex_best_positive",
             "positive_share_ok", "passed"} <= set(fh)
-    assert fh["passed"] == (fh["total_pnl_positive"] and fh["median_fold_positive"]
+    assert fh["passed"] == (fh["total_pnl_positive"] and fh["ex_best_positive"]
                             and fh["positive_share_ok"])
 
 
