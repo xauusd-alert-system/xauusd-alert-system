@@ -7,11 +7,50 @@ Supports:
 - traded_event barriers: the event the execution engine actually resolves
   (protective level before stop), see generate_labels_traded_event
 
+WHICH EVENT IS TRAINED ON (labeling.event)
+------------------------------------------
+generate_labels_from_config dispatches on `labeling.event`:
+
+  "barrier" (default)  the historical triple barrier, via labeling.method
+                       (fixed / atr_scaled). This is what every model in the
+                       project was trained on up to now.
+  "traded"             generate_labels_traded_direction, i.e. the event the
+                       execution engine resolves. Requires asset_key, because
+                       the event is defined by the per-asset signal grid and
+                       execution costs.
+
+The default keeps existing behaviour bit-for-bit, so flipping the switch is an
+explicit, per-asset decision (assets.<KEY>.labeling.event) rather than something
+a config refactor can do by accident.
+
 CRITICAL NO-LOOK-AHEAD WARNING:
 This module is intentionally forward-looking for OFFLINE labeling only.
 """
 import numpy as np
 import pandas as pd
+
+# Values accepted by labeling.event (see generate_labels_from_config).
+LABEL_EVENTS = ("barrier", "traded")
+
+# Label spaces the traded direction label can be emitted in. See
+# generate_labels_traded_direction for why both exist.
+TRADED_ENCODINGS = ("binary01", "pm1")
+
+
+def resolve_label_event(cfg: dict) -> str:
+    """Return the configured labeling.event, validated.
+
+    Public so callers can log WHICH event a run was labelled with. A run whose
+    label space is not printed anywhere is a run whose numbers cannot be
+    attributed later.
+    """
+    lab_cfg = (cfg or {}).get("labeling", {}) or {}
+    event = str(lab_cfg.get("event", "barrier")).strip().lower()
+    if event not in LABEL_EVENTS:
+        raise ValueError(
+            f"Unknown labeling.event: {event!r}; expected one of {LABEL_EVENTS}"
+        )
+    return event
 
 
 def generate_labels(df: pd.DataFrame, target_x: float, stop_y: float, horizon_n: int,
@@ -294,6 +333,7 @@ def generate_labels_traded_direction(
     df: pd.DataFrame,
     cfg: dict,
     asset_key: str = "XAUUSD",
+    encoding: str = "binary01",
     **kwargs,
 ) -> pd.Series:
     """Which SIDE is the better bet under the real trade geometry.
@@ -301,9 +341,9 @@ def generate_labels_traded_direction(
     Evaluates generate_labels_traded_event for both directions and keeps only
     bars where the two sides disagree:
 
-        label = 1   long reaches its protective level first, short does not
-        label = 0   short reaches its protective level first, long does not
-        label = NaN both sides resolve the same way (or either is unresolved)
+        long wins    long reaches its protective level first, short does not
+        short wins   short reaches its protective level first, long does not
+        label = NaN  both sides resolve the same way (or either is unresolved)
 
     The NaN share is the headline diagnostic. The protective level sits at 1x
     ATR while the stop sits at 2x ATR, so both directions usually resolve
@@ -312,16 +352,40 @@ def generate_labels_traded_direction(
     can work, and the fix is the geometry (or a meta-label on trade quality),
     not a better classifier.
 
-    Emitted with name "label" so it is drop-in for the binary {0: short,
-    1: long} head that model/predictor.py expects.
+    ENCODING (why there are two)
+    ----------------------------
+    "binary01"  {0: short, 1: long}. What ModelPredictor's binary branch
+                decodes on OUTPUT (p_short = P(class 0), p_long = P(class 1)),
+                and what the A10 diagnostics (diag_traded_event.py,
+                traded_event_summary) count.
+    "pm1"       {-1: short, +1: long}. What model.trainer.build_training_matrix
+                accepts on INPUT: in binary mode it keeps only rows whose label
+                isin([1, -1]) and then encodes y = (label == 1). Feeding it the
+                "binary01" space silently DROPS every short row, because 0 means
+                "no barrier hit" in the triple-barrier space that filter was
+                written for. The surviving single class then raises
+                DegenerateLabelSpaceError, and a walk-forward run degrades every
+                fold to a neutral 0.5 -- i.e. an empty backtest that reads as
+                "the traded label does not work" instead of "the label space was
+                mismatched". Any code path that trains on this label must use
+                "pm1"; generate_labels_from_config does.
+
+    Emitted with name "label" in both encodings.
     """
+    if encoding not in TRADED_ENCODINGS:
+        raise ValueError(
+            f"encoding must be one of {TRADED_ENCODINGS}, got {encoding!r}"
+        )
+
     long_lab = generate_labels_traded_event(df, cfg, asset_key, direction=1, **kwargs).values
     short_lab = generate_labels_traded_event(df, cfg, asset_key, direction=-1, **kwargs).values
+
+    short_code = -1.0 if encoding == "pm1" else 0.0
 
     out = np.full(len(df), np.nan)
     resolved = (~np.isnan(long_lab)) & (~np.isnan(short_lab))
     out[resolved & (long_lab == 1.0) & (short_lab == 0.0)] = 1.0
-    out[resolved & (long_lab == 0.0) & (short_lab == 1.0)] = 0.0
+    out[resolved & (long_lab == 0.0) & (short_lab == 1.0)] = short_code
     return pd.Series(out, index=df.index, name="label")
 
 
@@ -381,8 +445,43 @@ def traded_event_summary(
     }
 
 
-def generate_labels_from_config(df: pd.DataFrame, cfg: dict) -> pd.Series:
+def generate_labels_from_config(df: pd.DataFrame, cfg: dict,
+                                asset_key: str = None) -> pd.Series:
+    """The single entry point every training path uses to build `label`.
+
+    Dispatches on labeling.event (see module docstring and resolve_label_event).
+    The switch lives HERE rather than at each call site on purpose: run_backtest
+    and scripts/deflated_sharpe.py share this function, and a switch duplicated
+    per stand is exactly how the two stands came to disagree about purging.
+    """
     lab_cfg = cfg["labeling"]
+    event = resolve_label_event(cfg)
+
+    if event == "traded":
+        if asset_key is None:
+            raise ValueError(
+                "labeling.event='traded' requires asset_key: the traded event is "
+                "defined by the per-asset execution costs (spread_usd / "
+                "slippage_usd) and signal grid, so labelling with another "
+                "asset's geometry would silently mislabel the sample. Call "
+                "generate_labels_from_config(df, cfg, asset_key=<KEY>)."
+            )
+        if bool((cfg.get("model") or {}).get("include_zero_class", False)):
+            raise ValueError(
+                "labeling.event='traded' is incompatible with "
+                "model.include_zero_class=true: in the three-class space 0 means "
+                "no_trade, while the traded direction label uses -1/+1 for the "
+                "two sides and NaN for 'both sides resolve the same way'. There "
+                "is no no_trade class to learn under this event -- set "
+                "include_zero_class=false for this asset, or keep "
+                "labeling.event='barrier'."
+            )
+        # "pm1" is mandatory here: build_training_matrix filters on
+        # isin([1, -1]), so the {0, 1} space would lose every short row.
+        return generate_labels_traded_direction(
+            df, cfg, asset_key, encoding="pm1"
+        )
+
     method = lab_cfg.get("method", "fixed")
 
     if method == "fixed":
