@@ -29,6 +29,11 @@ Design (honesty requirements, mirroring `scripts/run_backtest.py`):
 - A "null" variant (random 0.5±noise probabilities, no model) is always
   included as a negative control: it must come out with DSR ~= 0.5 and a
   large MinTRL, or the machinery is broken.
+- A fold VOTES on the gate only if it carries at least
+  `MIN_TRADES_FOR_VALID_FOLD` trades, and the fold condition weighs money as
+  well as votes (see `fold_health`). Counting a one-trade fold as a verdict,
+  or a majority of tiny positive folds as a result, is how a losing family
+  passes a checklist.
 - `--historical-trials` (default 729 = the full project grid-search history)
   deflates with the TOTAL number of trials ever tried; `dsr_trials` uses only
   the family evaluated in this run (smaller, milder deflation). Correlated
@@ -97,6 +102,24 @@ from model.trainer import (
     DegenerateLabelSpaceError,
 )
 from model.predictor import ModelPredictor
+
+# ---------------------------------------------------------------------------
+# Gate constants
+#
+# A fold below MIN_TRADES_FOR_VALID_FOLD says nothing about the config: fold 9
+# of the 2026-08-14 XAUUSD run contained a single trade (-122.24) and used to
+# cast a full negative vote, while fold 7 lost -2293.40 over 152 trades and
+# cast exactly one negative vote as well.
+# ---------------------------------------------------------------------------
+
+MIN_TRADES_FOR_VALID_FOLD = 10
+POS_FOLD_SHARE_MIN = 0.55
+# The report's own verdict ladder calls PBO in (0.20, 0.30] "HIGH overfit risk",
+# so admitting at 0.30 meant the gate passed what the report condemned.
+PBO_MAX = 0.20
+
+FOLD_CONDITION = "folds: total PnL > 0, PnL ex-best fold > 0, 55% positive"
+PBO_CONDITION = f"PBO < {PBO_MAX:.2f}"
 
 # ---------------------------------------------------------------------------
 # Variant families (config deltas applied on top of config/config.yaml).
@@ -330,6 +353,9 @@ def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
     and predict on `test_df.fillna(0.0)` — which scores warm-up rows whose
     features are NaN as valid 0.0-feature rows (0.0 is a meaningful value for a
     z-score feature) and opens trades the live trader can never take.
+
+    Parity was confirmed on 2026-08-14: both harnesses now report 365 trades and
+    -396.5 on XAUUSD, fold for fold.
     """
     cfg_inner = merge_asset_cfg(cfg, asset_key, "labeling")
     cfg_inner = merge_asset_cfg(cfg_inner, asset_key, "ensemble")
@@ -437,7 +463,10 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
                      horizon_bars: int = 36) -> dict:
     """One row of the DSR report for a single config variant."""
     if not fold_trades:
-        return {"variant": name, "n_trades": 0, "t_eff": 0.0, "n_folds": n_folds, "pos_folds": 0,
+        return {"variant": name, "n_trades": 0, "t_eff": 0.0, "n_folds": n_folds,
+                "traded_folds": 0, "valid_folds": 0, "pos_folds": 0,
+                "median_fold_pnl": 0.0, "best_fold_pnl": 0.0,
+                "total_pnl_ex_best": 0.0, "t_block": float("nan"),
                 "total_pnl": 0.0, "expectancy": 0.0, "win_rate": 0.0,
                 "profit_factor": 0.0, "median_fold_pf": 0.0, "sharpe": 0.0,
                 "skew": 0.0, "kurtosis_excess": 0.0, "psr_0": float("nan"),
@@ -467,7 +496,27 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
     d_hist = deflated_sharpe_ratio(arr, n_trials=historical_trials, t_eff=t_eff)
     mtrl = minimum_track_record_length(arr, n_trials=historical_trials, t_eff=t_eff)
 
-    valid_folds = int(np.sum([len(ft) > 0 for ft in fold_trades]))
+    # A fold that traded at all vs a fold that traded ENOUGH to vote. Fold 9 of
+    # the 2026-08-14 XAUUSD run held one trade (-122.24): its sign is noise, so
+    # it must not count as a verdict in either direction.
+    fold_sums = [float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades]
+    traded_folds = int(np.sum([len(ft) > 0 for ft in fold_trades]))
+    valid_mask = [len(ft) >= MIN_TRADES_FOR_VALID_FOLD for ft in fold_trades]
+    valid_folds = int(np.sum(valid_mask))
+    valid_sums = [s for s, ok in zip(fold_sums, valid_mask) if ok]
+    # A POSITIVE fold is a VALID fold that MADE MONEY. This used to be
+    # `np.sum(ft > 0) > 0`, i.e. "the fold contains at least one winning
+    # trade", which is true of essentially every non-empty fold - including
+    # every fold of the random-probability `null` control (12/12).
+    pos_folds = int(np.sum([s > 0.0 for s in valid_sums]))
+    median_fold_pnl = float(np.median(valid_sums)) if valid_sums else 0.0
+    # Concentration: how much of the result is one window? A family whose profit
+    # disappears when the single best fold is removed has one good period, not
+    # an edge. Only a POSITIVE best fold is removable (subtracting a negative
+    # best fold would flatter the result instead of stressing it).
+    best_fold_pnl = max(max(fold_sums), 0.0) if fold_sums else 0.0
+    total_pnl = float(arr.sum())
+    total_pnl_ex_best = total_pnl - best_fold_pnl
     t_block = block_bootstrap_t(trade_r) if trade_r and len(trade_r) >= 2 else float("nan")
 
     return {
@@ -475,16 +524,14 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
         "n_trades": int(len(arr)),
         "t_eff": round(t_eff, 1),
         "n_folds": n_folds,
+        "traded_folds": traded_folds,
         "valid_folds": valid_folds,
         "t_block": t_block,
-        # A POSITIVE fold is a fold that MADE MONEY. This used to be
-        # `np.sum(ft > 0) > 0`, i.e. "the fold contains at least one winning
-        # trade", which is true of essentially every non-empty fold - including
-        # every fold of the random-probability `null` control (12/12). That made
-        # the gate's "positive folds >= 55% valid" condition vacuous, and it was
-        # the only condition the XAUUSD family ever passed.
-        "pos_folds": int(np.sum([float(ft.sum()) > 0.0 for ft in fold_trades])),
-        "total_pnl": round(float(arr.sum()), 2),
+        "pos_folds": pos_folds,
+        "median_fold_pnl": round(median_fold_pnl, 2),
+        "best_fold_pnl": round(best_fold_pnl, 2),
+        "total_pnl_ex_best": round(total_pnl_ex_best, 2),
+        "total_pnl": round(total_pnl, 2),
         "expectancy": round(float(arr.mean()), 4),
         "win_rate": round(100.0 * float(np.mean(arr > 0)), 1),
         "profit_factor": round(pf, 2) if pf != 999.0 else 999.0,
@@ -630,6 +677,7 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         "years": round(years, 2),
         "n_trials": len(variants),
         "historical_trials": historical_trials,
+        "min_trades_for_valid_fold": MIN_TRADES_FOR_VALID_FOLD,
         "n_eff": {
             "family_rho_bar": round(float(mean_rho), 4) if np.isfinite(mean_rho) else None,
             "n_eff_historical": round(n_eff_historical, 2),
@@ -663,36 +711,87 @@ def _fmt(x, width: int = 9, digits: int = 2) -> str:
     return str(x).rjust(width)
 
 
+def fold_health(cur: dict | None) -> dict:
+    """Did the folds actually make money, or did they merely vote that way?
+
+    Three legs, all required, none implied by the others:
+
+    * `total_pnl > 0` — the family has to be profitable at all. A checklist
+      that can be passed by a losing config is not a checklist.
+    * `total_pnl - best_fold > 0` — the result must survive deleting its single
+      best window. This is the leg a fat right tail cannot buy.
+    * `>= 55% of VALID folds positive` — the original condition, kept, but now
+      computed over folds with at least MIN_TRADES_FOR_VALID_FOLD trades.
+
+    NOTE on a leg that is NOT here: "median fold PnL > 0" was tried first and
+    dropped, because it cannot fail while the 55% leg passes (if strictly more
+    than half of the folds are positive, their median is positive by
+    construction). `median_fold_pnl` is still reported as a description.
+
+    The 2026-08-14 XAUUSD run passed the third leg (3/5 = 60% of valid folds)
+    with -396.5 total and -1514.1 ex-best, which is precisely why the other two
+    exist.
+    """
+    if cur is None:
+        return {"total_pnl": 0.0, "total_pnl_positive": False,
+                "total_pnl_ex_best": 0.0, "ex_best_positive": False,
+                "best_fold_pnl": 0.0, "median_fold_pnl": 0.0,
+                "pos_folds": 0, "valid_folds": 0, "positive_share": 0.0,
+                "positive_share_ok": False, "passed": False}
+    total = float(cur.get("total_pnl", 0.0))
+    ex_best = float(cur.get("total_pnl_ex_best", 0.0))
+    valid = int(cur.get("valid_folds", 0))
+    pos = int(cur.get("pos_folds", 0))
+    share = (pos / valid) if valid > 0 else 0.0
+    total_ok = total > 0.0
+    ex_best_ok = ex_best > 0.0
+    share_ok = bool(valid > 0 and share >= POS_FOLD_SHARE_MIN)
+    return {
+        "total_pnl": total,
+        "total_pnl_positive": total_ok,
+        "total_pnl_ex_best": ex_best,
+        "ex_best_positive": ex_best_ok,
+        "best_fold_pnl": float(cur.get("best_fold_pnl", 0.0)),
+        "median_fold_pnl": float(cur.get("median_fold_pnl", 0.0)),
+        "pos_folds": pos,
+        "valid_folds": valid,
+        "positive_share": share,
+        "positive_share_ok": share_ok,
+        "passed": bool(total_ok and ex_best_ok and share_ok),
+    }
+
+
 def decision_gate(res: dict) -> dict:
     """Hard admission checklist for live capital (audit, Claude 5 Opus plan).
 
     All conditions simultaneously:
       1. block-bootstrap t >= 3.0 on R-multiplicators
       2. DSR > 0.95 at the defensible N_eff
-      3. PBO < 0.30
+      3. PBO < 0.20 (the report calls 0.20-0.30 HIGH overfit risk, so the gate
+         must not admit inside that band)
       4. survives 1.5x costs with PF > 1.1
-      5. positive folds >= 55% of VALID folds (positive = positive fold PnL)
+      5. folds: total PnL > 0 AND total PnL without the best fold > 0 AND
+         >= 55% of valid folds positive (see `fold_health`)
       6. IS->OOS slope >= 0.5
       7. locked hold-out confirms (not computable here — always 'pending')
-    Returns {condition: bool/None, passed_all}.
+    Returns {checks, fold_health, passed_all}.
     """
     cur = next((t for t in res["trials"] if t["variant"] == "current"), None)
     cscv = res["cscv"]
+    fh = fold_health(cur)
     checks = {
         "block_bootstrap_t >= 3.0": bool(cur is not None and cur.get("t_block", float("nan")) >= 3.0),
         "DSR(N_eff) > 0.95": bool(cur is not None and cur.get("dsr_neff", float("nan")) > 0.95),
-        "PBO < 0.30": bool(cscv["pbo"] < 0.30),
+        PBO_CONDITION: bool(cscv["pbo"] < PBO_MAX),
         "PF > 1.1 at 1.5x costs": bool(res.get("cost_stress") and res["cost_stress"]["profit_factor"] > 1.1),
-        "positive folds >= 55% valid": bool(
-            cur is not None and cur.get("valid_folds", 0) > 0
-            and cur["pos_folds"] / cur["valid_folds"] >= 0.55),
+        FOLD_CONDITION: bool(fh["passed"]),
         "IS->OOS slope >= 0.5": bool(cscv.get("is_oos_slope") is not None
                                      and np.isfinite(cscv.get("is_oos_slope", float("nan")))
                                      and cscv["is_oos_slope"] >= 0.5),
         "locked hold-out confirms": None,  # organizational, set by the user
     }
     known = [v for v in checks.values() if v is not None]
-    return {"checks": checks, "passed_all": bool(known) and all(known)}
+    return {"checks": checks, "fold_health": fh, "passed_all": bool(known) and all(known)}
 
 
 def print_report(res: dict) -> None:
@@ -715,21 +814,25 @@ def print_report(res: dict) -> None:
     print(f"Trial correlation: rho_bar={rho_s} -> N_eff({res['historical_trials']}) = "
           f"{neff.get('n_eff_historical', 'n/a')} (participation ratio "
           f"{neff.get('family_participation_ratio', 'n/a')})")
+    print(f"+folds = valid folds with positive PnL / valid folds "
+          f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades); "
+          f"exBest = total PnL minus the single best fold")
 
     dsr_label = f"DSR({res['historical_trials']})"
     neff_label = f"DSR(Nef)"
-    hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'WR%':>6}{'PF':>6}{'medPF':>7}"
-           f"{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
-           f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>7}")
+    hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'exBest':>9}{'WR%':>6}{'PF':>6}"
+           f"{'medPF':>7}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
+           f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}")
     print(hdr)
     print("-" * len(hdr))
     for t in res["trials"]:
         print(f"{t['variant']:<14}{t['n_trades']:>6}{t['total_pnl']:>9.1f}"
+              f"{t.get('total_pnl_ex_best', 0.0):>9.1f}"
               f"{t['win_rate']:>6.1f}{t['profit_factor']:>6.2f}{t['median_fold_pf']:>7.2f}"
               f"{t['sharpe']:>8.2f}{_fmt(t['psr_0'], 8):>8}{_fmt(t['dsr_trials'], 8):>8}"
               f"{_fmt(t['dsr_neff'], 8):>8}"
               f"{_fmt(t['dsr_historical'], 9):>9}{_fmt(t['min_trl_years'], 9):>9}"
-              f"{t['pos_folds']}/{t['n_folds']:>2}")
+              f"{str(t['pos_folds']) + '/' + str(t.get('valid_folds', 0)):>8}")
 
     c = res["cscv"]
     print(f"\nCSCV (Probability of Backtest Overfitting):")
@@ -763,6 +866,17 @@ def print_report(res: dict) -> None:
             print(f"  [ ] {cond}  (user/organizational)")
         else:
             print(f"  [{'x' if ok else ' '}] {cond}")
+        if cond == FOLD_CONDITION:
+            fh = gate["fold_health"]
+            print(f"        total PnL {fh['total_pnl']:+.1f} "
+                  f"[{'ok' if fh['total_pnl_positive'] else 'FAIL'}] | "
+                  f"ex-best {fh['total_pnl_ex_best']:+.1f} "
+                  f"(best fold {fh['best_fold_pnl']:+.1f}) "
+                  f"[{'ok' if fh['ex_best_positive'] else 'FAIL'}] | "
+                  f"{fh['pos_folds']}/{fh['valid_folds']} positive "
+                  f"({100.0 * fh['positive_share']:.1f}%, need "
+                  f"{100.0 * POS_FOLD_SHARE_MIN:.0f}%) "
+                  f"[{'ok' if fh['positive_share_ok'] else 'FAIL'}]")
     print(f"  => {'PASS -> capital' if gate['passed_all'] else 'FAIL -> paper/shadow only'}")
 
     cur = next((t for t in res["trials"] if t["variant"] == "current"), None)
