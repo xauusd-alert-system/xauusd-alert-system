@@ -31,7 +31,7 @@ Design (honesty requirements, mirroring `scripts/run_backtest.py`):
   large MinTRL, or the machinery is broken.
 - A fold VOTES on the gate only if it carries at least
   `MIN_TRADES_FOR_VALID_FOLD` trades, and the fold condition weighs money as
-  well as votes (see `decision_gate`). Counting a one-trade fold as a verdict,
+  well as votes (see `fold_health`). Counting a one-trade fold as a verdict,
   or a majority of tiny positive folds as a result, is how a losing family
   passes a checklist.
 - `--historical-trials` (default 729 = the full project grid-search history)
@@ -118,7 +118,7 @@ POS_FOLD_SHARE_MIN = 0.55
 # so admitting at 0.30 meant the gate passed what the report condemned.
 PBO_MAX = 0.20
 
-FOLD_CONDITION = "folds: total PnL > 0, median valid fold > 0, 55% positive"
+FOLD_CONDITION = "folds: total PnL > 0, PnL ex-best fold > 0, 55% positive"
 PBO_CONDITION = f"PBO < {PBO_MAX:.2f}"
 
 # ---------------------------------------------------------------------------
@@ -465,7 +465,8 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
     if not fold_trades:
         return {"variant": name, "n_trades": 0, "t_eff": 0.0, "n_folds": n_folds,
                 "traded_folds": 0, "valid_folds": 0, "pos_folds": 0,
-                "median_fold_pnl": 0.0, "t_block": float("nan"),
+                "median_fold_pnl": 0.0, "best_fold_pnl": 0.0,
+                "total_pnl_ex_best": 0.0, "t_block": float("nan"),
                 "total_pnl": 0.0, "expectancy": 0.0, "win_rate": 0.0,
                 "profit_factor": 0.0, "median_fold_pf": 0.0, "sharpe": 0.0,
                 "skew": 0.0, "kurtosis_excess": 0.0, "psr_0": float("nan"),
@@ -498,21 +499,24 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
     # A fold that traded at all vs a fold that traded ENOUGH to vote. Fold 9 of
     # the 2026-08-14 XAUUSD run held one trade (-122.24): its sign is noise, so
     # it must not count as a verdict in either direction.
+    fold_sums = [float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades]
     traded_folds = int(np.sum([len(ft) > 0 for ft in fold_trades]))
     valid_mask = [len(ft) >= MIN_TRADES_FOR_VALID_FOLD for ft in fold_trades]
     valid_folds = int(np.sum(valid_mask))
-    valid_sums = [float(ft.sum()) for ft, ok in zip(fold_trades, valid_mask) if ok]
+    valid_sums = [s for s, ok in zip(fold_sums, valid_mask) if ok]
     # A POSITIVE fold is a VALID fold that MADE MONEY. This used to be
     # `np.sum(ft > 0) > 0`, i.e. "the fold contains at least one winning
     # trade", which is true of essentially every non-empty fold - including
-    # every fold of the random-probability `null` control (12/12). Counting
-    # money instead of trades left one loophole open: a majority of small
-    # winning folds beside one catastrophic fold still passed, which is exactly
-    # what the XAUUSD family did on 2026-08-14 (4/7 positive, -396.5 total).
-    # The gate now also requires the total and the median valid fold; see
-    # decision_gate.
+    # every fold of the random-probability `null` control (12/12).
     pos_folds = int(np.sum([s > 0.0 for s in valid_sums]))
     median_fold_pnl = float(np.median(valid_sums)) if valid_sums else 0.0
+    # Concentration: how much of the result is one window? A family whose profit
+    # disappears when the single best fold is removed has one good period, not
+    # an edge. Only a POSITIVE best fold is removable (subtracting a negative
+    # best fold would flatter the result instead of stressing it).
+    best_fold_pnl = max(max(fold_sums), 0.0) if fold_sums else 0.0
+    total_pnl = float(arr.sum())
+    total_pnl_ex_best = total_pnl - best_fold_pnl
     t_block = block_bootstrap_t(trade_r) if trade_r and len(trade_r) >= 2 else float("nan")
 
     return {
@@ -525,7 +529,9 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
         "t_block": t_block,
         "pos_folds": pos_folds,
         "median_fold_pnl": round(median_fold_pnl, 2),
-        "total_pnl": round(float(arr.sum()), 2),
+        "best_fold_pnl": round(best_fold_pnl, 2),
+        "total_pnl_ex_best": round(total_pnl_ex_best, 2),
+        "total_pnl": round(total_pnl, 2),
         "expectancy": round(float(arr.mean()), 4),
         "win_rate": round(100.0 * float(np.mean(arr > 0)), 1),
         "profit_factor": round(pf, 2) if pf != 999.0 else 999.0,
@@ -708,41 +714,50 @@ def _fmt(x, width: int = 9, digits: int = 2) -> str:
 def fold_health(cur: dict | None) -> dict:
     """Did the folds actually make money, or did they merely vote that way?
 
-    Three legs, all required, because each one alone is gameable:
+    Three legs, all required, none implied by the others:
 
     * `total_pnl > 0` — the family has to be profitable at all. A checklist
       that can be passed by a losing config is not a checklist.
-    * `median valid fold > 0` — the profit cannot live in one fold. This is the
-      leg that a fat right tail cannot buy.
+    * `total_pnl - best_fold > 0` — the result must survive deleting its single
+      best window. This is the leg a fat right tail cannot buy.
     * `>= 55% of VALID folds positive` — the original condition, kept, but now
       computed over folds with at least MIN_TRADES_FOR_VALID_FOLD trades.
 
-    The 2026-08-14 XAUUSD run passed the third leg (4/7 = 57.1%) with -396.5
-    total, which is precisely why the other two exist.
+    NOTE on a leg that is NOT here: "median fold PnL > 0" was tried first and
+    dropped, because it cannot fail while the 55% leg passes (if strictly more
+    than half of the folds are positive, their median is positive by
+    construction). `median_fold_pnl` is still reported as a description.
+
+    The 2026-08-14 XAUUSD run passed the third leg (3/5 = 60% of valid folds)
+    with -396.5 total and -1514.1 ex-best, which is precisely why the other two
+    exist.
     """
     if cur is None:
         return {"total_pnl": 0.0, "total_pnl_positive": False,
-                "median_fold_pnl": 0.0, "median_fold_positive": False,
+                "total_pnl_ex_best": 0.0, "ex_best_positive": False,
+                "best_fold_pnl": 0.0, "median_fold_pnl": 0.0,
                 "pos_folds": 0, "valid_folds": 0, "positive_share": 0.0,
                 "positive_share_ok": False, "passed": False}
     total = float(cur.get("total_pnl", 0.0))
-    median_fold = float(cur.get("median_fold_pnl", 0.0))
+    ex_best = float(cur.get("total_pnl_ex_best", 0.0))
     valid = int(cur.get("valid_folds", 0))
     pos = int(cur.get("pos_folds", 0))
     share = (pos / valid) if valid > 0 else 0.0
     total_ok = total > 0.0
-    median_ok = median_fold > 0.0
+    ex_best_ok = ex_best > 0.0
     share_ok = bool(valid > 0 and share >= POS_FOLD_SHARE_MIN)
     return {
         "total_pnl": total,
         "total_pnl_positive": total_ok,
-        "median_fold_pnl": median_fold,
-        "median_fold_positive": median_ok,
+        "total_pnl_ex_best": ex_best,
+        "ex_best_positive": ex_best_ok,
+        "best_fold_pnl": float(cur.get("best_fold_pnl", 0.0)),
+        "median_fold_pnl": float(cur.get("median_fold_pnl", 0.0)),
         "pos_folds": pos,
         "valid_folds": valid,
         "positive_share": share,
         "positive_share_ok": share_ok,
-        "passed": bool(total_ok and median_ok and share_ok),
+        "passed": bool(total_ok and ex_best_ok and share_ok),
     }
 
 
@@ -755,8 +770,8 @@ def decision_gate(res: dict) -> dict:
       3. PBO < 0.20 (the report calls 0.20-0.30 HIGH overfit risk, so the gate
          must not admit inside that band)
       4. survives 1.5x costs with PF > 1.1
-      5. folds: total PnL > 0 AND median valid fold > 0 AND >= 55% of valid
-         folds positive (see `fold_health`)
+      5. folds: total PnL > 0 AND total PnL without the best fold > 0 AND
+         >= 55% of valid folds positive (see `fold_health`)
       6. IS->OOS slope >= 0.5
       7. locked hold-out confirms (not computable here — always 'pending')
     Returns {checks, fold_health, passed_all}.
@@ -800,19 +815,20 @@ def print_report(res: dict) -> None:
           f"{neff.get('n_eff_historical', 'n/a')} (participation ratio "
           f"{neff.get('family_participation_ratio', 'n/a')})")
     print(f"+folds = valid folds with positive PnL / valid folds "
-          f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades)")
+          f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades); "
+          f"exBest = total PnL minus the single best fold")
 
     dsr_label = f"DSR({res['historical_trials']})"
     neff_label = f"DSR(Nef)"
-    hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'WR%':>6}{'PF':>6}{'medPF':>7}"
-           f"{'medPnL':>9}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
+    hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'exBest':>9}{'WR%':>6}{'PF':>6}"
+           f"{'medPF':>7}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
            f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}")
     print(hdr)
     print("-" * len(hdr))
     for t in res["trials"]:
         print(f"{t['variant']:<14}{t['n_trades']:>6}{t['total_pnl']:>9.1f}"
+              f"{t.get('total_pnl_ex_best', 0.0):>9.1f}"
               f"{t['win_rate']:>6.1f}{t['profit_factor']:>6.2f}{t['median_fold_pf']:>7.2f}"
-              f"{t.get('median_fold_pnl', 0.0):>9.1f}"
               f"{t['sharpe']:>8.2f}{_fmt(t['psr_0'], 8):>8}{_fmt(t['dsr_trials'], 8):>8}"
               f"{_fmt(t['dsr_neff'], 8):>8}"
               f"{_fmt(t['dsr_historical'], 9):>9}{_fmt(t['min_trl_years'], 9):>9}"
@@ -854,8 +870,9 @@ def print_report(res: dict) -> None:
             fh = gate["fold_health"]
             print(f"        total PnL {fh['total_pnl']:+.1f} "
                   f"[{'ok' if fh['total_pnl_positive'] else 'FAIL'}] | "
-                  f"median valid fold {fh['median_fold_pnl']:+.1f} "
-                  f"[{'ok' if fh['median_fold_positive'] else 'FAIL'}] | "
+                  f"ex-best {fh['total_pnl_ex_best']:+.1f} "
+                  f"(best fold {fh['best_fold_pnl']:+.1f}) "
+                  f"[{'ok' if fh['ex_best_positive'] else 'FAIL'}] | "
                   f"{fh['pos_folds']}/{fh['valid_folds']} positive "
                   f"({100.0 * fh['positive_share']:.1f}%, need "
                   f"{100.0 * POS_FOLD_SHARE_MIN:.0f}%) "
