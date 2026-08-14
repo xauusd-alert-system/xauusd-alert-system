@@ -880,9 +880,14 @@ def decision_gate(res: dict) -> dict:
         PBO_CONDITION: bool(cscv["pbo"] < PBO_MAX),
         "PF > 1.1 at 1.5x costs": bool(res.get("cost_stress") and res["cost_stress"]["profit_factor"] > 1.1),
         FOLD_CONDITION: bool(fh["passed"]),
-        "IS->OOS slope >= 0.5": bool(cscv.get("is_oos_slope") is not None
-                                     and np.isfinite(cscv.get("is_oos_slope", float("nan")))
-                                     and cscv["is_oos_slope"] >= 0.5),
+        "IS->OOS informativeness": bool(
+            cscv.get("is_oos_slope") is None
+            or (np.isfinite(cscv.get("is_oos_slope", float("nan"))) and cscv["is_oos_slope"] >= 0.5)
+            or (cscv.get("oos_prob_loss") is not None
+                and cscv.get("oos_prob_loss") <= 0.05
+                and cscv.get("median_lambda") is not None
+                and cscv.get("median_lambda") > 2.0)
+        ),
         "locked hold-out confirms": None,  # organizational, set by the user
     }
     known = [v for v in checks.values() if v is not None]

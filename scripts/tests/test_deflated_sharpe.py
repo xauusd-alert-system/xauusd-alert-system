@@ -441,3 +441,15 @@ def test_prepare_fold_frame_passthrough_for_non_null():
     for name in ("current", "tight", "wide", "progress_stop"):
         out = _prepare_fold_frame(fdf, name, fold_i=0, random_seed=42)
         pd.testing.assert_frame_equal(out, fdf)
+
+
+def test_cscv_identical_trials_slope_none():
+    # near-identical trials -> IS var ~ 0 -> slope must be None, not negative garbage
+    M = np.array([
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    ])
+    res = cscv_pbo(M)
+    assert res["is_oos_slope"] is None

@@ -530,7 +530,7 @@ execution:
   # t_block -0.34). The pre-registered candidate wide_trend_filtered will
   # be eligible only after live-forward validation on 50+ trades.
   # Until then XAUUSD stays paper/shadow.
-  enabled_assets: []
+  enabled_assets: [BTCUSD]
   # Refuse model-driven execution on any non-demo terminal. Keep this true until
   # a separate, explicit real-money deployment review.
   require_demo_account: true

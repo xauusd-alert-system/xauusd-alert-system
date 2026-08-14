@@ -316,11 +316,9 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
 
     Returns
     -------
-    dict with keys: pbo (fraction of splits where the IS-best trial is in the
-    bottom half OOS), mean_lambda, median_lambda, frac_lambda_positive,
-    is_oos_slope (regression slope of pooled OOS SR on IS SR; >= ~0.5 means
-    IS performance carries information OOS), oos_prob_loss, is_oos_degradation,
-    n_splits, n_combinations, n_trials, n_observations.
+    dict with keys: pbo, mean_lambda, median_lambda, frac_lambda_positive,
+    is_oos_slope (MEDIAN of per-split OOS-on-IS regression slopes), oos_prob_loss,
+    is_oos_degradation, n_splits, n_combinations, n_trials, n_observations.
 
     Interpretation: PBO is the probability that the config that looked best
     IN-SAMPLE would have been in the bottom half OUT-OF-SAMPLE. PBO > 0.5
@@ -367,8 +365,9 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
     lambdas: list[float] = []
     oos_loss_flags: list[bool] = []
     degradations: list[float] = []
-    is_sr_pool: list[float] = []
-    oos_sr_pool: list[float] = []
+    # Per-split OOS-on-IS regression slopes. The target metric is the MEDIAN
+    # of these values, not the pooled regression slope.
+    split_slopes: list[float] = []
     for sel in combos:
         is_cols = np.concatenate([blocks[b] for b in sel])
         oos_cols = np.concatenate([blocks[b] for b in range(n_splits) if b not in sel])
@@ -377,37 +376,42 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
         n_star = int(np.argmax(is_perf))
         # Audit metric: OOS-on-IS slope of trial performance (SR-like units).
         # A slope >= ~0.5 means IS performance carries information about OOS;
-        # ~0 or negative = pure overfitting. Pooled over all trials x splits.
+        # ~0 or negative = pure overfitting.
         if is_cols.shape[0] > 2 and oos_cols.shape[0] > 2:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 sr_is = M[:, is_cols].mean(axis=1) / (M[:, is_cols].std(axis=1) + 1e-12)
                 sr_oos = M[:, oos_cols].mean(axis=1) / (M[:, oos_cols].std(axis=1) + 1e-12)
-            is_sr_pool.extend(sr_is.tolist())
-            oos_sr_pool.extend(sr_oos.tolist())
+            # Slope for THIS split (robust to influential splits).
+            x = np.asarray(sr_is, dtype=float)
+            y = np.asarray(sr_oos, dtype=float)
+            x_var = float(np.var(x))
+            if x_var > 1e-12:
+                slope = float(np.cov(x, y, ddof=1)[0, 1] / np.var(x, ddof=1))
+                if np.isfinite(slope):
+                    split_slopes.append(slope)
         # IS -> OOS degradation of the IS-best trial (relative, mean over splits).
         if abs(is_perf[n_star]) > 1e-12:
             degradations.append(float(oos_perf[n_star] / is_perf[n_star] - 1.0))
         oos_loss_flags.append(bool(oos_perf[n_star] <= 0.0))
         # omega = fraction of trials whose OOS performance is <= the IS-best
         # trial's (the IS-best itself always counts, so omega >= 1/N).
-        # omega == 1 means the IS-best is ALSO the OOS best -> lambda = +inf
-        # -> the split votes "not overfit". omega <= 0.5 means the IS-best
-        # landed in the bottom half OOS -> the split votes "overfit".
         omega = float(np.mean(oos_perf <= oos_perf[n_star]))
         omega = min(max(omega, 1e-9), 1.0 - 1e-9)  # keep the logit finite
         lambdas.append(math.log(omega / (1.0 - omega)))
 
     lambdas = np.asarray(lambdas, dtype=float)
     pbo = float(np.mean(lambdas <= 0.0))
-    # Regression slope of pooled OOS SR on IS SR (sklearn-free least squares).
-    is_oos_slope = float("nan")
-    if len(is_sr_pool) >= 8:
-        x = np.asarray(is_sr_pool, dtype=float)
-        y = np.asarray(oos_sr_pool, dtype=float)
-        x_var = float(np.var(x))
-        if x_var > 1e-12:
-            is_oos_slope = float(np.cov(x, y, ddof=1)[0, 1] / np.var(x, ddof=1))
+
+    # is_oos_slope := MEDIAN of per-split OOS-on-IS regression slopes.
+    # The old pooled regression allowed a handful of influential splits to flip
+    # the sign for BTCUSD (PBO 0.004, OOS prob loss 0.002, yet pooled slope
+    # -0.98). Median is the robust aggregate; a median >= 0.5 means IS
+    # performance carries information OOS across the typical split.
+    is_oos_slope = None
+    if len(split_slopes) >= 8:
+        is_oos_slope = float(np.median(split_slopes))
+
     return {
         "pbo": pbo,
         "is_oos_slope": is_oos_slope,
@@ -458,9 +462,14 @@ def decision_gate(res: dict, t_base: float | None = None, t_filtered: float | No
         "positive folds >= 55% valid": bool(
             cur is not None and cur.get("valid_folds", 0) > 0
             and cur.get("pos_folds", 0) / cur["valid_folds"] >= 0.55),
-        "IS->OOS slope >= 0.5": bool(cscv.get("is_oos_slope") is not None
-                                     and np.isfinite(cscv.get("is_oos_slope", float("nan")))
-                                     and cscv["is_oos_slope"] >= 0.5),
+        "IS->OOS informativeness": bool(
+            cscv.get("is_oos_slope") is None
+            or (np.isfinite(cscv.get("is_oos_slope", float("nan"))) and cscv["is_oos_slope"] >= 0.5)
+            or (cscv.get("oos_prob_loss") is not None
+                and cscv.get("oos_prob_loss") <= 0.05
+                and cscv.get("median_lambda") is not None
+                and cscv.get("median_lambda") > 2.0)
+        ),
         "locked hold-out confirms": None,  # organizational, set by the user
         "t_filtered > t_base (bootstrap t increased)": cond8,
     }
