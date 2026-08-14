@@ -15,7 +15,7 @@ from features.structure import detect_structure
 from features.mtf_confluence import compute_confluence_score
 from features.order_flow import add_order_flow_features
 from regime.classifier import add_regime_indicators, classify_regime_series
-from labeling.label_generator import generate_labels_from_config
+from labeling.label_generator import generate_labels_from_config, resolve_label_event
 from data.storage import read_candles
 from model.trainer import (
     build_training_matrix,
@@ -118,7 +118,24 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
         df["mtf_confluence_score"] = 0.0
 
     df["regime"] = classify_regime_series(df, cfg)
-    df["label"] = generate_labels_from_config(df, cfg)
+    # labeling.event selects WHICH event is learned: the historical triple
+    # barrier ("barrier", default) or the event the execution engine actually
+    # resolves ("traded", A10). asset_key is required by the traded path because
+    # the event is defined by that asset's costs and signal grid; passing it
+    # unconditionally keeps the two callers of build_full_df (run_backtest and
+    # scripts/deflated_sharpe.py) on one label space by construction.
+    label_event = resolve_label_event(cfg)
+    df["label"] = generate_labels_from_config(df, cfg, asset_key=asset_key)
+    labelled = int(df["label"].notna().sum())
+    print(f"[run_backtest] label event = {label_event} | labelled rows "
+          f"{labelled}/{len(df)} ({labelled / len(df) * 100:.2f}%)" if len(df)
+          else f"[run_backtest] label event = {label_event} | empty frame")
+    if label_event == "traded" and labelled:
+        valid = df["label"].dropna()
+        long_share = float((valid == 1.0).mean() * 100)
+        print(f"[run_backtest] traded-direction labels: long {long_share:.2f}% / "
+              f"short {100.0 - long_share:.2f}% of {labelled} informative bars "
+              f"(NaN bars are those where BOTH sides resolve the same way)")
     return df
 
 
@@ -336,7 +353,11 @@ def main():
             # end_date is journalled so a shortened run can never later be
             # mistaken for a full-sample one.
             params={"timeframe": timeframe, "db_path": args.db_path,
-                    "end_date": args.end_date},
+                    "end_date": args.end_date,
+                    # The label event is part of the trial's identity: the same
+                    # grid trained on a different event is a DIFFERENT trial.
+                    "label_event": resolve_label_event(
+                        merge_asset_cfg(cfg, args.asset, "labeling"))},
             metrics={"n_folds": summary["n_folds"], "valid_folds": summary["valid_folds"],
                      "positive_folds_valid": summary["positive_folds_valid"],
                      "median_pf_valid": summary["median_pf_valid"],
