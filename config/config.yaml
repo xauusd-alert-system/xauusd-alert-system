@@ -123,6 +123,8 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
+    labeling:
+      event: traded  
     # Equal-step signal grid clamps (price points). Gold M5 ATR ~3-7 -> keep the
     # step inside 2..8 pts so extreme ATR cannot produce absurd TP/SL levels.
     signal_grid:

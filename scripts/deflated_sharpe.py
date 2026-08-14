@@ -29,6 +29,11 @@ Design (honesty requirements, mirroring `scripts/run_backtest.py`):
 - A "null" variant (random 0.5±noise probabilities, no model) is always
   included as a negative control: it must come out with DSR ~= 0.5 and a
   large MinTRL, or the machinery is broken.
+- Cost stress (1.5x spread/slippage/commission) and the block-bootstrap t-stat
+  on R-multiples are computed for EVERY variant in the family, not only
+  `current` (audit follow-up: a config cannot be judged healthier than the
+  shipped baseline unless it was put through the identical stress -- this is
+  what let a bare "wide beats current on raw PnL" pass unchallenged before).
 - A fold VOTES on the gate only if it carries at least
   `MIN_TRADES_FOR_VALID_FOLD` trades, and the fold condition weighs money as
   well as votes (see `fold_health`). Counting a one-trade fold as a verdict,
@@ -141,6 +146,7 @@ GENERIC_VARIANTS: dict = {
     "null": None,
 }
 
+
 GBP_VARIANTS: dict = {
     "current": {},  # = v4 (post-sync config): stop 3.0, BE 1.0, tp2 2.5, tp3 3.0, conf 0.80, h36
     "v3_early_be": {  # pre-v4 (EUR-style early-BE package)
@@ -204,6 +210,22 @@ GBP_VARIANTS: dict = {
         "labeling": {"horizon_candles_n": 36},
     },
     "null": None,
+}
+
+XAUUSD_THRESHOLD_VARIANTS: dict = {
+    "conf_073": {"ensemble": {"min_confidence_to_alert": 0.73}},
+    "conf_075": {"ensemble": {"min_confidence_to_alert": 0.75}},
+    "floor_064": {"ensemble": {"ml_confidence_floor": 0.64}},
+    "floor_066": {"ensemble": {"ml_confidence_floor": 0.66}},
+    "prob_057": {"ensemble": {"min_ml_probability": 0.57}},
+    "prob_059": {"ensemble": {"min_ml_probability": 0.59}},
+    "combo_conservative": {
+        "ensemble": {
+            "min_confidence_to_alert": 0.73,
+            "ml_confidence_floor": 0.64,
+            "min_ml_probability": 0.57,
+        }
+    },
 }
 
 # Synthetic-demo fallback price scales (only used when no DB is available).
@@ -271,6 +293,25 @@ def _null_probs(n: int, seed: int = 123) -> np.ndarray:
     return np.clip(0.5 + rng.normal(0.0, 0.05, n), 0.05, 0.95)
 
 
+def _prepare_fold_frame(fdf: pd.DataFrame, name: str, fold_i: int, random_seed: int) -> pd.DataFrame:
+    """Return the fold frame to feed the engine for variant `name`.
+
+    Factored out so the baseline run and the cost-stress rerun of the SAME
+    variant see IDENTICAL ml_p_* values -- the only axis stress is allowed to
+    move is cost, never the signal. Before this helper existed, the null
+    variant's injected probabilities were generated inline inside the main
+    loop only, so a naive stress rerun would have re-drawn a fresh random
+    control every time instead of stressing the exact same trades.
+    """
+    if name == "null":
+        fdf_run = fdf.copy()
+        p = _null_probs(len(fdf_run), seed=random_seed + fold_i)
+        fdf_run["ml_p_long"] = p
+        fdf_run["ml_p_short"] = 1.0 - p
+        return fdf_run
+    return fdf
+
+
 # ---------------------------------------------------------------------------
 # Variant plumbing
 # ---------------------------------------------------------------------------
@@ -278,6 +319,8 @@ def _null_probs(n: int, seed: int = 123) -> np.ndarray:
 def _variants_for(asset_key: str) -> dict:
     if asset_key == "GBPUSD":
         return dict(GBP_VARIANTS)
+    if asset_key == "XAUUSD":
+        return {**GENERIC_VARIANTS, **XAUUSD_THRESHOLD_VARIANTS}
     return dict(GENERIC_VARIANTS)
 
 
@@ -333,6 +376,57 @@ def _apply_cost_mult(cfg: dict, asset_key: str, mult: float) -> dict:
     if "slippage_points" in bt:
         bt["slippage_points"] = float(bt["slippage_points"]) * mult
     return cfg_v
+
+
+def _cost_stress_for_variant(cfg: dict, asset_key: str, frames: list, name: str,
+                             overrides: dict | None, random_seed: int,
+                             cost_mult: float = 1.5) -> dict:
+    """Rerun ONE variant's folds with spread/slippage/commission x cost_mult.
+
+    Originally this only ran for `current` (audit gate condition 4). Extended
+    to run for every variant in the grid: `wide` beating `current` on raw PnL
+    is not evidence it survives the same cost shock, and admitting it without
+    checking would repeat exactly the selection bias this whole script exists
+    to catch.
+
+    Uses the SAME per-fold frame preparation as the baseline run
+    (`_prepare_fold_frame`), so for the `null` control the injected random
+    probabilities are identical to the baseline pass -- stress must change
+    costs only, never the signal being tested.
+
+    PF sentinel note: normalized to the same 999.0 "no losing trades" sentinel
+    `_summarize_trial` uses everywhere else. The original current-only stress
+    block instead divided by max(gross_loss, 1e-12), which produced a huge
+    (not 999.0) float in that edge case -- harmless for `current`'s real
+    numbers (it has real losses), but inconsistent once this runs on every
+    variant including `null`.
+    """
+    cfg_s = _apply_cost_mult(cfg, asset_key, cost_mult)
+    cfg_s = _apply_variant(cfg_s, asset_key, overrides)
+    fold_pfs: list[float] = []
+    pnls: list[float] = []
+    for fold_i, fdf in enumerate(frames):
+        fdf_run = _prepare_fold_frame(fdf, name, fold_i, random_seed)
+        cfg_run = merge_asset_cfg(cfg_s, asset_key, "labeling")
+        cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
+        engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
+        trades = engine.run(fdf_run.reset_index(drop=True))
+        arr = np.array([t.pnl for t in trades], dtype=float)
+        if len(arr) >= 3:
+            wins, losses = arr[arr > 0], arr[arr <= 0]
+            gp, gl = float(wins.sum()), float(-losses.sum())
+            fold_pfs.append((gp / gl) if gl > 0 else 999.0)
+        pnls.extend(arr.tolist())
+    total_pnl = float(np.sum(pnls)) if pnls else 0.0
+    gross_profit = float(np.sum(np.maximum(pnls, 0.0))) if pnls else 0.0
+    gross_loss = float(-np.sum(np.minimum(pnls, 0.0))) if pnls else 0.0
+    pf = (gross_profit / gross_loss) if gross_loss > 0 else 999.0
+    return {
+        "cost_x1_5_n_trades": len(pnls),
+        "cost_x1_5_pnl": round(total_pnl, 2),
+        "cost_x1_5_pf": round(pf, 2) if pf != 999.0 else 999.0,
+        "cost_x1_5_median_fold_pf": round(float(np.median(fold_pfs)), 2) if fold_pfs else None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -582,19 +676,14 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 
     fold_matrix = []
     trials = []
-    current_r: list[float] = []
+    variant_r_by_name: dict[str, list[float]] = {}
     n_eff_historical = float(len(variants))
     for name, overrides in variants.items():
         cfg_v = _apply_variant(cfg, asset_key, overrides)
         fold_trades: list[np.ndarray] = []
         variant_r: list[float] = []
         for fold_i, fdf in enumerate(frames):
-            fdf_run = fdf
-            if name == "null":
-                fdf_run = fdf.copy()
-                p = _null_probs(len(fdf_run), seed=random_seed + fold_i)
-                fdf_run["ml_p_long"] = p
-                fdf_run["ml_p_short"] = 1.0 - p
+            fdf_run = _prepare_fold_frame(fdf, name, fold_i, random_seed)
             cfg_run = merge_asset_cfg(cfg_v, asset_key, "labeling")
             cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
             engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
@@ -602,24 +691,29 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             tdf = trades_to_dataframe(trades)
             pnls = tdf["pnl"].to_numpy(dtype=float) if len(tdf) else np.array([], dtype=float)
             fold_trades.append(pnls)
-            if name == "current":
-                # Per-trade R of the current config (audit: gate needs an
-                # honest block-bootstrap t, which requires trade-level R).
-                for t in trades:
-                    if getattr(t, "initial_stop_price", None):
-                        risk = abs(t.entry_price - t.initial_stop_price) * t.volume * engine.point_value_lot
-                        if risk > 1e-12:
-                            variant_r.append(float(t.pnl / risk))
+            # Per-trade R (needed for the block-bootstrap t below). Used to be
+            # gated on `name == "current"`, which is exactly why the stress
+            # grid could not tell whether `wide`'s edge was real.
+            for t in trades:
+                if getattr(t, "initial_stop_price", None):
+                    risk = abs(t.entry_price - t.initial_stop_price) * t.volume * engine.point_value_lot
+                    if risk > 1e-12:
+                        variant_r.append(float(t.pnl / risk))
         n_total = int(sum(len(ft) for ft in fold_trades))
         trades_per_year = n_total / years if years > 0 else 0.0
-        if name == "current":
-            current_r = variant_r
-        trials.append(_summarize_trial(
+        variant_r_by_name[name] = variant_r
+        trial = _summarize_trial(
             name, fold_trades, len(windows), historical_trials,
             n_variants=len(variants), trades_per_year=trades_per_year,
             n_eff_historical=n_eff_historical, trade_r=variant_r,
-            horizon_bars=int(merged_lab.get("horizon_candles_n", 36))))
+            horizon_bars=int(merged_lab.get("horizon_candles_n", 36)))
+        if cost_stress:
+            trial.update(_cost_stress_for_variant(
+                cfg, asset_key, frames, name, overrides, random_seed, cost_mult=1.5))
+        trials.append(trial)
         fold_matrix.append([float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades])
+
+    current_r = variant_r_by_name.get("current", [])
 
     fold_arr = np.asarray(fold_matrix, dtype=float)
     cscv = cscv_pbo(fold_arr, n_splits=n_splits)
@@ -635,34 +729,24 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         n_eff_historical = float(historical_trials)
     n_eff_historical = max(n_eff_historical, pr_ratio)
 
-    # Cost stress (audit gate: survive 1.5x costs with PF > 1.1): rerun ONLY
-    # the current variant with spread/slippage/commission x 1.5.
+    # Cost stress (audit gate condition 4: survive 1.5x costs with PF > 1.1)
+    # is now computed for EVERY variant inside the loop above
+    # (`_cost_stress_for_variant`) and lives on each trial dict as
+    # cost_x1_5_pnl / cost_x1_5_pf / cost_x1_5_n_trades / cost_x1_5_median_fold_pf.
+    # `res["cost_stress"]` is rebuilt here in the OLD current-only shape purely
+    # for backward compatibility with `decision_gate` / `print_report`, which
+    # only ever gated the shipped `current` config's stress result.
     stress = None
-    if cost_stress and "current" in variants:
-        cfg_s = _apply_cost_mult(cfg, asset_key, 1.5)
-        cfg_s = _apply_variant(cfg_s, asset_key, variants["current"])
-        stress_fold_pfs = []
-        stress_pnls = []
-        for fdf in frames:
-            cfg_run = merge_asset_cfg(cfg_s, asset_key, "labeling")
-            cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
-            engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
-            trades = engine.run(fdf.reset_index(drop=True))
-            arr = np.array([t.pnl for t in trades], dtype=float)
-            if len(arr) >= 3:
-                wins, losses = arr[arr > 0], arr[arr <= 0]
-                gp, gl = float(wins.sum()), float(-losses.sum())
-                stress_fold_pfs.append((gp / gl) if gl > 0 else 999.0)
-            stress_pnls.extend(arr.tolist())
-        stress = {
-            "cost_mult": 1.5,
-            "n_trades": len(stress_pnls),
-            "total_pnl": round(float(np.sum(stress_pnls)), 2) if stress_pnls else 0.0,
-            "profit_factor": round(float(np.sum(np.maximum(stress_pnls, 0.0)) /
-                                         max(-np.sum(np.minimum(stress_pnls, 0.0)), 1e-12)), 2)
-            if stress_pnls else 0.0,
-            "median_fold_pf": round(float(np.median(stress_fold_pfs)), 2) if stress_fold_pfs else None,
-        }
+    if cost_stress:
+        cur_trial = next((t for t in trials if t["variant"] == "current"), None)
+        if cur_trial is not None and "cost_x1_5_pnl" in cur_trial:
+            stress = {
+                "cost_mult": 1.5,
+                "n_trades": cur_trial["cost_x1_5_n_trades"],
+                "total_pnl": cur_trial["cost_x1_5_pnl"],
+                "profit_factor": cur_trial["cost_x1_5_pf"],
+                "median_fold_pf": cur_trial["cost_x1_5_median_fold_pf"],
+            }
 
     # Record the effective config of the "current" variant for the report.
     cur_cfg = _apply_variant(cfg, asset_key, variants.get("current"))
@@ -774,6 +858,13 @@ def decision_gate(res: dict) -> dict:
          >= 55% of valid folds positive (see `fold_health`)
       6. IS->OOS slope >= 0.5
       7. locked hold-out confirms (not computable here — always 'pending')
+
+    NOTE: this gate still evaluates the `current` variant only (by design --
+    it admits the SHIPPED config, not the whole grid). Every variant's
+    cost-stress and block-bootstrap-t numbers are now visible in the printed
+    table for manual comparison, but promoting a non-`current` variant (e.g.
+    `wide`) to `current` and re-running is a deliberate, separate step, not
+    something this function should do implicitly.
     Returns {checks, fold_health, passed_all}.
     """
     cur = next((t for t in res["trials"] if t["variant"] == "current"), None)
@@ -817,12 +908,16 @@ def print_report(res: dict) -> None:
     print(f"+folds = valid folds with positive PnL / valid folds "
           f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades); "
           f"exBest = total PnL minus the single best fold")
+    print(f"t_block = block-bootstrap t-stat on per-trade R-multiples; "
+          f"x1.5PnL/x1.5PF = cost-stress rerun at 1.5x spread/slippage/commission "
+          f"(gate conditions 1 & 4, now computed for EVERY variant, not just 'current')")
 
     dsr_label = f"DSR({res['historical_trials']})"
     neff_label = f"DSR(Nef)"
     hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'exBest':>9}{'WR%':>6}{'PF':>6}"
            f"{'medPF':>7}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
-           f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}")
+           f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}"
+           f"{'t_block':>9}{'x1.5PnL':>9}{'x1.5PF':>8}")
     print(hdr)
     print("-" * len(hdr))
     for t in res["trials"]:
@@ -832,7 +927,10 @@ def print_report(res: dict) -> None:
               f"{t['sharpe']:>8.2f}{_fmt(t['psr_0'], 8):>8}{_fmt(t['dsr_trials'], 8):>8}"
               f"{_fmt(t['dsr_neff'], 8):>8}"
               f"{_fmt(t['dsr_historical'], 9):>9}{_fmt(t['min_trl_years'], 9):>9}"
-              f"{str(t['pos_folds']) + '/' + str(t.get('valid_folds', 0)):>8}")
+              f"{str(t['pos_folds']) + '/' + str(t.get('valid_folds', 0)):>8}"
+              f"{_fmt(t.get('t_block', float('nan')), 9):>9}"
+              f"{_fmt(t.get('cost_x1_5_pnl', float('nan')), 9, 1):>9}"
+              f"{_fmt(t.get('cost_x1_5_pf', float('nan')), 8):>8}")
 
     c = res["cscv"]
     print(f"\nCSCV (Probability of Backtest Overfitting):")
@@ -856,11 +954,13 @@ def print_report(res: dict) -> None:
     # Cost stress + decision gate
     st = res.get("cost_stress")
     if st:
-        print(f"\nCost stress x{st['cost_mult']}: n={st['n_trades']} PnL={st['total_pnl']} "
-              f"PF={st['profit_factor']} median fold PF={st['median_fold_pf']} "
+        print(f"\nCost stress x{st['cost_mult']} (current variant): n={st['n_trades']} "
+              f"PnL={st['total_pnl']} PF={st['profit_factor']} "
+              f"median fold PF={st['median_fold_pf']} "
               f"({'PASS' if st['profit_factor'] > 1.1 else 'FAIL'} PF>1.1)")
+        print("  (per-variant cost-stress and block-bootstrap t are in the table above)")
     gate = decision_gate(res)
-    print("\nDecision gate (all conditions simultaneously):")
+    print("\nDecision gate (all conditions simultaneously, evaluated for 'current' only):")
     for cond, ok in gate["checks"].items():
         if ok is None:
             print(f"  [ ] {cond}  (user/organizational)")
@@ -907,7 +1007,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--n-splits", type=int, default=None, help="CSCV split count (default: auto)")
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds (quick runs/tests)")
     parser.add_argument("--no-cost-stress", action="store_true",
-                        help="Skip the 1.5x-cost stress rerun of the current config")
+                        help="Skip the 1.5x-cost stress rerun (now per variant)")
     parser.add_argument("--no-journal", action="store_true",
                         help="Do not append this run to logs/trial_journal.csv")
     parser.add_argument("--allow-locked", action="store_true",

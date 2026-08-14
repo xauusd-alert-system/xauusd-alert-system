@@ -326,3 +326,118 @@ def test_run_analysis_reports_n_eff(synthetic_gbp_df):
     # every trial row carries the new DSR(N_eff) column
     for t in res["trials"]:
         assert "dsr_neff" in t
+
+# ---------------------------------------------------------------------------
+# Per-variant cost stress + block-bootstrap t (audit follow-up: gate
+# conditions 1 and 4 used to be computed for the "current" variant only, so
+# a variant like "wide" could beat "current" on raw PnL/DSR without ever
+# being checked against the same 1.5x cost shock or having its R-multiples
+# bootstrapped). See scripts/deflated_sharpe.py: `_cost_stress_for_variant`,
+# `_prepare_fold_frame`.
+# ---------------------------------------------------------------------------
+
+
+def test_stress_fields_present_for_every_variant(synthetic_gbp_df):
+    from config.loader import load_config
+    cfg = load_config()
+    variants = {
+        "current": {},
+        "tight": {"signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5}},
+        "wide": {"signal_grid": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0, "tp3_mult": 4.0}},
+        "progress_stop": {"signal_grid": {"progress_stop_enabled": True,
+                                          "progress_stop_ratio": 0.5,
+                                          "progress_stop_atr": 0.3}},
+        "null": None,
+    }
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
+                       historical_trials=729, cost_stress=True)
+    required = {"cost_x1_5_pnl", "cost_x1_5_pf", "cost_x1_5_n_trades", "t_block"}
+    for t in res["trials"]:
+        missing = required - set(t.keys())
+        assert not missing, f"variant '{t['variant']}' missing {missing}"
+
+
+def test_block_bootstrap_t_not_gated_to_current(synthetic_gbp_df):
+    """Regression guard for the bug this PR fixes: t_block used to be NaN for
+    every variant except 'current', because per-trade R was only appended to
+    `variant_r` inside an `if name == "current":` branch of the main loop."""
+    from config.loader import load_config
+    cfg = load_config()
+    variants = {"current": {}, "wide": {"signal_grid": {"stop_mult": 4.0}}}
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
+                       historical_trials=729)
+    for t in res["trials"]:
+        if t["n_trades"] >= 2:
+            assert not math.isnan(t["t_block"]), (
+                f"variant '{t['variant']}' has {t['n_trades']} trades but "
+                f"t_block is NaN -- R-multiple collection looks gated to "
+                f"'current' again"
+            )
+
+
+def test_cost_stress_never_improves_pnl(synthetic_gbp_df):
+    from config.loader import load_config
+    cfg = load_config()
+    variants = {"current": {}, "wide": {"signal_grid": {"stop_mult": 4.0}}, "null": None}
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
+                       historical_trials=729)
+    for t in res["trials"]:
+        assert t["cost_x1_5_pnl"] <= t["total_pnl"] + 1e-6, (
+            f"variant '{t['variant']}': cost x1.5 PnL ({t['cost_x1_5_pnl']}) > "
+            f"baseline PnL ({t['total_pnl']}) -- costs look unapplied"
+        )
+
+
+def test_current_cost_stress_field_backward_compatible(synthetic_gbp_df):
+    """res['cost_stress'] (consumed by decision_gate/print_report) must keep
+    mirroring the 'current' variant's own cost_x1_5_* fields after moving the
+    computation inside the per-variant loop."""
+    from config.loader import load_config
+    cfg = load_config()
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df,
+                       variants={"current": {}, "null": None},
+                       historical_trials=729)
+    cur = next(t for t in res["trials"] if t["variant"] == "current")
+    stress = res["cost_stress"]
+    assert stress is not None
+    assert stress["total_pnl"] == cur["cost_x1_5_pnl"]
+    assert stress["profit_factor"] == cur["cost_x1_5_pf"]
+    assert stress["n_trades"] == cur["cost_x1_5_n_trades"]
+
+
+def test_decision_gate_still_current_only(synthetic_gbp_df):
+    """decision_gate() must keep evaluating 'current' only -- extending
+    stress to the whole grid is a reporting change, not an admission-policy
+    change. Promoting a non-current variant is a deliberate separate step."""
+    from config.loader import load_config
+    from scripts.deflated_sharpe import decision_gate
+    cfg = load_config()
+    variants = {"current": {}, "wide": {"signal_grid": {"stop_mult": 4.0}}, "null": None}
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
+                       historical_trials=729)
+    gate = decision_gate(res)
+    assert "PF > 1.1 at 1.5x costs" in gate["checks"]
+    assert isinstance(gate["passed_all"], bool)
+
+
+def test_prepare_fold_frame_deterministic_for_null():
+    """_prepare_fold_frame must return IDENTICAL injected probabilities for
+    the same (name='null', fold_i, seed) call -- required so a cost-stress
+    rerun of the null control stresses cost only, never the signal."""
+    from scripts.deflated_sharpe import _prepare_fold_frame
+    idx = pd.date_range("2023-01-01", periods=50, freq="1h", tz="UTC")
+    fdf = pd.DataFrame({"close": np.arange(50, dtype=float)}, index=idx)
+    a = _prepare_fold_frame(fdf, "null", fold_i=2, random_seed=42)
+    b = _prepare_fold_frame(fdf, "null", fold_i=2, random_seed=42)
+    pd.testing.assert_series_equal(a["ml_p_long"], b["ml_p_long"])
+    pd.testing.assert_series_equal(a["ml_p_short"], b["ml_p_short"])
+
+
+def test_prepare_fold_frame_passthrough_for_non_null():
+    """For every variant except 'null', the fold frame must pass through
+    unchanged (the model's own ml_p_* is authoritative, not re-randomized)."""
+    from scripts.deflated_sharpe import _prepare_fold_frame
+    fdf = pd.DataFrame({"ml_p_long": [0.6, 0.4], "ml_p_short": [0.4, 0.6]})
+    for name in ("current", "tight", "wide", "progress_stop"):
+        out = _prepare_fold_frame(fdf, name, fold_i=0, random_seed=42)
+        pd.testing.assert_frame_equal(out, fdf)
