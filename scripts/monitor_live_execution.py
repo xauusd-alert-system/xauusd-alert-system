@@ -37,7 +37,18 @@ BASELINE = {
         "min_trades_for_alert": 10,
         "warning_pf_below": 1.5,
         "warning_wr_below": 70.0,
-    }
+    },
+    "XAUUSD": {
+        # Pre-lock current (2026-08-08 cutoff): 747 trades, PnL -244.2,
+        # PF 0.99, WR 66.3%. This baseline monitors the LEGACY current
+        # execution quality; wide_trend_filtered is not live yet.
+        "expected_wr": 66.3,
+        "expected_pf": 0.99,
+        "expected_pnl_per_trade": -0.33,  # -244.2 / 747
+        "min_trades_for_alert": 10,
+        "warning_pf_below": 0.70,   # alert if live PF is far below backtest
+        "warning_wr_below": 55.0,   # alert if WR collapses well below 66%
+    },
 }
 
 
