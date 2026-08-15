@@ -48,6 +48,46 @@ def average_uniqueness_weights(n: int, horizon: int) -> np.ndarray:
     return weights
 
 
+def aligned_uniqueness_weights(
+    source_index: pd.Index,
+    selected_index: pd.Index,
+    horizon: int,
+    default: float | None = None,
+) -> np.ndarray:
+    """Compute uniqueness on the full chronological frame and align it to X rows.
+
+    Feature/label preparation drops warm-up, unresolved and ambiguous rows.  Weight
+    arrays therefore cannot safely be sliced by length: they must be keyed by the
+    original frame index.  Missing indices are an error by default because silently
+    assigning unit weight recreates the research/production asymmetry this helper is
+    intended to remove.
+    """
+    source_index = pd.Index(source_index)
+    selected_index = pd.Index(selected_index)
+    if not source_index.is_unique:
+        raise ValueError("source_index must be unique for sample-weight alignment")
+
+    series = pd.Series(
+        average_uniqueness_weights(len(source_index), horizon), index=source_index
+    )
+    aligned = series.reindex(selected_index)
+    if aligned.isna().any():
+        missing = selected_index[aligned.isna()]
+        if default is None:
+            raise ValueError(
+                f"sample-weight alignment failed for {len(missing)} rows; "
+                f"first missing index={missing[0]!r}"
+            )
+        aligned = aligned.fillna(float(default))
+
+    values = aligned.to_numpy(dtype=float)
+    if not np.isfinite(values).all() or (values < 0).any():
+        raise ValueError("sample weights must be finite and non-negative")
+    if len(values) and not (values > 0).any():
+        raise ValueError("all aligned sample weights are zero")
+    return values
+
+
 def sample_weight_series(df_len: int, horizon: int, decay_lambda: float = 0.0) -> np.ndarray:
     """Weights = average uniqueness, optionally multiplied by an exponential
     freshness decay exp(-lambda * age_in_days_like_units) — the audit's

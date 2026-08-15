@@ -44,8 +44,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <button onclick="sendControl('resume')" class="bg-emerald-600/80 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
                     <i class="fas fa-play"></i> Возобновить
                 </button>
-                <button onclick="sendControl('closeall')" class="bg-rose-600/80 hover:bg-rose-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
-                    <i class="fas fa-power-off"></i> Закрыть всё
+                <button disabled title="Используйте авторизованный Telegram /closeall" class="bg-slate-700 text-slate-400 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 cursor-not-allowed">
+                    <i class="fas fa-lock"></i> Closeall: только Telegram
                 </button>
             </div>
         </header>
@@ -57,8 +57,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <span>Режим системы</span>
                     <i class="fas fa-server text-indigo-400 text-base"></i>
                 </div>
-                <div id="kpi-data-mode" class="text-2xl font-bold mt-2 text-indigo-300">Live / Active</div>
-                <div class="text-xs text-slate-400 mt-1">Провайдер: MetaTrader 5 / Shim</div>
+                <div id="kpi-data-mode" class="text-2xl font-bold mt-2 text-indigo-300">UNKNOWN</div>
+                <div class="text-xs text-slate-400 mt-1">Фактический источник указан ниже</div>
             </div>
 
             <div class="glass-card p-5">
@@ -66,8 +66,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <span>Баланс / Эквити</span>
                     <i class="fas fa-wallet text-emerald-400 text-base"></i>
                 </div>
-                <div id="kpi-balance" class="text-2xl font-bold mt-2 text-emerald-400">$100,000.00</div>
-                <div id="kpi-equity" class="text-xs text-slate-400 mt-1">Эквити: $100,000.00</div>
+                <div id="kpi-balance" class="text-2xl font-bold mt-2 text-emerald-400">—</div>
+                <div id="kpi-equity" class="text-xs text-slate-400 mt-1">Эквити: —</div>
             </div>
 
             <div class="glass-card p-5">
@@ -88,6 +88,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="text-xs text-slate-400 mt-1">Circuit Breaker: 5% Max DD</div>
             </div>
         </div>
+        <div id="data-disclosure" class="text-xs text-amber-300 bg-amber-950/30 border border-amber-800/50 rounded-lg px-4 py-2">
+            Source: unavailable | Mode: implemented_not_live_verified | As of: —
+        </div>
 
         <!-- 🌟 SMART MONEY & INSTITUTIONAL MICROSTRUCTURE METRICS BLOCK 🌟 -->
         <div class="glass-card p-6 border-l-4 border-l-cyan-500">
@@ -101,61 +104,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </button>
             </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-mono">
-                <!-- Manipulation Index -->
-                <div class="p-4 bg-slate-850/80 rounded-lg border border-slate-700/60 space-y-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-slate-400 font-sans font-semibold">Manipulation Index</span>
-                        <span class="px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 font-bold border border-amber-700/50">7/10</span>
-                    </div>
-                    <p class="text-slate-300 font-sans text-xs leading-relaxed pt-1">
-                        — высокий уровень манипуляций сохраняется. Крупные игроки продолжают активно работать в этом диапазоне.
-                    </p>
-                </div>
-
-                <!-- Zone Strength -->
-                <div class="p-4 bg-slate-850/80 rounded-lg border border-slate-700/60 space-y-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-slate-400 font-sans font-semibold">Zone Strength</span>
-                        <span class="px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold border border-rose-700/50">18%</span>
-                    </div>
-                    <p class="text-slate-300 font-sans text-xs leading-relaxed pt-1">
-                        — зона крайне слабая. Текущий уровень не является серьёзной поддержкой, вероятность ухода ниже высокая.
-                    </p>
-                </div>
-
-                <!-- SMF Ratio -->
-                <div class="p-4 bg-slate-850/80 rounded-lg border border-slate-700/60 space-y-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-slate-400 font-sans font-semibold">SMF Ratio</span>
-                        <span class="px-2 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-bold border border-indigo-700/50">2.34</span>
-                    </div>
-                    <p class="text-slate-300 font-sans text-xs leading-relaxed pt-1">
-                        — институционалы доминируют над розницей с коэффициентом 2.3 к 1. Умные деньги продолжают давить вниз.
-                    </p>
-                </div>
-
-                <!-- Liquidity Grab -->
-                <div class="p-4 bg-slate-850/80 rounded-lg border border-slate-700/60 space-y-1.5">
-                    <div class="flex justify-between items-center">
-                        <span class="text-slate-400 font-sans font-semibold">Liquidity Grab</span>
-                        <span class="px-2 py-0.5 rounded bg-purple-900/60 text-purple-300 font-bold border border-purple-700/50">8/10</span>
-                    </div>
-                    <p class="text-slate-300 font-sans text-xs leading-relaxed pt-1">
-                        — активная охота за ликвидностью. Именно это объясняет резкие движения на локальных уровнях перед продолжением тренда.
-                    </p>
-                </div>
-
-                <!-- Delta Confidence -->
-                <div class="p-4 bg-slate-850/80 rounded-lg border border-slate-700/60 space-y-1.5 md:col-span-2">
-                    <div class="flex justify-between items-center">
-                        <span class="text-slate-400 font-sans font-semibold">Delta Confidence</span>
-                        <span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-bold border border-emerald-700/50">HIGH</span>
-                    </div>
-                    <p class="text-slate-300 font-sans text-xs leading-relaxed pt-1">
-                        — уверенность модели в направлении дельты высокая. Продавцы контролируют рынок на старших таймфреймах.
-                    </p>
-                </div>
+            <div id="institutional-metrics-container" class="text-sm text-slate-500 p-4 bg-slate-900/40 rounded-lg border border-slate-700/60">
+                Реальные закрытые свечи недоступны — значения не подменяются демонстрационными.
             </div>
         </div>
 
@@ -190,14 +140,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div id="sentiment-card" class="p-3.5 bg-slate-800/60 rounded-lg border border-slate-700 text-xs space-y-2">
                         <div class="flex justify-between items-center">
                             <span class="text-slate-400">Настроение золота:</span>
-                            <span id="sentiment-bias" class="font-bold text-emerald-400 uppercase">BULLISH (+0.65)</span>
+                            <span id="sentiment-bias" class="font-bold text-emerald-400 uppercase">—</span>
                         </div>
                         <div class="flex justify-between items-center">
                             <span class="text-slate-400">Уверенность AI:</span>
-                            <span id="sentiment-conf" class="font-mono text-amber-300">85.0%</span>
+                            <span id="sentiment-conf" class="font-mono text-amber-300">—</span>
                         </div>
                         <div id="sentiment-tags" class="text-slate-400 text-[11px] pt-1">
-                            Ключевые факторы: <span class="text-slate-300 font-mono">+safe haven, +rate cut</span>
+                            Реальный источник новостей не настроен
                         </div>
                     </div>
                 </div>
@@ -210,15 +160,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div class="p-3.5 bg-slate-800/60 rounded-lg border border-slate-700 text-xs space-y-2 font-mono">
                         <div class="flex justify-between">
                             <span class="text-slate-400">VaR 95% (риск):</span>
-                            <span id="mc-var95" class="text-rose-400">-$240.50</span>
+                            <span id="mc-var95" class="text-rose-400">—</span>
                         </div>
                         <div class="flex justify-between">
                             <span class="text-slate-400">Вероятность прибыли:</span>
-                            <span id="mc-prob" class="text-emerald-400 font-bold">88.4%</span>
+                            <span id="mc-prob" class="text-emerald-400 font-bold">—</span>
                         </div>
                         <div class="flex justify-between">
                             <span class="text-slate-400">Риск банкротства:</span>
-                            <span id="mc-ruin" class="text-emerald-400">0.0%</span>
+                            <span id="mc-ruin" class="text-emerald-400">—</span>
                         </div>
                     </div>
                 </div>
@@ -357,6 +307,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <script>
         let currentChartAsset = "XAUUSD";
+        let institutionalReportText = "";
 
         async function fetchJSON(url) {
             try {
@@ -369,8 +320,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         function copyMetricsText() {
-            const text = `*Метрики по софту на текущий момент*\\n\\n**Manipulation Index: 7/10** — высокий уровень манипуляций сохраняется. Крупные игроки продолжают активно работать в этом диапазоне.\\n\\n**Zone Strength: 18%** — зона крайне слабая. Текущий уровень не является серьёзной поддержкой, вероятность ухода ниже высокая.\\n\\n**SMF Ratio: 2.34** — институционалы доминируют над розницей с коэффициентом 2.3 к 1. Умные деньги продолжают давить вниз.\\n\\n**Liquidity Grab: 8/10** — активная охота за ликвидностью. Именно это объясняет резкие движения на локальных уровнях перед продолжением тренда.\\n\\n**Delta Confidence: HIGH** — уверенность модели в направлении дельты высокая. Продавцы контролируют рынок на старших таймфреймах.`;
-            navigator.clipboard.writeText(text).then(() => {
+            if (!institutionalReportText) {
+                alert("Реальные institutional metrics сейчас недоступны.");
+                return;
+            }
+            navigator.clipboard.writeText(institutionalReportText).then(() => {
                 alert("✅ Отчёт скопирован в буфер обмена!");
             });
         }
@@ -380,8 +334,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const container = document.getElementById("chart-container");
             try {
                 const res = await fetch("/api/chart/" + asset);
-                const svg = await res.text();
-                container.innerHTML = svg;
+                const contentType = res.headers.get("content-type") || "";
+                if (!res.ok || !contentType.includes("image/svg+xml")) {
+                    let reason = "реальные свечи недоступны";
+                    try {
+                        const payload = await res.json();
+                        reason = payload.detail?.reason || payload.detail || reason;
+                    } catch (_) {}
+                    container.innerHTML = `<div class="text-amber-400 text-sm">График недоступен: ${reason}</div>`;
+                    return;
+                }
+                container.innerHTML = await res.text();
             } catch(e) {
                 container.innerHTML = '<div class="text-rose-400 text-sm">Ошибка загрузки графика</div>';
             }
@@ -394,30 +357,56 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             // Status
             const status = await fetchJSON("/api/status");
             if (status) {
-                document.getElementById("kpi-data-mode").innerText = status.data_mode.toUpperCase();
-                document.getElementById("kpi-balance").innerText = "$" + status.balance.toLocaleString('en-US', {minimumFractionDigits: 2});
-                document.getElementById("kpi-equity").innerText = "Эквити: $" + status.equity.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById("kpi-data-mode").innerText = String(status.data_mode || "unknown").toUpperCase();
+                document.getElementById("kpi-balance").innerText = status.balance == null ? "—" : "$" + status.balance.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById("kpi-equity").innerText = status.equity == null ? "Эквити: —" : "Эквити: $" + status.equity.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById("data-disclosure").innerText = "Source: " + (status.source || "unknown") + " | Mode: " + (status.mode || "unknown") + " | As of: " + (status.as_of_utc || "—");
                 document.getElementById("kpi-positions").innerText = status.open_positions_count;
                 document.getElementById("kpi-risk").innerText = status.circuit_breaker ? "HALTED" : "NORMAL";
                 document.getElementById("kpi-risk").className = status.circuit_breaker ? "text-2xl font-bold mt-2 text-rose-500" : "text-2xl font-bold mt-2 text-emerald-400";
             }
 
-            // Sentiment
-            const sent = await fetchJSON("/api/sentiment");
-            if (sent) {
-                const biasEl = document.getElementById("sentiment-bias");
-                biasEl.innerText = sent.bias.toUpperCase() + " (" + (sent.score > 0 ? "+" : "") + sent.score.toFixed(2) + ")";
-                biasEl.className = sent.bias === "bullish" ? "font-bold text-emerald-400 uppercase" : (sent.bias === "bearish" ? "font-bold text-rose-400 uppercase" : "font-bold text-slate-400 uppercase");
-                document.getElementById("sentiment-conf").innerText = (sent.confidence * 100).toFixed(1) + "%";
-                document.getElementById("sentiment-tags").innerHTML = 'Ключевые факторы: <span class="text-slate-300 font-mono">' + (sent.matched_terms.join(", ") || "нейтральный фон") + '</span>';
+            // Institutional metrics — real candles only.
+            const inst = await fetchJSON("/api/institutional-metrics");
+            const instContainer = document.getElementById("institutional-metrics-container");
+            if (inst && inst.available && inst.metrics) {
+                institutionalReportText = inst.report_text || "";
+                instContainer.innerHTML = Object.entries(inst.metrics).map(([key, value]) =>
+                    `<div class="mb-2"><span class="text-cyan-300 font-mono">${key}</span>: ` +
+                    `<span class="text-slate-200">${value.display ?? "—"}</span> ` +
+                    `<span class="text-slate-400">${value.text ?? ""}</span></div>`
+                ).join("") + `<div class="text-[11px] text-slate-500 mt-3">Source: ${inst.source} | As of: ${inst.as_of_utc}</div>`;
+            } else {
+                institutionalReportText = "";
+                instContainer.innerHTML = '<span class="text-amber-400">Реальные institutional metrics недоступны; демонстрационные значения отключены.</span>';
             }
 
-            // Monte Carlo
+            // Sentiment — no sample headlines are presented as live.
+            const sent = await fetchJSON("/api/sentiment");
+            const biasEl = document.getElementById("sentiment-bias");
+            if (sent && sent.available && sent.bias != null && sent.score != null) {
+                biasEl.innerText = sent.bias.toUpperCase() + " (" + (sent.score > 0 ? "+" : "") + Number(sent.score).toFixed(2) + ")";
+                biasEl.className = sent.bias === "bullish" ? "font-bold text-emerald-400 uppercase" : (sent.bias === "bearish" ? "font-bold text-rose-400 uppercase" : "font-bold text-slate-400 uppercase");
+                document.getElementById("sentiment-conf").innerText = sent.confidence == null ? "—" : (Number(sent.confidence) * 100).toFixed(1) + "%";
+                const terms = Array.isArray(sent.matched_terms) ? sent.matched_terms : [];
+                document.getElementById("sentiment-tags").innerHTML = 'Ключевые факторы: <span class="text-slate-300 font-mono">' + (terms.join(", ") || "нейтральный фон") + '</span>';
+            } else {
+                biasEl.innerText = "—";
+                biasEl.className = "font-bold text-slate-500 uppercase";
+                document.getElementById("sentiment-conf").innerText = "—";
+                document.getElementById("sentiment-tags").innerHTML = '<span class="text-slate-500">Данные недоступны: реальный источник новостей не настроен</span>';
+            }
+
+            // Monte Carlo — persisted executed trades only.
             const mc = await fetchJSON("/api/monte-carlo");
-            if (mc) {
-                document.getElementById("mc-var95").innerText = "$" + mc.var_95_usd.toFixed(2);
-                document.getElementById("mc-prob").innerText = mc.profit_probability_pct.toFixed(1) + "%";
-                document.getElementById("mc-ruin").innerText = mc.prob_of_ruin_pct.toFixed(1) + "%";
+            if (mc && mc.available && mc.var_95_usd != null) {
+                document.getElementById("mc-var95").innerText = "$" + Number(mc.var_95_usd).toFixed(2);
+                document.getElementById("mc-prob").innerText = Number(mc.profit_probability_pct).toFixed(1) + "%";
+                document.getElementById("mc-ruin").innerText = Number(mc.prob_of_ruin_pct).toFixed(1) + "%";
+            } else {
+                document.getElementById("mc-var95").innerText = "—";
+                document.getElementById("mc-prob").innerText = "—";
+                document.getElementById("mc-ruin").innerText = "—";
             }
 
             // Matrix
@@ -426,18 +415,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const tbody = document.getElementById("signal-matrix-body");
                 tbody.innerHTML = "";
                 for (const item of matrix.signals) {
-                    let biasBadge = '<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">NEUTRAL</span>';
-                    if (item.bias === "long") biasBadge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-bold border border-emerald-700/50">LONG / BUY</span>';
-                    if (item.bias === "short") biasBadge = '<span class="px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold border border-rose-700/50">SHORT / SELL</span>';
+                    let biasBadge = item.available
+                        ? '<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">NEUTRAL</span>'
+                        : '<span class="px-2 py-0.5 rounded bg-amber-900/60 text-amber-300">UNAVAILABLE</span>';
+                    if (item.available && item.bias === "long") biasBadge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-bold border border-emerald-700/50">LONG / BUY</span>';
+                    if (item.available && item.bias === "short") biasBadge = '<span class="px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold border border-rose-700/50">SHORT / SELL</span>';
 
-                    const targets = item.targets ? item.targets.map(t => t.toFixed(2)).join(" / ") : "-";
-                    const sl = item.invalidation ? item.invalidation.toFixed(2) : "-";
+                    const confidence = item.available ? (Number(item.confidence) * 100).toFixed(1) + "%" : "—";
+                    const targets = item.available && item.targets ? item.targets.map(t => t.toFixed(2)).join(" / ") : "-";
+                    const sl = item.available && item.invalidation ? item.invalidation.toFixed(2) : "-";
 
                     tbody.innerHTML += `
                         <tr class="hover:bg-slate-800/40 transition">
                             <td class="py-3 px-4 font-bold text-slate-200">${item.asset}</td>
                             <td class="py-3 px-4">${biasBadge}</td>
-                            <td class="py-3 px-4 text-amber-300 font-semibold">${(item.confidence * 100).toFixed(1)}%</td>
+                            <td class="py-3 px-4 text-amber-300 font-semibold">${confidence}</td>
                             <td class="py-3 px-4 text-slate-300"><span class="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">${item.regime}</span></td>
                             <td class="py-3 px-4 text-slate-400 uppercase">${item.session}</td>
                             <td class="py-3 px-4 text-emerald-400 font-mono">${targets}</td>
@@ -449,7 +441,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             // Correlation
             const corr = await fetchJSON("/api/correlation");
-            if (corr && corr.matrix) {
+            if (corr && corr.available && Array.isArray(corr.matrix) && corr.matrix.length) {
                 const tbody = document.getElementById("corr-matrix-body");
                 tbody.innerHTML = "";
                 const assets = corr.assets;
@@ -475,12 +467,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     rowHtml += '</tr>';
                     tbody.innerHTML += rowHtml;
                 }
+            } else {
+                document.getElementById("corr-matrix-body").innerHTML = '<tr><td class="p-4 text-amber-400">Реальная корреляция недоступна</td></tr>';
             }
 
             // Positions
             const posData = await fetchJSON("/api/positions");
             const posContainer = document.getElementById("positions-list");
-            if (posData && posData.positions && posData.positions.length > 0) {
+            if (posData && posData.available && posData.positions && posData.positions.length > 0) {
                 posContainer.innerHTML = "";
                 for (const pos of posData.positions) {
                     const pnlClass = pos.profit >= 0 ? "text-emerald-400" : "text-rose-400";
@@ -498,8 +492,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </div>
                     `;
                 }
-            } else {
+            } else if (posData && posData.available) {
                 posContainer.innerHTML = `<div class="text-center py-8 text-slate-500 text-sm"><i class="fas fa-inbox text-2xl mb-2 block"></i> Нет открытых позиций</div>`;
+            } else {
+                posContainer.innerHTML = `<div class="text-center py-8 text-amber-400 text-sm">MT5 positions недоступны</div>`;
             }
 
             if(icon) setTimeout(() => icon.classList.remove("fa-spin"), 400);
@@ -510,6 +506,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             try {
                 const res = await fetch("/api/control/" + action, { method: "POST" });
                 const json = await res.json();
+                if (!res.ok) {
+                    alert("Действие не выполнено: " + (json.detail || res.statusText));
+                    return;
+                }
                 alert(json.message || "Действие выполнено");
                 refreshData();
             } catch(e) {

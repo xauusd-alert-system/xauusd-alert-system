@@ -4,6 +4,7 @@ Ensures a single source of truth: config/config.yaml.
 """
 from dotenv import load_dotenv
 load_dotenv()
+import copy
 import os
 import yaml
 
@@ -27,6 +28,33 @@ def load_config(path: str = None) -> dict:
     return _CONFIG_CACHE
 
 
+def effective_asset_config(cfg: dict, asset_key: str) -> dict:
+    """Return a deep-copied config with all supported per-asset sections merged.
+
+    Training, validation and live inference must resolve the same policy.  Keeping
+    this operation in the config layer avoids the historical failure where the
+    research runner merged ``assets.<KEY>.labeling`` but production retraining did
+    not.  Unknown asset keys are rejected: silently falling back to global costs
+    or target geometry would create a model with an untraceable contract.
+    """
+    assets = (cfg or {}).get("assets", {}) or {}
+    if asset_key not in assets:
+        raise KeyError(f"Unknown asset_key {asset_key!r}; no assets.{asset_key} config")
+
+    out = copy.deepcopy(cfg)
+    asset_cfg = assets[asset_key] or {}
+    for section in ("labeling", "model", "ensemble", "signal_grid"):
+        override = asset_cfg.get(section)
+        if override is None:
+            continue
+        if not isinstance(override, dict):
+            raise ValueError(f"assets.{asset_key}.{section} must be a mapping")
+        merged = copy.deepcopy(out.get(section, {}) or {})
+        merged.update(copy.deepcopy(override))
+        out[section] = merged
+    return out
+
+
 def get_env(key: str, default=None, required: bool = False):
     """
     Fetch a secret/config value from environment variables.
@@ -35,6 +63,24 @@ def get_env(key: str, default=None, required: bool = False):
     if required and val is None:
         raise EnvironmentError(f"Required environment variable '{key}' is not set.")
     return val
+
+
+def resolve_signal_step(atr_value: float, grid: dict) -> float:
+    """Resolve the causal grid step from signal-bar ATR and configured clamps."""
+    atr_value = float(atr_value)
+    if not atr_value > 0:
+        raise ValueError(f"ATR must be positive, got {atr_value!r}")
+    fixed = grid.get("step_points")
+    step = float(fixed) if fixed is not None else atr_value
+    lower = grid.get("step_min_points")
+    upper = grid.get("step_max_points")
+    if lower is not None:
+        step = max(step, float(lower))
+    if upper is not None:
+        step = min(step, float(upper))
+    if not step > 0:
+        raise ValueError(f"resolved signal step must be positive, got {step!r}")
+    return step
 
 
 def get_signal_grid(cfg: dict, asset_cfg: dict = None, regime: str = None) -> dict:

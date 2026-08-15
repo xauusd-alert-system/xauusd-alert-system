@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> None:
     print("\n1. CONFUSION MATRIX ON THE SAME BARS (rows = engine, cols = label)")
     order_e = ["protect", "stop", "timeout"]
     order_l = ["protect", "stop", "nan"]
-    hdr = f"{'engine\\label':<14}" + "".join(f"{c:>10}" for c in order_l) + f"{'total':>10}"
+    hdr = "engine\\label".ljust(14) + "".join(f"{c:>10}" for c in order_l) + f"{'total':>10}"
     print(hdr)
     print("-" * len(hdr))
     for e in order_e:

@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from config.loader import load_config, get_env, get_signal_grid
 from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles, _TIMEFRAMES
 from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
+from data.execution_ledger import init_execution_ledger, log_execution_attempt, now_ms
 from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
 from execution.risk_manager import InstitutionalRiskManager
@@ -222,6 +223,7 @@ class MultiAssetMT5Trader:
         # get_env may return None; coerce to str so schema init/log calls type-check.
         self.trade_db_path = str(get_env("TRADE_LOG_DB_PATH", default=self.cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
         init_trade_log_schema(self.trade_db_path)
+        init_execution_ledger(self.trade_db_path)
         # Track the feature/confidence snapshot we had at entry, keyed by position ticket,
         # so we can persist them via log_trade_entry(log_trade_close(...)) for ML retraining.
         self.signal_features = {}
@@ -669,6 +671,51 @@ class MultiAssetMT5Trader:
             return 0.0
         return round(tranche, 6)
 
+    def _record_execution_result(self, *, asset_key, broker_symbol, action, side,
+                                 requested_at, request, result,
+                                 position_ticket=None):
+        """Best-effort append-only execution telemetry; never blocks trading."""
+        try:
+            done_codes = {
+                code for code in (
+                    getattr(mt5, "TRADE_RETCODE_DONE", None),
+                    getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", None),
+                ) if code is not None
+            }
+            retcode = getattr(result, "retcode", None)
+            is_done = retcode in done_codes
+            status = (
+                "partial" if retcode == getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", object())
+                else "filled" if is_done else "rejected"
+            )
+            result_price = getattr(result, "price", None) if is_done else None
+            if result_price is not None and float(result_price) <= 0:
+                result_price = None  # some MT5 result types report 0; never invent slippage
+            result_volume = getattr(result, "volume", None) if is_done else None
+            if result_volume is not None and float(result_volume) <= 0:
+                result_volume = None
+            log_execution_attempt(
+                self.trade_db_path,
+                asset_key=str(asset_key),
+                broker_symbol=str(broker_symbol),
+                action=action,
+                side=side,
+                requested_at_ms=requested_at,
+                completed_at_ms=now_ms(),
+                requested_price=request.get("price"),
+                filled_price=result_price,
+                volume_requested=request.get("volume"),
+                volume_filled=result_volume,
+                status=status,
+                retcode=retcode,
+                rejection_reason=None if is_done else str(getattr(result, "comment", "")),
+                order_ticket=getattr(result, "order", None),
+                position_ticket=position_ticket,
+                metadata={"comment": request.get("comment")},
+            )
+        except Exception as exc:
+            logger.error("Execution ledger write failed: %s", exc)
+
     def _modify_sl_tp(self, pos, new_sl, new_tp):
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
@@ -713,7 +760,19 @@ class MultiAssetMT5Trader:
         if self.dry_run:
             logger.info(f"[DRY RUN] Would close partial {label}: {request}")
             return True  # dry-run: treated as filled for state-advance purposes
+        requested_at = now_ms()
         res = mt5.order_send(request)
+        asset_key = self.active_trades.get(pos.ticket, {}).get("symbol", pos.symbol)
+        self._record_execution_result(
+            asset_key=asset_key,
+            broker_symbol=pos.symbol,
+            action="partial_close",
+            side="sell" if pos.type == 0 else "buy",
+            requested_at=requested_at,
+            request=request,
+            result=res,
+            position_ticket=pos.ticket,
+        )
         if res.retcode == mt5.TRADE_RETCODE_DONE:
             logger.info(f"✅ Closed {label} for #{pos.ticket} ({volume} lots)")
             return True
@@ -757,15 +816,38 @@ class MultiAssetMT5Trader:
         order_type = mt5.ORDER_TYPE_BUY if bias == "long" else mt5.ORDER_TYPE_SELL
         price = tick.ask if bias == "long" else tick.bid
 
-        invalidation = float(signal["invalidation"])
-        targets = signal["targets"]
-        raw_tp = float(targets[2] if len(targets) > 2 else targets[-1])
+        # Recenter the frozen signal-bar grid on the actual requested entry.
+        # Using absolute levels built around the previous close makes live gap
+        # entries differ from the next-open backtest and paper accumulator.
+        direction = 1 if bias == "long" else -1
+        step = float(signal.get("step") or 0.0)
+        if step <= 0:
+            logger.error("[%s] Signal has no positive grid step; refusing order", asset_key)
+            return
+        regime_name = str(signal.get("regime", ""))
+        grid = get_signal_grid(self.cfg, self.cfg["assets"][asset_key], regime=regime_name)
+        targets = [
+            price + direction * step * float(grid.get(key, default))
+            for key, default in (("tp1_mult", 1.0), ("tp2_mult", 1.5), ("tp3_mult", 2.0))
+        ]
+        invalidation = price - direction * step * float(grid.get("stop_mult", 2.0))
+        raw_tp = float(targets[2])
 
         try:
             sl_price, tp_price = self._normalize_stops(mt5_symbol, bias, price, invalidation, raw_tp)
         except Exception as e:
             logger.error(f"Normalization failed for {mt5_symbol}: {e}")
             return
+        digits = int(getattr(info, "digits", 5))
+        targets = [round(float(t), digits) for t in targets]
+        targets[2] = float(tp_price)
+        invalidation = float(sl_price)
+        signal = dict(signal)
+        signal.update({
+            "entry_zone": [round(price - step * 0.1, digits), round(price + step * 0.1, digits)],
+            "invalidation": invalidation,
+            "targets": targets,
+        })
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -786,6 +868,7 @@ class MultiAssetMT5Trader:
             logger.info(f"[DRY RUN] Order NOT sent for {asset_key}. Would execute with request above.")
             return
 
+        requested_at = now_ms()
         result = mt5.order_send(request)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             # HIGH 22: in real MT5 the order ticket (result.order) differs from the
@@ -803,6 +886,16 @@ class MultiAssetMT5Trader:
             except Exception as e:  # pragma: no cover - defensive fallback
                 logger.warning(f"[{asset_key}] Could not resolve position ticket, using order ticket {pos_ticket}: {e}")
 
+            self._record_execution_result(
+                asset_key=asset_key,
+                broker_symbol=mt5_symbol,
+                action="open",
+                side="buy" if bias == "long" else "sell",
+                requested_at=requested_at,
+                request=request,
+                result=result,
+                position_ticket=pos_ticket,
+            )
             logger.info(f"🔥 [{asset_key}] ORDER EXECUTED IN MT5! Ticket: #{pos_ticket}, Type: {bias.upper()}, Price: {price}, SL: {sl_price}, TP: {tp_price}")
 
             try:
@@ -872,6 +965,15 @@ class MultiAssetMT5Trader:
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)
         else:
+            self._record_execution_result(
+                asset_key=asset_key,
+                broker_symbol=mt5_symbol,
+                action="open",
+                side="buy" if bias == "long" else "sell",
+                requested_at=requested_at,
+                request=request,
+                result=result,
+            )
             logger.error(
                 f"Order Send Failed for {asset_key}: {result.comment} (Retcode: {result.retcode}), "
                 f"request={request}"

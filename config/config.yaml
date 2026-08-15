@@ -1,4 +1,4 @@
-﻿ensemble:
+ensemble:
   min_confidence_to_alert: 0.60
   # W15 (audit 2026-08-10): these probabilities were previously hard-coded
   # defaults inside model/ensemble.py with no entry in config.yaml, so the
@@ -124,7 +124,7 @@ assets:
       rule_weight: 0.10
       ml_weight: 0.90
     labeling:
-      event: traded  
+      event: traded
     # Equal-step signal grid clamps (price points). Gold M5 ATR ~3-7 -> keep the
     # step inside 2..8 pts so extreme ATR cannot produce absurd TP/SL levels.
     signal_grid:
@@ -379,6 +379,10 @@ regime:
 model:
   random_seed: 42
   calibration_method: sigmoid
+  # Production and calibration use the same index-aligned average-uniqueness
+  # weights. Set either mode to `none` only for an explicit controlled A/B.
+  sample_weight_mode: uniqueness       # uniqueness | none
+  calibration_weight_mode: same_as_training  # same_as_training | none
   train_ratio: 0.8
   type: xgboost          # xgboost | random_forest | lightgbm | ensemble
   ensemble_method: soft_voting
@@ -403,12 +407,15 @@ model:
 
 
 # ---------------------------------------------------------------------------
-# TRAINING labels (triple-barrier, labeling/label_generator.py). These barrier
-# distances define the SUPERVISED target the models are trained on and are
-# intentionally decoupled from the Telegram signal grid (see `signal_grid:`
-# below) so retraining semantics stay stable.
+# TRAINING target contract (labeling/label_generator.py). `barrier` preserves the
+# legacy triple barrier globally; an asset may explicitly opt into `traded`, which
+# resolves that asset's execution grid/cost event. Production retraining merges
+# assets.<KEY>.labeling before labeling and records this version/hash in the model
+# bundle. Never change an event on the basis of locked/live-forward data.
 # ---------------------------------------------------------------------------
 labeling:
+  contract_version: 2
+  event: barrier           # barrier | traded (per-asset opt-in allowed)
   method: atr_scaled
   horizon_candles_n: 36
   target_atr_multiplier: 1.2
@@ -475,6 +482,10 @@ backtest:
 # ===== RETRAINING =====
 retraining:
   enabled: true
+  # Executed trades are policy-selected and win/loss is not an unconditional
+  # direction label. Keep them for monitoring until a debiasing contract is
+  # pre-registered; production retraining uses historical event labels only.
+  real_trade_merge_enabled: false
   retrain_on_startup: false
   max_age_hours: 24
   download_data: true
@@ -602,6 +613,15 @@ validation:
     enabled: true
     start: "2026-08-08"    # from today — live-forward accumulation
     end: null              # open-ended: research never looks at fresh data
+
+# Frozen paper is a separate process and never routes orders. Paths may be
+# overridden by PAPER_MANIFEST_PATH / PAPER_LEDGER_DB for /paper status.
+paper_forward:
+  enabled: false
+  manifest_path: config/paper/xauusd_wide_trend_filtered.json
+  ledger_db_path: data/paper_forward.sqlite
+  min_closed_trades: 50
+  outcome_metrics_visible_during_accumulation: false
 
 
 # ===== CORRELATION FILTER (динамический) =====

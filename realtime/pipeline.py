@@ -9,7 +9,12 @@ import time
 from datetime import datetime, timezone
 import pandas as pd
 
-from config.loader import load_config, get_signal_grid
+from config.loader import (
+    load_config,
+    get_signal_grid,
+    effective_asset_config,
+    resolve_signal_step as _resolve_signal_step,
+)
 from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
@@ -20,8 +25,6 @@ from model.predictor import ModelPredictor
 from model.ensemble import compute_ensemble_signal
 from data.session_tagger import tag_dataframe
 
-from copy import deepcopy
-
 logger = logging.getLogger("realtime_pipeline")
 
 
@@ -30,22 +33,11 @@ def resolve_signal_step(atr_val: float, grid_cfg: dict) -> float:
     Resolves the equal-step TP/SL grid step for a signal.
 
     Priority: fixed `step_points` (price points) when set, otherwise the
-    dynamic ATR step (tp1_mult * ATR, spec default 1.0 * ATR). The result is
+    dynamic signal-bar ATR step (1.0 * ATR). TP multipliers are applied once
+    after step resolution. The result is
     clamped to [step_min_points, step_max_points] when those are configured.
     """
-    step_points = grid_cfg.get("step_points")
-    if step_points:
-        step = float(step_points)
-    else:
-        step = atr_val * float(grid_cfg.get("tp1_mult", 1.0))
-
-    step_min = grid_cfg.get("step_min_points")
-    step_max = grid_cfg.get("step_max_points")
-    if step_min:
-        step = max(step, float(step_min))
-    if step_max:
-        step = min(step, float(step_max))
-    return step
+    return _resolve_signal_step(atr_val, grid_cfg)
 
 
 class RealtimePipeline:
@@ -84,25 +76,8 @@ class RealtimePipeline:
         ).get("timeframe", "M5")
         self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
 
-        # Эффективный конфиг с asset-specific переопределением ensemble, labeling, model
-        self.effective_cfg = deepcopy(self.cfg)
-        asset_ensemble = self.asset_cfg.get("ensemble")
-        if asset_ensemble:
-            merged_ensemble = deepcopy(self.cfg.get("ensemble", {}))
-            merged_ensemble.update(asset_ensemble)
-            self.effective_cfg["ensemble"] = merged_ensemble
-
-        asset_labeling = self.asset_cfg.get("labeling")
-        if asset_labeling:
-            merged_labeling = deepcopy(self.cfg.get("labeling", {}))
-            merged_labeling.update(asset_labeling)
-            self.effective_cfg["labeling"] = merged_labeling
-
-        asset_model = self.asset_cfg.get("model")
-        if asset_model:
-            merged_model = deepcopy(self.cfg.get("model", {}))
-            merged_model.update(asset_model)
-            self.effective_cfg["model"] = merged_model
+        # One resolver for production training, research and live inference.
+        self.effective_cfg = effective_asset_config(self.cfg, asset_key)
 
     def get_frame(self, n_candles: int = 100, build_features: bool = False) -> pd.DataFrame:
         """Return a raw (or feature-built) DataFrame of the asset's real candles.
@@ -254,7 +229,7 @@ class RealtimePipeline:
             "entry_zone": entry_zone,
             "invalidation": invalidation,
             "targets": targets,
-            "step": round(step, 4),
+            "step": float(step),
             "reasoning_summary": signal.reasoning_summary,
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
             "timestamp_utc": int(latest["timestamp_utc"]),

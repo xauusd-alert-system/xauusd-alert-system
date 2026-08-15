@@ -30,6 +30,7 @@ Commands
 /metrics — 📊 institutional microstructure metrics (SMC / Smart Money)
 /metrics today|week — closed-trade stats (count, WR, PF, expectancy, P&L)
 /account — balance, equity, margin, margin level, floating & today's realized P&L
+/paper — frozen paper accumulator liveness/sample counter (never outcome metrics)
 /pause   — set trader.dry_run = True (orders logged, not sent)
 /resume  — set trader.dry_run = False
 /closeall — market-close every open position (emergency stop)
@@ -145,7 +146,7 @@ class TelegramControlBot:
     # alerts go to). Mutating commands were already admin-only; this extends
     # the same fail-closed guard to read-outs of sensitive data.
     ADMIN_COMMANDS = frozenset({
-        "/status", "/positions", "/metrics", "/why", "/account",
+        "/status", "/positions", "/metrics", "/why", "/account", "/paper",
         "/pause", "/resume", "/closeall",
     })
 
@@ -158,6 +159,7 @@ class TelegramControlBot:
             "/positions": self._cmd_positions,
             "/why":       self._cmd_why,
             "/account":   self._cmd_account,
+            "/paper":     self._cmd_paper,
             "/pause":     self._cmd_pause,
             "/resume":    self._cmd_resume,
             "/closeall":  self._cmd_closeall,
@@ -215,6 +217,7 @@ class TelegramControlBot:
             "/metrics — 📊 микроструктурные метрики по РЕАЛЬНОМУ рынку (SMC / Smart Money)\n"
             "/metrics today|week|2week|month|3month|all — подробная статистика закрытых сделок\n"
             "/account — баланс, equity, маржа, плавающий и дневной реализованный P&L\n"
+            "/paper — прогресс frozen paper: только счётчики/liveness, без P&L\n"
             "/pause — enable dry-run (stop sending orders)\n"
             "/resume — disable dry-run (orders go live again)\n"
             "/closeall — ⚠️ emergency close ALL open positions\n"
@@ -374,6 +377,27 @@ class TelegramControlBot:
         except Exception as exc:
             logger.exception("/metrics %s failed", period)
             self._send(chat_id, f"❌ Metrics error: {exc}")
+
+    def _cmd_paper(self, chat_id: str, args: tuple = ()) -> None:
+        """Frozen-paper liveness only; never reads close-event outcome payloads."""
+        if not self._require_admin(chat_id):
+            return
+        try:
+            import os
+            from data.paper_ledger import paper_accumulation_status
+            from paper.accumulator import format_accumulation_status, load_frozen_manifest
+
+            manifest_path = os.getenv("PAPER_MANIFEST_PATH")
+            db_path = os.getenv("PAPER_LEDGER_DB", "data/paper_forward.sqlite")
+            if not manifest_path:
+                self._send(chat_id, "ℹ️ PAPER_MANIFEST_PATH не настроен; frozen paper accumulator не запущен.")
+                return
+            manifest = load_frozen_manifest(manifest_path, verify_model=False)
+            status = paper_accumulation_status(db_path, manifest["run_id"])
+            self._send(chat_id, format_accumulation_status(status))
+        except Exception as exc:
+            logger.exception("/paper failed")
+            self._send(chat_id, f"❌ Paper status error: {exc}")
 
     def _cmd_account(self, chat_id: str, args: tuple = ()) -> None:
         """/account — balance, equity, margin, margin level, floating P&L and

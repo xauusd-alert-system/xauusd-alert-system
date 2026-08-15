@@ -36,7 +36,7 @@ The ML signal plus wide exits carries the edge.
 
 - Data: from 2026-08-08 onward (locked hold-out).
 - Trigger: when >= 50 trades accumulate for wide_trend_filtered.
-- Method: single run with --allow-locked (burns the lock).
+- Method: one outcome read from the frozen append-only paper ledger.
 - Success criteria:
   - PF >= 1.30
   - Cost x1.5 PF >= 1.20
@@ -44,4 +44,46 @@ The ML signal plus wide exits carries the edge.
   - DSR(N_eff) >= 0.80
 
 If all criteria pass -> promotion PR.
-If any fail -> remain paper; keep accumulating.
+If any fail -> remain paper. **No sequential second look is allowed for the same frozen run.**
+
+## Frozen accumulator workflow
+
+The accumulator freezes exact model bytes, config snapshot, variant overrides,
+feature manifest and start/minimum policy. Its manifest cannot be overwritten with
+a different policy; candle transitions are idempotent append-only events.
+
+```bash
+python -m scripts.paper_accumulate create-manifest \
+  --asset XAUUSD --variant wide_trend_filtered \
+  --model-path output/models/xauusd_direction_model.joblib \
+  --manifest config/paper/xauusd_wide_trend_filtered.json \
+  --start 2026-08-08 --min-trades 50
+
+python -m scripts.paper_accumulate run \
+  --manifest config/paper/xauusd_wide_trend_filtered.json \
+  --db-path data/paper_forward.sqlite
+```
+
+Liveness only (never reads PnL/PF/outcome payloads):
+
+```bash
+python -m scripts.paper_accumulate status \
+  --manifest config/paper/xauusd_wide_trend_filtered.json \
+  --db-path data/paper_forward.sqlite
+```
+
+Telegram exposes the same safe counter through `/paper` when
+`PAPER_MANIFEST_PATH` and `PAPER_LEDGER_DB` are configured.
+
+After 50 closed trades, perform the single read:
+
+```bash
+python -m scripts.run_live_forward_validation \
+  --manifest config/paper/xauusd_wide_trend_filtered.json \
+  --paper-db data/paper_forward.sqlite \
+  --out logs/xauusd_wide_live_forward_once.json \
+  --force
+```
+
+The command appends `validation_read` before loading outcome payloads. A second run
+for the same manifest is refused, including after a crash following the marker.

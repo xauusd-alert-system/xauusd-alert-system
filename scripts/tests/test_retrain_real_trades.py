@@ -141,6 +141,11 @@ def test_retrain_asset_skips_merge_and_returns_not_ok_in_regime_feature_mode(tmp
     assert stats["reason"] == "no_candles"
 
 
+def test_real_trade_merge_is_default_off_until_debiasing_contract_exists():
+    cfg = load_config()
+    assert cfg["retraining"]["real_trade_merge_enabled"] is False
+
+
 # --------------------------------------------------------------------------- #
 # #27 - main() must surface problems as a non-zero exit code.
 # --------------------------------------------------------------------------- #
