@@ -36,17 +36,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <p class="text-slate-400 text-sm mt-1">Institutional Multi-Asset ML System &bull; Smart Money Concepts &bull; Causal No-Lookahead Architecture</p>
             </div>
             
-            <!-- Quick Controls -->
-            <div class="flex items-center gap-2">
-                <button onclick="sendControl('pause')" class="bg-amber-600/80 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
-                    <i class="fas fa-pause"></i> Пауза
-                </button>
-                <button onclick="sendControl('resume')" class="bg-emerald-600/80 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
-                    <i class="fas fa-play"></i> Возобновить
-                </button>
-                <button disabled title="Используйте авторизованный Telegram /closeall" class="bg-slate-700 text-slate-400 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 cursor-not-allowed">
-                    <i class="fas fa-lock"></i> Closeall: только Telegram
-                </button>
+            <!-- Broker controls intentionally live only in authenticated Telegram. -->
+            <div class="text-xs text-slate-400 border border-slate-700 rounded-lg px-3 py-2">
+                <i class="fas fa-lock"></i> Управление исполнением: только авторизованный Telegram
             </div>
         </header>
 
@@ -360,7 +352,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById("kpi-data-mode").innerText = String(status.data_mode || "unknown").toUpperCase();
                 document.getElementById("kpi-balance").innerText = status.balance == null ? "—" : "$" + status.balance.toLocaleString('en-US', {minimumFractionDigits: 2});
                 document.getElementById("kpi-equity").innerText = status.equity == null ? "Эквити: —" : "Эквити: $" + status.equity.toLocaleString('en-US', {minimumFractionDigits: 2});
-                document.getElementById("data-disclosure").innerText = "Source: " + (status.source || "unknown") + " | Mode: " + (status.mode || "unknown") + " | As of: " + (status.as_of_utc || "—");
+                document.getElementById("data-disclosure").innerText = "Source: " + (status.source || "unknown") + " | Data: " + (status.mode || "unknown") + " | Deployment: " + (status.deployment_mode || "unknown") + " | Strategy: " + (status.strategy_version || "unknown") + " | Config: " + String(status.config_hash || "").slice(0,12) + " | As of: " + (status.as_of_utc || "—");
                 document.getElementById("kpi-positions").innerText = status.open_positions_count;
                 document.getElementById("kpi-risk").innerText = status.circuit_breaker ? "HALTED" : "NORMAL";
                 document.getElementById("kpi-risk").className = status.circuit_breaker ? "text-2xl font-bold mt-2 text-rose-500" : "text-2xl font-bold mt-2 text-emerald-400";

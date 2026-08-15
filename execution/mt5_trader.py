@@ -16,6 +16,9 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config, get_env, get_signal_grid
+from config.deployment import deployment_mode, order_routing_allowed
+from config.strategy_contract import strategy_identity
+from data.trading_event_ledger import append_trading_event
 from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles, _TIMEFRAMES
 from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
 from data.execution_ledger import init_execution_ledger, log_execution_attempt, now_ms
@@ -138,10 +141,22 @@ class MultiAssetMT5Trader:
     def __init__(self):
         self.cfg = load_config()
         self.bot = TelegramAlertBot(self.cfg)
+        self.deployment_mode = deployment_mode(self.cfg)
+        self.strategy_identity = strategy_identity(self.cfg)
+        self.order_routing_enabled, self.order_routing_reason = order_routing_allowed(
+            self.cfg, confirmed_by="startup-capability-check"
+        )
+        if (self.order_routing_enabled
+                and self.cfg.get("deployment", {}).get("require_telegram_admin_for_execution", True)
+                and not (get_env("TELEGRAM_ADMIN_CHAT_ID") or get_env("TELEGRAM_CHAT_ID"))):
+            raise RuntimeError("Execution-capable deployment requires TELEGRAM_ADMIN_CHAT_ID")
 
         self.magic_number = 777111
-        self.dry_run = os.getenv("DRY_RUN") == "1"
-        self.require_demo_account = bool(self.cfg.get("execution", {}).get("require_demo_account", False))
+        self.dry_run = (os.getenv("DRY_RUN") == "1") or not self.order_routing_enabled
+        self.require_demo_account = (
+            self.deployment_mode.value == "demo_systematic"
+            or bool(self.cfg.get("execution", {}).get("require_demo_account", False))
+        )
         if self.require_demo_account and not self.dry_run:
             initialize_mt5()
             account = mt5.account_info()
@@ -334,11 +349,15 @@ class MultiAssetMT5Trader:
 
     # ========== ДИНАМИЧЕСКИЙ КОРРЕЛЯЦИОННЫЙ ФИЛЬТР ==========
 
-    def _fetch_close_series(self, symbol: str, count: int) -> pd.Series:
-        """Загружает последние count M5-свечей и возвращает close."""
+    def _fetch_close_series(self, asset_key: str, symbol: str, count: int) -> pd.Series:
+        """Strategy-horizon returns indexed by UTC, never positional M5 closes."""
         try:
-            df = fetch_closed_candles(symbol, "M5", count)
-            return df["close"].astype(float).reset_index(drop=True)
+            asset_cfg = self.cfg.get("assets", {}).get(asset_key, {})
+            timeframe = asset_cfg.get("timeframe") or self.cfg.get("market_data", {}).get("timeframe", "M5")
+            df = fetch_closed_candles(symbol, timeframe, count)
+            ts = pd.to_datetime(df["timestamp"], utc=True)
+            return pd.Series(df["close"].astype(float).pct_change().values,
+                             index=ts, name=asset_key).dropna()
         except Exception as e:
             logger.error(f"Error fetching {symbol} for correlation: {e}")
             return pd.Series(dtype=float)
@@ -355,7 +374,7 @@ class MultiAssetMT5Trader:
         symbols = {k: v["mt5_symbol"] for k, v in assets.items() if v.get("enabled")}
         closes = {}
         for asset_key, symbol in symbols.items():
-            s = self._fetch_close_series(symbol, self.corr_history_bars)
+            s = self._fetch_close_series(asset_key, symbol, self.corr_history_bars)
             if len(s) > 50:
                 closes[asset_key] = s
 
@@ -535,9 +554,8 @@ class MultiAssetMT5Trader:
                 trailing_mult = self.trailing_atr_mult_by_symbol.get(symbol)
                 if trailing_mult is not None and tp1_hit and tp2_hit and not trade_data.get("trailing_active", False):
                     try:
-                        atr_now = 0.0  # would need real ATR fetch; use a rough 1% of price for live safety
-                        # In production one would fetch recent ATR; for now use a conservative trail
-                        trail_dist = trailing_mult * max(0.0008, (current_price * 0.0006))  # approx ATR
+                        atr_now = self._latest_causal_atr(trade_data.get("symbol", symbol))
+                        trail_dist = float(trailing_mult) * atr_now
                         if pos.type == 0:
                             new_sl = round(pos.price_open + (current_price - pos.price_open) * 0.7, digits)  # conservative
                             # Prefer dynamic trail using recent high
@@ -557,8 +575,8 @@ class MultiAssetMT5Trader:
                                 if new_sl <= min_sl:
                                     self._modify_sl_tp(pos, new_sl, pos.tp)
                                     trade_data["trailing_active"] = True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.error("[%s] trailing skipped: causal ATR unavailable: %s", symbol, exc)
             else:
                 if tp1 is not None and not tp1_hit and current_price <= tp1:
                     close_vol = self._scaleout_volume(symbol, info, original_volume, 0.5)
@@ -617,6 +635,12 @@ class MultiAssetMT5Trader:
             if close_price is None:
                 close_price = 0.0
             try:
+                self._append_trade_event(
+                    "position_closed", symbol, trade_info.get("signal_contract") or {},
+                    position_ticket=ticket, reason="broker_position_closed",
+                    payload={"close_time": close_time, "close_price": close_price,
+                             "realized_pnl": realized_pnl}, actor="broker_history",
+                )
                 log_trade_close(
                     self.trade_db_path,
                     ticket,
@@ -652,6 +676,16 @@ class MultiAssetMT5Trader:
         # W10: reflect closed-ticket removal in the persisted management state.
         self._save_management_state()
 
+    def _latest_causal_atr(self, asset_key: str) -> float:
+        pipeline = self.pipelines.get(asset_key)
+        if pipeline is None:
+            raise RuntimeError(f"no live pipeline for ATR: {asset_key}")
+        frame = pipeline.get_frame(n_candles=120, build_features=True)
+        atr = float(frame["atr"].iloc[-1])
+        if not math.isfinite(atr) or atr <= 0:
+            raise RuntimeError(f"invalid live ATR for {asset_key}: {atr}")
+        return atr
+
     def _get_min_dist(self, symbol: str, tick, info) -> float:
         stops_level = info.trade_stops_level * info.point
         freeze_level = info.trade_freeze_level * info.point
@@ -682,6 +716,24 @@ class MultiAssetMT5Trader:
             )
             return 0.0
         return round(tranche, 6)
+
+    def _append_trade_event(self, event_type: str, asset_key: str, signal: dict,
+                            *, position_ticket=None, order_ticket=None, reason=None,
+                            payload=None, actor="mt5_trader"):
+        try:
+            append_trading_event(
+                self.trade_db_path, event_type=event_type,
+                signal_id=str(signal.get("signal_id") or f"legacy:{asset_key}:{signal.get('timestamp_utc', 0)}"),
+                asset_key=asset_key,
+                strategy_version=str(signal.get("strategy_version") or self.strategy_identity["strategy_version"]),
+                config_hash=str(signal.get("config_hash") or self.strategy_identity["config_hash"]),
+                model_hash=signal.get("model_hash"),
+                feature_snapshot_hash=signal.get("feature_snapshot_hash"),
+                position_ticket=position_ticket, order_ticket=order_ticket,
+                actor=actor, reason=reason, payload=payload or {},
+            )
+        except Exception as exc:
+            logger.error("Trading event ledger write failed: %s", exc)
 
     def _record_execution_result(self, *, asset_key, broker_symbol, action, side,
                                  requested_at, request, result,
@@ -739,10 +791,24 @@ class MultiAssetMT5Trader:
         if self.dry_run:
             logger.info(f"[DRY RUN] Would modify SL/TP: {request}")
             return
+        trade = self.active_trades.get(pos.ticket, {})
+        signal = trade.get("signal_contract") or {}
+        asset_key = trade.get("symbol", pos.symbol)
+        self._append_trade_event("stop_move_requested", asset_key, signal,
+                                 position_ticket=pos.ticket,
+                                 payload={"old_sl": getattr(pos, "sl", None), "new_sl": new_sl,
+                                          "old_tp": getattr(pos, "tp", None), "new_tp": new_tp})
         res = mt5.order_send(request)
         if res.retcode == mt5.TRADE_RETCODE_DONE:
+            self._append_trade_event("stop_move_confirmed", asset_key, signal,
+                                     position_ticket=pos.ticket, reason="broker_confirmed",
+                                     payload={"new_sl": new_sl, "new_tp": new_tp})
             logger.info(f"✅ Modified SL/TP for #{pos.ticket}: SL={new_sl}, TP={new_tp}")
         else:
+            self._append_trade_event("stop_move_rejected", asset_key, signal,
+                                     position_ticket=pos.ticket,
+                                     reason=str(getattr(res, "comment", "rejected")),
+                                     payload={"retcode": getattr(res, "retcode", None)})
             logger.debug(f"Modify failed: {res.comment} ({res.retcode})")
 
     def _close_partial_position(self, pos, price, volume, label):
@@ -772,9 +838,14 @@ class MultiAssetMT5Trader:
         if self.dry_run:
             logger.info(f"[DRY RUN] Would close partial {label}: {request}")
             return True  # dry-run: treated as filled for state-advance purposes
+        trade = self.active_trades.get(pos.ticket, {})
+        asset_key = trade.get("symbol", pos.symbol)
+        signal = trade.get("signal_contract") or {}
+        self._append_trade_event("partial_close_submitted", asset_key, signal,
+                                 position_ticket=pos.ticket,
+                                 reason=label, payload={"price": price, "volume": volume})
         requested_at = now_ms()
         res = mt5.order_send(request)
-        asset_key = self.active_trades.get(pos.ticket, {}).get("symbol", pos.symbol)
         self._record_execution_result(
             asset_key=asset_key,
             broker_symbol=pos.symbol,
@@ -786,14 +857,39 @@ class MultiAssetMT5Trader:
             position_ticket=pos.ticket,
         )
         if res.retcode == mt5.TRADE_RETCODE_DONE:
+            self._append_trade_event("partial_filled", asset_key, signal,
+                                     position_ticket=pos.ticket,
+                                     order_ticket=getattr(res, "order", None), reason=label,
+                                     payload={"requested_price": price,
+                                              "filled_price": getattr(res, "price", None),
+                                              "volume": volume})
             logger.info(f"✅ Closed {label} for #{pos.ticket} ({volume} lots)")
             return True
+        self._append_trade_event("partial_rejected", asset_key, signal,
+                                 position_ticket=pos.ticket, reason=str(res.comment),
+                                 payload={"retcode": res.retcode, "label": label})
         logger.error(f"❌ Partial close failed {label} for #{pos.ticket}: {res.comment} ({res.retcode})")
         return False
 
     def execute_signal(self, asset_key: str, signal: dict):
         bias = signal["bias"]
         if bias == "no_trade":
+            return
+        signal_id = str(signal.get("signal_id") or f"legacy:{asset_key}:{signal.get('timestamp_utc', 0)}")
+        allowed, deployment_reason = order_routing_allowed(
+            self.cfg, confirmed_by=signal.get("confirmed_by")
+        )
+        if not self.order_routing_enabled or not allowed:
+            logger.warning("[%s] Order routing blocked: %s", asset_key, deployment_reason)
+            return
+        if asset_key not in self.execution_assets:
+            logger.warning("[%s] Order routing blocked by execution allowlist", asset_key)
+            return
+        if int(signal.get("expires_at_utc") or 0) and int(time.time()) > int(signal["expires_at_utc"]):
+            logger.warning("[%s] Signal %s expired before execution", asset_key, signal_id)
+            return
+        if signal.get("signal_state") not in {None, "confirmed"}:
+            logger.warning("[%s] Signal %s is not confirmed", asset_key, signal_id)
             return
 
         min_conf = self._get_dynamic_min_confidence(asset_key)
@@ -880,6 +976,14 @@ class MultiAssetMT5Trader:
             logger.info(f"[DRY RUN] Order NOT sent for {asset_key}. Would execute with request above.")
             return
 
+        self._append_trade_event(
+            "order_submitted", asset_key, signal,
+            reason="model_signal_confirmed", payload={
+                "broker_symbol": mt5_symbol, "side": bias, "requested_price": price,
+                "volume": self.volume, "sl": sl_price, "tp": tp_price,
+                "deployment_mode": self.deployment_mode.value,
+            },
+        )
         requested_at = now_ms()
         result = mt5.order_send(request)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
@@ -898,6 +1002,15 @@ class MultiAssetMT5Trader:
             except Exception as e:  # pragma: no cover - defensive fallback
                 logger.warning(f"[{asset_key}] Could not resolve position ticket, using order ticket {pos_ticket}: {e}")
 
+            self._append_trade_event(
+                "order_filled", asset_key, signal,
+                position_ticket=pos_ticket, order_ticket=getattr(result, "order", None),
+                reason="broker_fill", payload={
+                    "requested_price": price, "filled_price": getattr(result, "price", None),
+                    "volume": getattr(result, "volume", self.volume),
+                    "sl": sl_price, "tp": tp_price,
+                },
+            )
             self._record_execution_result(
                 asset_key=asset_key,
                 broker_symbol=mt5_symbol,
@@ -938,6 +1051,12 @@ class MultiAssetMT5Trader:
                 "tp3": raw_tp,
                 "tp1_hit": False,
                 "tp2_hit": False,
+                "signal_contract": {
+                    k: signal.get(k) for k in (
+                        "signal_id", "strategy_version", "config_hash", "model_hash",
+                        "feature_snapshot_hash", "timestamp_utc"
+                    )
+                },
             }
             # W10: persist the new position's management state immediately so a
             # restart before the next BE check still knows its TP targets.
@@ -977,6 +1096,12 @@ class MultiAssetMT5Trader:
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)
         else:
+            self._append_trade_event(
+                "order_rejected", asset_key, signal,
+                order_ticket=getattr(result, "order", None),
+                reason=str(getattr(result, "comment", "rejected")),
+                payload={"retcode": getattr(result, "retcode", None), "request": request},
+            )
             self._record_execution_result(
                 asset_key=asset_key,
                 broker_symbol=mt5_symbol,

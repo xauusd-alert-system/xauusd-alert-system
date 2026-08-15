@@ -1,14 +1,10 @@
 """
 Clean signal formatter for Telegram alerts.
 
-Implements the equal-step TP/SL grid specification:
-
-    step   = signal["step"] (dynamic 1.0 * ATR) or signal["atr"];
-              if absent, step is derived from the signal targets / invalidation
-    TP1    = entry ± 1 * step
-    TP2    = entry ± 2 * step   (exactly 2x the TP1 distance)
-    TP3    = entry ± 3 * step   (exactly 3x the TP1 distance)
-    Stop   = entry ∓ 3 * step   (exactly 3x the step => risk:TP3 = 1:1)
+Implements the versioned SignalSpec display contract. Explicit target legs and
+invalidation are authoritative and may contain TP4 or other validated legs.
+Legacy signals without target_legs fall back to the historical equal-step 1/2/3
+layout for backwards-compatible rendering.
 
 Message layout (clean format):
 
@@ -91,14 +87,16 @@ def compute_levels(signal: dict, step: Optional[float] = None) -> dict:
         step = resolve_step(signal)
     step = float(step)
     direction = 1.0 if signal["bias"] == "long" else -1.0
-    return {
-        "entry": entry,
-        "step": step,
-        "tp1": entry + direction * step,
-        "tp2": entry + direction * 2.0 * step,
-        "tp3": entry + direction * 3.0 * step,
-        "sl": entry - direction * 3.0 * step,
-    }
+    legs = signal.get("target_legs") or []
+    supplied = [float(leg["price"]) for leg in legs if leg.get("price") is not None]
+    targets = supplied or [entry + direction * step * n for n in (1.0, 2.0, 3.0)]
+    stop = signal.get("invalidation") if supplied else None
+    if stop is None:
+        stop = entry - direction * 3.0 * step
+    out = {"entry": entry, "step": step, "targets": targets, "sl": float(stop)}
+    for i, price in enumerate(targets[:3], 1):
+        out[f"tp{i}"] = price  # compatibility for existing consumers
+    return out
 
 
 def format_clean_signal_message(
@@ -135,14 +133,14 @@ def format_clean_signal_message(
     asset_line = ASSET_LABELS.get(asset_key, asset_key)
     levels = compute_levels(signal)
 
+    target_lines = "\n".join(
+        f"→ TP{i}: {_fmt_price(price)}" for i, price in enumerate(levels["targets"], 1)
+    )
     message = (
         f"{direction}\n"
         f"{asset_line}\n"
         f"Зона входа: {_fmt_price(levels['entry'])}\n"
-        f"Цели:\n"
-        f"→ TP1: {_fmt_price(levels['tp1'])}\n"
-        f"→ TP2: {_fmt_price(levels['tp2'])}\n"
-        f"→ TP3: {_fmt_price(levels['tp3'])}\n"
+        f"Цели:\n{target_lines}\n"
         f"Стоп: {_fmt_price(levels['sl'])}"
     )
 

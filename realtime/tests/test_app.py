@@ -88,17 +88,20 @@ def test_api_monte_carlo_endpoint_has_no_hypothetical_fallback(client, monkeypat
     assert "var_95_usd" not in payload
 
 
-def test_api_monte_carlo_uses_executed_trade_ledger(client, monkeypatch, tmp_path):
-    from data.trade_logger import log_trade_entry, log_trade_close
+def test_api_monte_carlo_uses_primary_event_ledger(client, monkeypatch, tmp_path):
+    from data.trading_event_ledger import append_trading_event
 
     db = str(tmp_path / "trades.sqlite")
     for ticket, pnl in ((1, 10.0), (2, -4.0)):
-        log_trade_entry(db, ticket, "XAUUSD", "long", 100 + ticket, 2000.0, {"rsi": 50})
-        log_trade_close(db, ticket, 200 + ticket, 2001.0, pnl)
+        append_trading_event(
+            db, event_type="position_closed", signal_id=f"s{ticket}", asset_key="XAUUSD",
+            strategy_version="v3", config_hash="cfg", actor="broker_history",
+            position_ticket=ticket, payload={"realized_pnl": pnl},
+        )
     monkeypatch.setenv("TRADE_LOG_DB_PATH", db)
     payload = client.get("/api/monte-carlo").json()
     assert payload["available"] is True
-    assert payload["source"] == "executed_trades.pnl"
+    assert payload["source"] == "trading_events.position_closed.realized_pnl"
     assert payload["n_trades"] == 2
 
 
@@ -116,9 +119,12 @@ def test_institutional_metrics_have_no_static_fallback(client, monkeypatch):
     assert payload["metrics"] == {}
 
 
-def test_api_control_endpoints(client):
+def test_api_control_endpoints(client, monkeypatch):
+    monkeypatch.setenv("DASHBOARD_CONTROL_TOKEN", "test-control-token")
+    headers = {"Authorization": "Bearer test-control-token"}
+    assert client.post("/api/control/pause").status_code == 403
     # Pause
-    res_pause = client.post("/api/control/pause")
+    res_pause = client.post("/api/control/pause", headers=headers)
     assert res_pause.status_code == 200
     assert res_pause.json()["scope"] == "dashboard_api_process_only"
 
@@ -127,11 +133,11 @@ def test_api_control_endpoints(client):
     assert res_status.json()["trading_paused"] is True
 
     # Resume
-    res_resume = client.post("/api/control/resume")
+    res_resume = client.post("/api/control/resume", headers=headers)
     assert res_resume.status_code == 200
     assert res_resume.json()["scope"] == "dashboard_api_process_only"
 
     # Web process must never claim it closed broker positions when it is not wired.
-    res_close = client.post("/api/control/closeall")
+    res_close = client.post("/api/control/closeall", headers=headers)
     assert res_close.status_code == 501
     assert "not wired" in res_close.json()["detail"]

@@ -218,8 +218,8 @@ class TelegramControlBot:
             "/metrics today|week|2week|month|3month|all — подробная статистика закрытых сделок\n"
             "/account — баланс, equity, маржа, плавающий и дневной реализованный P&L\n"
             "/paper — прогресс frozen paper: только счётчики/liveness, без P&L\n"
-            "/pause — enable dry-run (stop sending orders)\n"
-            "/resume — disable dry-run (orders go live again)\n"
+            "/pause — дополнительный runtime brake (dry-run)\n"
+            "/resume — снять runtime brake; deployment.mode и allowlist всё равно обязательны\n"
             "/closeall — ⚠️ emergency close ALL open positions\n"
             "/help — this message\n\n"
             "🔒 Команды с данными счёта (/status, /positions, /metrics, /why, /account) "
@@ -262,24 +262,12 @@ class TelegramControlBot:
                 except Exception:
                     continue
             if candles is None or len(candles) < 10:
-                # Fallback: synthetic demo (explicitly labelled).
-                from simulation.provider import SimulationProvider
-                try:
-                    candles = SimulationProvider.get().get_candles("M5", n=100)
-                except Exception:
-                    candles = None
-                if candles is None or len(candles) < 10:
-                    metrics = {
-                        "manipulation_index": {"display": "n/a", "text": "нет данных."},
-                        "zone_strength": {"display": "n/a", "text": "нет данных."},
-                        "smf_ratio": {"display": "n/a", "text": "нет данных."},
-                        "liquidity_grab": {"display": "n/a", "text": "нет данных."},
-                        "delta_confidence": {"display": "n/a", "text": "нет данных."},
-                    }
-                    msg = "📊 *Метрики по софту на текущий момент*\n\n_Нет данных ни по реальному рынку, ни по симулятору._\n" + format_institutional_metrics_report(metrics)
-                    self._send(chat_id, msg, parse_mode="Markdown")
-                    return
-                source = "synthetic"
+                self._send(
+                    chat_id,
+                    "📊 Institutional metrics unavailable: no real closed-candle source. "
+                    "Synthetic fallback is disabled.",
+                )
+                return
             metrics = compute_institutional_metrics(candles)
             label = "РЕАЛЬНЫЙ РЫНОК" if source != "synthetic" else "СИМУЛЯТОР (НЕ реальные данные)"
             msg = format_institutional_metrics_report(metrics)

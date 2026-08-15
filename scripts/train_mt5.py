@@ -165,8 +165,11 @@ def build_artifact_metadata(
     asset_cfg = cfg.get("assets", {}).get(asset_key, {})
     spread = asset_cfg.get("spread_usd", cfg.get("backtest", {}).get("spread_points", 25) / 100.0)
     slippage = asset_cfg.get("slippage_usd", cfg.get("backtest", {}).get("slippage_points", 5) / 100.0)
+    from config.strategy_contract import strategy_identity
+    identity = strategy_identity(cfg)
     return {
         "bundle_schema_version": 2,
+        **identity,
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
         "asset_key": asset_key,
         "timeframe": timeframe,

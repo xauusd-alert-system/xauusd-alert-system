@@ -65,6 +65,16 @@ def init_schema(db_path: str):
                 PRIMARY KEY (symbol, timestamp_utc)
             );
         """)
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE_NAME})")}
+        optional = {
+            "signal_id": "TEXT", "signal_state": "TEXT", "strategy_version": "TEXT",
+            "config_hash": "TEXT", "model_hash": "TEXT", "feature_snapshot_hash": "TEXT",
+            "expires_at_utc": "INTEGER", "published_at_utc": "INTEGER",
+            "publish_latency_seconds": "INTEGER",
+        }
+        for name, sql_type in optional.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN {name} {sql_type}")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_sym_ts ON {TABLE_NAME}(symbol, timestamp_utc);")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_ts ON {TABLE_NAME}(timestamp_utc);")
         conn.commit()
@@ -85,8 +95,10 @@ def log_signal(db_path: str, signal: dict, alert_sent: bool, symbol: str = "XAUU
         conn.execute(
             f"""INSERT OR REPLACE INTO {TABLE_NAME}
                 (symbol, timestamp_utc, generated_at, bias, confidence, regime, session,
-                 entry_zone, invalidation, targets, reasoning_summary, alert_sent)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 entry_zone, invalidation, targets, reasoning_summary, alert_sent,
+                 signal_id, signal_state, strategy_version, config_hash, model_hash,
+                 feature_snapshot_hash, expires_at_utc, published_at_utc, publish_latency_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 symbol,
                 signal["timestamp_utc"],
@@ -100,6 +112,11 @@ def log_signal(db_path: str, signal: dict, alert_sent: bool, symbol: str = "XAUU
                 json.dumps(signal["targets"]) if signal.get("targets") else None,
                 signal.get("reasoning_summary", ""),
                 int(alert_sent),
+                signal.get("signal_id"), signal.get("signal_state"),
+                signal.get("strategy_version"), signal.get("config_hash"),
+                signal.get("model_hash"), signal.get("feature_snapshot_hash"),
+                signal.get("expires_at_utc"), signal.get("published_at_utc"),
+                signal.get("publish_latency_seconds"),
             ),
         )
         conn.commit()

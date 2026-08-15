@@ -1,3 +1,13 @@
+deployment:
+  # Formal safety state; DRY_RUN is no longer the deployment authority.
+  mode: research  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic
+  live_approval_id: null
+  require_telegram_admin_for_execution: true
+
+strategy:
+  spec_path: config/strategy_spec.yaml
+  version: xauusd-system-v3-signalbar-2026-08-16
+
 ensemble:
   min_confidence_to_alert: 0.60
   # W15 (audit 2026-08-10): these probabilities were previously hard-coded
@@ -14,6 +24,9 @@ ensemble:
   use_news_guard: true
   news_buffer_before_min: 30
   news_buffer_after_min: 30
+  news_feed_failure_policy_live: fail_closed
+  news_feed_max_age_minutes: 360
+  historical_news_calendar_path: null  # dated CSV: timestamp_utc,title,country,impact
   # W14 (audit 2026-08-10): the news guard is enforced in the live trading path,
   # but backtest bars older than ~7 days are skipped by is_news_red_zone() because
   # there is no HISTORICAL economic-calendar feed. So backtests do not model news

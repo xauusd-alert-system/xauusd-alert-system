@@ -9,13 +9,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import pandas as pd
 import numpy as np
 
 from config.loader import load_config, get_env, get_signal_grid
+from config.deployment import deployment_mode
 from realtime.pipeline import RealtimePipeline
 from realtime.dashboard import DASHBOARD_HTML
 from backtest.monte_carlo import MonteCarloSimulator
@@ -33,12 +34,27 @@ DATA_MODE = get_env("DATA_MODE", default="mock")
 
 # Initialize default pipeline (XAUUSD flagship)
 pipeline = RealtimePipeline(cfg=CFG, model_path=MODEL_PATH, data_mode=DATA_MODE)
+APP_STRATEGY_IDENTITY = pipeline.strategy_identity
 
 # Track trading paused state
 TRADING_PAUSED = False
 
 
 class SignalResponse(BaseModel):
+    signal_id: str
+    signal_state: str
+    strategy_version: str
+    strategy_spec_hash: str
+    config_hash: str
+    model_hash: Optional[str] = None
+    feature_snapshot_hash: Optional[str] = None
+    setup_timeframe: str
+    context_timeframes: List[str] = Field(default_factory=list)
+    expires_at_utc: Optional[int] = None
+    target_legs: List[Dict[str, Any]] = Field(default_factory=list)
+    confirmation_predicates: List[str] = Field(default_factory=list)
+    confirmed_by: Optional[str] = None
+    confirmation_time_utc: Optional[int] = None
     bias: str
     confidence: float
     entry_zone: Optional[List[float]] = None
@@ -67,6 +83,8 @@ def health():
         "data_mode": DATA_MODE,
         "model_loaded": pipeline._predictor is not None,
         "trading_paused": TRADING_PAUSED,
+        "deployment_mode": deployment_mode(CFG).value,
+        **APP_STRATEGY_IDENTITY,
     }
 
 
@@ -118,6 +136,8 @@ def get_status():
         "trading_paused": TRADING_PAUSED,
         "execution_enabled_assets": CFG.get("execution", {}).get("enabled_assets", []),
         "require_demo_account": bool(CFG.get("execution", {}).get("require_demo_account", False)),
+        "deployment_mode": deployment_mode(CFG).value,
+        **APP_STRATEGY_IDENTITY,
     }
 
 
@@ -288,20 +308,21 @@ def get_monte_carlo():
         default=CFG.get("general", {}).get("db_path", "data/market_data_mt5.sqlite"),
     ))
     if not os.path.exists(db_path):
-        return {"available": False, "source": "executed_trades",
+        return {"available": False, "source": "trading_events.position_closed",
                 "mode": "live_history", "as_of_utc": as_of,
-                "reason": "trade_ledger_missing"}
+                "reason": "primary_event_ledger_missing"}
     try:
-        from data.trade_logger import read_executed_trades
-        trades = read_executed_trades(db_path)
-        pnls = pd.to_numeric(trades.get("pnl"), errors="coerce").dropna().to_numpy(dtype=float)
+        from data.trading_event_ledger import closed_position_pnls, verify_event_chain
+        if not verify_event_chain(db_path):
+            raise RuntimeError("event hash chain verification failed")
+        pnls = np.asarray(closed_position_pnls(db_path), dtype=float)
     except Exception as exc:
-        logger.warning("Could not load executed trades for Monte Carlo: %s", exc)
-        return {"available": False, "source": "executed_trades",
+        logger.warning("Could not load primary event ledger for Monte Carlo: %s", exc)
+        return {"available": False, "source": "trading_events.position_closed",
                 "mode": "live_history", "as_of_utc": as_of,
-                "reason": "trade_ledger_unreadable"}
+                "reason": "primary_event_ledger_unreadable"}
     if len(pnls) < 2:
-        return {"available": False, "source": "executed_trades",
+        return {"available": False, "source": "trading_events.position_closed",
                 "mode": "live_history", "as_of_utc": as_of,
                 "reason": "at_least_two_closed_trades_required",
                 "n_trades": int(len(pnls))}
@@ -317,7 +338,7 @@ def get_monte_carlo():
         horizon_trades=100,
     )
     result = mc.run_simulation()
-    result.update({"available": True, "source": "executed_trades.pnl",
+    result.update({"available": True, "source": "trading_events.position_closed.realized_pnl",
                    "mode": "live_history", "as_of_utc": as_of,
                    "n_trades": int(len(pnls))})
     return result
@@ -431,9 +452,12 @@ def get_positions():
 
 
 @app.post("/api/control/{action}")
-def handle_control(action: str):
-    """Dashboard-process controls; broker mutation is intentionally not wired here."""
+def handle_control(action: str, authorization: str | None = Header(default=None)):
+    """Authenticated dashboard-process controls; broker mutation is not wired here."""
     global TRADING_PAUSED
+    expected = get_env("DASHBOARD_CONTROL_TOKEN", default=None)
+    if not expected or authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=403, detail="dashboard control authorization required")
     action_lower = action.lower()
     if action_lower == "pause":
         TRADING_PAUSED = True
