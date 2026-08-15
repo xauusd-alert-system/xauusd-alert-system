@@ -157,7 +157,7 @@ def test_run_analysis_cost_stress_and_gate(synthetic_gbp_df):
         "block_bootstrap_t >= 3.0", "DSR(N_eff) > 0.95", "PBO < 0.20",
         "PF > 1.1 at 1.5x costs",
         "folds: total PnL > 0, PnL ex-best fold > 0, 55% positive",
-        "IS->OOS slope >= 0.5", "locked hold-out confirms"}
+            "IS->OOS informativeness", "locked hold-out confirms"}
     assert gate["checks"]["locked hold-out confirms"] is None
     # The gate must publish WHICH leg of the fold condition failed; a bare
     # boolean is what let "57.1% positive folds" stand in for a result.
