@@ -724,6 +724,7 @@ class MultiAssetMT5Trader:
         bias = signal["bias"]
         if bias == "no_trade":
             return
+        entry_time = None        
 
         min_conf = self._get_dynamic_min_confidence(asset_key)
         if signal["confidence"] < min_conf:
@@ -800,15 +801,26 @@ class MultiAssetMT5Trader:
                 opened = positions_get_by_magic(symbol=mt5_symbol, magic=self.magic_number)
                 if opened:
                     pos_ticket = int(opened[-1].ticket)
+                    # Prefer the MT5 position's actual open time over the signal
+                    # bar timestamp. The signal timestamp can be earlier than the
+                    # fill (next bar open) or, after a restart/reconnect, can come
+                    # from a different signal snapshot than the actual market entry.
+                    pos_time = getattr(opened[-1], "time", None)
+                    if pos_time is not None and int(pos_time) > 0:
+                        entry_time = int(pos_time)
             except Exception as e:  # pragma: no cover - defensive fallback
-                logger.warning(f"[{asset_key}] Could not resolve position ticket, using order ticket {pos_ticket}: {e}")
+                logger.warning(f"[{asset_key}] Could not resolve position ticket/time, using order ticket {pos_ticket}: {e}")
 
             logger.info(f"🔥 [{asset_key}] ORDER EXECUTED IN MT5! Ticket: #{pos_ticket}, Type: {bias.upper()}, Price: {price}, SL: {sl_price}, TP: {tp_price}")
 
-            try:
-                entry_time = int(float(signal.get("timestamp_utc", 0) or 0))
-            except (TypeError, ValueError):
-                entry_time = int(datetime.now(timezone.utc).timestamp())
+
+            # Fallback if positions_get did not provide the actual open time.
+            if entry_time is None:
+                try:
+                    entry_time = int(float(signal.get("timestamp_utc", 0) or 0))
+                except (TypeError, ValueError):
+                    entry_time = int(datetime.now(timezone.utc).timestamp())
+
 
             exec_msg = (
                 f"🔥 [{asset_key}] ORDER EXECUTED IN MT5!\n"
