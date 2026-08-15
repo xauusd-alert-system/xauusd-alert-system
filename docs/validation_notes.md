@@ -7,3 +7,10 @@ informative when it passes; when it does not, the gate uses the direct
 selection metrics OOS prob loss <= 0.05 and median lambda > 2.0.
 
 This revision is pre-registered before re-running the BTCUSD gate.
+
+## Live execution BTCUSD — first snapshot 2026-08-15
+
+- valid closed trades: 10 (1 malformed row excluded: close_time < entry_time)
+- WR 60%, PF 0.79, total PnL -15.92
+- statistically indistinguishable from backtest (95% CI for WR at n=10: 54%–100%)
+- decision: keep live, next review at 30 trades
