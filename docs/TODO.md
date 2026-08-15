@@ -1,7 +1,7 @@
 # План работ и статус реализации (TODO & Roadmap)
 ## Проект: `xauusd-alert-system`
 
-**Текущий статус (аудит 2026-08-16):** кодовые компоненты в основном реализованы, но это **не означает подтверждённую доходность или live-ready**. Production target/weights и сбор execution costs исправлены; экономическая revalidation на копии real DB и frozen live-forward sample ещё обязательны. Последняя локальная проверка: **535 tests passed**.
+**Текущий статус (аудит 2026-08-16):** кодовые компоненты в основном реализованы, но это **не означает подтверждённую доходность или live-ready**. Causal grid-parity fix инвалидировал старые XAU/BTC admission gates; automatic retraining и model-driven execution заморожены до повторной pre-lock revalidation. Последняя локальная проверка: **539 tests passed**.
 
 Статусы ниже различают: `IMPLEMENTED` (код и тесты), `RESEARCH-ONLY`, `OPT-IN`, `LIVE-VERIFIED`. Если `LIVE-VERIFIED` явно не указан, модуль нельзя считать проверенным на реальном счёте/рынке.
 
@@ -126,7 +126,7 @@ GOLD | ЗОЛОТО | XAUUSD
 
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **535 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **539 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

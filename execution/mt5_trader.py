@@ -93,6 +93,21 @@ def purge_closed_position_context(ticket: int, path: str = LIVE_POSITIONS_PATH) 
     os.replace(tmp_path, path)
 
 
+def configured_execution_assets(cfg: dict) -> set[str]:
+    """Resolve execution allowlist; an explicit empty list means deny all."""
+    execution = (cfg or {}).get("execution", {}) or {}
+    if "enabled_assets" in execution:
+        configured = execution.get("enabled_assets")
+        if configured is None:
+            raise ValueError("execution.enabled_assets must be a list, not null")
+        return {str(asset) for asset in configured}
+    # Legacy configs without an allowlist keep the historical enabled-asset fallback.
+    return {
+        key for key, value in (cfg or {}).get("assets", {}).items()
+        if value.get("enabled", False)
+    }
+
+
 def positions_get_by_magic(symbol: str = None, magic: int = None):
     """Return positions, optionally filtered by symbol and magic, using only the
     parameters the REAL MetaTrader5 Python API accepts.
@@ -164,10 +179,7 @@ class MultiAssetMT5Trader:
         # `enabled` permits an asset in research/data pipelines. Execution can
         # be narrower: this prevents unvalidated assets from becoming tradeable
         # simply because their data collection is enabled.
-        allowed_assets = self.cfg.get("execution", {}).get("enabled_assets")
-        self.execution_assets = set(allowed_assets) if allowed_assets else {
-            key for key, value in assets.items() if value.get("enabled", False)
-        }
+        self.execution_assets = configured_execution_assets(self.cfg)
         for asset_key, a_cfg in assets.items():
             if a_cfg.get("enabled", False) and asset_key in self.execution_assets:
                 try:

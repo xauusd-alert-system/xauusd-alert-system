@@ -22,6 +22,13 @@ Every new model bundle contains `metadata` with asset/timeframe, data period, ta
 and signal-grid contract, class counts, static cost assumptions, weighting and
 calibration policy, and SHA-256 of the effective config. Old bundles remain loadable.
 
+## Temporary safety freeze
+
+`retraining.enabled`, `retraining.schedule.enabled`, and the model execution
+allowlist are disabled after the geometry correction. Old XAUUSD candidate and
+BTCUSD gate results are not admissible under the new contract. Re-enable them
+only in a separate reviewed commit after copied-DB pre-lock validation.
+
 ## Signal-grid causality and parity
 
 The grid step is frozen from the **closed signal bar** (`step_points` or ATR,

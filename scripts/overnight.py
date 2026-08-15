@@ -197,6 +197,12 @@ def main() -> int:
     enabled_assets = [
         k for k, v in cfg.get("assets", {}).items() if v.get("enabled", False)
     ]
+    retraining_enabled = bool(cfg.get("retraining", {}).get("enabled", True))
+    if not retraining_enabled:
+        logger.warning(
+            "Retraining safety freeze is active: backup/retrain/real-trade/deploy-check "
+            "stages will be skipped until pre-lock baselines are rebuilt."
+        )
 
     status: list[str] = []
 
@@ -248,48 +254,48 @@ def main() -> int:
         logger.info("Skipping walk-forward backtest (OVERNIGHT_NO_BACKTEST set).")
 
     # ---- Stage 3b: back up current production models (Part B Phase 6, #25) ---
-    if _env_flag("OVERNIGHT_NO_DEPLOY_GUARD"):
+    if retraining_enabled and _env_flag("OVERNIGHT_NO_DEPLOY_GUARD"):
         ok = _run(
             "deploy_guard_backup",
             [sys.executable, "-m", "scripts.deploy_guard", "--backup"],
         )
         status.append(("deploy_guard_backup", ok))
     else:
-        logger.info("Skipping deploy_guard backup (OVERNIGHT_NO_DEPLOY_GUARD set).")
+        logger.info("Skipping deploy_guard backup (safety freeze or env skip).")
 
     # ---- Stage 3: fresh retrain of all assets ------------------------------
-    if _env_flag("OVERNIGHT_NO_RETRAIN"):
+    if retraining_enabled and _env_flag("OVERNIGHT_NO_RETRAIN"):
         ok = _run(
             "retrain_models",
             [sys.executable, "-m", "scripts.train_all_assets"],
         )
         status.append(("retrain_models", ok))
     else:
-        logger.info("Skipping retrain (OVERNIGHT_NO_RETRAIN set).")
+        logger.info("Skipping retrain (safety freeze or env skip).")
 
     # ---- Stage 4: final retrain with real executed trades ------------------
-    if _env_flag("OVERNIGHT_NO_REAL_TRADES"):
+    if retraining_enabled and _env_flag("OVERNIGHT_NO_REAL_TRADES"):
         ok = _run(
             "retrain_with_real_trades",
             [sys.executable, "-m", "scripts.retrain_with_real_trades"],
         )
         status.append(("retrain_with_real_trades", ok))
     else:
-        logger.info("Skipping retrain_with_real_trades (OVERNIGHT_NO_REAL_TRADES set).")
+        logger.info("Skipping retrain_with_real_trades (safety freeze or env skip).")
 
     # ---- Stage 4b: deploy guard - reject a regressing nightly model --------
     # (Part B Phase 6, #25) Walk-forward-validate the freshly retrained model
     # against the backup from Stage 3b on the SAME OOS windows; if it regressed
     # beyond tolerance, restore the incumbent so a bad night cannot overwrite a
     # good production model. Exit code 1 => stage failed => Telegram ❌.
-    if _env_flag("OVERNIGHT_NO_DEPLOY_GUARD"):
+    if retraining_enabled and _env_flag("OVERNIGHT_NO_DEPLOY_GUARD"):
         ok = _run(
             "deploy_guard_check",
             [sys.executable, "-m", "scripts.deploy_guard", "--check"],
         )
         status.append(("deploy_guard_check", ok))
     else:
-        logger.info("Skipping deploy_guard check (OVERNIGHT_NO_DEPLOY_GUARD set).")
+        logger.info("Skipping deploy_guard check (safety freeze or env skip).")
 
     # ---- Stage 5: summary report -------------------------------------------
     summary_text = ""
