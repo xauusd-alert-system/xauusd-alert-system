@@ -119,25 +119,19 @@ def test_institutional_metrics_have_no_static_fallback(client, monkeypatch):
     assert payload["metrics"] == {}
 
 
-def test_api_control_endpoints(client, monkeypatch):
+def test_api_control_endpoints_are_disabled(client, monkeypatch):
+    """Web-UI spec §11/§12: ALL browser mutation controls are off until a real
+    command bus exists (idempotency, confirmation, kill-switch, reconciliation).
+    """
     monkeypatch.setenv("DASHBOARD_CONTROL_TOKEN", "test-control-token")
     headers = {"Authorization": "Bearer test-control-token"}
+    # unauthenticated -> 403
     assert client.post("/api/control/pause").status_code == 403
-    # Pause
-    res_pause = client.post("/api/control/pause", headers=headers)
-    assert res_pause.status_code == 200
-    assert res_pause.json()["scope"] == "dashboard_api_process_only"
-
-    # Status reflects paused
-    res_status = client.get("/api/status")
-    assert res_status.json()["trading_paused"] is True
-
-    # Resume
-    res_resume = client.post("/api/control/resume", headers=headers)
-    assert res_resume.status_code == 200
-    assert res_resume.json()["scope"] == "dashboard_api_process_only"
-
-    # Web process must never claim it closed broker positions when it is not wired.
-    res_close = client.post("/api/control/closeall", headers=headers)
-    assert res_close.status_code == 501
-    assert "not wired" in res_close.json()["detail"]
+    assert client.post("/api/control/closeall").status_code == 403
+    # authenticated but disabled -> 501 for every action
+    for action in ("pause", "resume", "closeall", "anything"):
+        res = client.post(f"/api/control/{action}", headers=headers)
+        assert res.status_code == 501
+        assert "disabled" in res.json()["detail"]
+    # the in-memory pause flag is never flipped through the web process
+    assert client.get("/api/status").json()["trading_paused"] is False

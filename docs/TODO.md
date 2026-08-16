@@ -133,9 +133,19 @@ GOLD | ЗОЛОТО | XAUUSD
 - [x] **`signal_journal.asset_key`:** nullable-колонка + in-place миграция (`logs/journal.py`).
 - [ ] **Wave 3+ (требуют Windows-хоста):** acceptance checklist, empirical cost dataset на demo, frozen paper baseline, revalidation. UI-views Execution Quality / Lifecycle Trace — API готов, HTML — будущая работа.
 
+## 3c. Web-UI honesty wave (2026-08-16, спецификация «Полная реализация личного веб-интерфейса», §12/§6.3; аудит в `docs/WEB_UI_HONESTY_AUDIT.md`)
+
+- [x] **DataEnvelope/freshness контракт:** `realtime/data_envelope.py` — `fresh/stale/offline/waiting/error` (5s/60s), ключи `source/mode/as_of_utc_ms/freshness_status/ingest_lag_ms/coverage/last_successful_at_utc_ms`; применён ко всем dashboard endpoints и ledger endpoints.
+- [x] **`/api/matrix` без neutral fallback:** per-asset `status=error` + `reason` при исключении, `status=unavailable` вне live-режима; `bias/confidence=None` — никогда не `neutral 0.50`.
+- [x] **Mutation controls отключены:** `/api/control/*` → `501` для всех действий (даже с токеном), `403` без токена; до command bus браузерных controls не существует (Telegram-бот остаётся единственным управлением). Из dashboard удалён мёртвый `sendControl`, добавлен баннер `INTERNAL DIAGNOSTIC VIEW`.
+- [x] **`/ws` — ledger event stream:** owner-only (`?token=`), push нормализованных `ledger_events` каждые 2s с freshness/heartbeat; без токена — `UNAUTHORIZED` + close 1008; строгий курсор без дубликатов. Требует `websockets`/`uvicorn[standard]`.
+- [x] **No-fallback тесты:** `realtime/tests/test_data_envelope.py`, `test_dashboard_honesty.py`; WS-тесты в `test_ledger_ingest.py`; control-тест в `test_app.py` обновлён (501).
+- [ ] **Signal Desk UI (другой проект `trading-system-playbook`):** страницы Overview/Signals/Lifecycle/Positions/Execution Quality/Risk/Research/System Health — вне этого репозитория.
+- [ ] **Wave 3+:** MT5 read-only views на Windows-хосте, empirical cost dataset, acceptance checklist.
+
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **603 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; добавлены 57 тестов MQL5 observer wave). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **620 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; добавлены 57 тестов MQL5 observer wave и 17 тестов web-UI honesty wave). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

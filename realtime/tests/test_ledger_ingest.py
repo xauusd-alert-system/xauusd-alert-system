@@ -5,6 +5,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from contracts.execution_contracts import ExecutionEvent, execution_event_id
 from data.ledger_bridge import build_envelope, sign_envelope
@@ -153,3 +154,51 @@ def test_events_endpoint_filters(client):
     body = res.json()
     assert body["count"] == 2
     assert all(e["source"] == "mt5_observer" for e in body["events"])
+
+
+def test_events_endpoint_includes_freshness(client):
+    envelope = build_envelope([_deal_event(1)], producer="mt5_observer",
+                              account_mode="demo", account_login=7).model_dump(mode="json")
+    _post(client, envelope)
+    res = client.get("/api/ledger/events", headers={"Authorization": "Bearer owner-token"})
+    body = res.json()
+    for key in ("freshness_status", "as_of_utc_ms", "ingest_lag_ms",
+                "last_successful_at_utc_ms", "source", "mode", "coverage"):
+        assert key in body, key
+    assert body["freshness_status"] == "fresh"
+    assert body["as_of_utc_ms"] is not None
+
+
+def _assert_ws_rejected(client, url: str) -> None:
+    with client.websocket_connect(url) as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert msg["code"] == "UNAUTHORIZED"
+        # server closes the socket right after the error frame
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_json()
+        assert exc_info.value.code == 1008
+
+
+def test_ws_rejects_missing_or_wrong_token(client):
+    _assert_ws_rejected(client, "/ws")
+    _assert_ws_rejected(client, "/ws?token=wrong-token")
+
+
+def test_ws_streams_ledger_events_for_owner(client):
+    envelope = build_envelope([_deal_event(1)], producer="mt5_observer",
+                              account_mode="demo", account_login=7).model_dump(mode="json")
+    _post(client, envelope)
+    with client.websocket_connect("/ws?token=owner-token") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "events"
+        assert msg["count"] >= 1
+        assert msg["events"][0]["deal_ticket"] == 1
+        assert msg["freshness_status"] == "fresh"
+        assert "server_time_utc_ms" in msg
+        assert "deployment_mode" in msg
+        # next push (2s later) must NOT replay already-sent events
+        msg2 = ws.receive_json()
+        assert msg2["type"] == "events"
+        assert msg2["count"] == 0
+        assert msg2["events"] == []
