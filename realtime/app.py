@@ -640,25 +640,48 @@ def _check_bearer(authorization: str | None, expected: str | None) -> bool:
 
 @app.post("/api/ledger/ingest")
 async def ledger_ingest(request: Request, authorization: str | None = Header(default=None)):
-    """Owner-only, idempotent fact ingest from the Python bridge / MQL5 observer."""
+    """Strict signed, owner-only, idempotent fact ingest (Signal Desk contract).
+
+    REQUIRED, in order (security contract):
+      a. server-side HMAC secret configured  -> else 503 (signing policy unavailable)
+      b. remote bearer token configured + correct  -> else 401/403
+      c. raw body read BEFORE any parsing
+      d. X-Ledger-Signature present and HMAC-SHA256 valid over the EXACT raw
+         body (constant-time)  -> else 401
+      e. only then JSON/schema validation
+      f. only then ledger upsert (idempotent by event_id)
+
+    There is NO unsigned/opt-out path: bearer alone is never accepted.
+    ``signature_valid`` is set to True ONLY after a successful HMAC check.
+    """
+    # a. signing policy must be configured (fail-closed)
+    secret = get_env("LEDGER_INGEST_SECRET", default=None)
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="ledger signing policy unavailable (LEDGER_INGEST_SECRET not configured)",
+        )
+    # b. remote bearer authentication
     ingest_token = get_env("LEDGER_INGEST_TOKEN", default=None)
     if not ingest_token:
         raise HTTPException(status_code=403, detail="ledger ingest is not configured")
     if not _check_bearer(authorization, ingest_token):
         raise HTTPException(status_code=401, detail="ledger ingest authorization required")
 
+    # c. raw body BEFORE any trusted parsing
+    body = await request.body()
+
+    # d. mandatory HMAC over the exact raw bytes (constant-time)
+    signature = request.headers.get("X-Ledger-Signature")
+    if not verify_signature(body, signature, secret):
+        raise HTTPException(status_code=401, detail="ledger signature required or mismatch")
+    signature_valid = True
+
+    # e. schema validation AFTER signature check
     try:
-        body = await request.body()
         envelope = event_envelope_from_dict(json.loads(body.decode("utf-8")))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"invalid ledger envelope: {exc}")
-
-    secret = get_env("LEDGER_INGEST_SECRET", default=None)
-    signature_valid = True
-    if secret:
-        signature_valid = verify_signature(body, request.headers.get("X-Ledger-Signature"), secret)
-        if not signature_valid:
-            raise HTTPException(status_code=401, detail="ledger signature mismatch")
 
     db_path = _ledger_db_path()
     accepted = 0

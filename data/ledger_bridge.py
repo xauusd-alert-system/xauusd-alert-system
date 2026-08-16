@@ -180,7 +180,7 @@ def deliver_batch(
     *,
     ingest_url: str,
     token: str,
-    secret: str | None = None,
+    secret: str,
     producer: str = "mt5_observer",
     account_mode: str = "demo",
     account_login: int | str = "0",
@@ -188,11 +188,17 @@ def deliver_batch(
 ) -> tuple[bool, str, int]:
     """POST one envelope; returns (ok, response_text, http_status).
 
-    The signature header is added only when ``secret`` is provided (the MQL5
-    observer has no HMAC primitive and relies on HTTPS + bearer token).
+    Strict signed delivery (security contract): the HMAC secret is REQUIRED.
+    ``X-Ledger-Signature`` is always sent and computed over the exact bytes of
+    the JSON body handed to the HTTP client. Bearer alone is never enough.
+    The event is only considered delivered on a 2xx response.
     """
     import requests
 
+    if not secret:
+        raise ValueError(
+            "ledger delivery requires LEDGER_INGEST_SECRET (strict signed ingress)"
+        )
     envelope = build_envelope(events, producer=producer, account_mode=account_mode,
                               account_login=account_login)
     body = envelope.model_dump_json().encode("utf-8")
@@ -200,9 +206,8 @@ def deliver_batch(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "X-Ledger-Batch-Id": envelope.batch_id,
+        "X-Ledger-Signature": sign_envelope(envelope, secret)
     }
-    if secret:
-        headers["X-Ledger-Signature"] = sign_envelope(envelope, secret)
     try:
         response = requests.post(ingest_url, data=body, headers=headers, timeout=timeout)
     except requests.RequestException as exc:
@@ -289,14 +294,23 @@ def load_bridge_config(cfg: dict, env=None) -> dict[str, Any]:
     bridge = (cfg or {}).get("ledger_bridge", {}) or {}
     ingest_url = env.get("LEDGER_INGEST_URL") or bridge.get("ingest_url")
     token = env.get("LEDGER_INGEST_TOKEN") or bridge.get("ingest_token")
+    secret = env.get("LEDGER_INGEST_SECRET") or bridge.get("ingest_secret")
+    missing = []
     if not ingest_url:
-        raise RuntimeError("LEDGER_INGEST_URL is not configured")
+        missing.append("LEDGER_INGEST_URL")
     if not token:
-        raise RuntimeError("LEDGER_INGEST_TOKEN is not configured")
+        missing.append("LEDGER_INGEST_TOKEN")
+    if not secret:
+        missing.append("LEDGER_INGEST_SECRET")
+    if missing:
+        raise RuntimeError(
+            "ledger bridge configuration incomplete (strict signed ingress): "
+            + ", ".join(missing)
+        )
     return {
         "ingest_url": str(ingest_url),
         "token": str(token),
-        "secret": env.get("LEDGER_INGEST_SECRET") or bridge.get("ingest_secret"),
+        "secret": str(secret),
         "interval_seconds": float(bridge.get("interval_seconds", 15.0)),
         "batch_size": int(bridge.get("batch_size", 100)),
     }

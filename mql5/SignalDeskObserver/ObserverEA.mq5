@@ -36,8 +36,10 @@
 //+------------------------------------------------------------------+
 input string InpBrokerSymbolMap  = "XAUUSD=GOLD,XAGUSD=SILVER,BTCUSD=BITCOIN,EURUSD=EURUSD,GBPUSD=GBPUSD"; // canonical=broker pairs
 input long   InpMagicFilter      = 777111;      // 0 = observe all magic numbers
-input string InpLedgerUrl        = "https://ledger.example.com/api/ledger/ingest"; // allow-listed HTTPS URL
-input string InpLedgerToken      = "";          // bearer token for the ingest endpoint
+// Strict signed ingress (security contract): the observer sends ONLY to a
+// local loopback signing proxy. The proxy owns the remote bearer + HMAC secret.
+input string InpProxyUrl         = "http://127.0.0.1:8787/v1/observer/ingest"; // loopback signing proxy URL (must be 127.0.0.1)
+input string InpProxyToken       = "";          // OBSERVER_PROXY_TOKEN for the local proxy
 input int    InpFlushSeconds     = 15;          // outbox flush interval
 input int    InpHeartbeatSeconds = 600;         // heartbeat interval
 input int    InpReconcileDays    = 30;          // history scan depth
@@ -125,14 +127,14 @@ void FlushOutbox()
    }
    ArrayResize(data, written);
 
-   string headers = "Authorization: Bearer " + InpLedgerToken + "\r\n"
+   string headers = "Authorization: Bearer " + InpProxyToken + "\r\n"
                   + "Content-Type: application/json\r\n";
    uchar resultData[];
    string resultHeaders;
    string resultBody = "";
 
    ResetLastError();
-   bool ok = WebRequest("POST", InpLedgerUrl, headers, 5000, data, resultData, resultHeaders);
+   bool ok = WebRequest("POST", InpProxyUrl, headers, 5000, data, resultData, resultHeaders);
    if(ok)
    {
       resultBody = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
@@ -181,6 +183,39 @@ void MaybeReconcile()
 }
 
 //+------------------------------------------------------------------+
+//| Strict loopback proxy URL validation                             |
+//+------------------------------------------------------------------+
+bool IsLoopbackProxyUrl(const string url)
+{
+   // Format: http://127.0.0.1:<port>/v1/observer/ingest
+   if(StringFind(url, "http://127.0.0.1:") != 0)
+      return false;
+   int pathPos = StringFind(url, "/v1/observer/ingest");
+   if(pathPos < 0)
+      return false;
+   string hostPort = StringSubstr(url, 7, pathPos - 7);   // "127.0.0.1:<port>"
+   if(StringLen(hostPort) == 0 || StringFind(hostPort, "/") >= 0)
+      return false;
+   // no userinfo, no query, no fragment
+   if(StringFind(url, "@") >= 0 || StringFind(url, "?") >= 0 || StringFind(url, "#") >= 0)
+      return false;
+   // port must be numeric
+   int colon = StringFind(hostPort, ":");
+   if(colon < 0)
+      return false;
+   string port = StringSubstr(hostPort, colon + 1);
+   if(StringLen(port) == 0)
+      return false;
+   for(int i = 0; i < StringLen(port); i++)
+   {
+      ushort ch = StringGetCharacter(port, i);
+      if(ch < '0' || ch > '9')
+         return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
 //| OnInit                                                           |
 //+------------------------------------------------------------------+
 int OnInit()
@@ -195,14 +230,15 @@ int OnInit()
       Print("Observer: REFUSING to run on a REAL account (demo/contest only)");
       return INIT_FAILED;
    }
-   if(StringFind(InpLedgerUrl, "https://") != 0)
+   if(!IsLoopbackProxyUrl(InpProxyUrl))
    {
-      Print("Observer: LedgerUrl must be an https:// URL (WebRequest allowlist)");
+      Print("Observer: ProxyUrl must be exactly http://127.0.0.1:<port>/v1/observer/ingest "
+            "(loopback signing proxy only; direct remote URLs are forbidden)");
       return INIT_FAILED;
    }
-   if(StringLen(InpLedgerToken) == 0)
+   if(StringLen(InpProxyToken) == 0)
    {
-      Print("Observer: LedgerToken is empty; ingest will be rejected by the server");
+      Print("Observer: ProxyToken is empty; local signing proxy will reject the request");
       return INIT_FAILED;
    }
    if(!g_resolver.SetMapping(InpBrokerSymbolMap))

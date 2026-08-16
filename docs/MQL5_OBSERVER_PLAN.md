@@ -45,8 +45,8 @@
    история-реконсиляция после рестарта с `precision=history_reconciled`.
    Компиляция и acceptance-прогон — на Windows-хосте (см. README модуля).
 3. **Ledger bridge**: `ledger_outbox` (SQLite/WAL, append-only, ack-state),
-   HMAC-SHA256 подпись (Python; MQL5 — HTTPS+bearer), retry без потери событий.
-4. **Сервер**: `POST /api/ledger/ingest` (bearer + опциональная подпись,
+   HMAC-SHA256 подпись; MQL5 — через локальный loopback signing proxy (observer не знает remote secret), retry без потери событий.
+4. **Сервер**: `POST /api/ledger/ingest` (обязательные bearer + HMAC-подпись;
    идемпотентный upsert в append-only `ledger_events`), owner-only чтения
    `events` / `execution-quality` / `lifecycle/{intent_id}`; stale-флаг для UI.
 5. **Provenance**: immutable manifest (broker, terminal hash, symbol mapping,

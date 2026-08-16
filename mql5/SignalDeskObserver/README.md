@@ -27,7 +27,8 @@ server-side ledger (`POST /api/ledger/ingest`).
 2. In MetaEditor, right-click `ObserverEA.mq5` → **Compile** (F7). Zero warnings
    expected.
 3. In the MT5 terminal: **Tools → Options → Expert Advisors → WebRequest** —
-   add the exact `InpLedgerUrl` host to the allow-list (required for `WebRequest`).
+   add `http://127.0.0.1` to the allow-list (loopback signing proxy only; direct
+   remote URLs are rejected by the EA).
 4. Attach the EA to **any chart on a DEMO account**. On a real account
    `OnInit` returns `INIT_FAILED` and the EA does not run.
 
@@ -37,8 +38,8 @@ server-side ledger (`POST /api/ledger/ingest`).
 |---|---|---|
 | `InpBrokerSymbolMap` | `XAUUSD=GOLD,XAGUSD=SILVER,BTCUSD=BITCOIN,EURUSD=EURUSD,GBPUSD=GBPUSD` | canonical=broker pairs; unknown symbols are skipped, never guessed |
 | `InpMagicFilter` | `777111` | only observe orders/deals/positions with this magic; `0` = all |
-| `InpLedgerUrl` | `https://ledger.example.com/api/ledger/ingest` | must be `https://` and allow-listed |
-| `InpLedgerToken` | *(empty)* | bearer token; server rejects empty/unset tokens |
+| `InpProxyUrl` | `http://127.0.0.1:8787/v1/observer/ingest` | must be exactly the loopback proxy URL (`http://127.0.0.1:<port>/v1/observer/ingest`); direct remote URLs are rejected |
+| `InpProxyToken` | *(empty)* | local proxy bearer token (`OBSERVER_PROXY_TOKEN`); the observer NEVER knows the remote `LEDGER_INGEST_TOKEN` or `LEDGER_INGEST_SECRET` |
 | `InpFlushSeconds` | `15` | outbox flush interval (`WebRequest` only from `OnTimer`) |
 | `InpHeartbeatSeconds` | `600` | `health_heartbeat` fact interval |
 | `InpReconcileDays` | `30` | history scan depth for restart reconciliation |
@@ -96,7 +97,8 @@ extracts it into `payload.intent_id_short`, which the server joins to the full
 - HTTPS + bearer token only; no secrets in chart comments or logs (the token is
   an EA input and appears in the profile file — protect the `.set`/profile files
   on the Windows host).
-- The server ingest endpoint requires the same token; without it, POSTs are 403.
+- Strict signed ingress: the server requires BOTH the remote bearer token and a
+  valid HMAC-SHA256 `X-Ledger-Signature`; bearer-only POSTs are rejected (401/503).
 - This directory is reference code reviewed against the contract tests in
   `mql5/tests/test_wire_contract.py`; compiling and running it on a live Windows
   host requires the operator acceptance checklist above.

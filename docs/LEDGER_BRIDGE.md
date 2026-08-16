@@ -84,14 +84,17 @@ Python sender                          MQL5 Observer EA (Windows, demo)
 
 | Endpoint | Требование | Без конфигурации |
 |---|---|---|
-| `POST /api/ledger/ingest` | `Authorization: Bearer $LEDGER_INGEST_TOKEN`; при `LEDGER_INGEST_SECRET` — ещё `X-Ledger-Signature` (HMAC-SHA256 тела) | 403 fail-closed |
+| `POST /api/ledger/ingest` | `Authorization: Bearer $LEDGER_INGEST_TOKEN` И `X-Ledger-Signature` (HMAC-SHA256 по exact raw body); `LEDGER_INGEST_SECRET` обязателен | 503 (secret missing) / 401 (bad/missing signature) |
 | `GET /api/ledger/events` | `Bearer $LEDGER_OWNER_TOKEN` (fallback: ingest token) | 403 fail-closed |
 | `GET /api/ledger/execution-quality` | то же | 403 |
 | `GET /api/ledger/lifecycle/{intent_id}` | то же | 403 |
 
-MQL5 observer не умеет HMAC: он полагается на HTTPS + bearer token. Поэтому если в
-продакшене используется `LEDGER_INGEST_SECRET`, MQL5-интеграция либо отключает
-secret, либо переходит на отдельный endpoint/прокси, который добавляет подпись.
+MQL5 observer не умеет HMAC и НЕ знает remote bearer/secret: он отправляет данные
+только на локальный loopback signing proxy (`scripts/run_observer_signing_proxy.py`),
+который валидирует observer envelope, добавляет `X-Ledger-Signature` (HMAC-SHA256 по
+tочным raw bytes тела) и remote bearer, и пересылает raw body на внешний HTTPS
+`/api/ledger/ingest`. Server-side ingress fail-closed: без `LEDGER_INGEST_SECRET`
+endpoint возвращает 503, bearer-only POST отклоняется (401).
 
 ## 6. Схема БД
 

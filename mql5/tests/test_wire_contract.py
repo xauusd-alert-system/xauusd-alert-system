@@ -167,3 +167,91 @@ def test_intent_short_id_extraction_mirror():
     assert extract("XAUUSD ML Scalp") is None
     assert extract("XAUUSD ML Scalp 1234567") is None          # too short
     assert extract("XAUUSD ML Scalp zz123456") is None         # not hex
+
+
+# ==========================================================================
+# Strict signed ingress — MQL5 static contract tests (security patch)
+# ==========================================================================
+
+import os
+import re
+
+
+def _observer_source():
+    root = os.path.join(os.path.dirname(__file__), "..", "SignalDeskObserver")
+    files = [os.path.join(root, f) for f in os.listdir(root)
+             if f.endswith((".mq5", ".mqh"))]
+    return files
+
+
+def test_mql5_has_no_trade_calls():
+    """Observer stays read-only: no OrderSend/CTrade/order-modification APIs."""
+    forbidden = re.compile(
+        r"\b(OrderSend|OrderSendAsync|OrderModify|OrderDelete|PositionOpen|"
+        r"PositionClose|PositionModify|CTrade)\b")
+    for path in _observer_source():
+        with open(path, encoding="utf-8") as handle:
+            for lineno, line in enumerate(handle, 1):
+                stripped = line.strip()
+                if stripped.startswith("//") or stripped.startswith("/*"):
+                    continue
+                if forbidden.search(stripped):
+                    raise AssertionError(
+                        f"forbidden trade API in {os.path.basename(path)}:{lineno}: {stripped}"
+                    )
+
+
+def _loopback_url_validator():
+    """Python mirror of ObserverEA.IsLoopbackProxyUrl for unit-level checks."""
+    def validate(url: str) -> bool:
+        if not url.startswith("http://127.0.0.1:"):
+            return False
+        path_pos = url.find("/v1/observer/ingest")
+        if path_pos < 0:
+            return False
+        host_port = url[7:path_pos]
+        if not host_port or "/" in host_port:
+            return False
+        if "@" in url or "?" in url or "#" in url:
+            return False
+        colon = host_port.find(":")
+        if colon < 0:
+            return False
+        port = host_port[colon + 1:]
+        return bool(port) and port.isdigit()
+    return validate
+
+
+def test_observer_accepts_only_loopback_proxy_url():
+    validate = _loopback_url_validator()
+    assert validate("http://127.0.0.1:8787/v1/observer/ingest") is True
+    assert validate("http://127.0.0.1:1/v1/observer/ingest") is True
+
+
+def test_observer_rejects_direct_external_urls():
+    validate = _loopback_url_validator()
+    for bad in (
+        "https://ledger.example.com/api/ledger/ingest",   # https direct external
+        "http://localhost:8787/v1/observer/ingest",       # hostname not 127.0.0.1
+        "http://0.0.0.0:8787/v1/observer/ingest",         # non-loopback IP
+        "http://192.168.1.10:8787/v1/observer/ingest",    # non-loopback IP
+        "http://127.0.0.1:8787/other/path",               # wrong proxy path
+        "http://127.0.0.1:8787/v1/observer/ingest?x=1",   # query string
+        "http://127.0.0.1:8787",                          # missing path
+        "http://127.0.0.1:port/v1/observer/ingest",       # non-numeric port
+    ):
+        assert validate(bad) is False, bad
+
+
+def test_observer_source_uses_loopback_proxy_not_remote_url():
+    """The EA must reference the loopback proxy input, never a remote https
+    ingest URL or the remote bearer/HMAC secret."""
+    for path in _observer_source():
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        if path.endswith("ObserverEA.mq5"):
+            assert "InpProxyUrl" in text
+            assert "InpProxyToken" in text
+            assert "IsLoopbackProxyUrl" in text
+            assert "LEDGER_INGEST_SECRET" not in text
+            assert "LEDGER_INGEST_TOKEN" not in text
