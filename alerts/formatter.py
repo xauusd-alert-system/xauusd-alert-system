@@ -222,15 +222,19 @@ def _coerce_group_spec(spec: TradeGroupSpec | dict) -> TradeGroupSpec:
 
 def format_trade_group_message(spec: TradeGroupSpec | dict) -> str:
     """Telegram message for a validated TradeGroupSpec (ТЗ §21). Never computes
-    ATR/step/TP/SL — the spec's final geometry is the only source."""
+    ATR/step/TP/SL — the spec's final geometry is the only source.
+
+    The levels come from ``spec.as_geometry_payload()`` — the SAME parity dict
+    used by paper execution and ledger payloads (follow-up ТЗ §15): there is no
+    independent level calculation in the Telegram layer."""
     spec = _coerce_group_spec(spec)
     _require_final_geometry(spec)
+    levels = spec.as_geometry_payload()
 
     emoji = "🟢" if spec.side == "long" else "🔴"
     direction = "ЛОНГ" if spec.side == "long" else "ШОРТ"
-    entry = spec.entry
-    zone_low = _fmt_price(entry.low)
-    zone_high = _fmt_price(entry.high)
+    zone_low = _fmt_price(spec.entry.low)
+    zone_high = _fmt_price(spec.entry.high)
     allocation_by_leg = {t.leg: t.allocation for t in spec.targets}
     # floor-based percentages so the three lines always sum to 100.00
     # (0.333333/0.333333/0.333334 -> 33.33% / 33.33% / 33.34%)
@@ -244,11 +248,11 @@ def format_trade_group_message(spec: TradeGroupSpec | dict) -> str:
         f"Group: {spec.group_id}",
         "",
         f"Зона входа: {zone_low} — {zone_high}",
-        f"Стоп: {_fmt_price(spec.geometry.sl)}",
+        f"Стоп: {_fmt_price(levels['sl'])}",
         "",
-        f"TP1: {_fmt_price(spec.geometry.tp1)} · {pct1:.2f}%",
-        f"TP2: {_fmt_price(spec.geometry.tp2)} · {pct2:.2f}%",
-        f"TP3: {_fmt_price(spec.geometry.tp3)} · {pct3:.2f}%",
+        f"TP1: {_fmt_price(levels['tp1'])} · {pct1:.2f}%",
+        f"TP2: {_fmt_price(levels['tp2'])} · {pct2:.2f}%",
+        f"TP3: {_fmt_price(levels['tp3'])} · {pct3:.2f}%",
         "",
         "После TP1:",
         "SL остатка → BE + cost buffer",

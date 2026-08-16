@@ -99,3 +99,47 @@ ML signal (bias/confidence/regime/atr/model metadata)
 риск считается один раз на группу; BE_CONFIRMED невозможен без broker confirmation;
 netting не представлен как 3 независимые позиции; новый режим не включён в live;
 существующие regression tests не удалены; risk guards не отключены.
+
+---
+
+## 9. Follow-up (2026-08-16): исправления и усиление гарантий
+
+Коммит `fix: harden TradeGroupSpec direction, BE, and paper execution invariants`
+(поверх `b35d335`). `execution/mt5_trader.py` и live-конфигурация BTC **не тронуты**.
+
+### Исправления кода
+
+| Пункт follow-up ТЗ | Исправление |
+|---|---|
+| §2 SHORT SL validation bug | Знаковая формула заменена на явные direction-цепочки: LONG `SL < entry < TP1 < TP2 < TP3`, SHORT `TP3 < TP2 < TP1 < entry < SL` (`execution/trade_group.py::validate_contract`) |
+| §16 BE применяется ко всем остаточным legs | `confirm_break_even()` теперь модифицирует и проверяет **каждый** ref в `break_even.apply_to` (раньше только `apply_to[0]`); netting-драйвер резолвит virtual legs на агрегированную позицию (`execution/trade_group_executor.py`) |
+| §9 demo env gate | `TradeGroupExecutor(allow_demo=None)` читает `TRADE_GROUP_ENABLE_DEMO` (fail-closed: unset/0 → demo blocked) |
+| §15 единый parity helper | `format_trade_group_message()` строит уровни из `spec.as_geometry_payload()` — единственный источник для Telegram/execution/ledger |
+
+### Новые тесты (+58, всего 737 passed)
+
+- **§3 direction regression**: valid/invalid LONG ×2, valid/invalid SHORT ×4 (entry 100 / TP 104/108/112 / SL 90 и зеркально).
+- **§4 geometry engine direction**: LONG/SHORT цепочки + симметрия расстояний одного профиля.
+- **§5 BE direction**: LONG protected > raw, SHORT protected < raw; parametrized spread/slippage/commission/tick_size; tick alignment.
+- **§6 immutability**: ATR/spread/new-candle изменения дают другой *кандидат*, но approved spec (`as_geometry_payload()`) не меняется.
+- **§7 write-once fill**: None→100.05 allowed; 100.05→100.05 idempotent; 100.05→100.10 rejected.
+- **§8 allocation**: 0.03/0.04/0.05/0.10 → sum(legs)==total; direction-independent.
+- **§9 risk symmetry**: LONG и SHORT с одинаковыми distance/volume → одинаковый estimated loss (abs).
+- **§10 forbidden live**: env=0+live → `LiveExecutionForbidden`; env=1+demo → allowed; **paper lifecycle → 0 вызовов `order_send`** (spy driver).
+- **§11 mt5_trader guard**: исходник `mt5_trader.py` не содержит ссылок на group executor / `TRADE_GROUP_ENABLE_DEMO`.
+- **§12 BTC gate**: `config.yaml` BTC live 20–50 не изменён; `btc_m5_scalp_v1.validated=false` + `PROFILE_NOT_VALIDATED`.
+- **§13 SHORT Telegram parity**: entry 100 / TP1 96 / TP2 92 / TP3 88 / SL 110 — без зеркалирования/пересборки/legacy step; порядок TP сохранён.
+- **§14 missing geometry per-field**: tp1/tp2/tp3/sl/entry.reference → `formatter_error` (никакого fallback).
+- **§16/§17 hedging lifecycle**: 3 физических legs; после TP1 leg1 CLOSED, leg2/leg3 SL→BE (query подтверждает), TP2/TP3 immutable.
+- **§18 no premature BE**: price 102 < TP1 104 → нет событий, `BE_REQUESTED` недостижим до `TP1_FILLED`.
+- **§19 BE retry→success**: rejection → BE_RETRY (без BE_CONFIRMED) → после восстановления broker → BE_CONFIRMED.
+- **§20/§21 restart recovery matrix**: OPENED/TP1_FILLED/BE_REQUESTED/BE_RETRY/BE_CONFIRMED/TP2_FILLED — state/geometry/broker ids восстановлены, duplicate orders/TP/BE событий нет, ledger chronological + dedup (ровно 1 событие каждого типа).
+
+### Результат тестового запуска (фактический, текущий workspace)
+
+```text
+BASELINE: 679 passed, 11 warnings   (commit b35d335)
+AFTER FIX: 737 passed, 11 warnings  (текущий commit)
+NEW TESTS: 58
+WARNINGS: 11 (известные: Starlette deprecation, малые synthetic CSCV fixtures)
+```

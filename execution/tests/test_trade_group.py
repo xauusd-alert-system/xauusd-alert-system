@@ -270,3 +270,222 @@ def test_break_even_short_mirror():
     be = compute_break_even(side="short", actual_fill=4159.42, cost=cost, broker=broker)
     assert be["raw_price"] == 4159.42
     assert be["protected_price"] == 4159.02
+
+
+# ==========================================================================
+# Follow-up ТЗ §3: explicit LONG/SHORT direction regression tests
+# ==========================================================================
+
+def _spec_100(**overrides) -> TradeGroupSpec:
+    """Base spec at the follow-up example scale (entry=100)."""
+    base = dict(
+        group_id="TG-DIR-1",
+        signal_id="SGL-DIR-1",
+        intent_id="INT-DIR-1",
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        mode="paper",
+        side="long",
+        entry={"low": 99.0, "high": 101.0, "reference": 100.0, "actual_fill": None},
+        geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                  "tp1": 104.0, "tp2": 108.0, "tp3": 112.0, "sl": 90.0},
+        targets=[
+            {"leg": 1, "price": 104.0, "allocation": 0.333333},
+            {"leg": 2, "price": 108.0, "allocation": 0.333333},
+            {"leg": 3, "price": 112.0, "allocation": 0.333334},
+        ],
+        break_even={"trigger": "tp1_filled",
+                    "raw_price_policy": "actual_fill",
+                    "protected_price_policy": "actual_fill_plus_cost_buffer",
+                    "apply_to": [2, 3]},
+        risk={"currency": "USD", "max_cash": 25.0, "max_pct": 0.5,
+              "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
+        profile_id="dir_v1",
+        model_version="v3", model_hash="m" * 64, config_hash="c" * 64,
+        strategy_version="s3",
+        expires_at_utc_ms=1_800_000_000_000, created_at_utc_ms=1_700_000_000_000,
+    )
+    base.update(overrides)
+    return TradeGroupSpec(**base)
+
+
+def _short_100(**overrides) -> TradeGroupSpec:
+    """Valid SHORT at the follow-up example scale (entry=100)."""
+    base = dict(
+        group_id="TG-DIR-S1",
+        side="short",
+        entry={"low": 99.0, "high": 101.0, "reference": 100.0, "actual_fill": None},
+        geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                  "tp1": 96.0, "tp2": 92.0, "tp3": 88.0, "sl": 110.0},
+        targets=[
+            {"leg": 1, "price": 96.0, "allocation": 0.333333},
+            {"leg": 2, "price": 92.0, "allocation": 0.333333},
+            {"leg": 3, "price": 88.0, "allocation": 0.333334},
+        ],
+    )
+    base.update(overrides)
+    return _spec_100(**base)
+
+
+def test_valid_long_geometry_accepted():
+    _spec_100()  # SL 90 < entry 100 < TP1 104 < TP2 108 < TP3 112
+
+
+def test_invalid_long_sl_above_entry_rejected():
+    with pytest.raises(ValidationError, match="invalid LONG geometry"):
+        _spec_100(geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                            "tp1": 104.0, "tp2": 108.0, "tp3": 112.0, "sl": 101.0})
+
+
+def test_valid_short_geometry_accepted():
+    _short_100()  # TP3 88 < TP2 92 < TP1 96 < entry 100 < SL 110
+
+
+def test_invalid_short_sl_below_entry_rejected():
+    with pytest.raises(ValidationError, match="invalid SHORT geometry"):
+        _short_100(geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                             "tp1": 96.0, "tp2": 92.0, "tp3": 88.0, "sl": 99.0})
+
+
+def test_invalid_short_tp1_above_entry_rejected():
+    with pytest.raises(ValidationError, match="invalid SHORT geometry"):
+        _short_100(geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                             "tp1": 101.0, "tp2": 92.0, "tp3": 88.0, "sl": 110.0})
+
+
+def test_invalid_short_tp2_not_below_tp1_rejected():
+    with pytest.raises(ValidationError, match="invalid SHORT geometry"):
+        _short_100(geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                             "tp1": 96.0, "tp2": 96.0, "tp3": 88.0, "sl": 110.0})
+
+
+def test_invalid_short_tp3_not_below_tp2_rejected():
+    with pytest.raises(ValidationError, match="invalid SHORT geometry"):
+        _short_100(geometry={"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                             "tp1": 96.0, "tp2": 92.0, "tp3": 92.0, "sl": 110.0})
+
+
+# ==========================================================================
+# Follow-up ТЗ §7: actual_fill write-once
+# ==========================================================================
+
+def test_actual_fill_write_once_semantics():
+    spec = _spec_100()
+    assert spec.entry.actual_fill is None
+    filled = spec.with_actual_fill(100.05)            # None -> 100.05 allowed
+    assert filled.entry.actual_fill == 100.05
+    again = filled.with_actual_fill(100.05)           # 100.05 -> 100.05 idempotent
+    assert again.entry.actual_fill == 100.05
+    with pytest.raises(ValueError, match="cannot be overwritten"):
+        filled.with_actual_fill(100.10)               # 100.05 -> 100.10 rejected
+
+
+# ==========================================================================
+# Follow-up ТЗ §8: allocation is direction-independent and dust-safe
+# ==========================================================================
+
+@pytest.mark.parametrize("total", [0.03, 0.04, 0.05, 0.10])
+def test_allocation_sums_to_total_for_both_directions(total):
+    volumes_long = allocate_leg_volumes(total, volume_step=0.01, volume_min=0.01)
+    # allocate_leg_volumes has no side input -> direction independence is
+    # structural; assert the same result is used for a SHORT spec too.
+    spec_long = _spec_100(risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
+                                "estimated_loss_at_sl": 48.0, "total_volume": total})
+    spec_short = _short_100(risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
+                                  "estimated_loss_at_sl": 48.0, "total_volume": total})
+    for spec in (spec_long, spec_short):
+        allocated = [
+            round(spec.risk.total_volume * t.allocation, 8) for t in spec.targets
+        ]
+        assert sum(allocated) == pytest.approx(total, abs=1e-6)
+    assert sum(volumes_long) == pytest.approx(total, abs=1e-6)
+    assert volumes_long == allocate_leg_volumes(total, volume_step=0.01, volume_min=0.01)
+
+
+def test_allocation_dust_tolerance():
+    # 0.03 equal thirds must not lose dust: 0.01/0.01/0.01
+    assert allocate_leg_volumes(0.03, volume_step=0.01, volume_min=0.01) == [0.01, 0.01, 0.01]
+    assert sum(allocate_leg_volumes(0.10, volume_step=0.01, volume_min=0.01)) == pytest.approx(0.10)
+
+
+# ==========================================================================
+# Follow-up ТЗ §9: group risk math is direction-symmetric (abs distance)
+# ==========================================================================
+
+def test_estimated_loss_same_for_long_and_short():
+    from execution.trade_geometry import calculate_geometry
+    profile = {
+        "asset": "XAUUSD", "timeframe": "M15", "unit": "price", "validated": True,
+        "geometry_version": "v1",
+        "step": {"source": "atr", "atr_mult": 1.0,
+                 "min_price_distance": 3.0, "max_price_distance": 9.0},
+        "targets": {"multipliers": {"tp1": 1.0, "tp2": 1.5, "tp3": 2.0}},
+        "stop": {"source": "validated_multiple", "multiplier": 2.0},
+        "allocation": {"tp1": 0.333333, "tp2": 0.333333, "tp3": 0.333334},
+        "risk": {"currency": "USD", "max_pct": 0.5, "max_cash": 50.0},
+        "volume": {"total": 0.06},
+    }
+    broker = BrokerSnapshot(symbol_point=0.01, tick_size=0.01, digits=2,
+                            spread=0.25, contract_size=100.0,
+                            volume_min=0.01, volume_step=0.01, balance=10000.0)
+    cost = CostSnapshot(round_trip_cost_price=0.30, safety_buffer_price=0.10)
+    long_out = calculate_geometry(profile=profile, side="long", reference_price=100.0,
+                                  atr=4.0, broker=broker, cost=cost)
+    short_out = calculate_geometry(profile=profile, side="short", reference_price=100.0,
+                                   atr=4.0, broker=broker, cost=cost)
+    # same distance, same volume -> identical absolute estimated loss
+    assert long_out.estimated_loss_at_sl == pytest.approx(short_out.estimated_loss_at_sl)
+    assert long_out.estimated_loss_at_sl > 0.0
+    assert short_out.estimated_loss_at_sl > 0.0
+
+
+# ==========================================================================
+# Follow-up ТЗ §6: approved geometry is immune to market changes
+# ==========================================================================
+
+def test_atr_change_does_not_touch_approved_spec():
+    from execution.trade_geometry import (
+        BrokerSnapshot as BS, CostSnapshot as CS, build_trade_group_from_signal,
+    )
+    cfg = {"trade_profiles": {"p": {
+        "asset": "XAUUSD", "validated": True, "geometry_version": "v1",
+        "step": {"source": "atr", "atr_mult": 1.0,
+                 "min_price_distance": 3.0, "max_price_distance": 9.0},
+        "targets": {"multipliers": {"tp1": 1.0, "tp2": 1.5, "tp3": 2.0}},
+        "stop": {"multiplier": 2.0},
+        "allocation": {"tp1": 1 / 3, "tp2": 1 / 3, "tp3": 1 / 3},
+        # generous cap so the ATR-8 candidate passes risk (loss 96 < 200)
+        "risk": {"max_cash": 200.0, "max_pct": 0.5}, "volume": {"total": 0.06},
+    }}}
+    broker = BS(symbol_point=0.01, tick_size=0.01, spread=0.25, contract_size=100.0,
+                volume_min=0.01, volume_step=0.01, balance=10000.0)
+    cost = CS(round_trip_cost_price=0.30, safety_buffer_price=0.10)
+    signal = {"bias": "long", "atr": 4.0, "entry_zone": [4159.10, 4159.50],
+              "expires_at_utc_ms": 1_900_000_000_000}
+    approved = build_trade_group_from_signal(
+        signal, cfg=cfg, asset_key="XAUUSD", profile_id="p",
+        broker=broker, cost=cost, mode="paper", now_ms=1_700_000_000_000)
+    before = approved.as_geometry_payload()
+
+    # ATR changes in a NEW market snapshot -> new candidate spec, approved one unchanged
+    signal["atr"] = 8.0
+    candidate = build_trade_group_from_signal(
+        signal, cfg=cfg, asset_key="XAUUSD", profile_id="p",
+        broker=broker, cost=cost, mode="paper", now_ms=1_700_000_000_001)
+    assert approved.as_geometry_payload() == before          # approved untouched
+    assert candidate.geometry.tp1 != approved.geometry.tp1   # candidate differs
+
+    # spread changes -> still approved unchanged
+    broker_wider = BS(symbol_point=0.01, tick_size=0.01, spread=5.0, contract_size=100.0,
+                      volume_min=0.01, volume_step=0.01, balance=10000.0)
+    candidate2 = build_trade_group_from_signal(
+        {**signal, "atr": 4.0}, cfg=cfg, asset_key="XAUUSD", profile_id="p",
+        broker=broker_wider, cost=cost, mode="paper", now_ms=1_700_000_000_002)
+    assert approved.as_geometry_payload() == before
+    # new candle = new reference -> candidate differs, approved unchanged
+    candidate3 = build_trade_group_from_signal(
+        {**signal, "atr": 4.0, "entry_zone": [4160.10, 4160.50]},
+        cfg=cfg, asset_key="XAUUSD", profile_id="p",
+        broker=broker, cost=cost, mode="paper", now_ms=1_700_000_000_003)
+    assert approved.as_geometry_payload() == before
+    assert candidate3.entry.reference != approved.entry.reference

@@ -156,9 +156,18 @@ GOLD | ЗОЛОТО | XAUUSD
 - [ ] **P1.5 (отложено):** `mt5_trader.py` group execution (hedging/netting submit) — после acceptance; current live path неизменен.
 - [ ] **P2:** BTC profile frozen-data validation (ТЗ §30), live promotion (только с отдельным подтверждением).
 
+## 3e. TradeGroupSpec follow-up (2026-08-16): direction/BE/paper invariants
+
+- [x] **SHORT SL validation fix:** явные direction-цепочки (LONG `SL<entry<TP1<TP2<TP3`, SHORT зеркально) вместо знаковой формулы.
+- [x] **BE на все остаточные legs:** `confirm_break_even()` модифицирует+проверяет каждый `apply_to` ref (netting резолвит virtual legs).
+- [x] **Demo env gate:** `TRADE_GROUP_ENABLE_DEMO` (fail-closed), live всегда заблокирован; spy-тест: paper path → 0 вызовов `order_send`.
+- [x] **Parity helper:** Telegram читает уровни из `spec.as_geometry_payload()`.
+- [x] **+58 тестов:** direction (LONG/SHORT), BE direction/alignment/costs, immutability против ATR/spread/candle, write-once fill, allocation dust (0.03–0.10), risk symmetry, live-gate, BTC 20–50 нетронут, SHORT Telegram parity, missing-geometry per-field, hedging lifecycle, no premature BE, BE retry→success, restart recovery matrix (6 состояний), ledger chronological/dedup.
+- [ ] **P1.5 (отложено):** real MT5 TradeGroup execution — отдельным этапом, live promotion только с явным approval.
+
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **679 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; +59 TradeGroupSpec/broker-adapter тестов). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **737 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; +58 follow-up тестов). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

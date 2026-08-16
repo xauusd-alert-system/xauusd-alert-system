@@ -22,6 +22,7 @@ Semantics guaranteed here (ТЗ §16/§18/§25/§28):
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Protocol
 
 from data.trade_group_store import (
@@ -151,7 +152,7 @@ class TradeGroupExecutor:
         *,
         ledger_db_path: str | None = None,
         driver: GroupDriver | None = None,
-        allow_demo: bool = False,
+        allow_demo: bool | None = None,
         max_be_retries: int = 3,
         cost: CostSnapshot | None = None,
         broker: BrokerSnapshot | None = None,
@@ -159,7 +160,12 @@ class TradeGroupExecutor:
         self.db_path = db_path
         self.ledger_db_path = ledger_db_path or db_path
         self.driver = driver or PaperDriver()
-        self.allow_demo = allow_demo
+        # Fail-closed gate: demo execution is enabled ONLY by an explicit
+        # allow_demo=True argument or the TRADE_GROUP_ENABLE_DEMO=1 env var.
+        # Unset env / False -> demo blocked; live always blocked.
+        if allow_demo is None:
+            allow_demo = os.environ.get("TRADE_GROUP_ENABLE_DEMO", "0") == "1"
+        self.allow_demo = bool(allow_demo)
         self.max_be_retries = max(1, int(max_be_retries))
         self.cost = cost or CostSnapshot()
         self.broker = broker or BrokerSnapshot()
@@ -375,16 +381,20 @@ class TradeGroupExecutor:
         if requested <= 0.0:
             raise GroupStateError("no requested BE price; call request_break_even first")
 
-        ref = new_leg_id(group_id, spec.break_even.apply_to[0])
-        accepted, comment = self.driver.modify_sl(ref, requested)
-        if not accepted:
-            return self._be_retry_or_fail(group_id, spec, be_state, requested, comment)
-        observed = self.driver.query_sl(ref)
-        if observed is None or abs(observed - requested) > 1e-9:
-            return self._be_retry_or_fail(
-                group_id, spec, be_state, requested,
-                f"SL query mismatch: observed={observed}",
-            )
+        # ТЗ §16: BE applies to EVERY remaining leg in break_even.apply_to
+        # (netting: the driver resolves virtual legs to the aggregate position).
+        refs = [new_leg_id(group_id, leg) for leg in spec.break_even.apply_to]
+        for ref in refs:
+            accepted, comment = self.driver.modify_sl(ref, requested)
+            if not accepted:
+                return self._be_retry_or_fail(group_id, spec, be_state, requested, comment)
+        for ref in refs:
+            observed = self.driver.query_sl(ref)
+            if observed is None or abs(observed - requested) > 1e-9:
+                return self._be_retry_or_fail(
+                    group_id, spec, be_state, requested,
+                    f"SL query mismatch: observed={observed}",
+                )
 
         be_state.update({"status": BeStatus.BE_CONFIRMED.value,
                          "confirmed_price": requested, "last_error": None})

@@ -162,3 +162,75 @@ def test_geometry_from_spec_is_authoritative():
     assert geometry["sl"] == 4140.30
     assert geometry["schema_version"] == "trade-group.v1"
     assert geometry["group_id"] == "TG-20260816-000042"
+
+
+# ==========================================================================
+# Follow-up ТЗ §13: full SHORT parity — no mirroring, no rebuild, order kept
+# ==========================================================================
+
+SHORT_100 = {
+    "schema_version": "trade-group.v1",
+    "group_id": "TG-SHORT-1",
+    "signal_id": "SGL-SHORT-1",
+    "intent_id": "INT-SHORT-1",
+    "asset_key": "XAUUSD",
+    "broker_symbol": "GOLD",
+    "mode": "paper",
+    "side": "short",
+    "entry": {"low": 99.0, "high": 101.0, "reference": 100.0},
+    "geometry": {"version": "dir_v1", "unit": "price", "step_price": 4.0,
+                 "tp1": 96.0, "tp2": 92.0, "tp3": 88.0, "sl": 110.0},
+    "targets": [
+        {"leg": 1, "price": 96.0, "allocation": 0.333333},
+        {"leg": 2, "price": 92.0, "allocation": 0.333333},
+        {"leg": 3, "price": 88.0, "allocation": 0.333334},
+    ],
+    "break_even": {"trigger": "tp1_filled",
+                   "raw_price_policy": "actual_fill",
+                   "protected_price_policy": "actual_fill_plus_cost_buffer",
+                   "apply_to": [2, 3]},
+    "risk": {"currency": "USD", "max_cash": 25.0, "max_pct": 0.5,
+             "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
+    "profile_id": "dir_v1",
+    "model_version": "v3", "model_hash": "m" * 64, "config_hash": "c" * 64,
+    "strategy_version": "s3",
+    "expires_at_utc_ms": 1_800_000_000_000, "created_at_utc_ms": 1_700_000_000_000,
+}
+
+
+def test_short_parity_full_layout():
+    """Follow-up ТЗ §13: entry 100 / TP1 96 / TP2 92 / TP3 88 / SL 110."""
+    msg = format_trade_group_message(TradeGroupSpec.model_validate(SHORT_100))
+    assert "🔴 ШОРТ · XAUUSD" in msg
+    assert "Зона входа: 99 — 101" in msg
+    assert "TP1: 96 · 33.33%" in msg
+    assert "TP2: 92 · 33.33%" in msg
+    assert "TP3: 88 · 33.34%" in msg
+    assert "Стоп: 110" in msg
+    # no mirroring / no rebuild / no legacy step / order preserved
+    assert msg.index("TP1") < msg.index("TP2") < msg.index("TP3")
+    assert "104" not in msg and "108" not in msg and "112" not in msg
+    assert "90" not in msg
+    # parity with the single authoritative payload
+    spec = TradeGroupSpec.model_validate(SHORT_100)
+    assert geometry_from_spec(spec) == spec.as_geometry_payload()
+
+
+# ==========================================================================
+# Follow-up ТЗ §14: every missing final-geometry field -> formatter_error
+# ==========================================================================
+
+@pytest.mark.parametrize("field", ["tp1", "tp2", "tp3", "sl", "entry.reference"])
+def test_missing_geometry_field_is_formatter_error(field):
+    broken = dict(SHORT_100)
+    if field.startswith("entry"):
+        entry = dict(broken["entry"])
+        entry["reference"] = None
+        broken["entry"] = entry
+    else:
+        geometry = dict(broken["geometry"])
+        geometry[field] = None
+        broken["geometry"] = geometry
+    with pytest.raises(ValueError, match="formatter_error"):
+        format_clean_signal_message(broken)
+    # and never a fallback: no ATR/step recomputation path is reachable

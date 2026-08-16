@@ -224,15 +224,27 @@ class TradeGroupSpec(BaseModel):
                       "model_hash", "config_hash", "strategy_version"):
             if not str(getattr(self, field)).strip():
                 raise ValueError(f"{field} must not be empty")
-        direction = 1.0 if self.side == "long" else -1.0
-        if direction * (self.geometry.tp1 - self.entry.reference) <= 0.0:
-            raise ValueError("geometry.tp1 must be beyond entry for the side")
-        if direction * (self.geometry.tp2 - self.geometry.tp1) <= 0.0:
-            raise ValueError("TP2 must be beyond TP1 for the side (immutable ladder)")
-        if direction * (self.geometry.tp3 - self.geometry.tp2) <= 0.0:
-            raise ValueError("TP3 must be beyond TP2 for the side (immutable ladder)")
-        if direction * (self.entry.reference - self.geometry.sl) <= 0.0:
-            raise ValueError("SL must be below entry for the side")
+        # Follow-up ТЗ §2: explicit direction-aware geometry chains. The
+        # sign-based formula is replaced by readable per-direction ordering.
+        if self.side == "long":
+            if not (
+                self.geometry.sl < self.entry.reference
+                < self.geometry.tp1
+                < self.geometry.tp2
+                < self.geometry.tp3
+            ):
+                raise ValueError("invalid LONG geometry: expected "
+                                 "SL < entry.reference < TP1 < TP2 < TP3")
+        else:
+            if not (
+                self.geometry.tp3
+                < self.geometry.tp2
+                < self.geometry.tp1
+                < self.entry.reference
+                < self.geometry.sl
+            ):
+                raise ValueError("invalid SHORT geometry: expected "
+                                 "TP3 < TP2 < TP1 < entry.reference < SL")
         total_alloc = sum(t.allocation for t in self.targets)
         if abs(total_alloc - 1.0) > 1e-6:
             raise ValueError(f"target allocations must sum to 1.0, got {total_alloc}")

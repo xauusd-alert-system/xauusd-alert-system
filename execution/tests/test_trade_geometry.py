@@ -19,6 +19,7 @@ from execution.trade_geometry import (
     calculate_geometry,
     calculate_gross_r,
     calculate_step,
+    compute_break_even,
     is_tick_aligned,
     resolve_profile,
     terminal_points,
@@ -236,3 +237,115 @@ def test_invalid_tick_alignment_code_exists():
     # the code is part of the public reason-code contract.
     assert INVALID_TICK_ALIGNMENT == "INVALID_TICK_ALIGNMENT"
     assert not is_tick_aligned(1.005, 0.01)
+
+
+# ==========================================================================
+# Follow-up ТЗ §4: geometry engine direction-specific tests
+# ==========================================================================
+
+def test_geometry_engine_long_direction_chain():
+    out = calculate_geometry(
+        profile=XAU_PROFILE, side="long", reference_price=4159.30,
+        atr=4.0, broker=BROKER_XAU, cost=COST_XAU,
+    )
+    assert out.tp1 > 4159.30
+    assert out.tp2 > out.tp1
+    assert out.tp3 > out.tp2
+    assert out.sl < 4159.30
+
+
+def test_geometry_engine_short_direction_chain():
+    out = calculate_geometry(
+        profile=XAU_PROFILE, side="short", reference_price=4159.30,
+        atr=4.0, broker=BROKER_XAU, cost=COST_XAU,
+    )
+    assert out.tp1 < 4159.30
+    assert out.tp2 < out.tp1
+    assert out.tp3 < out.tp2
+    assert out.sl > 4159.30
+
+
+def test_geometry_engine_same_profile_symmetric_distances():
+    profile = XAU_PROFILE
+    long_out = calculate_geometry(profile=profile, side="long", reference_price=4159.30,
+                                  atr=4.0, broker=BROKER_XAU, cost=COST_XAU)
+    short_out = calculate_geometry(profile=profile, side="short", reference_price=4159.30,
+                                   atr=4.0, broker=BROKER_XAU, cost=COST_XAU)
+    # identical step / distances, mirrored around the reference
+    assert long_out.step_price == short_out.step_price
+    assert abs(long_out.tp1 - 4159.30) == pytest.approx(abs(short_out.tp1 - 4159.30))
+    assert abs(long_out.sl - 4159.30) == pytest.approx(abs(short_out.sl - 4159.30))
+    assert long_out.gross_r == pytest.approx(short_out.gross_r)
+
+
+# ==========================================================================
+# Follow-up ТЗ §5: BE direction tests (raw vs protected, tick alignment)
+# ==========================================================================
+
+def test_be_long_protected_above_raw():
+    broker = BrokerSnapshot(symbol_point=0.01, tick_size=0.01, digits=2,
+                            spread=0.25, contract_size=100.0)
+    cost = CostSnapshot(expected_exit_slippage=0.10, commission_buffer=0.05)
+    be = compute_break_even(side="long", actual_fill=100.00, cost=cost, broker=broker)
+    assert be["raw_price"] == 100.00
+    assert be["protected_price"] > be["raw_price"]          # 100 + costs
+    assert be["protected_price"] == pytest.approx(100.40)   # 0.25 + 0.10 + 0.05
+
+
+def test_be_short_protected_below_raw():
+    broker = BrokerSnapshot(symbol_point=0.01, tick_size=0.01, digits=2,
+                            spread=0.25, contract_size=100.0)
+    cost = CostSnapshot(expected_exit_slippage=0.10, commission_buffer=0.05)
+    be = compute_break_even(side="short", actual_fill=100.00, cost=cost, broker=broker)
+    assert be["raw_price"] == 100.00
+    assert be["protected_price"] < be["raw_price"]          # 100 - costs
+    assert be["protected_price"] == pytest.approx(99.60)
+
+
+@pytest.mark.parametrize("spread", [0.0, 0.25, 1.5])
+@pytest.mark.parametrize("slippage", [0.0, 0.10])
+@pytest.mark.parametrize("commission", [0.0, 0.05])
+def test_be_protection_scales_with_costs(spread, slippage, commission):
+    broker = BrokerSnapshot(symbol_point=0.01, tick_size=0.01, spread=spread)
+    cost = CostSnapshot(expected_exit_slippage=slippage, commission_buffer=commission)
+    total = spread + slippage + commission
+    be_long = compute_break_even(side="long", actual_fill=100.00, cost=cost, broker=broker)
+    be_short = compute_break_even(side="short", actual_fill=100.00, cost=cost, broker=broker)
+    assert be_long["protected_price"] == pytest.approx(100.0 + total)
+    assert be_short["protected_price"] == pytest.approx(100.0 - total)
+
+
+@pytest.mark.parametrize("tick_size", [0.01, 0.05, 0.1])
+def test_be_tick_alignment(tick_size):
+    broker = BrokerSnapshot(symbol_point=tick_size, tick_size=tick_size, spread=0.25)
+    cost = CostSnapshot(expected_exit_slippage=0.10, commission_buffer=0.05)
+    for side in ("long", "short"):
+        be = compute_break_even(side=side, actual_fill=100.00, cost=cost, broker=broker)
+        assert is_tick_aligned(be["raw_price"], tick_size)
+        assert is_tick_aligned(be["protected_price"], tick_size)
+
+
+# ==========================================================================
+# Follow-up ТЗ §12: BTC profile stays validation-gated; live 20-50 untouched
+# ==========================================================================
+
+def test_btc_live_signal_grid_unchanged_20_50():
+    """The current BTC live geometry (20-50 price units) must not be touched."""
+    import yaml
+    with open("config/config.yaml", "r", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+    grid = cfg["assets"]["BTCUSD"]["signal_grid"]
+    assert grid["step_min_points"] == 20.0
+    assert grid["step_max_points"] == 50.0
+
+
+def test_btc_candidate_profile_remains_validation_gated():
+    import yaml
+    with open("config/config.yaml", "r", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+    profile = cfg["trade_profiles"]["btc_m5_scalp_v1"]
+    assert profile["validated"] is False
+    assert profile.get("paper_only") is True
+    with pytest.raises(GeometryRejected) as exc:
+        validate_profile_gate(profile)
+    assert exc.value.reason_code == PROFILE_NOT_VALIDATED
