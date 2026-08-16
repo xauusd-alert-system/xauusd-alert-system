@@ -58,6 +58,14 @@ class GroupState(str, Enum):
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
+    # P1.5.1 partial-submission compensation states (ТЗ P1.5.1 §2/§8):
+    # a partial open runs a controlled compensation flow BEFORE the group is
+    # allowed to reach FAILED; FAILED_WITH_OPEN_RISK is explicitly NON-terminal
+    # so reconciliation keeps trying until open risk is zero.
+    PARTIAL_SUBMISSION = "PARTIAL_SUBMISSION"
+    COMPENSATION_REQUESTED = "COMPENSATION_REQUESTED"
+    COMPENSATION_CONFIRMED = "COMPENSATION_CONFIRMED"
+    FAILED_WITH_OPEN_RISK = "FAILED_WITH_OPEN_RISK"
 
 
 TERMINAL_STATES = frozenset({
@@ -71,7 +79,18 @@ GROUP_TRANSITIONS: dict[GroupState, frozenset[GroupState]] = {
                                      GroupState.EXPIRED, GroupState.CANCELLED}),
     GroupState.SUBMITTED: frozenset({GroupState.OPENED, GroupState.REJECTED,
                                      GroupState.FAILED, GroupState.EXPIRED,
-                                     GroupState.STOPPED}),
+                                     GroupState.STOPPED,
+                                     GroupState.PARTIAL_SUBMISSION}),
+    GroupState.PARTIAL_SUBMISSION: frozenset({GroupState.COMPENSATION_REQUESTED,
+                                              GroupState.FAILED_WITH_OPEN_RISK,
+                                              GroupState.REJECTED}),
+    GroupState.COMPENSATION_REQUESTED: frozenset({
+        GroupState.COMPENSATION_CONFIRMED, GroupState.COMPENSATION_REQUESTED,
+        GroupState.FAILED_WITH_OPEN_RISK}),
+    GroupState.COMPENSATION_CONFIRMED: frozenset({GroupState.FAILED}),
+    GroupState.FAILED_WITH_OPEN_RISK: frozenset({
+        GroupState.COMPENSATION_REQUESTED, GroupState.COMPENSATION_CONFIRMED,
+        GroupState.FAILED_WITH_OPEN_RISK}),
     GroupState.OPENED: frozenset({GroupState.TP1_FILLED, GroupState.STOPPED,
                                   GroupState.FAILED, GroupState.EXPIRED}),
     GroupState.TP1_FILLED: frozenset({GroupState.BE_REQUESTED, GroupState.STOPPED,

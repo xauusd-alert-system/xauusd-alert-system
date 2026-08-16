@@ -41,10 +41,12 @@ def init_trade_group_store(db_path: str) -> None:
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
             intent_json TEXT,
-            account_mode TEXT
+            account_mode TEXT,
+            volume_json TEXT,
+            comp_json TEXT
         )""")
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}
-        for column in ("intent_json", "account_mode"):
+        for column in ("intent_json", "account_mode", "volume_json", "comp_json"):
             if column not in existing:
                 conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN {column} TEXT")
         conn.execute(f"""CREATE TABLE IF NOT EXISTS {ACTIONS_TABLE} (
@@ -75,18 +77,39 @@ def save_group(
     submitted: bool = False,
     intent_json: str | None = None,
     account_mode: str | None = None,
+    volume: dict[str, Any] | None = None,
+    comp_state: dict[str, Any] | None = None,
 ) -> None:
-    """Insert or update one group (state is mutable; geometry is not)."""
+    """Insert or update one group (state is mutable; geometry is not).
+
+    INSERT OR REPLACE would wipe unspecified mutable columns (volume/comp/
+    intent/account_mode) on every state transition, so omitted values are
+    preserved from the existing row.
+    """
     init_trade_group_store(db_path)
     now = _now_ms()
+    existing_row = None
+    try:
+        existing_row = load_group(db_path, spec.group_id)
+    except Exception:
+        existing_row = None
+    if existing_row is not None:
+        if volume is None:
+            volume = existing_row.get("volume") or {}
+        if comp_state is None:
+            comp_state = existing_row.get("comp_state") or {}
+        if intent_json is None:
+            intent_json = existing_row.get("intent_json")
+        if account_mode is None:
+            account_mode = existing_row.get("account_mode")
     conn = get_connection(db_path)
     try:
         conn.execute(
             f"""INSERT OR REPLACE INTO {TABLE}
                 (group_id, schema_version, spec_json, spec_hash, state, legs_json,
                  be_json, broker_ids_json, submitted, created_at_ms, updated_at_ms,
-                 intent_json, account_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 intent_json, account_mode, volume_json, comp_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 spec.group_id, spec.schema_version,
                 spec.model_dump_json(), spec.geometry_hash(),
@@ -94,6 +117,7 @@ def save_group(
                 json.dumps(be_state or {}), json.dumps(broker_ids or {}),
                 1 if submitted else 0, now, now,
                 intent_json, account_mode,
+                json.dumps(volume or {}), json.dumps(comp_state or {}),
             ),
         )
         conn.commit()
@@ -123,6 +147,8 @@ def load_group(db_path: str, group_id: str) -> dict[str, Any] | None:
     data["submitted"] = bool(data["submitted"])
     data["intent_json"] = data.pop("intent_json", None)
     data["account_mode"] = data.pop("account_mode", None)
+    data["volume"] = json.loads(data.pop("volume_json") or "{}")
+    data["comp_state"] = json.loads(data.pop("comp_json") or "{}")
     return data
 
 
@@ -205,6 +231,8 @@ def update_group_state(
     legs: list[dict[str, Any]] | None = None,
     be_state: dict[str, Any] | None = None,
     broker_ids: dict[str, Any] | None = None,
+    volume: dict[str, Any] | None = None,
+    comp_state: dict[str, Any] | None = None,
 ) -> None:
     """Persist a lifecycle transition + mutable state (geometry untouched)."""
     init_trade_group_store(db_path)
@@ -222,6 +250,12 @@ def update_group_state(
         if broker_ids is not None:
             sets.append("broker_ids_json = ?")
             params.append(json.dumps(broker_ids))
+        if volume is not None:
+            sets.append("volume_json = ?")
+            params.append(json.dumps(volume))
+        if comp_state is not None:
+            sets.append("comp_json = ?")
+            params.append(json.dumps(comp_state))
         params.append(group_id)
         conn.execute(
             f"UPDATE {TABLE} SET {', '.join(sets)} WHERE group_id = ?", params

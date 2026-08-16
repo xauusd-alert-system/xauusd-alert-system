@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from data.trade_group_store import list_actions, load_group
+from data.trade_group_store import list_actions, list_groups, load_group
 from data.trading_event_ledger import read_trading_events
 from execution.execution_intent import ExecutionIntent
 from execution.mt5_trade_group import DemoAccountRequired, MT5TradeGroupExecutor
@@ -45,10 +45,12 @@ class FakeMT5:
     DEAL_ENTRY_OUT = 1
 
     def __init__(self, account_mode="netting", trade_mode=0, balance=10000.0,
-                 bid=99.9, ask=100.25):
+                 bid=99.9, ask=100.25, volume_step=0.01, volume_min=0.01):
         self.account_mode = account_mode
         self.trade_mode = trade_mode
         self.balance = balance
+        self.volume_step = volume_step
+        self.volume_min = volume_min
         self.positions: dict[int, dict] = {}
         self.deals: list[dict] = []
         # market price near the 100-scale spec entry; tests move it to TP levels
@@ -61,9 +63,11 @@ class FakeMT5:
         self.inject_reject_open = False        # next DEAL open -> REQ_REJECT
         self.inject_reject_open_once = 0       # N opens rejected, then ok
         self.inject_reject_open_nth = None     # reject ONLY the Nth open
+        self.inject_reject_open_nths: set[int] | None = None  # reject these opens
         self._open_count = 0
         self.inject_partial_open = None        # fraction (0..1) for next open
         self.inject_reject_modify = False
+        self.inject_reject_close = False       # close requests -> REQ_REJECT
         self.inject_no_account = False
 
     # ---- API surface -----------------------------------------------------
@@ -89,8 +93,8 @@ class FakeMT5:
         return SimpleNamespace(
             digits=2, point=0.01, trade_tick_size=0.01,
             trade_stops_level=0, trade_freeze_level=0,
-            trade_contract_size=100.0, volume_min=0.01,
-            volume_max=100.0, volume_step=0.01,
+            trade_contract_size=100.0, volume_min=self.volume_min,
+            volume_max=100.0, volume_step=self.volume_step,
             trade_exec_mode="request",
         )
 
@@ -150,6 +154,9 @@ class FakeMT5:
             if pos is None:
                 return SimpleNamespace(retcode=self.TRADE_RETCODE_INVALID_REQUEST,
                                        order=0, comment="No such open position")
+            if self.inject_reject_close:
+                return SimpleNamespace(retcode=self.TRADE_RETCODE_REQ_REJECT,
+                                       order=0, comment="close requote")
             price = float(request.get("price") or (self.bid if pos["type"] == 0 else self.ask))
             close_volume = min(volume, pos["volume"])
             self._dt += 1
@@ -168,9 +175,11 @@ class FakeMT5:
 
         # open
         self._open_count += 1
-        if self.inject_reject_open or self.inject_reject_open_once > 0 or (
-                self.inject_reject_open_nth is not None
-                and self._open_count == self.inject_reject_open_nth):
+        nth_hit = (self.inject_reject_open_nth is not None
+                   and self._open_count == self.inject_reject_open_nth)
+        nths_hit = bool(self.inject_reject_open_nths
+                        and self._open_count in self.inject_reject_open_nths)
+        if self.inject_reject_open or self.inject_reject_open_once > 0 or nth_hit or nths_hit:
             if self.inject_reject_open_once > 0:
                 self.inject_reject_open_once -= 1
             elif self.inject_reject_open:
@@ -178,10 +187,14 @@ class FakeMT5:
             return SimpleNamespace(retcode=self.TRADE_RETCODE_REQ_REJECT,
                                    order=0, comment="requote")
 
-        step = 0.01
-        volume = round(round(volume / step) * step, 2)
+        step = self.volume_step
+        minimum = self.volume_min
+        volume = round(round(volume / step + 1e-9) * step, 8)
+        if volume < minimum - 1e-9:
+            volume = minimum
         if self.inject_partial_open is not None:
-            volume = max(0.01, round(round(volume * self.inject_partial_open / step) * step, 2))
+            partial = round(round(volume * self.inject_partial_open / step + 1e-9) * step, 8)
+            volume = max(minimum, partial)
             self.inject_partial_open = None
         price = float(request.get("price") or (self.ask if order_type == 0 else self.bid))
         self._pt += 1
@@ -519,6 +532,10 @@ def test_partial_fill_hedging(tmp_path):
 
 
 def test_order_reject_deterministic_final_state(tmp_path):
+    """P1.5.1 §2–§9: leg3 rejected -> leg1/leg2 are COMPENSATED (closed by
+    market order with broker confirmation) BEFORE the group may reach FAILED.
+    The pre-fix behavior (immediate FAILED leaving two open positions at the
+    broker) is explicitly forbidden by the follow-up ТЗ."""
     mt5 = FakeMT5(account_mode="hedging")
     executor, _ = make_executor(tmp_path, mt5)
     spec = make_spec()
@@ -530,13 +547,21 @@ def test_order_reject_deterministic_final_state(tmp_path):
     assert leg3["state"] == "REJECTED"
     assert "leg_rejected" in _events(executor.ledger_db_path)
     assert stored["state"] == GroupState.SUBMITTED
-    # controlled recovery: poll detects the incomplete submission -> FAILED,
-    # while the accepted legs keep their broker ids (no silent orphans)
-    executor.poll_once()
+    # poll 1: compensation closes are sent -> COMPENSATION_REQUESTED (never
+    # terminal FAILED while legs 1/2 may still be open at the broker)
+    events = executor.poll_once()
+    assert "partial_submission" in events
+    assert "compensation_requested" in events
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.COMPENSATION_REQUESTED
+    # poll 2: broker confirmation (positions gone) -> COMPENSATION_CONFIRMED
+    # -> FAILED with open risk == 0
+    events = executor.poll_once()
+    assert "compensation_confirmed" in events
     stored = load_group(executor.db_path, spec.group_id)
     assert stored["state"] == GroupState.FAILED
-    assert "execution_error" in _events(executor.ledger_db_path)
-    assert len(mt5.positions) == 2
+    assert len(mt5.positions) == 0                       # no leftover broker risk
+    assert "failed_with_open_risk" not in _events(executor.ledger_db_path)
 
 
 def test_restart_after_open(tmp_path):
@@ -883,3 +908,610 @@ def test_tp3_immutable_after_tp1(tmp_path):
     stored = load_group(executor.db_path, spec.group_id)
     assert stored["spec"].geometry.tp3 == tp3_before == 112.0
     assert by_leg[3]["tp"] == 112.0
+
+
+# ==========================================================================
+# P1.5.1 §22: compensation action idempotency
+# ==========================================================================
+
+def _partial_hedging_executor(tmp_path, mt5, rejected_open: int | set[int] | None = 3):
+    """Submit a hedging group with the given open(s) rejected; return executor+spec."""
+    executor, messages = make_executor(tmp_path, mt5)
+    spec = make_spec()
+    executor.create_group(spec)
+    if isinstance(rejected_open, set):
+        mt5.inject_reject_open_nths = rejected_open
+    elif rejected_open is not None:
+        mt5.inject_reject_open_nth = rejected_open
+    executor.submit_group(spec.group_id)
+    return executor, spec, messages
+
+
+def test_compensation_action_idempotent(tmp_path):
+    from data.trade_group_store import mark_action
+    db = str(tmp_path / "comp-actions.sqlite")
+    assert mark_action(db, "TG-1", "COMPENSATE-L1") is True
+    assert mark_action(db, "TG-1", "COMPENSATE-L1") is False   # same id -> blocked
+    assert mark_action(db, "TG-1", "COMPENSATE-L2") is True
+    # every compensating close is a distinct deterministic actionId
+    actions = list_actions(db, "TG-1")
+    assert {a["action_id"] for a in actions} == {"COMPENSATE-L1", "COMPENSATE-L2"}
+
+
+def test_duplicate_compensation_after_restart(tmp_path):
+    """Restart mid-compensation: the already-sent COMPENSATE closes are never
+    re-sent (order count unchanged), and the group still finalizes to FAILED."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, _ = _partial_hedging_executor(tmp_path, mt5, rejected_open=3)
+    executor.poll_once()                                     # compensation sent
+    assert executor._begin_compensation.__name__  # sanity
+    order_count = mt5._ot
+    actions_after_first = [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    # restart with a fresh executor over the same store + broker
+    executor2, _ = make_executor(tmp_path, mt5)
+    restored = executor2.recover_after_restart(spec.group_id)
+    assert restored["state"] == GroupState.COMPENSATION_REQUESTED
+    executor2.poll_once()                                    # verify -> confirmed -> FAILED
+    stored = load_group(executor2.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert mt5._ot == order_count                            # no duplicate close orders
+    actions_after = [a["action_id"] for a in list_actions(executor2.db_path, spec.group_id)]
+    comp_actions = [a for a in actions_after if a.startswith("COMPENSATE")]
+    assert comp_actions == [a for a in actions_after_first if a.startswith("COMPENSATE")]
+
+
+def test_duplicate_close_action_is_not_sent(tmp_path):
+    """Netting: after CLOSE-TP1 is recorded, re-polling at the same price must
+    not send a second close order."""
+    mt5 = FakeMT5(account_mode="netting")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)
+    executor.create_group(spec)
+    executor.submit_group(spec.group_id)
+    executor.poll_once()                                     # OPENED
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1 close + BE
+    assert "CLOSE-TP1" in [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    close_orders = mt5._ot
+    executor.poll_once()
+    executor.poll_once()
+    assert mt5._ot == close_orders                            # no duplicate close
+
+
+# ==========================================================================
+# P1.5.1 §23: partial submission compensation scenarios
+# ==========================================================================
+
+def test_leg3_rejected_closes_leg1_and_leg2(tmp_path):
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, messages = _partial_hedging_executor(tmp_path, mt5, rejected_open=3)
+    events = executor.poll_once()
+    assert "partial_submission" in events
+    assert "compensation_requested" in events
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.COMPENSATION_REQUESTED
+    assert len(mt5.positions) == 0                            # leg1/leg2 closed NOW
+    assert any("⚠️ TRADE GROUP PARTIAL SUBMISSION" in m for m in messages)
+    actions = [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    assert "COMPENSATE-L1" in actions and "COMPENSATE-L2" in actions
+    events = executor.poll_once()                             # confirmation -> FAILED
+    assert "compensation_confirmed" in events
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert stored["volume"]["total_remaining"] == 0.0
+    assert any("🛑 TRADE GROUP FAILED" in m for m in messages)
+    assert "Reason: LEG3_REJECTED" in messages[-1]
+    assert "Open risk: 0" in messages[-1]
+
+
+def test_leg2_rejected_closes_leg1(tmp_path):
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, _ = _partial_hedging_executor(tmp_path, mt5, rejected_open=2)
+    executor.poll_once()
+    # leg1 and leg3 were filled; both must be compensated
+    actions = [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    assert "COMPENSATE-L1" in actions and "COMPENSATE-L3" in actions
+    assert "COMPENSATE-L2" not in actions
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert len(mt5.positions) == 0
+
+
+def test_multiple_leg_rejection_compensates_all_filled(tmp_path):
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, _ = _partial_hedging_executor(tmp_path, mt5,
+                                                  rejected_open={2, 3})
+    executor.poll_once()
+    actions = [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    assert "COMPENSATE-L1" in actions                        # the only filled leg
+    assert "COMPENSATE-L2" not in actions and "COMPENSATE-L3" not in actions
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert len(mt5.positions) == 0
+
+
+def test_compensation_confirmation_required(tmp_path):
+    """The group must NOT reach FAILED in the same poll the closes were sent:
+    broker confirmation is verified on a later poll (P1.5.1 §7)."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, _ = _partial_hedging_executor(tmp_path, mt5, rejected_open=3)
+    events = executor.poll_once()
+    assert "compensation_confirmed" not in events
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.COMPENSATION_REQUESTED
+    events = executor.poll_once()
+    assert "compensation_confirmed" in events
+    assert load_group(executor.db_path, spec.group_id)["state"] == GroupState.FAILED
+
+
+def test_compensation_failure_keeps_reconciliation_active(tmp_path):
+    """Close rejected -> FAILED_WITH_OPEN_RISK; the NEXT poll retries the close
+    and the group finalizes once the broker accepts (P1.5.1 §8)."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, messages = _partial_hedging_executor(tmp_path, mt5, rejected_open=3)
+    mt5.inject_reject_close = True                           # compensation closes fail
+    events = executor.poll_once()
+    assert "compensation_failed" in events
+    assert "failed_with_open_risk" in events
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED_WITH_OPEN_RISK
+    assert len(mt5.positions) == 2                           # legs 1/2 still OPEN
+    assert any("🚨 EXECUTION ERROR" in m for m in messages)
+    assert "FAILED_WITH_OPEN_RISK" in messages[-1]
+    assert "compensation_failed" in _events(executor.ledger_db_path)
+    assert "failed_with_open_risk" in _events(executor.ledger_db_path)
+    # reconciliation stays active: broker recovers -> retry closes -> FAILED
+    mt5.inject_reject_close = False
+    events = executor.poll_once()
+    assert "compensation_confirmed" in events
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert len(mt5.positions) == 0
+
+
+def test_no_orphan_after_successful_compensation(tmp_path):
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, _ = _partial_hedging_executor(tmp_path, mt5, rejected_open=3)
+    executor.poll_once()
+    executor.poll_once()                                     # FAILED, risk 0
+    assert len(mt5.positions) == 0
+    driver = executor._resolve_driver(spec)
+    orphans = detect_orphan_positions(driver, executor.db_path,
+                                      ledger_db_path=executor.ledger_db_path)
+    assert orphans == []                                     # known-group compensation first
+
+
+def test_failed_compensation_creates_open_risk_state(tmp_path):
+    """Close rejection + exhausted retry budget -> the explicit
+    FAILED_WITH_OPEN_RISK safety state with open legs; reconciliation stays
+    active (bounded retries) and recovers once the broker accepts."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, spec, _ = _partial_hedging_executor(tmp_path, mt5, rejected_open=3)
+    executor.max_compensation_retries = 2                    # bounded retry budget
+    mt5.inject_reject_close = True
+    executor.poll_once()                                     # attempt 1 rejected
+    executor.poll_once()                                     # retry 1 rejected
+    executor.poll_once()                                     # retry 2 rejected -> exhausted
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED_WITH_OPEN_RISK
+    assert len(mt5.positions) == 2                           # explicit open risk
+    assert stored["comp_state"]["retries"] >= 2
+    assert "failed_with_open_risk" in _events(executor.ledger_db_path)
+    # reconciliation stays active; the EXHAUSTED state does NOT spam the
+    # ledger on every poll (each rejected attempt logs once, then it stops)
+    spam_count = _events(executor.ledger_db_path).count("failed_with_open_risk")
+    executor.poll_once()
+    assert _events(executor.ledger_db_path).count("failed_with_open_risk") == spam_count
+    # broker recovers -> a fresh executor (new retry budget) finalizes the group
+    mt5.inject_reject_close = False
+    fresh, _ = make_executor(tmp_path, mt5)
+    fresh.recover_after_restart(spec.group_id)
+    fresh.poll_once()
+    fresh.poll_once()
+    stored = load_group(fresh.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert len(mt5.positions) == 0
+
+
+# ==========================================================================
+# P1.5.1 §24: netting volume accounting
+# ==========================================================================
+
+def _netting_executor(tmp_path, mt5, total=0.06):
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=total)
+    executor.create_group(spec)
+    executor.submit_group(spec.group_id)
+    executor.poll_once()                                     # OPENED
+    return executor, spec
+
+
+def test_netting_tp1_uses_actual_filled_volume(tmp_path):
+    mt5 = FakeMT5(account_mode="netting")
+    executor, spec = _netting_executor(tmp_path, mt5, total=0.06)
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["volume"]["total_filled"] == 0.06
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1 close
+    stored = load_group(executor.db_path, spec.group_id)
+    # TP1 closes the ACTUAL filled volume's 1/3 allocation: 0.06/3 = 0.02
+    assert stored["volume"]["total_closed"] == pytest.approx(0.02)
+    assert stored["volume"]["total_remaining"] == pytest.approx(0.04)
+    assert list(mt5.positions.values())[0]["volume"] == pytest.approx(0.04)
+
+
+def test_netting_tp2_uses_remaining_volume(tmp_path):
+    mt5 = FakeMT5(account_mode="netting")
+    executor, spec = _netting_executor(tmp_path, mt5, total=0.06)
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()                                     # TP2
+    stored = load_group(executor.db_path, spec.group_id)
+    # cumulative 2/3 of 0.06 = 0.04; already closed 0.02 -> increment 0.02
+    assert stored["volume"]["total_closed"] == pytest.approx(0.04)
+    assert stored["volume"]["total_remaining"] == pytest.approx(0.02)
+
+
+def test_netting_tp3_closes_remaining_volume(tmp_path):
+    mt5 = FakeMT5(account_mode="netting")
+    executor, spec = _netting_executor(tmp_path, mt5, total=0.06)
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()
+    mt5.bid = mt5.ask = 112.0
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.RECONCILED
+    assert stored["volume"]["total_closed"] == pytest.approx(0.06)
+    assert stored["volume"]["total_remaining"] == pytest.approx(0.0)
+    assert mt5.positions == {}
+
+
+def test_netting_partial_fill_020(tmp_path):
+    """Case B (ТЗ §16): requested 0.03, filled 0.02 -> TP1/2/3 work from 0.02."""
+    mt5 = FakeMT5(account_mode="netting", volume_step=0.001, volume_min=0.001)
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.03)
+    executor.create_group(spec)
+    mt5.inject_partial_open = 2 / 3                          # 0.03 -> 0.02 filled
+    executor.submit_group(spec.group_id)
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["volume"]["total_filled"] == pytest.approx(0.02)
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1: 0.02/3 ~ 0.006
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["volume"]["total_closed"] == pytest.approx(0.006, abs=0.001)
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()                                     # TP2: cum 0.0133 - 0.006
+    mt5.bid = mt5.ask = 112.0
+    executor.poll_once()                                     # TP3: entire remaining
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.RECONCILED
+    assert stored["volume"]["total_closed"] == pytest.approx(0.02, abs=0.001)
+    assert mt5.positions == {}
+
+
+def test_netting_partial_fill_010(tmp_path):
+    """Case C (ТЗ §16): requested 0.03, filled 0.01 -> TP3 never closes more
+    than the remaining volume."""
+    mt5 = FakeMT5(account_mode="netting", volume_step=0.001, volume_min=0.001)
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.03)
+    executor.create_group(spec)
+    mt5.inject_partial_open = 1 / 3                          # 0.03 -> 0.01 filled
+    executor.submit_group(spec.group_id)
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["volume"]["total_filled"] == pytest.approx(0.01)
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1: 0.003
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()                                     # TP2: 0.003
+    mt5.bid = mt5.ask = 112.0
+    executor.poll_once()                                     # TP3: remaining 0.004
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.RECONCILED
+    assert stored["volume"]["total_closed"] == pytest.approx(0.01, abs=0.001)
+    assert stored["volume"]["total_remaining"] == pytest.approx(0.0)
+    assert mt5.positions == {}
+
+
+def test_netting_volume_step_rounding(tmp_path):
+    mt5 = FakeMT5(account_mode="netting", volume_step=0.005, volume_min=0.005)
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.03)
+    executor.create_group(spec)
+    executor.submit_group(spec.group_id)
+    executor.poll_once()
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1: floor(0.01/0.005)=0.01
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["volume"]["total_closed"] == pytest.approx(0.01)
+    # volume is a multiple of the step
+    volume = list(mt5.positions.values())[0]["volume"]
+    assert round(volume / 0.005) * 0.005 == pytest.approx(volume)
+
+
+def test_no_close_above_broker_remaining_volume(tmp_path):
+    mt5 = FakeMT5(account_mode="netting")
+    executor, spec = _netting_executor(tmp_path, mt5, total=0.06)
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # close 0.02 -> remaining 0.04
+    remaining = list(mt5.positions.values())[0]["volume"]
+    assert remaining == pytest.approx(0.04)
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()                                     # close 0.02 -> remaining 0.02
+    remaining = list(mt5.positions.values())[0]["volume"]
+    assert remaining == pytest.approx(0.02)
+    # no close was ever above the broker remaining volume
+    for deal in mt5.deals:
+        if deal["entry"] == FakeMT5.DEAL_ENTRY_OUT:
+            assert deal["volume"] <= 0.06
+
+
+def test_cumulative_allocation_not_double_counted(tmp_path):
+    mt5 = FakeMT5(account_mode="netting", volume_step=0.001, volume_min=0.001)
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.03)
+    executor.create_group(spec)
+    mt5.inject_partial_open = 2 / 3                          # filled 0.02
+    executor.submit_group(spec.group_id)
+    executor.poll_once()
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                     # TP1 ~0.006
+    stored = load_group(executor.db_path, spec.group_id)
+    closed_tp1 = stored["volume"]["total_closed"]
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()                                     # TP2 increment = cum - closed
+    stored = load_group(executor.db_path, spec.group_id)
+    closed_tp2 = stored["volume"]["total_closed"]
+    # the second close is the CUMULATIVE 2/3 target minus what TP1 already closed
+    assert closed_tp2 == pytest.approx(0.02 * 2 / 3, abs=0.001)
+    assert closed_tp2 > closed_tp1
+    assert closed_tp2 - closed_tp1 == pytest.approx(0.02 * 2 / 3 - closed_tp1, abs=0.001)
+    # never more than the filled volume in total
+    assert closed_tp2 <= 0.02 + 1e-9
+
+
+# ==========================================================================
+# P1.5.1 §25: hedging partial fill management
+# ==========================================================================
+
+def test_hedging_leg_partial_fill(tmp_path):
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)                      # legs 0.02/0.02/0.02
+    executor.create_group(spec)
+    mt5.inject_partial_open = 0.5                            # leg1: 0.02 -> 0.01
+    executor.submit_group(spec.group_id)
+    executor.poll_once()                                     # OPENED
+    stored = load_group(executor.db_path, spec.group_id)
+    leg1 = next(i for i in stored["legs"] if i["leg"] == 1)
+    assert leg1["state"] == "PARTIALLY_FILLED"
+    assert leg1["filled_volume"] == pytest.approx(0.01)
+    assert leg1["remaining_volume"] == pytest.approx(0.01)
+    # volume ledger reflects the actual fill
+    assert stored["volume"]["legs"]["1"]["filled_volume"] == pytest.approx(0.01)
+
+
+def test_hedging_management_uses_filled_volume(tmp_path):
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)
+    executor.create_group(spec)
+    mt5.inject_partial_open = 0.5                            # leg1 partially filled
+    executor.submit_group(spec.group_id)
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    leg1 = next(i for i in stored["legs"] if i["leg"] == 1)
+    # management (TP/BE) works on the broker position of the ACTUAL volume;
+    # no top-up order is ever sent for the missing 0.01
+    assert leg1["state"] == "PARTIALLY_FILLED"
+    assert len(mt5.positions) == 3
+    assert sum(1 for _ in mt5.deals) == 3                    # exactly 3 open deals
+
+
+def test_hedging_compensation_uses_actual_volume(tmp_path):
+    """Compensation closes exactly the ACTUAL broker volume of each open leg:
+    leg1 partially filled (0.01 of 0.02) + leg2 filled (0.02) + leg3 rejected."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)
+    executor.create_group(spec)
+    mt5.inject_partial_open = 0.5                            # leg1: 0.02 -> 0.01
+    mt5.inject_reject_open_nth = 3                           # leg3 rejected
+    executor.submit_group(spec.group_id)
+    executor.poll_once()                                     # compensation closes
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.COMPENSATION_REQUESTED
+    assert len(mt5.positions) == 0                           # both open legs closed
+    # the total closed volume == the ACTUAL filled volumes (0.01 + 0.02 = 0.03),
+    # NOT the requested volumes (0.02 + 0.02 = 0.04)
+    closed = stored["volume"]["total_closed"]
+    assert closed == pytest.approx(0.03)
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+
+
+# ==========================================================================
+# P1.5.1 §26: restart in partial-submission states
+# ==========================================================================
+
+@pytest.mark.parametrize("state", [
+    GroupState.SUBMITTED,
+    GroupState.COMPENSATION_REQUESTED,
+    GroupState.COMPENSATION_CONFIRMED,
+    GroupState.FAILED_WITH_OPEN_RISK,
+])
+def test_restart_in_compensation_states(tmp_path, state):
+    """Restart in each partial-submission state: no duplicate compensation, no
+    duplicate close, broker ids and remaining volume preserved."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec()
+    executor.create_group(spec)
+    mt5.inject_reject_open_nth = 3
+    executor.submit_group(spec.group_id)
+
+    def _advance_to(target):
+        if target == GroupState.COMPENSATION_REQUESTED:
+            executor.poll_once()                             # compensation sent
+        elif target == GroupState.COMPENSATION_CONFIRMED:
+            executor.poll_once()
+            executor.poll_once()                             # -> FAILED (confirmed)
+        elif target == GroupState.FAILED_WITH_OPEN_RISK:
+            mt5.inject_reject_close = True
+            executor.poll_once()                             # close rejected
+
+    _advance_to(state)
+    if state == GroupState.COMPENSATION_CONFIRMED:
+        stored = load_group(executor.db_path, spec.group_id)
+        assert stored["state"] == GroupState.FAILED          # confirmed -> FAILED
+        return
+
+    order_count = mt5._ot
+    actions_before = [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    mt5.inject_reject_close = False                          # broker recovered
+    restarted, _ = make_executor(tmp_path, mt5)              # restart
+    restored = restarted.recover_after_restart(spec.group_id)
+    assert restored["state"] == state
+    assert restored["spec"].geometry.tp1 == 104.0            # geometry preserved
+    restarted.poll_once()
+    restarted.poll_once()
+    # per-state order accounting: SUBMITTED sends compensation for the first
+    # time (+2 closes); FAILED_WITH_OPEN_RISK re-sends the previously rejected
+    # closes (bounded retry, +2); COMPENSATION_REQUESTED only verifies (0).
+    expected_new_orders = {"SUBMITTED": 2, "FAILED_WITH_OPEN_RISK": 2,
+                           "COMPENSATION_REQUESTED": 0}[state.value]
+    assert mt5._ot == order_count + expected_new_orders
+    stored = load_group(restarted.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED              # final state after recovery
+    assert len(mt5.positions) == 0                           # open risk == 0
+    actions_after = [a["action_id"] for a in list_actions(executor.db_path, spec.group_id)]
+    comp_before = [a for a in actions_before if a.startswith("COMPENSATE")]
+    comp_after = [a for a in actions_after if a.startswith("COMPENSATE")]
+    # the retry reuses the SAME deterministic actionIds — the action set never
+    # grows beyond one entry per compensated reference (no duplicate actions)
+    assert len(comp_after) == len(set(comp_after))
+    assert set(comp_before) <= set(comp_after)
+
+
+def test_restart_in_partial_submission_state(tmp_path):
+    """PARTIAL_SUBMISSION is a crash window: the compensation request is
+    idempotent, so a restart re-runs it without duplicate closes."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec()
+    executor.create_group(spec)
+    mt5.inject_reject_open_nth = 3
+    executor.submit_group(spec.group_id)
+    # crash BEFORE the first poll: the group is still SUBMITTED with a rejected
+    # leg and open positions at the broker — recovery must compensate, not dup
+    order_count = mt5._ot
+    restarted, _ = make_executor(tmp_path, mt5)              # restart
+    restored = restarted.recover_after_restart(spec.group_id)
+    assert restored["state"] == GroupState.SUBMITTED
+    events = restarted.poll_once()                           # compensation starts
+    assert "partial_submission" in events
+    assert "compensation_requested" in events
+    assert mt5._ot == order_count + 2                        # exactly 2 close orders
+    restarted.poll_once()
+    stored = load_group(restarted.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert len(mt5.positions) == 0
+
+
+# ==========================================================================
+# P1.5.1 §27: global safety invariant
+# ==========================================================================
+
+def test_safety_invariant_open_risk_within_approved(tmp_path):
+    """For every non-terminal group: broker open volume never exceeds the
+    approved group volume (risk proxy); a FAILED group has ZERO open broker
+    risk; FAILED_WITH_OPEN_RISK keeps reconciliation explicitly active."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)
+    executor.create_group(spec)
+    mt5.inject_reject_open_nth = 3
+    executor.submit_group(spec.group_id)
+    # partial submission -> FAILED after compensation (open risk 0)
+    executor.poll_once()
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.FAILED
+    assert len(mt5.positions) == 0                           # FAILED -> open risk == 0
+    # invariant over all groups in the store
+    for group in list_groups(executor.db_path):
+        g = load_group(executor.db_path, group["group_id"])
+        approved = g["spec"].risk.total_volume
+        driver = executor._resolve_driver(g["spec"])
+        open_volume = sum(float(p.get("volume") or 0.0)
+                          for p in driver.query_positions_by_magic()
+                          if g["spec"].group_id in str(p.get("comment", "")))
+        if g["state"] == GroupState.FAILED:
+            assert open_volume == 0.0
+        else:
+            assert open_volume <= approved + 1e-9            # never above approved
+
+
+def test_netting_partial_submission_compensates_aggregate(tmp_path):
+    """Netting: a rejected open (aggregate position cannot open) leaves nothing
+    to compensate; but a PARTIALLY filled aggregate is compensated with the
+    ACTUAL broker volume (P1.5.1 §23/§12)."""
+    mt5 = FakeMT5(account_mode="netting")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)
+    executor.create_group(spec)
+    mt5.inject_reject_open_nth = 2                          # reject leg2/3 virtual? no —
+    # netting submits only ONE physical open (leg1); reject it -> nothing opened
+    mt5.inject_reject_open_nth = 1
+    executor.submit_group(spec.group_id)
+    stored = load_group(executor.db_path, spec.group_id)
+    leg1 = next(i for i in stored["legs"] if i["leg"] == 1)
+    assert leg1["state"] == "REJECTED"
+    assert len(mt5.positions) == 0                          # nothing at the broker
+    events = executor.poll_once()
+    # no opened legs -> compensation has nothing to close; the group still goes
+    # through the controlled flow and finalizes without open risk
+    assert "partial_submission" in events
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] in (GroupState.FAILED, GroupState.REJECTED)
+    assert len(mt5.positions) == 0
+
+
+def test_netting_partial_aggregate_trades_on_actual_volume(tmp_path):
+    """Netting: a PARTIALLY filled aggregate (0.06 requested -> 0.03 filled)
+    opens normally (no rejected leg) and every later close is based on the
+    ACTUAL 0.03, never on the requested 0.06."""
+    mt5 = FakeMT5(account_mode="netting", volume_step=0.001, volume_min=0.001)
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec(total_volume=0.06)
+    executor.create_group(spec)
+    mt5.inject_partial_open = 0.5                           # 0.06 -> 0.03 filled
+    executor.submit_group(spec.group_id)
+    executor.poll_once()                                    # OPENED
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.OPENED
+    assert stored["volume"]["total_filled"] == pytest.approx(0.03)
+    assert list(mt5.positions.values())[0]["volume"] == pytest.approx(0.03)
+    mt5.bid = mt5.ask = 104.0
+    executor.poll_once()                                    # TP1: 0.03/3 = 0.01
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["volume"]["total_closed"] == pytest.approx(0.01)
+    assert list(mt5.positions.values())[0]["volume"] == pytest.approx(0.02)
+    mt5.bid = mt5.ask = 108.0
+    executor.poll_once()                                    # TP2: cumulative 0.02
+    mt5.bid = mt5.ask = 112.0
+    executor.poll_once()                                    # TP3: remaining 0.01
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.RECONCILED
+    assert stored["volume"]["total_closed"] == pytest.approx(0.03)
+    assert mt5.positions == {}

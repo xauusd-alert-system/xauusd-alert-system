@@ -193,6 +193,11 @@ class MT5NettingDriver:
             "filled_volume": float(getattr(result, "volume", 0.0) or 0.0),
         }
 
+    def close_position(self, reference: str, volume: float) -> dict[str, Any]:
+        """Alias for compensation closes: the aggregate position is closed via
+        the same partial-close path (volume = entire remaining position)."""
+        return self.close_partial(reference, volume)
+
     def query_position(self, reference: str) -> dict[str, Any] | None:
         return self._position(self._resolve_ticket(reference))
 

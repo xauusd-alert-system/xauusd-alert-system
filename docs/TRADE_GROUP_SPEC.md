@@ -217,3 +217,75 @@ order_send / positions_get / history_deals_get + константы). Адапт
 против этой поверхности без изменений для реального терминала; обязательный
 реальный demo smoke test (broker symbol, account mode, ticket/order/deal IDs)
 выполняется на Windows-хосте по чек-листу §48.
+
+---
+
+## 11. P1.5.1 — безопасный partial submission и volume reconciliation (2026-08-16)
+
+Коммит `fix: harden MT5 trade-group partial submission and volume reconciliation`
+(поверх `5ad8500`). LIVE запрещён; ML/model/BTC 20–50/`btc_m5_scalp_v1`/риск-капы/
+paper executor не менялись.
+
+### P0: partial submission MUST compensate already-opened legs (§2–§9)
+
+- Новые domain-состояния: `PARTIAL_SUBMISSION`, `COMPENSATION_REQUESTED`,
+  `COMPENSATION_CONFIRMED`, `FAILED_WITH_OPEN_RISK` (non-terminal).
+- Flow: `SUBMITTED → PARTIAL_SUBMISSION → COMPENSATION_REQUESTED →
+  COMPENSATION_CONFIRMED → FAILED`. При rejected leg уже открытые legs (hedging:
+  физические позиции; netting: aggregate) закрываются market-close с
+  broker confirmation; FAILED достижим только при open risk == 0.
+- Idempotency (§5): `COMPENSATE-L<n>` / `COMPENSATE-GROUP` через существующий
+  `trade_group_actions` + `mark_action()`; actionId маркируется ТОЛЬКО после
+  подтверждённого close (rejected остаётся unmarked → bounded retry);
+  брокер — backstop против дубликатов («position not found» = цель достигнута).
+- Геометрия не меняется (§6): compensation — execution recovery, не пересчёт.
+- Подтверждение (§7): close request → broker result → позиция больше не open
+  (или OUT deal) → `COMPENSATION_CONFIRMED`; в том же poll FAILED недостижим.
+- Если compensation сама не удалась (§8): `FAILED_WITH_OPEN_RISK` + ledger
+  `compensation_failed` + `failed_with_open_risk` + Telegram emergency;
+  reconciliation продолжает poll'ить с bounded retry (exhausted-состояние не
+  спамит ledger). Silent orphan запрещён (§9): known-group compensation первым,
+  orphan detector — safety net.
+
+### P0: netting volume accounting (§10–§18)
+
+- Volume ledger на группу и на leg (`requested/filled/closed/remaining`) —
+  колонка `volume_json`; для netting `total_filled` = ACTUAL broker volume
+  (источник истины, §12); hedging legs получают per-leg filled/remaining.
+- Netting close volume (§13–§15): `desired_cumulative = total_filled ×
+  cumulative_allocation; increment = desired - already_closed; close =
+  min(increment, remaining_before); floor to volume_step; TP3 = весь остаток`.
+  Cumulative allocation исключает double-close (§14).
+- Hedging partial fill (§18): leg → `PARTIALLY_FILLED`, management по
+  фактическому объёму; compensation закрывает только реальный volume.
+
+### Ledger (§20) / Telegram (§21)
+
+- Event types: `partial_submission`, `compensation_requested`,
+  `compensation_confirmed`, `compensation_failed`, `failed_with_open_risk`.
+- Сообщения: `⚠️ TRADE GROUP PARTIAL SUBMISSION`, `🛑 TRADE GROUP FAILED ...
+  Compensation: CONFIRMED, Open risk: 0`, `🚨 EXECUTION ERROR ... State:
+  FAILED_WITH_OPEN_RISK`. Компенсационные close никогда не отправляются как
+  TP1/TP2/TP3/BE-обновления (§19: compensation OUT deals consume-ятся, не
+  классифицируются).
+
+### Тесты (фактический запуск)
+
+```text
+Base commit: 5ad8500
+New commit:  (P1.5.1, см. git log)
+Tests:
+  BASELINE: 775 passed, 11 warnings
+  AFTER:    804 passed, 11 warnings
+  NEW:      29 (все в execution/tests/test_mt5_trade_group.py: 34 -> 63)
+```
+
+Покрытие §22–§27: compensation action idempotency; duplicate compensation
+после restart; duplicate close не отправляется; leg3/leg2/multiple rejection
+компенсируются; confirmation required; failure keeps reconciliation active;
+no orphan после успешной compensation; failed compensation → open-risk state;
+netting TP1/TP2/TP3 от ACTUAL volume; partial fill 0.020/0.010; volume_step
+rounding; no close above remaining; cumulative allocation без double-count;
+hedging leg partial fill; management по filled volume; compensation по actual
+volume; restart во всех компенсационных состояниях; глобальный safety
+invariant (non-terminal: open volume <= approved; FAILED: open risk == 0).

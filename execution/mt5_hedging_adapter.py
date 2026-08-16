@@ -126,6 +126,50 @@ class MT5HedgingDriver:
     # Extra surface used by the executor / reconciliation
     # ------------------------------------------------------------------
 
+    def close_position(self, reference: str, volume: float) -> dict[str, Any]:
+        """Market-close one physical leg position (used by the compensation
+        flow — an emergency execution event, never a TP/SL target)."""
+        ticket = int(reference)
+        position = self._position(ticket)
+        if position is None:
+            return {"status": "rejected", "retcode": -1,
+                    "comment": f"position {ticket} not found"}
+        close_type = self.mt5.ORDER_TYPE_SELL if position["type"] == 0 \
+            else self.mt5.ORDER_TYPE_BUY
+        snapshot = self.ctx.symbol_snapshot(position["symbol"])
+        price = snapshot["bid"] if position["type"] == 0 else snapshot["ask"]
+        close_volume = min(float(volume), float(position["volume"]))
+        group_id = self.ctx.parse_comment(str(position.get("comment") or "")) \
+            or f"TG:{ticket}"
+        request = {
+            "action": self.mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": position["symbol"],
+            "volume": close_volume,
+            "type": close_type,
+            "price": float(price),
+            "deviation": 20,
+            "magic": self.magic,
+            "comment": self.ctx.build_comment(group_id, None),
+            "type_time": self.mt5.ORDER_TIME_GTC,
+            "type_filling": self.mt5.ORDER_FILLING_IOC,
+        }
+        result = self.mt5.order_send(request)
+        retcode = int(getattr(result, "retcode", -1) or -1)
+        done = getattr(self.mt5, "TRADE_RETCODE_DONE", 10009)
+        if retcode != done:
+            return {"status": "rejected", "retcode": retcode,
+                    "comment": str(getattr(result, "comment", "") or ""),
+                    "order_id": getattr(result, "order", None)}
+        return {
+            "status": "filled", "retcode": retcode,
+            "comment": str(getattr(result, "comment", "") or ""),
+            "order_id": int(getattr(result, "order", 0) or 0) or None,
+            "deal_id": int(getattr(result, "deal", 0) or 0) or None,
+            "fill_price": float(getattr(result, "price", 0.0) or 0.0),
+            "filled_volume": float(getattr(result, "volume", 0.0) or 0.0),
+        }
+
     def query_position(self, reference: str) -> dict[str, Any] | None:
         return self._position(int(reference))
 

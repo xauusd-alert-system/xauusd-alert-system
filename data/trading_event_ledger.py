@@ -24,6 +24,10 @@ EVENT_TYPES = {
     # P1.5 demo MT5 execution (ТЗ §37): partial fills, group opened, orphan
     # broker positions and execution errors are explicit ledger facts.
     "leg_partially_filled", "group_opened", "orphan_broker_position", "execution_error",
+    # P1.5.1 partial-submission compensation lifecycle (ТЗ P1.5.1 §20):
+    # every compensation step is an explicit, idempotent ledger fact.
+    "partial_submission", "compensation_requested", "compensation_confirmed",
+    "compensation_failed", "failed_with_open_risk",
 }
 
 
