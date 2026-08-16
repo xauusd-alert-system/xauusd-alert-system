@@ -94,6 +94,24 @@ def test_entry_price_includes_fractional_spread_and_per_asset_slippage():
     assert first.entry_price == pytest.approx(expected_entry, abs=1e-9)
 
 
+def test_next_open_grid_uses_causal_signal_atr_not_completed_entry_bar_atr():
+    cfg = _cfg({"slippage_usd": 0.0, "spread_usd": 0.0})
+    df = _df()
+    df.loc[0, "atr"] = 0.001
+    df.loc[1, "atr"] = 0.010  # unknown at bar-1 open; must not define the trade
+    trade = EnsembleBacktester(cfg, asset_key="TEST").run(df)[0]
+    assert abs(trade.entry_price - trade.initial_stop_price) == pytest.approx(0.001)
+
+
+def test_grid_step_clamps_are_applied_in_backtester():
+    cfg = _cfg({
+        "slippage_usd": 0.0, "spread_usd": 0.0,
+        "signal_grid": {"step_min_points": 0.002, "stop_mult": 1.0},
+    })
+    trade = EnsembleBacktester(cfg, asset_key="TEST").run(_df())[0]
+    assert abs(trade.entry_price - trade.initial_stop_price) == pytest.approx(0.002)
+
+
 def test_fx_slippage_override_does_not_turn_every_trade_into_an_instant_loss():
     """With realistic per-asset slippage, not every exit is an immediate ATR-stop loss."""
     cfg = _cfg({"slippage_usd": 0.0002, "spread_usd": 0.00012})

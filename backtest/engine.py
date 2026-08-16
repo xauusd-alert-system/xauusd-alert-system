@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 
 from regime.classifier import RegimeLabel
-from config.loader import get_signal_grid
+from config.loader import get_signal_grid, resolve_signal_step
 
 
 @dataclass
@@ -63,6 +63,7 @@ class EventDrivenBacktester:
         self.cfg = cfg
         self.asset_key = asset_key
         asset_cfg = cfg.get("assets", {}).get(asset_key, {}) if asset_key else {}
+        self.asset_cfg = asset_cfg
         bt_cfg = cfg["backtest"]
         lab_cfg = cfg["labeling"]
         # W6 (audit 2026-08-10): honour the per-asset spread/slippage overrides
@@ -145,13 +146,23 @@ class EventDrivenBacktester:
 
                 # Barrier sizing: ATR-scaled (matches labeling.method=atr_scaled) or fixed pips.
                 barrier_ok = True
+                be_trigger_mult = self.be_trigger_mult
                 if self.use_atr_scaled:
-                    atr_val = float(atrs[i]) if atrs is not None else float("nan")
+                    signal_i = i - 1 if i > 0 else i
+                    atr_val = float(atrs[signal_i]) if atrs is not None else float("nan")
                     if pd.isna(atr_val) or atr_val <= 0:
                         atr_val = 0.0
                     if atr_val > 0:
-                        stop_price = entry_price - direction * atr_val * self.stop_y_mult
-                        target_price = entry_price + direction * atr_val * self.target_x_mult
+                        regime_name = str(regimes[signal_i])
+                        if hasattr(regimes[signal_i], "value"):
+                            regime_name = regimes[signal_i].value
+                        grid = get_signal_grid(self.cfg, self.asset_cfg, regime=regime_name)
+                        step = resolve_signal_step(atr_val, grid)
+                        stop_mult = float(grid.get("stop_mult", self.stop_y_mult))
+                        target_mult = float(grid.get("tp1_mult", self.target_x_mult))
+                        be_trigger_mult = float(grid.get("breakeven_trigger_atr", self.be_trigger_mult))
+                        stop_price = entry_price - direction * step * stop_mult
+                        target_price = entry_price + direction * step * target_mult
                     elif self.target_x > 0 and self.stop_y > 0:
                         stop_price = entry_price - direction * self.stop_y
                         target_price = entry_price + direction * self.target_x
@@ -173,6 +184,7 @@ class EventDrivenBacktester:
                         session=str(sessions[i]),
                         regime_at_entry=str(regimes[i - 1]) if i > 0 else str(regimes[i]),
                     )
+                    open_position._be_trigger_mult = be_trigger_mult
                     entry_bar = i
                     pending_signal = None
 
@@ -187,7 +199,7 @@ class EventDrivenBacktester:
                 # be_trigger_mult * target-distance in our favor.
                 if not getattr(open_position, "_be_triggered", False):
                     be_level = (open_position.entry_price
-                                + direction * self.be_trigger_mult
+                                + direction * getattr(open_position, "_be_trigger_mult", self.be_trigger_mult)
                                 * (open_position.target_price - open_position.entry_price))
                     if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
                         open_position.stop_price = open_position.entry_price

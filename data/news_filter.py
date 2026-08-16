@@ -6,6 +6,8 @@ Completely silent and network-free during historical backtests.
 import time
 import logging
 import requests
+import csv
+import os
 from datetime import datetime, timezone
 from typing import List, Dict
 
@@ -14,6 +16,8 @@ logger = logging.getLogger("news_guard")
 _NEWS_CACHE: List[Dict] = []
 _LAST_FETCH_TS: float = 0.0
 _FETCH_FAILED_UNTIL: float = 0.0
+_LAST_FETCH_OK: bool | None = None
+_LAST_ERROR: str | None = None
 CACHE_TTL_SECONDS = 6 * 3600  # 6 часов кэша
 
 
@@ -22,7 +26,7 @@ def fetch_economic_calendar() -> List[Dict]:
     Fetches weekly economic events from Forex Factory JSON API with Chrome User-Agent.
     Suppresses repeated failed attempts for 30 minutes to prevent hangs/log-spam.
     """
-    global _NEWS_CACHE, _LAST_FETCH_TS, _FETCH_FAILED_UNTIL
+    global _NEWS_CACHE, _LAST_FETCH_TS, _FETCH_FAILED_UNTIL, _LAST_FETCH_OK, _LAST_ERROR
     now = time.time()
 
     # Если была ошибка сети, не повторяем запросы 30 минут
@@ -60,11 +64,15 @@ def fetch_economic_calendar() -> List[Dict]:
 
         _NEWS_CACHE = high_impact_events
         _LAST_FETCH_TS = now
+        _LAST_FETCH_OK = True
+        _LAST_ERROR = None
         return _NEWS_CACHE
 
-    except Exception:
+    except Exception as exc:
         # При ошибке сети/SSL блокируем сетевые попытки на 30 минут, работаем без новостей
         _FETCH_FAILED_UNTIL = now + 1800
+        _LAST_FETCH_OK = False
+        _LAST_ERROR = str(exc)
         return _NEWS_CACHE
 
 
@@ -102,3 +110,36 @@ def is_news_red_zone(
             return True, f"RED ZONE: {title} ({dt_str})"
 
     return False, ""
+
+def news_feed_status() -> dict:
+    """Distinguish an available empty calendar from an unavailable feed."""
+    age = (time.time() - _LAST_FETCH_TS) if _LAST_FETCH_TS else None
+    return {
+        "available": bool(_LAST_FETCH_OK),
+        "last_success_age_seconds": age if _LAST_FETCH_OK else None,
+        "error": _LAST_ERROR,
+        "event_count": len(_NEWS_CACHE),
+    }
+
+
+def news_guard_decision(current_ts_utc: int, buffer_before_minutes: int = 30,
+                        buffer_after_minutes: int = 30,
+                        failure_policy: str = "fail_closed",
+                        historical_calendar_path: str | None = None) -> tuple[bool, str, bool]:
+    """Return (blocked, reason, feed_available), with optional dated research CSV."""
+    if (time.time() - int(current_ts_utc or 0)) > 7 * 86400:
+        if not historical_calendar_path or not os.path.exists(historical_calendar_path):
+            return False, "historical_calendar_not_modelled", False
+        before, after = buffer_before_minutes * 60, buffer_after_minutes * 60
+        with open(historical_calendar_path, encoding="utf-8", newline="") as handle:
+            for event in csv.DictReader(handle):
+                if event.get("impact") not in {None, "", "High"}: continue
+                event_ts = int(event["timestamp_utc"])
+                if event_ts - before <= int(current_ts_utc) <= event_ts + after:
+                    return True, f"HISTORICAL RED ZONE: {event.get('title', 'High Impact News')}", True
+        return False, "historical_calendar_clear", True
+    blocked, reason = is_news_red_zone(current_ts_utc, buffer_before_minutes, buffer_after_minutes)
+    status = news_feed_status()
+    if not status["available"] and failure_policy == "fail_closed":
+        return True, f"NEWS FEED UNAVAILABLE: {status.get('error') or 'no successful fetch'}", False
+    return blocked, reason, bool(status["available"])

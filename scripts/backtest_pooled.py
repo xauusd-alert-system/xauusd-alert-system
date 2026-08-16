@@ -41,7 +41,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
+from config.loader import load_config, effective_asset_config
 from scripts.deflated_sharpe import (
     _make_synthetic_wf_df,
     _inject_biased_probs,
@@ -82,7 +82,10 @@ def _load_asset_frames(cfg, assets, max_folds):
             df = _make_synthetic_wf_df(n, spec["price"], spec["atr"], freq)
             df = _inject_biased_probs(df)
             from labeling.label_generator import generate_labels_from_config
-            df["label"] = generate_labels_from_config(df, cfg)
+            cfg_asset = effective_asset_config(cfg, asset)
+            df["label"] = generate_labels_from_config(
+                df, cfg_asset, asset_key=asset
+            )
             out[asset] = df
     return out
 

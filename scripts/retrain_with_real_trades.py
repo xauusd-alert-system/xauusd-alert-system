@@ -1,15 +1,17 @@
 """
-Weekly Retraining Script using Historical Candle Data + Real Executed Trades.
-Extracts real trades from executed_trades SQLite table, joins features & outcomes,
-and retrains per-asset ML models.
+Weekly retraining with a versioned historical target and an explicit, default-off
+legacy executed-trade merge. Executed trades remain monitoring data unless
+``retraining.real_trade_merge_enabled`` is deliberately enabled after a selection-
+bias/debiasing review.
 
 Usage:
     python -m scripts.retrain_with_real_trades
 
 Step 5d (#26/#27) conservative "documented assumptions" hardening:
 
-#26 - real trades ARE merged into retraining (see retrain_asset, binary mode
-      only). The merge is exactly the documented contract:
+#26 - legacy real-trade merging remains available only behind the explicit
+      `retraining.real_trade_merge_enabled` flag (default false). If enabled,
+      the legacy mapping is:
       `prepare_real_trades_df` parses the JSON features of each executed trade
       and maps its outcome to a binary label:
           long trade & win          -> target 1
@@ -23,9 +25,9 @@ Step 5d (#26/#27) conservative "documented assumptions" hardening:
 #27 - a retraining run must NOT silently "succeed" when the real-trade payload
       is missing. `retrain_asset` always returns per-asset stats, and `main()`
       maps them to an honest exit code consumed by scripts/overnight.py stage 4:
-        EXIT_OK (0)              - every asset fully retrained; in binary mode
-                                   real trades merged (or legitimately none
-                                   exist yet on a fresh account).
+        EXIT_OK (0)              - every asset retrained under the configured
+                                   policy (historical-only by default; legacy
+                                   merge only when explicitly enabled).
         EXIT_PAYLOAD_MISSING (1) - any asset hard-failed (exception, no candles,
                                    too few samples), OR the real-trade merge was
                                    skipped for EVERY enabled asset because of an
@@ -47,14 +49,17 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
+from config.loader import load_config, effective_asset_config
 from data.storage import read_candles
 from data.trade_logger import read_executed_trades
-from scripts.train_mt5 import build_full_df
+from scripts.train_mt5 import (
+    build_full_df, build_artifact_metadata, _purged_oos_calibration,
+)
+from model.uniqueness import aligned_uniqueness_weights, average_uniqueness_weights
 from model.trainer import (
     FEATURE_COLUMNS,
     build_training_matrix,
-    time_ordered_split,
+    purged_time_ordered_split,
     train_model,
     calibrate_model,
     save_model,
@@ -141,6 +146,8 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
             "reason": str,         # human-readable status
         }
     """
+    # Resolve the exact same per-asset target/model policy as train_mt5 and live.
+    cfg = effective_asset_config(cfg, asset_key)
     asset_cfg = cfg["assets"][asset_key]
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     timeframe = asset_cfg.get("timeframe") or cfg.get("market_data", {}).get("timeframe", "M5")
@@ -178,7 +185,17 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
     # contain the regime_<label> one-hot columns (they are synthesized from the
     # raw regime column, which is not persisted with executed trades), so the
     # real-trade merge is skipped to avoid feeding incomplete feature rows in.
-    if three_class or use_regime_feature:
+    merge_enabled = bool(cfg.get("retraining", {}).get("real_trade_merge_enabled", False))
+    if not merge_enabled:
+        # Executed trades are selected by the incumbent policy and their mutable
+        # win/loss outcome is not the same event as an unconditional directional
+        # label. Keep them as monitoring data until an explicit debiasing contract
+        # is pre-registered; never silently poison the new target baseline.
+        logger.info("[%s] real-trade merge disabled by policy; historical target only", asset_key)
+        X_combined, y_combined, available_cols = build_training_matrix(full_df, cfg=cfg)
+        real_trades = 0
+        reason = "historical_only_policy"
+    elif three_class or use_regime_feature:
         if three_class:
             reason = "skip_merge_three_class"
             logger.warning(
@@ -214,11 +231,34 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
                 "real_trades": real_trades, "reason": "too_few_samples"}
 
     train_ratio = cfg["model"].get("train_ratio", 0.8)
-    X_train, X_test, y_train, y_test = time_ordered_split(X_combined, y_combined, train_ratio)
+    horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 0))
+    embargo = int(cfg.get("backtest", {}).get("walk_forward", {}).get("embargo_candles", 0))
+    X_train, X_test, y_train, y_test = purged_time_ordered_split(
+        X_combined, y_combined, train_ratio, horizon=horizon, embargo=embargo
+    )
 
-    base_model = train_model(X_train, y_train, cfg)
-    calibrated_model = calibrate_model(base_model, X_train, y_train, cfg)
-    save_model(calibrated_model, available_cols, model_path)
+    if reason == "historical_only_policy":
+        sample_weight = aligned_uniqueness_weights(
+            full_df.index, X_train.index, horizon=max(1, horizon)
+        )
+    else:
+        # Legacy opt-in merge has mixed event durations; use conservative
+        # positional horizon weights rather than pretending row indices align.
+        all_weights = average_uniqueness_weights(len(X_combined) + horizon + 1, max(1, horizon))
+        sample_weight = all_weights[:len(X_train)]
+    base_model = train_model(X_train, y_train, cfg, sample_weight=sample_weight)
+    calibrated_model = calibrate_model(
+        base_model, X_train, y_train, cfg, sample_weight=sample_weight
+    )
+    cal_report = _purged_oos_calibration(calibrated_model, X_test, y_test, asset_key)
+    metadata = build_artifact_metadata(
+        cfg, asset_key, timeframe, full_df, y_combined, len(X_train), len(X_test),
+        "uniqueness", calibration_report_oos=cal_report,
+    )
+    metadata["retraining_real_trade_merge"] = {
+        "enabled": merge_enabled, "rows": int(real_trades), "reason": reason,
+    }
+    save_model(calibrated_model, available_cols, model_path, metadata=metadata)
 
     logger.info(f"✅ Successfully retrained & saved model for {asset_key} -> {model_path}")
 
@@ -227,7 +267,7 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
     # trained & saved on history. Nothing real was folded in, so the run must
     # not present as a fully successful retrain (that would be a silent no-op
     # for #26).
-    ok_flag = reason == "ok"
+    ok_flag = reason in {"ok", "historical_only_policy"}
     return {"asset": asset_key, "ok": ok_flag, "samples": len(X_combined),
             "real_trades": real_trades, "reason": reason}
 

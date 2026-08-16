@@ -9,7 +9,7 @@ from typing import Optional
 import pandas as pd
 from regime.classifier import RegimeLabel
 from backtest.engine import rule_based_signal
-from data.news_filter import is_news_red_zone
+from data.news_filter import news_guard_decision
 from config.loader import get_signal_grid
 
 logger = logging.getLogger("ensemble")
@@ -58,7 +58,11 @@ def compute_ensemble_signal(
         buf_before = ens_cfg.get("news_buffer_before_min", 30)
         buf_after = ens_cfg.get("news_buffer_after_min", 30)
         try:
-            in_red_zone, news_title = is_news_red_zone(timestamp_utc, buf_before, buf_after)
+            failure_policy = ens_cfg.get("news_feed_failure_policy_live", "fail_closed")
+            in_red_zone, news_title, _feed_available = news_guard_decision(
+                timestamp_utc, buf_before, buf_after, failure_policy=failure_policy,
+                historical_calendar_path=ens_cfg.get("historical_news_calendar_path"),
+            )
             if in_red_zone:
                 return EnsembleSignal(
                     bias="no_trade",
@@ -71,10 +75,15 @@ def compute_ensemble_signal(
                     reasoning_summary=f"Blocked by News Guard -> {news_title}",
                 )
         except Exception as e:
-            # Fail open (trading continues) if the news feed is unavailable, but
-            # log it: a silently broken guard would let trades through during
-            # high-impact news with no indication anything went wrong.
-            logger.warning("News guard check failed; proceeding without news suppression: %s", e)
+            logger.error("News guard check failed: %s", e)
+            if ens_cfg.get("news_feed_failure_policy_live", "fail_closed") == "fail_closed":
+                return EnsembleSignal(
+                    bias="no_trade", confidence=0.0, rule_vote=0,
+                    ml_p_long=float(ml_p_long), ml_p_short=float(ml_p_short),
+                    regime=regime.value if hasattr(regime, "value") else str(regime),
+                    suppressed_by_meta_filter=True,
+                    reasoning_summary=f"Blocked: news guard unavailable ({e})",
+                )
 
     is_crypto = "BTC" in asset_key.upper() or "ETH" in asset_key.upper()
 

@@ -96,6 +96,12 @@ class TelegramAlertBot:
         message = format_signal_message(signal, asset_key, include_meta=include_meta)
         success = self.send_text_message(message)
         if success:
+            published = int(time.time())
+            signal["published_at_utc"] = published
+            created = signal.get("timestamp_utc")
+            signal["publish_latency_seconds"] = (
+                max(0, published - int(created)) if created is not None else None
+            )
             self._last_alert_ts = time.time()
             self._alerts_sent_today += 1
             return True

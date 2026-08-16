@@ -22,6 +22,9 @@ class ModelPredictor:
         bundle = load_model(model_path)
         self.model = bundle["model"]
         self.feature_cols = bundle["feature_cols"]
+        # Old bundles remain loadable; newly trained production bundles expose
+        # their target/config/weight contract for deployment checks and dashboards.
+        self.metadata = bundle.get("metadata", {})
 
     @property
     def classes_(self):

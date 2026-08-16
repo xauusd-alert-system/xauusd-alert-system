@@ -1,5 +1,11 @@
 # xauusd-alert-system
 
+> Operator start: [`docs/POST_PULL_RUNBOOK.md`](docs/POST_PULL_RUNBOOK.md).
+>
+> Agent handoff: [`docs/AGENT_HANDOFF_2026-08-16.md`](docs/AGENT_HANDOFF_2026-08-16.md).
+>
+> Current deployment is fail-closed research mode; historical publications are not live evidence.
+
 A multi-asset, machine-learning trading and alerting system for MetaTrader 5. It
 turns live M5 candles into calibrated directional signals, gates them through a
 regime/session/news meta-filter, and can either alert on Telegram or place and

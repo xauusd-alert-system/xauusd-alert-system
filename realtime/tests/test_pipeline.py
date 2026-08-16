@@ -78,7 +78,8 @@ def test_pipeline_regime_field_is_valid_enum_value():
 def test_resolve_signal_step_defaults_to_dynamic_atr():
     """Default step = 1.0 * ATR (spec: dynamic, gold @4250 -> ~4.25 pts)."""
     assert resolve_signal_step(4.25, {}) == pytest.approx(4.25)
-    assert resolve_signal_step(4.25, {"tp1_mult": 2.0}) == pytest.approx(8.5)
+    # tp1_mult is applied to the resolved step when targets are built, not twice.
+    assert resolve_signal_step(4.25, {"tp1_mult": 2.0}) == pytest.approx(4.25)
 
 
 def test_resolve_signal_step_fixed_override_wins():

@@ -3,13 +3,21 @@ Realtime inference pipeline: wires MT5 live data -> features -> regime -> model 
 into a single callable that produces the structured signal JSON required by the
 FastAPI service, MT5 Auto-Trader, and Telegram bot.
 """
+import hashlib
+import json
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 import pandas as pd
 
-from config.loader import load_config, get_signal_grid
+from config.loader import (
+    load_config,
+    get_signal_grid,
+    effective_asset_config,
+    resolve_signal_step as _resolve_signal_step,
+)
 from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
@@ -19,8 +27,7 @@ from regime.classifier import add_regime_indicators, classify_regime_series, Reg
 from model.predictor import ModelPredictor
 from model.ensemble import compute_ensemble_signal
 from data.session_tagger import tag_dataframe
-
-from copy import deepcopy
+from config.strategy_contract import strategy_identity
 
 logger = logging.getLogger("realtime_pipeline")
 
@@ -30,22 +37,11 @@ def resolve_signal_step(atr_val: float, grid_cfg: dict) -> float:
     Resolves the equal-step TP/SL grid step for a signal.
 
     Priority: fixed `step_points` (price points) when set, otherwise the
-    dynamic ATR step (tp1_mult * ATR, spec default 1.0 * ATR). The result is
+    dynamic signal-bar ATR step (1.0 * ATR). TP multipliers are applied once
+    after step resolution. The result is
     clamped to [step_min_points, step_max_points] when those are configured.
     """
-    step_points = grid_cfg.get("step_points")
-    if step_points:
-        step = float(step_points)
-    else:
-        step = atr_val * float(grid_cfg.get("tp1_mult", 1.0))
-
-    step_min = grid_cfg.get("step_min_points")
-    step_max = grid_cfg.get("step_max_points")
-    if step_min:
-        step = max(step, float(step_min))
-    if step_max:
-        step = min(step, float(step_max))
-    return step
+    return _resolve_signal_step(atr_val, grid_cfg)
 
 
 class RealtimePipeline:
@@ -84,25 +80,16 @@ class RealtimePipeline:
         ).get("timeframe", "M5")
         self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
 
-        # Эффективный конфиг с asset-specific переопределением ensemble, labeling, model
-        self.effective_cfg = deepcopy(self.cfg)
-        asset_ensemble = self.asset_cfg.get("ensemble")
-        if asset_ensemble:
-            merged_ensemble = deepcopy(self.cfg.get("ensemble", {}))
-            merged_ensemble.update(asset_ensemble)
-            self.effective_cfg["ensemble"] = merged_ensemble
-
-        asset_labeling = self.asset_cfg.get("labeling")
-        if asset_labeling:
-            merged_labeling = deepcopy(self.cfg.get("labeling", {}))
-            merged_labeling.update(asset_labeling)
-            self.effective_cfg["labeling"] = merged_labeling
-
-        asset_model = self.asset_cfg.get("model")
-        if asset_model:
-            merged_model = deepcopy(self.cfg.get("model", {}))
-            merged_model.update(asset_model)
-            self.effective_cfg["model"] = merged_model
+        # One resolver for production training, research and live inference.
+        self.effective_cfg = effective_asset_config(self.cfg, asset_key)
+        model_metadata = self._predictor.metadata if self._predictor is not None else {}
+        self.strategy_identity = strategy_identity(self.effective_cfg, model_metadata)
+        if self.model_path and os.path.isfile(self.model_path):
+            digest = hashlib.sha256()
+            with open(self.model_path, "rb") as model_file:
+                for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            self.strategy_identity["model_hash"] = digest.hexdigest()
 
     def get_frame(self, n_candles: int = 100, build_features: bool = False) -> pd.DataFrame:
         """Return a raw (or feature-built) DataFrame of the asset's real candles.
@@ -248,23 +235,65 @@ class RealtimePipeline:
         else:
             entry_zone, invalidation, targets = None, None, None
 
+        signal_ts = int(latest["timestamp_utc"])
+        signal_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+        ))
+        feature_hash = hashlib.sha256(
+            json.dumps(feature_dict, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest() if feature_dict else None
+        scaleout = grid_cfg.get("scaleout") or {}
+        ratios = [float(scaleout.get("tp1_ratio", 0.5)), float(scaleout.get("tp2_ratio", 0.3))]
+        ratios.append(max(0.0, 1.0 - sum(ratios)))
         return {
+            "signal_id": signal_id,
+            "signal_state": "confirmed" if signal.bias != "no_trade" else "no_trade",
+            "strategy_version": self.strategy_identity["strategy_version"],
+            "strategy_spec_hash": self.strategy_identity["strategy_spec_hash"],
+            "config_hash": self.strategy_identity["config_hash"],
+            "model_hash": self.strategy_identity["model_hash"],
+            "feature_snapshot_hash": feature_hash,
+            "setup_timeframe": self.timeframe,
+            "context_timeframes": self.cfg.get("features", {}).get("mtf_reference_timeframes", []),
+            "expires_at_utc": signal_ts + 4 * {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400}.get(self.timeframe, 900),
+            "target_legs": ([{"price": p, "close_ratio": ratios[i], "label": f"TP{i+1}"} for i, p in enumerate(targets)] if targets else []),
+            "confirmation_predicates": ["candle_closed", "regime_allowed", "session_allowed", "ensemble_gate_passed"],
+            "confirmed_by": ("systematic:ensemble" if signal.bias != "no_trade" else None),
+            "confirmation_time_utc": (signal_ts if signal.bias != "no_trade" else None),
             "bias": signal.bias,
             "confidence": signal.confidence,
             "entry_zone": entry_zone,
             "invalidation": invalidation,
             "targets": targets,
-            "step": round(step, 4),
+            "step": float(step),
             "reasoning_summary": signal.reasoning_summary,
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
-            "timestamp_utc": int(latest["timestamp_utc"]),
+            "timestamp_utc": signal_ts,
             "session": session,
             "features": feature_dict,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def _no_trade_response(self, latest, regime, reason: str) -> dict:
+        signal_ts = int(latest["timestamp_utc"])
+        signal_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+        ))
         return {
+            "signal_id": signal_id,
+            "signal_state": "no_trade",
+            "strategy_version": self.strategy_identity["strategy_version"],
+            "strategy_spec_hash": self.strategy_identity["strategy_spec_hash"],
+            "config_hash": self.strategy_identity["config_hash"],
+            "model_hash": self.strategy_identity["model_hash"],
+            "feature_snapshot_hash": None,
+            "setup_timeframe": self.timeframe,
+            "context_timeframes": self.cfg.get("features", {}).get("mtf_reference_timeframes", []),
+            "expires_at_utc": signal_ts,
+            "target_legs": [],
+            "confirmation_predicates": [],
             "bias": "no_trade",
             "confidence": 0.0,
             "entry_zone": None,
@@ -272,7 +301,7 @@ class RealtimePipeline:
             "targets": None,
             "reasoning_summary": reason,
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
-            "timestamp_utc": int(latest["timestamp_utc"]),
+            "timestamp_utc": signal_ts,
             "session": str(latest["session"]),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }

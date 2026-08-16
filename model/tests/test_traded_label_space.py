@@ -155,6 +155,25 @@ def test_the_traded_event_refuses_the_three_class_space():
 # The encoding contract
 # ---------------------------------------------------------------------------
 
+def test_traded_event_uses_signal_bar_atr_and_grid_clamp():
+    from labeling.label_generator import generate_labels_traded_event
+
+    df = pd.DataFrame({
+        "open": [100.0] * 8,
+        "high": [100.0, 100.0, 101.1, 100.0, 100.0, 100.0, 100.0, 100.0],
+        "low": [100.0] * 8,
+        "close": [100.0] * 8,
+        "atr": [1.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    })
+    cfg = _cfg()
+    cfg["signal_grid"]["step_max_points"] = 1.0
+    labels = generate_labels_traded_event(
+        df, cfg, ASSET, direction=1, horizon_n=4,
+        include_costs=False, require_net_positive=False,
+    )
+    assert labels.iloc[0] == 1.0  # protect=101 from signal ATR; not entry ATR=10
+
+
 def test_the_wired_training_label_uses_minus_one_for_short():
     df = _sawtooth_df()
     labels = generate_labels_from_config(df, _cfg(event="traded"), ASSET)

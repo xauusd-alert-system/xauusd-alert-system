@@ -483,7 +483,8 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
     return model
 
 
-def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict):
+def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
+                    sample_weight: np.ndarray | None = None):
     """
     Wrap the trained model with HONEST probability calibration using a purged,
     time-ordered split -- no shuffled K-fold, no temporal overlap (Phase 0+1).
@@ -508,8 +509,22 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     a no-op identity wrapper so probabilities stay raw (never silently accepted from a
     shuffled K-fold). Callers check this via the returned object's
     `_is_honest_placeholder` attribute.
+
+    ``sample_weight`` is the same index-aligned uniqueness vector used for the
+    production base fit.  It is supplied to CalibratedClassifierCV so both its
+    cloned estimator fit and held-out calibrator fit obey one explicit weighting
+    policy; fallback refits use it as well.
     """
     method = cfg["model"]["calibration_method"]
+    sw = None
+    if sample_weight is not None:
+        sw = np.asarray(sample_weight, dtype=float)
+        if len(sw) != len(y_train):
+            raise ValueError(
+                f"sample_weight length {len(sw)} != y_train length {len(y_train)}"
+            )
+        if not np.isfinite(sw).all() or (sw < 0).any() or not (sw > 0).any():
+            raise ValueError("sample_weight must be finite, non-negative and not all zero")
     # Normalize ONCE here (never again downstream): CalibratedClassifierCV refits
     # the estimator on raw label slices of this y, so the labels it forwards to
     # XGBoost must already be contiguous. Internal refits below therefore use
@@ -542,7 +557,7 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
             "(n=%d < fit=%d + purge=%d + calib=%d); applying identity calibration.",
             n, min_fit, horizon, min_calib,
         )
-        base = _fit_classifier(X_train, y_train, cfg)  # deterministic refit, same seed
+        base = _fit_classifier(X_train, y_train, cfg, sample_weight=sw)  # deterministic refit, same seed
         _attach_noop_calibration(base, method_invalid=True)
         return base
 
@@ -569,7 +584,7 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
             "(classes %s vs full %s); identity calibration.",
             sorted(set(y_fit.unique())), sorted(full_classes),
         )
-        base = _fit_classifier(X_train, y_train, cfg)  # refit on full set (deterministic seed)
+        base = _fit_classifier(X_train, y_train, cfg, sample_weight=sw)  # refit on full set (deterministic seed)
         _attach_noop_calibration(base, method_invalid=True)
         return base
     if len(X_calib) < 5 or set(y_calib.unique()) != full_classes:
@@ -579,7 +594,7 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
             "(classes %s vs full %s); identity calibration.",
             sorted(set(y_calib.unique())), sorted(full_classes),
         )
-        base = _fit_classifier(X_train, y_train, cfg)
+        base = _fit_classifier(X_train, y_train, cfg, sample_weight=sw)
         _attach_noop_calibration(base, method_invalid=True)
         return base
 
@@ -599,7 +614,11 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
         (np.arange(fit_end), np.arange(fit_end + horizon, n))
     ]
     calibrated = CalibratedClassifierCV(base_model, method=method, cv=split_indices)
-    calibrated.fit(X_train, y_train)
+    fit_kwargs = {"sample_weight": sw} if sw is not None else {}
+    calibrated.fit(X_train, y_train, **fit_kwargs)
+    calibrated._calibration_weight_mode = (
+        "sample_weight" if sw is not None else "unweighted"
+    )
     return calibrated
 
 
@@ -616,9 +635,13 @@ def _attach_noop_calibration(model, method_invalid: bool) -> None:
         model._calibration_skipped_reason = "insufficient_purged_data"
 
 
-def save_model(model, feature_cols: list, path: str):
+def save_model(model, feature_cols: list, path: str, metadata: dict | None = None):
+    """Persist a model bundle with an auditable, backward-compatible contract."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    joblib.dump({"model": model, "feature_cols": feature_cols}, path)
+    bundle = {"model": model, "feature_cols": feature_cols}
+    if metadata is not None:
+        bundle["metadata"] = metadata
+    joblib.dump(bundle, path)
 
 
 def load_model(path: str):
