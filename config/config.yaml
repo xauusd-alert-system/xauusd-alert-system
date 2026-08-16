@@ -647,7 +647,13 @@ trade_profiles:
     asset: XAUUSD
     timeframe: M15
     unit: price
-    validated: true
+    # Pre-merge audit: validated:true НЕ имеет attached validation report /
+    # frozen-data evidence. До отдельного доказательного отчёта профиль
+    # остаётся research/paper-статусом — validation gate блокирует его
+    # (PROFILE_NOT_VALIDATED). Геометрия/TP/SL/risk НЕ менялись.
+    validated: false
+    validation_status: pending_xau_validation
+    paper_only: true
     geometry_version: xau_m15_intraday_v1
     step:
       source: atr

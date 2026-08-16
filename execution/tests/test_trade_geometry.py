@@ -349,3 +349,21 @@ def test_btc_candidate_profile_remains_validation_gated():
     with pytest.raises(GeometryRejected) as exc:
         validate_profile_gate(profile)
     assert exc.value.reason_code == PROFILE_NOT_VALIDATED
+
+
+def test_xau_profile_remains_validation_gated_until_evidence():
+    """Pre-merge audit: xau_m15_intraday_v1 has validated:true WITHOUT an
+    attached validation report / frozen-data evidence. Until a separate
+    evidenced report exists the profile must stay unvalidated and the
+    validation gate must block it (PROFILE_NOT_VALIDATED) — it is paper-only
+    by construction and cannot produce an approved group."""
+    import yaml
+    with open("config/config.yaml", "r", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+    profile = cfg["trade_profiles"]["xau_m15_intraday_v1"]
+    assert profile["validated"] is False
+    assert profile.get("paper_only") is True
+    assert profile.get("validation_status") == "pending_xau_validation"
+    with pytest.raises(GeometryRejected) as exc:
+        validate_profile_gate(profile)
+    assert exc.value.reason_code == PROFILE_NOT_VALIDATED
