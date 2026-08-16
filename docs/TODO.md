@@ -143,9 +143,22 @@ GOLD | ЗОЛОТО | XAUUSD
 - [ ] **Signal Desk UI (другой проект `trading-system-playbook`):** страницы Overview/Signals/Lifecycle/Positions/Execution Quality/Risk/Research/System Health — вне этого репозитория.
 - [ ] **Wave 3+:** MT5 read-only views на Windows-хосте, empirical cost dataset, acceptance checklist.
 
+## 3d. TradeGroupSpec v1 (2026-08-16, ТЗ «TradeGroupSpec v1»; статус в `docs/TRADE_GROUP_SPEC.md`)
+
+- [x] **Domain-контракт:** `execution/trade_group.py` — `TradeGroupSpec` v1 (immutable), `TradeLeg`, `GroupState` (state machine + BE_RETRY), `BreakEvenPolicy`, `GroupRisk`, `allocate_leg_volumes` (floor-правило), `check_group_risk` (один раз на группу), ids `signalId/intentId/groupId/legId`.
+- [x] **Geometry engine:** `execution/trade_geometry.py` — pure: профили, step (ATR+clamps), TP1/2/3/SL, tick alignment, broker min stop distance, cost-aware admissibility, gross R, reason codes; `build_trade_group_from_signal()` — ML→spec мост.
+- [x] **Profiles:** `config.trade_profiles` — `xau_m15_intraday_v1` (validated), `btc_m5_scalp_v1` (validated:false, paper-only кандидат; live BTC signal_grid не тронут).
+- [x] **BE (ТЗ §17/§18):** raw = actual fill; protected = fill + spread + slippage + commission; BE_CONFIRMED только после modify + broker query; bounded retry.
+- [x] **Telegram parity:** `alerts/formatter.py` — authoritative final geometry для `trade-group.v1` (recomputation запрещена), legacy fallback только для старых сигналов, lifecycle update формат.
+- [x] **Ledger/logger:** 15 новых lifecycle event types + `group_id`/`leg_id` (nullable, in-place); `trade_logger` group-колонки.
+- [x] **Persistence + paper executor:** `data/trade_group_store.py` (submitted-guard против duplicate orders при restart), `execution/trade_group_executor.py` (PaperDriver netting/hedging, simulate_tick, restart recovery; demo по `TRADE_GROUP_ENABLE_DEMO=1`; live — `LiveExecutionForbidden`).
+- [x] **Broker adapter:** `get_account_mode()`, `get_symbol_constraints()`.
+- [ ] **P1.5 (отложено):** `mt5_trader.py` group execution (hedging/netting submit) — после acceptance; current live path неизменен.
+- [ ] **P2:** BTC profile frozen-data validation (ТЗ §30), live promotion (только с отдельным подтверждением).
+
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **620 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; добавлены 57 тестов MQL5 observer wave и 17 тестов web-UI honesty wave). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **679 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; +59 TradeGroupSpec/broker-adapter тестов). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

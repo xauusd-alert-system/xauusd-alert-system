@@ -633,6 +633,76 @@ validation:
   require_provenance_manifest: false
   provenance_manifest_path: null
 
+# ===== TRADE PROFILES (TradeGroupSpec v1, ТЗ §8/§9) =====
+# Versioned deterministic geometry/risk profiles used by the trade-group path
+# (execution/trade_geometry.py). ML никогда не задаёт TP/SL произвольно —
+# только профиль. Профиль с `validated: false` блокируется validation gate
+# (PROFILE_NOT_VALIDATED) и не может породить approved group.
+#
+# BTC: текущий live-профиль НЕ меняется (signal_grid step 20–50 остаётся как
+# есть). btc_m5_scalp_v1 — КАНДИДАТ (paper-only), числа не скопированы из XAU;
+# значения пройдут frozen-data validation перед любым промоушеном (ТЗ §30).
+trade_profiles:
+  xau_m15_intraday_v1:
+    asset: XAUUSD
+    timeframe: M15
+    unit: price
+    validated: true
+    geometry_version: xau_m15_intraday_v1
+    step:
+      source: atr
+      atr_mult: 1.0
+      min_price_distance: 3.0     # зеркалит текущий signal_grid XAUUSD
+      max_price_distance: 9.0
+    targets:
+      multipliers: {tp1: 1.0, tp2: 1.5, tp3: 2.0}
+    stop:
+      source: validated_multiple
+      multiplier: 2.0
+    break_even:
+      trigger: tp1_filled
+      raw_price_policy: actual_fill
+      protected_price_policy: actual_fill_plus_cost_buffer
+      apply_to: [2, 3]
+    allocation: {tp1: 0.333333, tp2: 0.333333, tp3: 0.333334}
+    risk:
+      currency: USD
+      max_pct: 0.50
+      max_cash: 50.0
+    volume:
+      # floor-аллокация (ТЗ §15): total 0.06 -> legs 0.01/0.01/0.04 (все fillable)
+      total: 0.06
+  btc_m5_scalp_v1:
+    asset: BTCUSD
+    timeframe: M5
+    unit: price
+    validated: false            # validation gate: PROFILE_NOT_VALIDATED
+    validation_status: pending_btc_validation   # ТЗ §30: frozen-data gate required
+    paper_only: true
+    geometry_version: btc_m5_scalp_v1_candidate
+    step:
+      source: atr
+      atr_mult: 1.0
+      min_price_distance: 4.0   # КАНДИДАТ; НЕ активен пока validated=false
+      max_price_distance: 6.0
+    targets:
+      multipliers: {tp1: 1.0, tp2: 2.0, tp3: 3.0}
+    stop:
+      source: structure_or_validated_multiple
+      multiplier: 2.0
+    break_even:
+      trigger: tp1_filled
+      raw_price_policy: actual_fill
+      protected_price_policy: actual_fill_plus_cost_buffer
+      apply_to: [2, 3]
+    allocation: {tp1: 0.333333, tp2: 0.333333, tp3: 0.333334}
+    risk:
+      currency: USD
+      max_pct: 0.50
+      max_cash: 25.0
+    volume:
+      total: 0.01
+
 # Frozen paper is a separate process and never routes orders. Paths may be
 # overridden by PAPER_MANIFEST_PATH / PAPER_LEDGER_DB for /paper status.
 paper_forward:

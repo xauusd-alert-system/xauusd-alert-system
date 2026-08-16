@@ -55,6 +55,7 @@ MT5 candles ─▶ features ─▶ regime ─▶ model ─▶ ensemble/meta-filt
 - **[MQL5 Observer Plan — статус](docs/MQL5_OBSERVER_PLAN.md)**: план применения экосистемы MQL5 (read-only observer EA, контракты `SignalIntent`/`ExecutionEvent`, provenance manifest) и статус его реализации (Waves 0–2).
 - **[LEDGER_BRIDGE](docs/LEDGER_BRIDGE.md)**: MT5 observer producer → `/api/ledger/ingest` → append-only `ledger_events`; schema versioning, idempotency, восстановление, Execution Quality view.
 - **[Web-UI Honesty Audit](docs/WEB_UI_HONESTY_AUDIT.md)**: аудит старого FastAPI dashboard против спецификации личного веб-интерфейса — no-fallback контракт, freshness statuses, отключённые mutation controls, `/ws` ledger event stream.
+- **[TradeGroupSpec v1](docs/TRADE_GROUP_SPEC.md)**: нормализованный lifecycle сделки (immutable geometry, group risk, BE от actual fill, hedging/netting, paper-only executor) — статус реализации ТЗ.
 
 ## Requirements
 
