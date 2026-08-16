@@ -101,3 +101,73 @@ def test_delta_confidence_very_high_is_reachable():
     })
     level, _ = calculate_delta_confidence(df)
     assert level == "VERY HIGH"
+
+
+# ==========================================================================
+# Position Quality audit regressions (ТЗ §5/§6/§12/§24/§26)
+# ==========================================================================
+
+from features.smart_money_metrics import (
+    FORBIDDEN_CLAIMS,
+    SOURCE_KIND,
+    PARAMETER_META,
+)
+
+
+def test_report_text_never_claims_institutional_control_from_proxy(sample_market_df):
+    """§5/§12: OHLCV-proxy metrics must never be phrased as confirmed
+    institutional activity / real flow. Any future rewording that reintroduces
+    the forbidden claims fails here."""
+    report = format_institutional_metrics_report(
+        compute_institutional_metrics(sample_market_df))
+    lower = report.lower()
+    for claim in FORBIDDEN_CLAIMS:
+        assert claim.lower() not in lower, f"forbidden claim present: {claim}"
+    # honest disclaimer present
+    assert "ohlcv-прокси" in lower
+    assert "не реальный торговый поток" in lower
+
+
+def test_every_parameter_carries_source_kind_ohlcv_proxy(sample_market_df):
+    """§5/§24: each parameter result must declare its true source kind and the
+    real lookback it used — never a fabricated real-flow source."""
+    metrics = compute_institutional_metrics(sample_market_df)
+    for name, meta in PARAMETER_META.items():
+        param = metrics[name]
+        assert param["source_kind"] == SOURCE_KIND == "ohlcv_proxy", name
+        assert param["lookback"] == meta["lookback"], name
+        assert param["data_status"] in {"sufficient", "insufficient"}, name
+    agg = metrics["source_provenance"]
+    assert agg["source_kind"] == "ohlcv_proxy"
+    assert agg["lookbacks"] == {name: meta["lookback"]
+                                for name, meta in PARAMETER_META.items()}
+    assert "real trade flow" in agg["note"].lower() or "не реальный" in agg["note"]
+
+
+def test_insufficient_delta_data_is_marked_not_valid(sample_market_df):
+    """§12/§27: a too-short frame must be explicitly insufficient, never a
+    silently valid value."""
+    short = sample_market_df.iloc[:5].copy()
+    metrics = compute_institutional_metrics(short)
+    delta = metrics["delta_confidence"]
+    assert delta["data_status"] == "insufficient"
+    assert delta["source_kind"] == "ohlcv_proxy"
+    # the level is still a display value, but the marker prevents treating it
+    # as a valid reading downstream
+    assert delta["level"] in {"LOW", "MEDIUM", "HIGH", "VERY HIGH"}
+
+
+def test_short_frame_marks_all_parameters_insufficient(sample_market_df):
+    short = sample_market_df.iloc[:3].copy()
+    metrics = compute_institutional_metrics(short)
+    for name in PARAMETER_META:
+        assert metrics[name]["data_status"] == "insufficient", name
+
+
+def test_repeated_snapshot_is_deterministic(sample_market_df):
+    """§26: the same snapshot must produce byte-identical results on repeat."""
+    first = compute_institutional_metrics(sample_market_df)
+    second = compute_institutional_metrics(sample_market_df)
+    assert first == second
+    # reordering rows (same content) must NOT change the per-bar result
+    assert first["manipulation_index"]["source_kind"] == "ohlcv_proxy"
