@@ -143,3 +143,77 @@ AFTER FIX: 737 passed, 11 warnings  (текущий commit)
 NEW TESTS: 58
 WARNINGS: 11 (известные: Starlette deprecation, малые synthetic CSCV fixtures)
 ```
+
+---
+
+## 10. P1.5 — demo MT5 TradeGroup execution (2026-08-16)
+
+Коммит `feat: add demo MT5 TradeGroup execution and reconciliation` (поверх
+`eb00883`). LIVE запрещён; `execution/mt5_trader.py` и live BTC 20–50 не тронуты.
+
+### Новые модули
+
+| Модуль | Назначение (ТЗ P1.5) |
+|---|---|
+| `execution/execution_intent.py` | Immutable `ExecutionIntent` — ссылается на `TradeGroupSpec.geometry_hash()`; `require_geometry_unchanged()` перед submission |
+| `execution/mt5_common.py` | `MT5BrokerContext`: свежий broker snapshot (никакого stale-cache), `account_mode()` (hedging/netting/unknown — never guessed), tick-align-only normalization, `ORDER_GEOMETRY_INVALID` вместо растягивания TP/SL, comment `TG:<gid>\|L:<leg>\|<magic>` |
+| `execution/mt5_hedging_adapter.py` | 3 физических позиции: leg1→TP1, leg2→TP2, leg3→TP3, общий SL; magic/comment корреляция |
+| `execution/mt5_netting_adapter.py` | 1 aggregate position (total volume, SL=spec.sl, TP=tp3) + 3 virtual legs; partial close по TP; **один** SL modify для virtual legs (никаких противоположных модификаций) |
+| `execution/mt5_trade_group.py` | `MT5TradeGroupExecutor` (demo): submit (demo-account gate + account-mode detect + constraint validation + risk/TTL re-check + intent verification) и `poll_once()` — reconciliation-driven state machine |
+| `execution/reconciliation.py` | `inspect_group` (deals по ВСЕМ known tickets, включая закрытые позиции), `classify_broker_close` (tp1/tp2/tp3/stop по immutable spec), `detect_orphan_positions` (ORPHAN_BROKER_POSITION, idempotent, не управляется автоматически), volume-mismatch sync |
+| `data/trade_group_store.py` | + таблица `trade_group_actions` (actionId PK, `mark_action` idempotent), колонки `intent_json`/`account_mode` |
+| `data/trading_event_ledger.py` | + `leg_partially_filled`, `group_opened`, `orphan_broker_position`, `execution_error` |
+
+### Гарантии (проверены тестами)
+
+* **LIVE всегда заблокирован** (`LiveExecutionForbidden`); demo — только при
+  `TRADE_GROUP_ENABLE_DEMO=1` + `account.trade_mode == DEMO` (`DemoAccountRequired`);
+  account mode `unknown` → `ACCOUNT_MODE_UNKNOWN` (никогда не угадывается).
+* **TP1/TP2/TP3/SL immutable**: broker-закрытие классифицируется по immutable spec;
+  после TP1 меняется только SL остатка (BE), TP2/TP3 не трогаются ни в state, ни в
+  broker-запросах.
+* **TP1/BE только по broker confirmation**: локальная цена — только candidate
+  trigger для netting partial close; состояние меняется по результату
+  order/deal/position query. Deals «потребляются» один раз (actionId `DEAL-<ticket>`).
+* **BE**: от actual fill; все required legs (apply_to) модифицируются и проверяются
+  query'ем; rejection → `BE_RETRY` (bounded) → FAILED, никогда `BE_CONFIRMED`;
+  restart-safe (query-first, mark-on-success).
+* **Idempotency**: `OPEN-L1..3`, `CLOSE-TP1/2/3`, `BE-L2/L3`/`BE`, `DEAL-<t>` —
+  повтор actionId не создаёт duplicate action; restart не re-send'ит entry/close/BE.
+* **Partial fill**: `leg_partially_filled` + `PARTIALLY_FILLED`; remainder
+  cancel-политика (детерминированная), никаких top-up ордеров.
+* **Rejected leg** при открытии → `leg_rejected` + controlled recovery: group FAILED,
+  принятые legs сохраняют broker ids (не становятся silent orphans).
+* **Orphan**: позиция с нашим magic без local group → `ORPHAN_BROKER_POSITION`
+  (idempotent по ticket), не управляется.
+* **Telegram**: сообщения только после broker-confirmed событий; формат §35
+  (OPENED/TP1/BE/TP2/TP3/STOPPED, `Mode: DEMO`, group id).
+
+### Тесты (фактический запуск)
+
+```text
+Base commit: eb00883
+New commit:  (P1.5, см. git log)
+Tests:
+  BASELINE: 737 passed, 11 warnings
+  AFTER:    772 passed, 11 warnings
+  NEW:      35 (34 demo-executor + 4 reconciliation; всего в execution/tests: 168)
+```
+
+Покрытие §42–§46: сценарии A–F (hedging long/short, netting full cycle, stop,
+BE rejection→retry, restart после TP1), partial fill, order reject, restart
+after open/tp1/during-be-retry, idempotent action, orphan detection, no
+duplicate orders после reconciliation, telegram после confirmation, BTC
+unvalidated profile blocked, broker unavailable (no false success), BE retries
+exhausted → FAILED.
+
+### Demo account smoke test
+
+**Реальный Windows/MT5 demo smoke test в этом sandbox НЕ проводился** (нет
+Windows-терминала и пакета MetaTrader5). Вместо него все demo-сценарии прогнаны
+на детерминированном `FakeMT5`-двойнике, зеркалящем реальную поверхность
+MetaTrader5 Python API (account_info / symbol_info / symbol_info_tick /
+order_send / positions_get / history_deals_get + константы). Адаптеры написаны
+против этой поверхности без изменений для реального терминала; обязательный
+реальный demo smoke test (broker symbol, account mode, ticket/order/deal IDs)
+выполняется на Windows-хосте по чек-листу §48.

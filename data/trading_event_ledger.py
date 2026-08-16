@@ -21,6 +21,9 @@ EVENT_TYPES = {
     "leg_submitted", "leg_filled", "tp1_filled", "be_requested", "be_retry",
     "be_confirmed", "tp2_filled", "tp3_filled", "stop_filled", "leg_rejected",
     "group_reconciled",
+    # P1.5 demo MT5 execution (ТЗ §37): partial fills, group opened, orphan
+    # broker positions and execution errors are explicit ledger facts.
+    "leg_partially_filled", "group_opened", "orphan_broker_position", "execution_error",
 }
 
 

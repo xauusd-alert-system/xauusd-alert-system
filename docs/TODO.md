@@ -163,11 +163,12 @@ GOLD | ЗОЛОТО | XAUUSD
 - [x] **Demo env gate:** `TRADE_GROUP_ENABLE_DEMO` (fail-closed), live всегда заблокирован; spy-тест: paper path → 0 вызовов `order_send`.
 - [x] **Parity helper:** Telegram читает уровни из `spec.as_geometry_payload()`.
 - [x] **+58 тестов:** direction (LONG/SHORT), BE direction/alignment/costs, immutability против ATR/spread/candle, write-once fill, allocation dust (0.03–0.10), risk symmetry, live-gate, BTC 20–50 нетронут, SHORT Telegram parity, missing-geometry per-field, hedging lifecycle, no premature BE, BE retry→success, restart recovery matrix (6 состояний), ledger chronological/dedup.
-- [ ] **P1.5 (отложено):** real MT5 TradeGroup execution — отдельным этапом, live promotion только с явным approval.
+- [x] **P1.5 — demo MT5 TradeGroup execution:** `execution/execution_intent.py` (intent + geometry-hash verification), `mt5_common.py` (fresh snapshot, account-mode detect, tick-align-only, ORDER_GEOMETRY_INVALID), `mt5_hedging_adapter.py` (3 physical legs), `mt5_netting_adapter.py` (aggregate + virtual legs, один BE modify), `mt5_trade_group.py` (demo executor + poll state machine), `reconciliation.py` (deal-history evidence, orphan detection, volume sync), store actions table (idempotency), ledger `leg_partially_filled/group_opened/orphan_broker_position/execution_error`. LIVE заблокирован; demo gate = `TRADE_GROUP_ENABLE_DEMO=1` + DEMO account. +35 тестов (34 executor + 4 reconciliation; сценарии A–F §42, partial/reject/restart/orphan §43–§44, telegram §35–§36). Реальный Windows demo smoke test — на Windows-хосте.
+- [ ] **P2:** BTC profile frozen-data validation (ТЗ §30), live promotion (только с отдельным подтверждением).
 
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **737 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; +58 follow-up тестов). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **775 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; +38 P1.5 demo-execution/reconciliation тестов). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

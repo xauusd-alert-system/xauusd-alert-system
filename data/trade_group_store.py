@@ -22,6 +22,9 @@ from execution.trade_group import GroupState, TradeGroupSpec
 TABLE = "trade_groups"
 
 
+ACTIONS_TABLE = "trade_group_actions"
+
+
 def init_trade_group_store(db_path: str) -> None:
     conn = get_connection(db_path)
     try:
@@ -36,7 +39,20 @@ def init_trade_group_store(db_path: str) -> None:
             broker_ids_json TEXT NOT NULL,
             submitted INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL
+            updated_at_ms INTEGER NOT NULL,
+            intent_json TEXT,
+            account_mode TEXT
+        )""")
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}
+        for column in ("intent_json", "account_mode"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN {column} TEXT")
+        conn.execute(f"""CREATE TABLE IF NOT EXISTS {ACTIONS_TABLE} (
+            group_id TEXT NOT NULL,
+            action_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (group_id, action_id)
         )""")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_state ON {TABLE}(state)")
         conn.commit()
@@ -57,6 +73,8 @@ def save_group(
     be_state: dict[str, Any] | None = None,
     broker_ids: dict[str, Any] | None = None,
     submitted: bool = False,
+    intent_json: str | None = None,
+    account_mode: str | None = None,
 ) -> None:
     """Insert or update one group (state is mutable; geometry is not)."""
     init_trade_group_store(db_path)
@@ -66,14 +84,16 @@ def save_group(
         conn.execute(
             f"""INSERT OR REPLACE INTO {TABLE}
                 (group_id, schema_version, spec_json, spec_hash, state, legs_json,
-                 be_json, broker_ids_json, submitted, created_at_ms, updated_at_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 be_json, broker_ids_json, submitted, created_at_ms, updated_at_ms,
+                 intent_json, account_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 spec.group_id, spec.schema_version,
                 spec.model_dump_json(), spec.geometry_hash(),
                 state.value, json.dumps(legs or []),
                 json.dumps(be_state or {}), json.dumps(broker_ids or {}),
                 1 if submitted else 0, now, now,
+                intent_json, account_mode,
             ),
         )
         conn.commit()
@@ -101,7 +121,64 @@ def load_group(db_path: str, group_id: str) -> dict[str, Any] | None:
     data["be_state"] = json.loads(data.pop("be_json") or "{}")
     data["broker_ids"] = json.loads(data.pop("broker_ids_json") or "{}")
     data["submitted"] = bool(data["submitted"])
+    data["intent_json"] = data.pop("intent_json", None)
+    data["account_mode"] = data.pop("account_mode", None)
     return data
+
+
+# --------------------------------------------------------------------------
+# Idempotent execution actions (ТЗ P1.5 §30)
+# --------------------------------------------------------------------------
+
+def mark_action(db_path: str, group_id: str, action_id: str,
+                payload: dict[str, Any] | None = None) -> bool:
+    """Atomically record one actionId; returns True ONLY for the first caller.
+
+    Repeating the same ``actionId`` (restart, retry, duplicate event) never
+    creates a duplicate broker action.
+    """
+    init_trade_group_store(db_path)
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            f"""INSERT OR IGNORE INTO {ACTIONS_TABLE}
+                (group_id, action_id, payload_json, created_at_ms)
+                VALUES (?, ?, ?, ?)""",
+            (group_id, action_id, json.dumps(payload or {}, sort_keys=True, default=str),
+             _now_ms()),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+def has_action(db_path: str, group_id: str, action_id: str) -> bool:
+    init_trade_group_store(db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            f"SELECT 1 FROM {ACTIONS_TABLE} WHERE group_id=? AND action_id=?",
+            (group_id, action_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def list_actions(db_path: str, group_id: str) -> list[dict[str, Any]]:
+    init_trade_group_store(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            f"SELECT action_id, payload_json, created_at_ms FROM {ACTIONS_TABLE} "
+            f"WHERE group_id=? ORDER BY created_at_ms, action_id",
+            (group_id,),
+        ).fetchall()
+        return [{"action_id": r[0], "payload": json.loads(r[1] or "{}"),
+                 "created_at_ms": r[2]} for r in rows]
+    finally:
+        conn.close()
 
 
 def list_groups(db_path: str, state: GroupState | None = None) -> list[dict[str, Any]]:
