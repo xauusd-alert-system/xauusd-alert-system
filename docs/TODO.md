@@ -124,9 +124,18 @@ GOLD | ЗОЛОТО | XAUUSD
 
 ---
 
+## 3b. MQL5 observer wave (2026-08-16, план в `docs/MQL5_OBSERVER_PLAN.md`)
+
+- [x] **Контракты v1:** `SignalIntent` / `ExecutionEvent` / `EventEnvelope` + детерминированные `event_id` (`contracts/execution_contracts.py`, 12 тестов).
+- [x] **Wave 1 — MQL5 Observer EA (read-only):** `mql5/SignalDeskObserver/` (ObserverEA, EventSerializer, DiskOutbox, SymbolResolver, HistoryReconciler, JsonWriter; без `OrderSend`/`CTrade`; demo/contest-only; wire-contract golden tests). Компиляция и acceptance — на Windows-хосте (`mql5/SignalDeskObserver/README.md`).
+- [x] **Wave 0 — provenance manifest:** `data/provenance.py` + `scripts/build_provenance_manifest.py`; opt-in gate в `train_mt5`/`run_backtest` (`validation.require_provenance_manifest`).
+- [x] **Wave 2 — ledger bridge:** `data/ledger_bridge.py` (outbox + HMAC + retry), `scripts/run_ledger_bridge.py`, серверные endpoints `/api/ledger/ingest`, `/api/ledger/events`, `/api/ledger/execution-quality`, `/api/ledger/lifecycle/{intent_id}` (`realtime/app.py`, `data/ledger_events.py`), Python sender пишет `intent_created`/`request_result` и intent до `order_send` (`execution/mt5_trader.py`, `data/intent_ledger.py`, `data/execution_ledger.py` intent/precision columns).
+- [x] **`signal_journal.asset_key`:** nullable-колонка + in-place миграция (`logs/journal.py`).
+- [ ] **Wave 3+ (требуют Windows-хоста):** acceptance checklist, empirical cost dataset на demo, frozen paper baseline, revalidation. UI-views Execution Quality / Lifecycle Trace — API готов, HTML — будущая работа.
+
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **545 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **603 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; добавлены 57 тестов MQL5 observer wave). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

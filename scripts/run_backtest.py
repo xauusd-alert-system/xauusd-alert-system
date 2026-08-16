@@ -315,6 +315,13 @@ def main():
     timeframe = asset_cfg.get("timeframe") or args.timeframe
 
     raw = load_asset_history(args.db_path, timeframe, args.asset)
+
+    # Wave 0 provenance gate: when validation.require_provenance_manifest is
+    # true, the frozen manifest must exist and match the raw content BEFORE any
+    # feature/label work. Mixing brokers or incomplete history stops the run.
+    from data.provenance import provenance_gate
+    provenance_gate(cfg, args.db_path, timeframe, args.asset)
+
     if args.end_date:
         raw = truncate_before(raw, args.end_date, args.asset)
     df = build_full_df(cfg, raw, db_path=args.db_path, asset_key=args.asset)

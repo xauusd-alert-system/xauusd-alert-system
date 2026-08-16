@@ -31,9 +31,15 @@ CREATE TABLE IF NOT EXISTS signal_journal (
     reasoning       TEXT,
     outcome         TEXT,
     outcome_pnl     REAL,
-    outcome_logged_at TEXT
+    outcome_logged_at TEXT,
+    asset_key       TEXT
 );
 """
+
+# Wave-0 MQL5 plan: signal_journal previously had no persisted asset. The
+# column is nullable and added in place so legacy journals migrate
+# non-destructively; multi-asset rollout must not start before this migration.
+_ASSET_COLUMN = "asset_key"
 
 
 class SignalJournal:
@@ -47,15 +53,23 @@ class SignalJournal:
     def _init_db(self):
         with self._connect() as conn:
             conn.execute(CREATE_TABLE_SQL)
+            # Idempotent in-place migration for journals created before the
+            # asset column existed (SQLite ADD COLUMN keeps existing rows).
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(signal_journal)")}
+            if _ASSET_COLUMN not in existing:
+                conn.execute(f"ALTER TABLE signal_journal ADD COLUMN {_ASSET_COLUMN} TEXT")
             conn.commit()
 
-    def log_signal(self, signal: dict) -> int:
+    def log_signal(self, signal: dict, asset_key: str | None = None) -> int:
         """
         Insert a new signal row. Returns the new row id (used later for update_outcome).
         signal is the dict from realtime/pipeline.py::generate_signal().
+        ``asset_key`` is persisted explicitly (Wave-0 MQL5 plan) so multi-asset
+        journals never fall back to a temporary default mapping.
         """
         entry_zone = signal.get("entry_zone") or [None, None]
         targets = signal.get("targets") or [None]
+        asset_key = asset_key or signal.get("asset_key")
         row = (
             signal.get("generated_at", datetime.now(timezone.utc).isoformat()),
             int(signal.get("timestamp_utc", 0)),
@@ -73,9 +87,10 @@ class SignalJournal:
             cursor = conn.execute(
                 """INSERT INTO signal_journal
                    (generated_at, timestamp_utc, session, regime, bias, confidence,
-                    entry_zone_low, entry_zone_high, invalidation, target, reasoning)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                row,
+                    entry_zone_low, entry_zone_high, invalidation, target, reasoning,
+                    asset_key)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                row + (asset_key,),
             )
             conn.commit()
             return cursor.lastrowid

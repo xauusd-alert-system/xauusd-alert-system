@@ -47,8 +47,9 @@ def test_update_outcome_fills_result(tmp_journal):
     row_id = tmp_journal.log_signal(SAMPLE_SIGNAL)
     tmp_journal.update_outcome(row_id, "target", pnl=150.0)
     rows = tmp_journal.fetch_all()
-    assert rows[0][-3] == "target"
-    assert rows[0][-2] == 150.0
+    # trailing columns: ..., outcome, outcome_pnl, outcome_logged_at, asset_key
+    assert rows[0][-4] == "target"
+    assert rows[0][-3] == 150.0
 
 
 def test_fetch_unresolved_excludes_resolved(tmp_journal):

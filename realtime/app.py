@@ -5,11 +5,12 @@ Macro AI news sentiment, visual charts, and interactive bot controls.
 """
 from __future__ import annotations
 import os
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Header
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 import pandas as pd
@@ -23,6 +24,14 @@ from backtest.monte_carlo import MonteCarloSimulator
 from alerts.chart_renderer import ChartRenderer
 from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
 from alerts import status_commands as sc
+from contracts.execution_contracts import event_envelope_from_dict
+from data.ledger_bridge import verify_signature
+from data.ledger_events import (
+    execution_quality_summary,
+    lifecycle_trace,
+    read_ledger_events,
+    upsert_ledger_event,
+)
 
 logger = logging.getLogger("realtime_app")
 
@@ -487,3 +496,129 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_json({"status": "live", "echo": data, "paused": TRADING_PAUSED})
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")
+
+
+# =====================================================================
+# Signal Desk ledger bridge (Wave 2 of the MQL5 observer plan).
+#
+# Producers: Python sender (intent_created / request_result) and the
+# MQL5 SignalDeskObserver (deal_added / order_history_added /
+# position_modified / execution_reconciled / health_heartbeat). All
+# facts are normalized into one append-only ledger_events table
+# (data/ledger_events.py); event_id is a deterministic primary key, so
+# outbox retries and restart reconciliation dedupe safely.
+#
+# Auth: POST requires LEDGER_INGEST_TOKEN (bearer); reads require
+# LEDGER_OWNER_TOKEN (falls back to the ingest token). When
+# LEDGER_INGEST_SECRET is set, the Python bridge must additionally sign
+# the body (X-Ledger-Signature, HMAC-SHA256); the MQL5 observer relies
+# on HTTPS + bearer only. Unconfigured endpoints fail closed (403).
+# =====================================================================
+
+def _ledger_db_path() -> str:
+    return str(get_env("TRADE_LOG_DB_PATH",
+                       default=CFG.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
+
+
+def _ledger_owner_token() -> str | None:
+    return get_env("LEDGER_OWNER_TOKEN", default=None) or get_env("LEDGER_INGEST_TOKEN", default=None)
+
+
+def _check_bearer(authorization: str | None, expected: str | None) -> bool:
+    return bool(expected) and authorization == f"Bearer {expected}"
+
+
+@app.post("/api/ledger/ingest")
+async def ledger_ingest(request: Request, authorization: str | None = Header(default=None)):
+    """Owner-only, idempotent fact ingest from the Python bridge / MQL5 observer."""
+    ingest_token = get_env("LEDGER_INGEST_TOKEN", default=None)
+    if not ingest_token:
+        raise HTTPException(status_code=403, detail="ledger ingest is not configured")
+    if not _check_bearer(authorization, ingest_token):
+        raise HTTPException(status_code=401, detail="ledger ingest authorization required")
+
+    try:
+        body = await request.body()
+        envelope = event_envelope_from_dict(json.loads(body.decode("utf-8")))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid ledger envelope: {exc}")
+
+    secret = get_env("LEDGER_INGEST_SECRET", default=None)
+    signature_valid = True
+    if secret:
+        signature_valid = verify_signature(body, request.headers.get("X-Ledger-Signature"), secret)
+        if not signature_valid:
+            raise HTTPException(status_code=401, detail="ledger signature mismatch")
+
+    db_path = _ledger_db_path()
+    accepted = 0
+    duplicates = 0
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    for event in envelope.events:
+        _, inserted = upsert_ledger_event(
+            db_path, event, signature_valid=signature_valid, received_at_utc_ms=now
+        )
+        if inserted:
+            accepted += 1
+        else:
+            duplicates += 1
+    return {
+        "status": "ok",
+        "accepted": accepted,
+        "duplicates": duplicates,
+        "signature_valid": signature_valid,
+        "source": envelope.producer,
+        "account_fingerprint": envelope.account_fingerprint,
+    }
+
+
+@app.get("/api/ledger/events")
+def ledger_events(
+    source: str | None = None,
+    event_type: str | None = None,
+    asset_key: str | None = None,
+    intent_id: str | None = None,
+    since_ms: int | None = None,
+    limit: int = 200,
+    authorization: str | None = Header(default=None),
+):
+    """Owner-only read of normalized execution facts."""
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    df = read_ledger_events(
+        _ledger_db_path(), source=source, event_type=event_type, asset_key=asset_key,
+        intent_id=intent_id, since_ms=since_ms, limit=min(max(1, limit), 5000),
+    )
+    records = []
+    for row in df.to_dict("records"):
+        row = {k: (None if pd.isna(v) else v) for k, v in row.items()}
+        try:
+            row["payload"] = json.loads(row.pop("payload_json") or "{}")
+        except json.JSONDecodeError:
+            row["payload"] = {}
+        records.append(row)
+    return {"source": "ledger_events", "available": True, "count": len(records),
+            "events": records}
+
+
+@app.get("/api/ledger/execution-quality")
+def ledger_execution_quality(
+    asset_key: str | None = None,
+    since_ms: int | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """Owner-only empirical execution-cost summary (plan Wave 3 view)."""
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    return execution_quality_summary(_ledger_db_path(), asset_key=asset_key, since_ms=since_ms)
+
+
+@app.get("/api/ledger/lifecycle/{intent_id}")
+def ledger_lifecycle(intent_id: str, authorization: str | None = Header(default=None)):
+    """Owner-only lifecycle trace: intent -> request -> deal -> reconciliation."""
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    return lifecycle_trace(_ledger_db_path(), intent_id)

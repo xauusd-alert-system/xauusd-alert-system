@@ -13,6 +13,8 @@ EVENT_TYPES = {
     "signal_published", "order_submitted", "order_filled", "order_rejected",
     "stop_move_requested", "stop_move_confirmed", "stop_move_rejected",
     "partial_close_submitted", "partial_filled", "partial_rejected", "position_closed",
+    # Wave-0 MQL5 plan: immutable SignalIntent recorded before order_send.
+    "intent_created",
 }
 
 

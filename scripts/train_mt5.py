@@ -233,6 +233,13 @@ def main():
     raw = read_candles(args.db_path, args.timeframe, args.symbol)
     if raw.empty:
         raise SystemExit(f"No candles found for {args.symbol} in {args.db_path} timeframe={args.timeframe}")
+
+    # Wave 0 provenance gate: when validation.require_provenance_manifest is
+    # true, the frozen manifest must exist and match the raw content BEFORE any
+    # feature/label work. Mixing brokers or incomplete history stops the run.
+    from data.provenance import provenance_gate
+    provenance_gate(cfg, args.db_path, args.timeframe, args.symbol)
+
     if args.end_date:
         raw = truncate_raw_before(raw, args.end_date, args.symbol)
 

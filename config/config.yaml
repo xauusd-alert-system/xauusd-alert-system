@@ -624,6 +624,14 @@ validation:
     enabled: true
     start: "2026-08-08"    # from today — live-forward accumulation
     end: null              # open-ended: research never looks at fresh data
+  # Wave-0 MQL5 plan: immutable raw-data provenance. When enabled, every
+  # train_mt5 / run_backtest run verifies the frozen manifest (data hash,
+  # source window, candle count) BEFORE building features; any mismatch stops
+  # the run. Build a manifest with:
+  #   python -m scripts.build_provenance_manifest --asset XAUUSD --timeframe M15 \
+  #       --broker <BROKER> --broker-symbol GOLD --out config/provenance/xauusd_m15.json
+  require_provenance_manifest: false
+  provenance_manifest_path: null
 
 # Frozen paper is a separate process and never routes orders. Paths may be
 # overridden by PAPER_MANIFEST_PATH / PAPER_LEDGER_DB for /paper status.

@@ -52,6 +52,8 @@ MT5 candles ─▶ features ─▶ regime ─▶ model ─▶ ensemble/meta-filt
 - **[TODO & Roadmap (План работ и статус)](TODO.md)** (`TODO.md` / `docs/TODO.md`): матрица готовности подсистем, чеклист развертывания и дорожная карта развития (Phase 0–6 completed, Phase 7+ roadmap).
 - **[Strategy Benchmarks & Validation](docs/benchmarks.md)** (`docs/benchmarks.md`): протокол честной валидации без утечек данных, walk-forward бейзлайны по активам и журнал изменений.
 - **[Audit 2026-08-10 — Fix Status](docs/AUDIT_FIXES_2026-08-10.md)**: таблица «находка → статус» по независимому квант-аудиту (SWOT/методология), с пояснением, какие пункты исправлены кодом, а какие только задокументированы.
+- **[MQL5 Observer Plan — статус](docs/MQL5_OBSERVER_PLAN.md)**: план применения экосистемы MQL5 (read-only observer EA, контракты `SignalIntent`/`ExecutionEvent`, provenance manifest) и статус его реализации (Waves 0–2).
+- **[LEDGER_BRIDGE](docs/LEDGER_BRIDGE.md)**: MT5 observer producer → `/api/ledger/ingest` → append-only `ledger_events`; schema versioning, idempotency, восстановление, Execution Quality view.
 
 ## Requirements
 

@@ -25,6 +25,18 @@ from data.execution_ledger import init_execution_ledger, log_execution_attempt, 
 from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
 from execution.risk_manager import InstitutionalRiskManager
+# Wave-0 contracts (MQL5 observer plan): SignalIntent is persisted BEFORE
+# order_send; ExecutionEvent facts are enqueued into the durable outbox for
+# delivery to the server ledger. Both are best-effort: a failure here must
+# never block or change the trading path.
+from contracts.execution_contracts import (
+    ExecutionEvent,
+    account_fingerprint,
+    build_signal_intent,
+    execution_event_id,
+)
+from data.intent_ledger import append_signal_intent
+from data.ledger_bridge import enqueue_event
 
 logging.basicConfig(
     level=logging.INFO,
@@ -735,9 +747,99 @@ class MultiAssetMT5Trader:
         except Exception as exc:
             logger.error("Trading event ledger write failed: %s", exc)
 
+    def _account_fingerprint(self) -> str:
+        """Best-effort '<mode>:<login>' fingerprint used in deterministic event ids."""
+        try:
+            account = mt5.account_info()
+            trade_mode = getattr(account, "trade_mode", None)
+            login = int(getattr(account, "login", 0) or 0)
+            mode = "unknown"
+            for attr, label in (("ACCOUNT_TRADE_MODE_DEMO", "demo"),
+                                ("ACCOUNT_TRADE_MODE_CONTEST", "contest"),
+                                ("ACCOUNT_TRADE_MODE_REAL", "real")):
+                value = getattr(mt5, attr, None)
+                if value is not None and trade_mode == value:
+                    mode = label
+                    break
+            return account_fingerprint(mode, login)
+        except Exception:  # pragma: no cover - defensive
+            return account_fingerprint("unknown", 0)
+
+    def _enqueue_execution_fact(self, event: ExecutionEvent) -> None:
+        """Durable outbox enqueue; never raises into the trading path."""
+        try:
+            enqueue_event(self.trade_db_path, event)
+        except Exception as exc:
+            logger.error("Ledger outbox enqueue failed: %s", exc)
+
+    def _intent_created_fact(self, intent) -> ExecutionEvent:
+        fp = self._account_fingerprint()
+        return ExecutionEvent(
+            event_id=execution_event_id("mt5_python_sender", fp, "intent", intent.intent_id),
+            event_type="intent_created",
+            intent_id=intent.intent_id,
+            source="mt5_python_sender",
+            account_mode=fp.split(":", 1)[0],
+            broker_symbol=intent.broker_symbol,
+            asset_key=intent.asset_key,
+            magic_number=intent.magic_number,
+            volume_requested=intent.requested_volume,
+            precision="request",
+            received_at_utc_ms=now_ms(),
+            payload={"signal_id": intent.signal_id, "mode": intent.mode},
+        )
+
+    def _request_result_fact(self, *, intent_id, asset_key, broker_symbol, request,
+                             result, requested_at_ms) -> ExecutionEvent:
+        fp = self._account_fingerprint()
+        result_order = int(getattr(result, "order", 0) or 0)
+        result_deal = int(getattr(result, "deal", 0) or 0)
+        if result_order or result_deal:
+            tx_id = f"{result_order}:{result_deal}"
+        else:
+            tx_id = f"t:{int(requested_at_ms)}:{int(getattr(result, 'retcode', 0) or 0)}"
+        retcode = getattr(result, "retcode", None)
+        done_codes = {
+            code for code in (
+                getattr(mt5, "TRADE_RETCODE_DONE", None),
+                getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", None),
+            ) if code is not None
+        }
+        is_done = retcode in done_codes
+        fill_price = getattr(result, "price", None) if is_done else None
+        if fill_price is not None and float(fill_price) <= 0:
+            fill_price = None
+        filled_volume = getattr(result, "volume", None) if is_done else None
+        if filled_volume is not None and float(filled_volume) <= 0:
+            filled_volume = None
+        return ExecutionEvent(
+            event_id=execution_event_id("mt5_python_sender", fp, "request", tx_id),
+            event_type="request_result",
+            intent_id=intent_id,
+            source="mt5_python_sender",
+            account_mode=fp.split(":", 1)[0],
+            broker_symbol=broker_symbol,
+            asset_key=asset_key,
+            magic_number=request.get("magic"),
+            order_ticket=result_order or None,
+            deal_ticket=result_deal or None,
+            retcode=retcode,
+            requested_price=request.get("price"),
+            fill_price=fill_price,
+            filled_volume=filled_volume,
+            volume_requested=request.get("volume"),
+            latency_ms=max(0, now_ms() - int(requested_at_ms)),
+            precision="request",
+            received_at_utc_ms=now_ms(),
+            reason=None if is_done else str(getattr(result, "comment", "") or ""),
+            payload={"action": str(request.get("action", "")),
+                     "order_comment": str(request.get("comment", ""))},
+        )
+
     def _record_execution_result(self, *, asset_key, broker_symbol, action, side,
                                  requested_at, request, result,
-                                 position_ticket=None):
+                                 position_ticket=None, intent_id=None,
+                                 precision="request"):
         """Best-effort append-only execution telemetry; never blocks trading."""
         try:
             done_codes = {
@@ -775,6 +877,8 @@ class MultiAssetMT5Trader:
                 rejection_reason=None if is_done else str(getattr(result, "comment", "")),
                 order_ticket=getattr(result, "order", None),
                 position_ticket=position_ticket,
+                intent_id=intent_id,
+                precision=precision,
                 metadata={"comment": request.get("comment")},
             )
         except Exception as exc:
@@ -976,16 +1080,49 @@ class MultiAssetMT5Trader:
             logger.info(f"[DRY RUN] Order NOT sent for {asset_key}. Would execute with request above.")
             return
 
+        # Wave-0 contract (MQL5 observer plan): persist the immutable
+        # SignalIntent BEFORE order_send, then carry a correlation-safe short id
+        # in the order comment so the MQL5 observer can join broker deal facts
+        # back to this intent. Failures here are logged, never blocking.
+        intent = build_signal_intent(
+            asset_key=asset_key,
+            broker_symbol=mt5_symbol,
+            side="long" if bias == "long" else "short",
+            requested_volume=self.volume,
+            entry_price=price,
+            sl_price=sl_price,
+            tp_price=tp_price,
+            model_version=str(signal.get("model_version") or "") or None,
+            feature_manifest_hash=signal.get("feature_manifest_hash"),
+            config_hash=signal.get("config_hash") or self.strategy_identity["config_hash"],
+            mode=self.deployment_mode.value,
+            magic_number=self.magic_number,
+            signal_id=signal_id,
+            created_at_utc_ms=now_ms(),
+        )
+        try:
+            append_signal_intent(self.trade_db_path, intent)
+            self._enqueue_execution_fact(self._intent_created_fact(intent))
+        except Exception as exc:
+            logger.error("Intent persist/enqueue failed: %s", exc)
+        request = dict(request)
+        request["comment"] = f"{asset_key} ML Scalp {intent.intent_id[:8]}"
+
         self._append_trade_event(
             "order_submitted", asset_key, signal,
             reason="model_signal_confirmed", payload={
                 "broker_symbol": mt5_symbol, "side": bias, "requested_price": price,
                 "volume": self.volume, "sl": sl_price, "tp": tp_price,
                 "deployment_mode": self.deployment_mode.value,
+                "intent_id": intent.intent_id,
             },
         )
         requested_at = now_ms()
         result = mt5.order_send(request)
+        self._enqueue_execution_fact(self._request_result_fact(
+            intent_id=intent.intent_id, asset_key=asset_key, broker_symbol=mt5_symbol,
+            request=request, result=result, requested_at_ms=requested_at,
+        ))
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             # HIGH 22: in real MT5 the order ticket (result.order) differs from the
             # position ticket. Resolve the genuine position ticket via positions_get so
@@ -1020,6 +1157,8 @@ class MultiAssetMT5Trader:
                 request=request,
                 result=result,
                 position_ticket=pos_ticket,
+                intent_id=intent.intent_id,
+                precision="request",
             )
             logger.info(f"🔥 [{asset_key}] ORDER EXECUTED IN MT5! Ticket: #{pos_ticket}, Type: {bias.upper()}, Price: {price}, SL: {sl_price}, TP: {tp_price}")
 
@@ -1110,6 +1249,8 @@ class MultiAssetMT5Trader:
                 requested_at=requested_at,
                 request=request,
                 result=result,
+                intent_id=intent.intent_id,
+                precision="request",
             )
             logger.error(
                 f"Order Send Failed for {asset_key}: {result.comment} (Retcode: {result.retcode}), "
