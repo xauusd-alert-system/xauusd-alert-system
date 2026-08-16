@@ -234,6 +234,8 @@ class TradeGroupSpec(BaseModel):
     strategy_version: str
     expires_at_utc_ms: int
     created_at_utc_ms: int
+    # P1.6 §20–§22: lineage from source to approved spec.
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_contract(self):
@@ -274,10 +276,37 @@ class TradeGroupSpec(BaseModel):
             raise ValueError("expires_at_utc_ms must be positive (TTL)")
         return self
 
+    def require_execution_provenance(self) -> None:
+        """P1.6 §22/§23: an APPROVED (execution-bound) spec must carry the full
+        lineage. The base model stays constructible (legacy tests / paper
+        fixtures), but the execution path calls this before approval."""
+        prov = self.provenance or {}
+        required_ids = ("market_snapshot_id", "feature_snapshot_id",
+                        "model_inference_id", "model_hash", "profile_id",
+                        "broker_snapshot_id", "cost_snapshot_id",
+                        "geometry_hash", "provenance_hash")
+        missing = [key for key in required_ids if not prov.get(key)]
+        if missing:
+            raise ValueError(
+                f"trade-group provenance incomplete: missing {missing}"
+            )
+        if prov.get("geometry_hash") != self.geometry_hash():
+            raise ValueError(
+                "provenance.geometry_hash must equal the spec geometry_hash"
+            )
+        if prov.get("provenance_hash") != self.provenance_hash():
+            raise ValueError(
+                "provenance.provenance_hash must equal the spec provenance_hash"
+            )
+
     # --- identity / hashing -------------------------------------------------
 
     def geometry_hash(self) -> str:
-        """Hash over the immutable geometry + risk; stable across actual_fill."""
+        """Hash over the immutable geometry + risk; stable across actual_fill.
+
+        P1.6 §21: ``geometry_hash`` = ЧТО получилось; ``provenance_hash`` =
+        ИЗ ЧЕГО получилось (lineage of parent snapshot ids).
+        """
         payload = json.dumps({
             "group_id": self.group_id,
             "asset_key": self.asset_key,
@@ -289,6 +318,18 @@ class TradeGroupSpec(BaseModel):
             "risk": {k: v for k, v in self.risk.model_dump().items()
                      if k not in {"estimated_loss_at_sl"}},
             "profile_id": self.profile_id,
+        }, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def provenance_hash(self) -> str:
+        """Lineage hash over the parent snapshot ids (§21/§24)."""
+        prov = self.provenance or {}
+        payload = json.dumps({
+            key: prov.get(key) for key in (
+                "market_snapshot_id", "feature_snapshot_id", "model_inference_id",
+                "model_hash", "profile_id", "broker_snapshot_id",
+                "cost_snapshot_id",
+            )
         }, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

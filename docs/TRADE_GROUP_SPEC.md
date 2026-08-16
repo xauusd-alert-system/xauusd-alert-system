@@ -289,3 +289,88 @@ rounding; no close above remaining; cumulative allocation без double-count;
 hedging leg partial fill; management по filled volume; compensation по actual
 volume; restart во всех компенсационных состояниях; глобальный safety
 invariant (non-terminal: open volume <= approved; FAILED: open risk == 0).
+
+---
+
+## 12. P1.6 — ProvenanceSpec v1, lineage и freshness (2026-08-16)
+
+Коммит `feat: add provenance lineage and source freshness contracts` (поверх
+`35f6bfb`). Live не включён; ML/model/BTC 20–50/`btc_m5_scalp_v1` не менялись.
+
+### ProvenanceSpec v1 (`execution/provenance.py`)
+
+- Единый контракт: `source | sourceType | sourceId | mode | asOfUtcMs |
+  observedAtUtcMs | freshness | dataHash | parentIds` (frozen pydantic).
+- Validation (§4): обязательные identity-поля, `as_of/observed_at > 0`, единый
+  набор freshness (`fresh/stale/offline/waiting/error/unknown`, совместим с
+  `realtime.data_envelope`), `fresh` требует `observed >= as_of` (§34).
+- `source="unknown"` невалиден (§37), кроме явного `legacy_unavailable` (§38) —
+  старые записи не получают задним числом выдуманный источник.
+- Source ID детерминированы (§5): `MARKET:/FEATURE:/BROKER:/COST:/MODEL:/
+  PROFILE:/GEOMETRY:/INFERENCE:`.
+
+### Costs — P0 (§17–§19/§45)
+
+- `CostSnapshot` получил `status ∈ {observed, estimated, unavailable}` +
+  `source/source_id/as_of_utc_ms` + `data_hash()`. Барe `CostSnapshot()` теперь
+  `unavailable`; явный `CostSnapshot(...)` с ценами — `estimated`
+  (backward-compat). `CostSnapshot.unavailable()` — явная фабрика.
+- `calculate_geometry` блокирует геометрию при отсутствии cost source:
+  `GeometryRejected(COST_DATA_UNAVAILABLE)` — критический regression
+  (`test_missing_cost_blocks_trade_group_creation`).
+
+### TradeGroupSpec provenance (§20–§22/§24)
+
+- Поле `provenance` с lineage ids: `market/feature/model_inference/profile/
+  broker/cost snapshot ids` + `geometry_hash` + `provenance_hash`.
+- `geometry_hash()` (ЧТО) и `provenance_hash()` (ИЗ ЧЕГО) разделены (§21);
+  `require_execution_provenance()` — strict gate для execution-bound spec.
+- `build_trade_group_from_signal` строит provenance (two-pass real hashes).
+- `ExecutionIntent` несёт `provenance_hash/broker_snapshot_id/cost_snapshot_id`;
+  `require_provenance_present()` перед submission; executor gate:
+  `PROVENANCE_INVALID` при неполной lineage (§41).
+
+### Ledger: actor vs source (§26–§28)
+
+- `append_trading_event` получил `source/source_type/source_id/observed_at_utc_ms`
+  (nullable, in-place миграция; chain verifier обновлён).
+- TP1/TP2/TP3/stop: `source=mt5, source_type=deal` при broker-подтверждении;
+  netting partial close: `source=simulator, source_type=paper_driver`
+  (candidate-close не выдаётся за broker fact). BE_CONFIRMED:
+  `source=mt5, source_type=position, evidence=broker_position_query`.
+
+### Audit endpoint + verifier
+
+- `GET /api/provenance/{group_id}` (owner-only, §39): lineage с
+  `status=present|missing` — никогда synthetic placeholder.
+- `scripts/verify_provenance.py` (§40): source presence, hash match, parent
+  relations, freshness, paper≠mt5/demo≠simulator.
+
+### Тесты (фактический запуск)
+
+```text
+Base commit: 35f6bfb
+New commit:  (P1.6, см. git log)
+Tests:
+  BASELINE: 804 passed, 11 warnings
+  AFTER:    834 passed, 11 warnings
+  NEW:      30 (29 provenance + 1 audit endpoint)
+```
+
+Покрытие §43–§45: model (requires source/id/as_of, frozen, hash stable,
+freshness enum, unknown rejected, legacy explicit), market/feature/manifest,
+model inference links feature snapshot, training manifest unavailable is
+explicit, holdout cutoff, costs (missing rejected, zero-observed distinct,
+source+freshness), broker (hash, freshness), geometry (parent provenance,
+provenance_hash, rejected without cost), TradeGroup/Intent gates, full-lineage
+end-to-end, verifier, no-fallback.
+
+### Честные границы (§50)
+
+- MARKET SOURCE: спецификация контракта + тесты; реальные MT5 candle IDs —
+  через MT5BrokerContext на Windows-хосте (не в этом sandbox).
+- BROKER SOURCE: свежий snapshot обязателен (§16); тесты на FakeMT5.
+- COST SOURCE: `observed` из MT5 bid/ask + `estimated` из профиля; отсутствие
+  → `COST_DATA_UNAVAILABLE`.
+- MODEL TRAINING PROVENANCE: не придумана — отсутствующий training manifest
+  явно `TRAINING_MANIFEST_UNAVAILABLE` / `HOLDOUT_PROVENANCE_UNAVAILABLE`.

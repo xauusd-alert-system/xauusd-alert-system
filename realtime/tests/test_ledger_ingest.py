@@ -202,3 +202,62 @@ def test_ws_streams_ledger_events_for_owner(client):
         assert msg2["type"] == "events"
         assert msg2["count"] == 0
         assert msg2["events"] == []
+
+
+def test_provenance_audit_endpoint(tmp_path, monkeypatch):
+    """P1.6 §39: the provenance audit returns the group lineage with explicit
+    missing nodes — never synthetic placeholders."""
+    from data.trade_group_store import save_group
+    from execution.trade_group import TradeGroupSpec, GroupState
+
+    monkeypatch.setenv("LEDGER_INGEST_TOKEN", "ingest-token")
+    monkeypatch.setenv("LEDGER_OWNER_TOKEN", "owner-token")
+    monkeypatch.setenv("TRADE_LOG_DB_PATH", str(tmp_path / "prov.sqlite"))
+
+    spec = TradeGroupSpec(
+        group_id="TG-PROV-1", signal_id="SGL-PROV-1", intent_id="INT-PROV-1",
+        asset_key="XAUUSD", broker_symbol="GOLD", mode="paper", side="long",
+        entry={"low": 99.0, "high": 101.0, "reference": 100.0},
+        geometry={"version": "v1", "unit": "price", "step_price": 4.0,
+                  "tp1": 104.0, "tp2": 108.0, "tp3": 112.0, "sl": 90.0},
+        targets=[{"leg": 1, "price": 104.0, "allocation": 1 / 3},
+                 {"leg": 2, "price": 108.0, "allocation": 1 / 3},
+                 {"leg": 3, "price": 112.0, "allocation": 1 / 3}],
+        break_even={"trigger": "tp1_filled",
+                    "raw_price_policy": "actual_fill",
+                    "protected_price_policy": "actual_fill_plus_cost_buffer",
+                    "apply_to": [2, 3]},
+        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
+              "estimated_loss_at_sl": 30.0, "total_volume": 0.03},
+        profile_id="p1", model_version="v3", model_hash="m" * 64,
+        config_hash="c" * 64, strategy_version="s3",
+        expires_at_utc_ms=1_900_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        provenance={
+            "market_snapshot_id": "MARKET:XAU:1",
+            "feature_snapshot_id": "FEATURE:XAU:1",
+            "model_inference_id": "INFERENCE:XAU:1",
+            "model_hash": "m" * 64, "profile_id": "p1",
+            "broker_snapshot_id": "BROKER:XAU:1",
+            "cost_snapshot_id": "COST:XAU:1",
+            "geometry_hash": "G" * 64, "provenance_hash": "P" * 64,
+        },
+    )
+    save_group(str(tmp_path / "prov.sqlite"), spec, state=GroupState.VALIDATED)
+    client = TestClient(app)
+    res = client.get("/api/provenance/TG-PROV-1",
+                     headers={"Authorization": "Bearer owner-token"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["available"] is True
+    lineage = body["lineage"]
+    assert lineage["group"]["status"] == "present"
+    assert lineage["market_snapshot"]["source_id"] == "MARKET:XAU:1"
+    assert lineage["cost_snapshot"]["source_id"] == "COST:XAU:1"
+    assert "ledger_events" in lineage
+    # a missing group is an explicit missing node
+    res = client.get("/api/provenance/TG-NOPE",
+                     headers={"Authorization": "Bearer owner-token"})
+    assert res.status_code == 200
+    assert res.json()["lineage"]["group"]["status"] == "missing"
+    # owner gate
+    assert client.get("/api/provenance/TG-PROV-1").status_code == 403

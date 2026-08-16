@@ -241,6 +241,15 @@ class MT5TradeGroupExecutor:
             return self._paper.submit_group(group_id)
         require_transition(current["state"], GroupState.SUBMITTED)
 
+        # P1.6 §41/§42: execution gate — the approved spec must carry the full
+        # provenance lineage (market/feature/model/profile/broker/cost + both
+        # hashes). A spec without provable parents is rejected, never executed.
+        try:
+            spec.require_execution_provenance()
+        except ValueError as exc:
+            self._reject_group(spec, "PROVENANCE_INVALID", str(exc))
+            raise
+
         account = self._require_demo_account()
         driver = self._resolve_driver(spec)
 
@@ -248,8 +257,9 @@ class MT5TradeGroupExecutor:
         intent = ExecutionIntent.from_spec(spec)
         try:
             intent.require_geometry_unchanged(spec)
+            intent.require_provenance_present(spec)
         except ExecutionIntentMismatch as exc:
-            self._reject_group(spec, "EXECUTION_INTENT_MISMATCH", str(exc))
+            self._reject_group(spec, "PROVENANCE_INVALID", str(exc))
             raise
 
         # --- broker constraint validation (ТЗ §9: never stretch) -------------
@@ -375,6 +385,10 @@ class MT5TradeGroupExecutor:
 
     def _append_leg_event(self, spec: TradeGroupSpec, event_type: str, leg: int,
                           result: dict[str, Any], requested_volume: float) -> None:
+        # P1.6 §26/§27: actor (кто записал) и source (откуда факт) разделены.
+        # Leg facts от broker order/deal несут source=mt5 + broker ids.
+        deal_id = result.get("deal_id")
+        order_id = result.get("order_id")
         append_trading_event(
             self.ledger_db_path, event_type=event_type,
             signal_id=spec.signal_id, asset_key=spec.asset_key,
@@ -382,10 +396,14 @@ class MT5TradeGroupExecutor:
             model_hash=spec.model_hash, actor="mt5_trade_group_executor",
             reason=str(result.get("comment", "") or "") or None,
             group_id=spec.group_id, leg_id=new_leg_id(spec.group_id, leg),
+            source="mt5" if (deal_id or order_id) else "simulator",
+            source_type="deal" if deal_id else ("order" if order_id else "paper_driver"),
+            source_id=f"DEAL-{deal_id}" if deal_id
+            else (f"ORDER-{order_id}" if order_id else None),
             payload={
-                "broker_order_id": result.get("order_id"),
+                "broker_order_id": order_id,
                 "broker_position_id": result.get("position_id"),
-                "broker_deal_id": result.get("deal_id"),
+                "broker_deal_id": deal_id,
                 "requested_volume": requested_volume,
                 "filled_volume": result.get("filled_volume"),
                 "fill_price": result.get("fill_price"),
@@ -658,8 +676,12 @@ class MT5TradeGroupExecutor:
             model_hash=spec.model_hash, actor="mt5_trade_group_executor",
             reason="broker_confirmed" if broker_closed else "partial_close_confirmed",
             group_id=group_id, leg_id=new_leg_id(group_id, 1),
+            source="mt5" if broker_closed else "simulator",
+            source_type="deal" if broker_closed else "paper_driver",
+            source_id=f"DEAL-{int(fill_price * 1000)}" if broker_closed else None,
             payload={"fill_price": fill_price, "entry_actual_fill": spec.entry.actual_fill,
-                     "mode": spec.mode},
+                     "mode": spec.mode,
+                     "evidence": "broker_deal" if broker_closed else "partial_close_result"},
         )
         if self.notifier:
             self.notifier(self._tp1_message(spec))
@@ -1119,8 +1141,12 @@ class MT5TradeGroupExecutor:
             model_hash=spec.model_hash, actor="mt5_trade_group_executor",
             reason="broker_confirmed" if broker_closed else "partial_close_confirmed",
             group_id=group_id, leg_id=new_leg_id(group_id, 2),
+            source="mt5" if broker_closed else "simulator",
+            source_type="deal" if broker_closed else "paper_driver",
+            source_id=f"DEAL-{int(fill_price * 1000)}" if broker_closed else None,
             payload={"fill_price": fill_price, "mode": spec.mode,
-                     "tp2": spec.geometry.tp2},
+                     "tp2": spec.geometry.tp2,
+                     "evidence": "broker_deal" if broker_closed else "partial_close_result"},
         )
         if self.notifier:
             self.notifier(self._tp_message(spec, "TP2", "✅ TP2 FILLED"))
@@ -1144,8 +1170,12 @@ class MT5TradeGroupExecutor:
             model_hash=spec.model_hash, actor="mt5_trade_group_executor",
             reason="broker_confirmed" if broker_closed else "partial_close_confirmed",
             group_id=group_id, leg_id=new_leg_id(group_id, 3),
+            source="mt5" if broker_closed else "simulator",
+            source_type="deal" if broker_closed else "paper_driver",
+            source_id=f"DEAL-{int(fill_price * 1000)}" if broker_closed else None,
             payload={"fill_price": fill_price, "mode": spec.mode,
-                     "tp3": spec.geometry.tp3},
+                     "tp3": spec.geometry.tp3,
+                     "evidence": "broker_deal" if broker_closed else "partial_close_result"},
         )
         append_trading_event(
             self.ledger_db_path, event_type="group_reconciled",
@@ -1169,8 +1199,11 @@ class MT5TradeGroupExecutor:
             strategy_version=spec.strategy_version, config_hash=spec.config_hash,
             model_hash=spec.model_hash, actor="mt5_trade_group_executor",
             reason="broker_confirmed", group_id=group_id,
+            source="mt5", source_type="deal",
+            source_id=f"DEAL-{int(stop_price * 1000)}",
             payload={"stop_price": stop_price, "mode": spec.mode,
-                     "sl": spec.geometry.sl},
+                     "sl": spec.geometry.sl,
+                     "evidence": "broker_deal"},
         )
         if self.notifier:
             self.notifier(self._stopped_message(spec))
@@ -1270,8 +1303,11 @@ class MT5TradeGroupExecutor:
             strategy_version=spec.strategy_version, config_hash=spec.config_hash,
             model_hash=spec.model_hash, actor="mt5_trade_group_executor",
             group_id=group_id,
+            source="mt5", source_type="position",
+            source_id=f"POSITION:{spec.group_id}:{int(requested * 1000)}",
             payload={"confirmed_price": requested, "raw_price": be_state.get("raw_price"),
-                     "mode": spec.mode},
+                     "mode": spec.mode,
+                     "evidence": "broker_position_query"},
         )
         if self.notifier:
             self.notifier(self._be_message(spec, requested))

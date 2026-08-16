@@ -47,12 +47,17 @@ class ExecutionIntent(BaseModel):
     expires_at_utc_ms: int
     geometry_hash: str
     created_at_utc_ms: int
+    # P1.6 §24: lineage references required before submission.
+    provenance_hash: str | None = None
+    broker_snapshot_id: str | None = None
+    cost_snapshot_id: str | None = None
 
     @classmethod
     def from_spec(cls, spec: TradeGroupSpec, intent_id: str | None = None) -> "ExecutionIntent":
         volumes = [
             round(spec.risk.total_volume * t.allocation, 8) for t in spec.targets
         ]
+        prov = spec.provenance or {}
         return cls(
             intent_id=intent_id or spec.intent_id,
             group_id=spec.group_id,
@@ -72,6 +77,9 @@ class ExecutionIntent(BaseModel):
             expires_at_utc_ms=spec.expires_at_utc_ms,
             geometry_hash=spec.geometry_hash(),
             created_at_utc_ms=spec.created_at_utc_ms,
+            provenance_hash=prov.get("provenance_hash"),
+            broker_snapshot_id=prov.get("broker_snapshot_id"),
+            cost_snapshot_id=prov.get("cost_snapshot_id"),
         )
 
     def verify_geometry(self, spec: TradeGroupSpec) -> bool:
@@ -84,4 +92,20 @@ class ExecutionIntent(BaseModel):
                 f"intent {self.intent_id} geometry_hash {self.geometry_hash} "
                 f"no longer matches spec {spec.group_id} "
                 f"({spec.geometry_hash()}); submission rejected"
+            )
+
+    def require_provenance_present(self, spec: TradeGroupSpec) -> None:
+        """P1.6 §24: the intent must carry the spec's provenance hash and the
+        broker/cost snapshot ids before submission."""
+        spec_prov = spec.provenance or {}
+        missing = []
+        if not self.provenance_hash or self.provenance_hash != spec_prov.get("provenance_hash"):
+            missing.append("provenance_hash")
+        if not self.broker_snapshot_id:
+            missing.append("broker_snapshot_id")
+        if not self.cost_snapshot_id:
+            missing.append("cost_snapshot_id")
+        if missing:
+            raise ExecutionIntentMismatch(
+                f"intent {self.intent_id} missing provenance for submission: {missing}"
             )

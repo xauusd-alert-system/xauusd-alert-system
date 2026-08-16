@@ -254,7 +254,7 @@ def make_spec(side="long", mode="demo", group_id="TG-DEMO-1", total_volume=0.03)
         entry, tp1, tp2, tp3, sl = 100.0, 104.0, 108.0, 112.0, 90.0
     else:
         entry, tp1, tp2, tp3, sl = 100.0, 96.0, 92.0, 88.0, 110.0
-    return TradeGroupSpec(
+    spec = TradeGroupSpec(
         group_id=group_id, signal_id="SGL-DEMO-1", intent_id="INT-DEMO-1",
         asset_key="XAUUSD", broker_symbol="GOLD", mode=mode, side=side,
         entry={"low": 99.0, "high": 101.0, "reference": entry},
@@ -272,7 +272,56 @@ def make_spec(side="long", mode="demo", group_id="TG-DEMO-1", total_volume=0.03)
         profile_id="demo_v1", model_version="v3", model_hash="m" * 64,
         config_hash="c" * 64, strategy_version="s3",
         expires_at_utc_ms=1_900_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        provenance=_spec_provenance(group_id=group_id, side=side, entry=entry,
+                                    tp1=tp1, tp2=tp2, tp3=tp3, sl=sl,
+                                    total_volume=total_volume),
     )
+    return spec
+
+
+def _spec_provenance(*, group_id, side, entry, tp1, tp2, tp3, sl,
+                     total_volume) -> dict:
+    """Deterministic, test-local provenance with a simulator (FakeMT5) source.
+    The P1.6 execution gate requires the lineage with self-consistent hashes;
+    tests run against the simulator double, so the honest source is
+    'simulator', not a fake 'mt5'."""
+    prov = {
+        "market_snapshot_id": f"MARKET:{group_id}:1",
+        "feature_snapshot_id": f"FEATURE:{group_id}:1",
+        "model_inference_id": f"INFERENCE:{group_id}:1",
+        "model_hash": "m" * 64,
+        "profile_id": "demo_v1",
+        "broker_snapshot_id": f"BROKER:{group_id}:1",
+        "cost_snapshot_id": f"COST:{group_id}:1",
+        "geometry_hash": "G" * 64,
+        "provenance_hash": "P" * 64,
+    }
+    # geometry_hash is self-consistent: build the spec twice to compute it
+    spec = TradeGroupSpec(
+        group_id=group_id, signal_id="SGL-DEMO-1", intent_id="INT-DEMO-1",
+        asset_key="XAUUSD", broker_symbol="GOLD", mode="paper", side=side,
+        entry={"low": 99.0, "high": 101.0, "reference": entry},
+        geometry={"version": "demo_v1", "unit": "price", "step_price": 4.0,
+                  "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl},
+        targets=[{"leg": 1, "price": tp1, "allocation": 1 / 3},
+                 {"leg": 2, "price": tp2, "allocation": 1 / 3},
+                 {"leg": 3, "price": tp3, "allocation": 1 / 3}],
+        break_even={"trigger": "tp1_filled",
+                    "raw_price_policy": "actual_fill",
+                    "protected_price_policy": "actual_fill_plus_cost_buffer",
+                    "apply_to": [2, 3]},
+        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
+              "estimated_loss_at_sl": 30.0, "total_volume": total_volume},
+        profile_id="demo_v1", model_version="v3", model_hash="m" * 64,
+        config_hash="c" * 64, strategy_version="s3",
+        expires_at_utc_ms=1_900_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        provenance=prov,
+    )
+    prov["geometry_hash"] = spec.geometry_hash()
+    # provenance_hash is computed over the lineage ids via a second pass
+    spec2 = spec.model_copy(update={"provenance": prov})
+    prov["provenance_hash"] = spec2.provenance_hash()
+    return prov
 
 
 def make_executor(tmp_path, mt5, **kwargs):

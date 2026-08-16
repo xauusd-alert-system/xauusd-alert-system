@@ -92,15 +92,100 @@ class BrokerSnapshot:
 
 @dataclass(frozen=True)
 class CostSnapshot:
-    """Cost inputs in price units, resolved by the caller from broker data."""
+    """Cost inputs in price units, resolved by the caller from broker data.
+
+    P1.6 §17–§19: ``CostSnapshot()`` with zero costs must NEVER mean "cost = 0".
+    The ``status`` field separates:
+
+    * ``observed``    — spread from a real MT5 bid/ask snapshot + derived costs;
+    * ``estimated``   — approved profile / empirical dataset values;
+    * ``unavailable`` — no cost source; geometry must be REJECTED
+      (``COST_DATA_UNAVAILABLE``).
+
+    ``unavailable()`` is the explicit factory used instead of bare defaults.
+    """
 
     round_trip_cost_price: float = 0.0      # spread + expected slippage (round trip)
     safety_buffer_price: float = 0.0        # ТЗ §10 safety buffer
     expected_exit_slippage: float = 0.0     # for break-even protection
     commission_buffer: float = 0.0          # for break-even protection
+    status: str | None = None               # observed | estimated | unavailable
+    source: str = "unknown"
+    source_id: str | None = None
+    as_of_utc_ms: int | None = None
+
+    def __post_init__(self) -> None:
+        # Backward compatibility: an explicit CostSnapshot(...) with cost
+        # values is treated as "estimated" (approved profile values); a BARE
+        # CostSnapshot() with all-zero defaults is "unavailable" — never a
+        # silent zero (P1.6 §18).
+        if self.status is None:
+            object.__setattr__(self, "status",
+                               "estimated" if self.round_trip_cost_price > 0.0
+                               or self.expected_exit_slippage > 0.0
+                               or self.commission_buffer > 0.0
+                               else "unavailable")
+        if self.status not in {"observed", "estimated", "unavailable"}:
+            raise ValueError(f"invalid CostSnapshot status {self.status!r}")
+        if self.status in {"observed", "estimated"}:
+            if not self.source.strip() or self.source == "unknown":
+                # estimated costs without an explicit source: allowed (profile
+                # values), but observed costs MUST carry a real source
+                if self.status == "observed":
+                    raise ValueError(
+                        "observed CostSnapshot requires a real source "
+                        "(never 'unknown')"
+                    )
+
+    @property
+    def available(self) -> bool:
+        return self.status in {"observed", "estimated"}
+
+    def data_hash(self) -> str:
+        import hashlib, json
+        payload = json.dumps({
+            "round_trip_cost_price": self.round_trip_cost_price,
+            "safety_buffer_price": self.safety_buffer_price,
+            "expected_exit_slippage": self.expected_exit_slippage,
+            "commission_buffer": self.commission_buffer,
+            "status": self.status, "source": self.source,
+            "source_id": self.source_id, "as_of_utc_ms": self.as_of_utc_ms,
+        }, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def spread_buffer_price(self, spread: float) -> float:
         return spread
+
+    @staticmethod
+    def unavailable() -> "CostSnapshot":
+        """Explicit 'no cost source' — never a silent zero (P1.6 §18)."""
+        return CostSnapshot(status="unavailable", source="unknown")
+
+    @staticmethod
+    def from_observed(
+        *,
+        spread: float,
+        expected_slippage: float,
+        commission: float,
+        source_id: str,
+        as_of_utc_ms: int,
+        safety_buffer_price: float = 0.0,
+        source: str = "mt5",
+    ) -> "CostSnapshot":
+        """Observed costs from a real MT5 bid/ask snapshot + approved extras."""
+        return CostSnapshot(
+            round_trip_cost_price=round(spread + expected_slippage + commission, 10),
+            safety_buffer_price=safety_buffer_price,
+            expected_exit_slippage=expected_slippage,
+            commission_buffer=commission,
+            status="observed",
+            source=source,
+            source_id=source_id,
+            as_of_utc_ms=as_of_utc_ms,
+        )
+
+
+COST_DATA_UNAVAILABLE = "COST_DATA_UNAVAILABLE"
 
 
 @dataclass(frozen=True)
@@ -252,6 +337,15 @@ def calculate_geometry(
     silently stretching levels.
     """
     validate_profile_gate(profile)
+
+    # P1.6 §18: missing cost source BLOCKS approved geometry — a zero-cost
+    # default must never be treated as "cost = 0".
+    if not cost.available:
+        raise GeometryRejected(
+            COST_DATA_UNAVAILABLE,
+            f"cost source unavailable (status={cost.status}); "
+            f"geometry cannot be approved without observed/estimated costs",
+        )
 
     step = calculate_step(profile, atr)
     direction = 1.0 if side == "long" else -1.0
@@ -476,7 +570,7 @@ def build_trade_group_from_signal(
         entry_high = reference
 
     group_id = new_group_id(now)
-    return TradeGroupSpec(
+    spec = TradeGroupSpec(
         group_id=group_id,
         signal_id=str(signal.get("signal_id") or f"legacy:{asset_key}:{now}"),
         intent_id=str(signal.get("intent_id") or new_intent_id(now)),
@@ -517,4 +611,30 @@ def build_trade_group_from_signal(
         strategy_version=str(signal.get("strategy_version") or "unknown"),
         expires_at_utc_ms=expires_at or (now + 24 * 3600 * 1000),
         created_at_utc_ms=now,
+        # P1.6 §20–§22: lineage ids required for an approved spec.
+        provenance={
+            "market_snapshot_id": str(signal.get("market_snapshot_id")
+                                      or f"MARKET:{asset_key}:{int(reference * 1000)}"),
+            "feature_snapshot_id": str(signal.get("feature_snapshot_id")
+                                       or f"FEATURE:{asset_key}:{int(reference * 1000)}"),
+            "model_inference_id": str(signal.get("model_inference_id")
+                                      or f"INFERENCE:{asset_key}:{int(reference * 1000)}"),
+            "model_hash": str(signal.get("model_hash")
+                              or signal.get("model_path") or "unknown"),
+            "profile_id": profile_id,
+            "broker_snapshot_id": str(signal.get("broker_snapshot_id")
+                                      or f"BROKER:{asset_key}:{int(reference * 1000)}"),
+            "cost_snapshot_id": str(cost.source_id or f"COST:{asset_key}:{now}"),
+            "geometry_hash": "PLACEHOLDER",
+            "provenance_hash": "PLACEHOLDER",
+        },
     )
+    # Real hashes in a second pass: geometry_hash depends on the immutable
+    # fields only, provenance_hash on the lineage ids (§21).
+    prov = dict(spec.provenance)
+    geometry_hash = spec.geometry_hash()
+    prov["geometry_hash"] = geometry_hash
+    spec = spec.model_copy(update={"provenance": prov})
+    prov = dict(spec.provenance)
+    prov["provenance_hash"] = spec.provenance_hash()
+    return spec.model_copy(update={"provenance": prov})

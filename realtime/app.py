@@ -756,3 +756,85 @@ def ledger_lifecycle(intent_id: str, authorization: str | None = Header(default=
         last_activity_ms=latest_ms,
         source="ledger_events", mode="demo",
     )
+
+
+# =====================================================================
+# P1.6 provenance audit endpoint (ТЗ §39)
+#
+# GET /api/provenance/{group_id} — owner-only lineage for a trade group:
+# spec provenance (market/feature/inference/profile/broker/cost ids +
+# both hashes), execution intent, broker orders/deals, and ledger events.
+# Missing nodes are reported as status="missing" — never a synthetic
+# placeholder.
+# =====================================================================
+
+@app.get("/api/provenance/{group_id}")
+def provenance_audit(group_id: str, authorization: str | None = Header(default=None)):
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    db_path = _ledger_db_path()
+    try:
+        from data.trade_group_store import load_group
+        from execution.provenance import FRESHNESS_VALUES
+
+        group = load_group(db_path, group_id)
+    except Exception as exc:
+        logger.warning("Provenance audit read failed: %s", exc)
+        group = None
+    if group is None:
+        return stamp(
+            {"group_id": group_id, "available": False,
+             "lineage": {"group": {"status": "missing"}}},
+            last_activity_ms=None, source="ledger_events", mode="demo",
+        )
+    spec = group["spec"]
+    prov = spec.provenance or {}
+    lineage = {
+        "group": {
+            "status": "present",
+            "group_id": spec.group_id,
+            "mode": spec.mode,
+            "side": spec.side,
+            "geometry_hash": spec.geometry_hash(),
+            "provenance_hash": spec.provenance_hash() if prov else None,
+            "provenance_status": prov.get("provenance_status", "available"),
+        },
+        "market_snapshot": _provenance_node(prov, "market_snapshot_id"),
+        "feature_snapshot": _provenance_node(prov, "feature_snapshot_id"),
+        "model_inference": _provenance_node(prov, "model_inference_id"),
+        "profile": _provenance_node(prov, "profile_id", prefix="PROFILE"),
+        "broker_snapshot": _provenance_node(prov, "broker_snapshot_id"),
+        "cost_snapshot": _provenance_node(prov, "cost_snapshot_id"),
+    }
+    # trading-event ledger for the group (actor vs source separation, §26)
+    try:
+        from data.trading_event_ledger import read_trading_events
+        df = read_trading_events(db_path, signal_id=spec.signal_id)
+        records = []
+        for row in df.to_dict("records"):
+            row = {k: (None if pd.isna(v) else v) for k, v in row.items()}
+            try:
+                row["payload"] = json.loads(row.pop("payload_json") or "{}")
+            except json.JSONDecodeError:
+                row["payload"] = {}
+            records.append(row)
+        lineage["ledger_events"] = {
+            "status": "present" if len(records) else "missing",
+            "events": records,
+        }
+    except Exception as exc:
+        logger.warning("Provenance ledger read failed: %s", exc)
+        lineage["ledger_events"] = {"status": "error", "detail": str(exc)}
+    return stamp(
+        {"group_id": group_id, "available": True, "lineage": lineage},
+        last_activity_ms=None, source="ledger_events", mode=spec.mode,
+    )
+
+
+def _provenance_node(prov: dict, key: str, prefix: str | None = None) -> dict:
+    """One lineage node: present with the id, or explicit missing."""
+    value = prov.get(key)
+    if not value:
+        return {"status": "missing"}
+    return {"status": "present", "source_id": str(value)}
