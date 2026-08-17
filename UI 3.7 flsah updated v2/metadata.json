@@ -1,0 +1,8 @@
+{
+  "name": "XAUUSD Alert System",
+  "description": "Multi-asset quantitative trading, ML signal inference, and real-time risk dashboard for XAUUSD and major forex/crypto pairs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
