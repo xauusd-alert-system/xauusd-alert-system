@@ -1,0 +1,56 @@
+# Python bytecode and cache directories
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment secrets
+.env
+
+# Generated logs and results
+logs/*.csv
+logs/*.json
+logs/*.log
+logs/backtest_archive/
+# Live position entry-context journal for the Telegram status commands
+# (already covered by logs/*.json; listed explicitly as it contains trade context)
+logs/live_positions.json
+logs/live_positions.json.tmp
+
+# Local backups, trained artifacts, and generated analysis output
+backup/
+models/
+output/
+
+# Backup / patch files
+*.bak
+
+# Process ID files
+*.pid
+
+# PowerShell $null redirect artefact (literal filename "$null")
+$null
+
+# One-off local scripts
+diag.py
+
+# PDF exports of the codebase
+compact_project_code.pdf
+
+# Version stub files (e.g. "2.4.0" dropped by some package managers)
+[0-9]*.*
+
+# One-off local migration/patch script
+fix_ingestion.py
+
+# SQLite databases and their transient sidecar files.
+# *.sqlite alone does NOT match the -wal / -shm suffixes, which is how
+# data/market_data_mt5.sqlite-{wal,shm} ended up committed. A tracked sidecar
+# aborts every branch switch made while the database is open.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
