@@ -8,7 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
+from config.loader import load_config, effective_asset_config
 from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
 from features.structure import detect_structure
@@ -78,17 +78,14 @@ def truncate_before(raw_df: pd.DataFrame, end_date: str, asset_key: str) -> pd.D
 
 
 def merge_asset_cfg(cfg: dict, asset_key: str, section: str) -> dict:
-    """Возвращает cfg с объединённым указанным section (ensemble/labeling/model) из asset_cfg."""
-    asset_cfg = cfg.get("assets", {}).get(asset_key, {})
-    base_section = cfg.get(section, {})
-    asset_section = asset_cfg.get(section)
-    if asset_section:
-        merged = copy.deepcopy(base_section)
-        merged.update(asset_section)
-    else:
-        merged = copy.deepcopy(base_section)
+    """Backward-compatible one-section merge used by existing research callers.
+
+    New production code should use :func:`config.loader.effective_asset_config`,
+    which resolves the complete per-asset contract in one operation.
+    """
+    effective = effective_asset_config(cfg, asset_key)
     cfg_copy = copy.deepcopy(cfg)
-    cfg_copy[section] = merged
+    cfg_copy[section] = copy.deepcopy(effective.get(section, {}))
     return cfg_copy
 
 
@@ -105,7 +102,11 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
     ref_tfs = cfg.get("features", {}).get("mtf_reference_timeframes", ["M15", "H1"])
     for htf in ref_tfs:
         try:
-            raw_htf = read_candles(db_path, htf, asset_key)
+            # Keep HTF inputs inside the exact raw sample boundary. This matters
+            # for pre-lock feature ablations even when the current indicators are
+            # causal: no future rows should enter the feature builder at all.
+            end_ts = int(raw_df["timestamp_utc"].max()) if "timestamp_utc" in raw_df else None
+            raw_htf = read_candles(db_path, htf, asset_key, end_ts=end_ts)
             if not raw_htf.empty:
                 htf_df = build_all_indicators(raw_htf, cfg)
                 htf_frames[htf] = htf_df
@@ -208,17 +209,17 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
             # overlap among the surviving rows. Weights are keyed by the train
             # frame's positional index and aligned to the rows build_training_matrix
             # actually keeps (it drops NaN-label/feature rows).
-            from model.uniqueness import average_uniqueness_weights
+            from model.uniqueness import aligned_uniqueness_weights
             horizon = int(cfg_inner.get("labeling", {}).get("horizon_candles_n", 36))
             try:
-                uniq = average_uniqueness_weights(len(train_df), horizon)
-                w_series = pd.Series(uniq, index=train_df.index)
-                sw = w_series.reindex(X_train.index).fillna(1.0).to_numpy()
+                sw = aligned_uniqueness_weights(
+                    train_df.index, X_train.index, horizon=max(1, horizon)
+                )
             except Exception:
                 sw = None
             try:
                 base = train_model(X_train, y_train, cfg_inner, sample_weight=sw)
-                calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
+                calibrated = calibrate_model(base, X_train, y_train, cfg_inner, sample_weight=sw)
             except DegenerateLabelSpaceError as exc:
                 # Data condition, not a defect: this window cannot produce a model
                 # whose probabilities decode into an honest p_long/p_short (see
@@ -281,6 +282,10 @@ def main():
     parser.add_argument("--asset", required=True, help="Internal asset key, e.g. XAUUSD")
     parser.add_argument("--timeframe", default="M5")
     parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
+    parser.add_argument(
+        "--label-event", choices=["configured", "barrier", "traded"], default="configured",
+        help="Explicit pre-lock legacy-vs-traded target A/B override.",
+    )
     parser.add_argument("--no-journal", action="store_true",
                         help="Do not append this run to logs/trial_journal.csv")
     parser.add_argument("--allow-locked", action="store_true",
@@ -296,6 +301,13 @@ def main():
     assets = cfg.get("assets", {})
     if args.asset not in assets:
         raise SystemExit(f"Unknown asset: {args.asset}")
+    if args.label_event != "configured":
+        # Set both layers because build_full_df deliberately resolves the asset
+        # override after the global section. The override is in-memory only.
+        cfg = copy.deepcopy(cfg)
+        cfg.setdefault("labeling", {})["event"] = args.label_event
+        cfg["assets"][args.asset].setdefault("labeling", {})["event"] = args.label_event
+        assets = cfg["assets"]
 
     asset_cfg = assets[args.asset]
     model_path = asset_cfg["model_path"]
@@ -303,6 +315,13 @@ def main():
     timeframe = asset_cfg.get("timeframe") or args.timeframe
 
     raw = load_asset_history(args.db_path, timeframe, args.asset)
+
+    # Wave 0 provenance gate: when validation.require_provenance_manifest is
+    # true, the frozen manifest must exist and match the raw content BEFORE any
+    # feature/label work. Mixing brokers or incomplete history stops the run.
+    from data.provenance import provenance_gate
+    provenance_gate(cfg, args.db_path, timeframe, args.asset)
+
     if args.end_date:
         raw = truncate_before(raw, args.end_date, args.asset)
     df = build_full_df(cfg, raw, db_path=args.db_path, asset_key=args.asset)
@@ -323,8 +342,11 @@ def main():
 
     results_df = pd.DataFrame([r for r in results])
     os.makedirs("logs", exist_ok=True)
-    results_df.to_csv(f"logs/backtest_{args.asset.lower()}.csv", index=False)
-    print(f"Saved metrics to logs/backtest_{args.asset.lower()}.csv")
+    event = resolve_label_event(merge_asset_cfg(cfg, args.asset, "labeling"))
+    suffix = f"_{event}" if args.label_event != "configured" else ""
+    metrics_path = f"logs/backtest_{args.asset.lower()}{suffix}.csv"
+    results_df.to_csv(metrics_path, index=False)
+    print(f"Saved metrics to {metrics_path}")
 
     # Quant audit 0.1: PF-median vs positive-fold arithmetic consistency.
     # Positive folds MUST be counted over VALID (non-empty) folds; a median
@@ -341,7 +363,9 @@ def main():
     if summary["inconsistent"]:
         print(f"WARNING: {summary['note']} -- re-check the aggregate tables "
               "(positive folds must use valid folds only).")
-    pd.DataFrame([summary]).to_csv(f"logs/backtest_{args.asset.lower()}_fold_summary.csv", index=False)
+    pd.DataFrame([summary]).to_csv(
+        f"logs/backtest_{args.asset.lower()}{suffix}_fold_summary.csv", index=False
+    )
 
     # Append-only trial journal (audit: N_trials for DSR comes from the real
     # project history, not from the last grid).

@@ -60,6 +60,19 @@ def test_clean_long_equal_step_grid():
     assert "Стоп: 2391.25" in msg
 
 
+def test_versioned_target_legs_support_tp4_and_explicit_stop():
+    signal = _sample_signal(bias="long")
+    signal["step"] = 3.0
+    signal["target_legs"] = [
+        {"price": 2403, "close_ratio": .4}, {"price": 2406, "close_ratio": .3},
+        {"price": 2409, "close_ratio": .2}, {"price": 2412, "close_ratio": .1},
+    ]
+    signal["invalidation"] = 2395
+    msg = format_signal_message(signal)
+    assert "→ TP4: 2412" in msg
+    assert "Стоп: 2395" in msg
+
+
 def test_clean_short_mirrors_long_grid():
     """Short mirrors the long grid on the downside."""
     signal = _sample_signal(bias="short")

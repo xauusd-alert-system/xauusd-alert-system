@@ -10,6 +10,9 @@ from config.loader import load_config
 
 def main():
     cfg = load_config()
+    if not cfg.get("retraining", {}).get("enabled", True):
+        print("Retraining safety freeze is active; train_all_assets skipped.")
+        return
     assets = cfg.get("assets", {})
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     timeframe = cfg.get("market_data", {}).get("timeframe", "M5")

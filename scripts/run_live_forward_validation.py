@@ -1,103 +1,139 @@
+"""One-time validation read of a frozen append-only paper ledger.
+
+This command refuses to expose outcomes before the pre-registered closed-trade
+minimum.  Once the gate is reached it appends ``validation_read`` BEFORE reading
+PnL payloads, permanently recording that the hold-out has been consumed.
 """
-Live-forward validation for a pre-registered candidate.
-
-Run ONCE after the locked hold-out has accumulated enough trades for the
-candidate. This script replicates the exact validation metrics from
-scripts/deflated_sharpe.py for a single pre-registered variant and compares
-them against thresholds fixed in docs/CANDIDATE_WIDE_TREND_FILTERED.md.
-
-Usage (once enough trades have accumulated):
-    python -m scripts.run_live_forward_validation \
-      --asset XAUUSD --variant wide_trend_filtered \
-      --db-path data/market_data_mt5.sqlite \
-      --min-trades 50 \
-      --pre-lock-end 2026-08-08
-
-This script ALWAYS passes --allow-locked to the underlying fold builder:
-it is the single, pre-approved burn of the hold-out for the candidate.
-"""
+from __future__ import annotations
 
 import argparse
-import sys
+import json
+import math
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, "..")
-
-from config.loader import load_config, get_signal_grid
-from scripts.deflated_sharpe import (
-    run_analysis,
-    _variants_for,
-    _apply_variant,
-    _cost_stress_for_variant,
+from backtest.deflated_sharpe import deflated_sharpe_ratio
+from backtest.metrics import block_bootstrap_t
+from data.paper_ledger import (
+    append_paper_event,
+    paper_accumulation_status,
+    read_paper_events,
 )
-from scripts.run_backtest import load_asset_history, build_full_df, truncate_before
+from paper.accumulator import load_frozen_manifest
 
 
 def check_thresholds(trial: dict, min_trades: int) -> dict:
-    """Evaluate a candidate against pre-registered live-forward thresholds."""
-    checks = {}
-    checks[f"n_trades >= {min_trades}"] = trial.get("n_trades", 0) >= min_trades
-    checks["PF >= 1.30"] = trial.get("profit_factor", 0.0) >= 1.30
-    checks["cost_x1_5_pf >= 1.20"] = trial.get("cost_x1_5_pf", 0.0) >= 1.20
-    checks["t_block >= 1.50"] = trial.get("t_block", float("nan")) >= 1.50
-    checks["DSR(N_eff) >= 0.80"] = trial.get("dsr_neff", float("nan")) >= 0.80
-    checks["passed_all"] = all(v for k, v in checks.items() if k != "passed_all")
+    checks = {
+        f"n_trades >= {min_trades}": trial.get("n_trades", 0) >= min_trades,
+        "PF >= 1.30": trial.get("profit_factor", 0.0) >= 1.30,
+        "cost_x1_5_pf >= 1.20": trial.get("cost_x1_5_pf", 0.0) >= 1.20,
+        "t_block >= 1.50": trial.get("t_block", float("nan")) >= 1.50,
+        "DSR(N_eff) >= 0.80": trial.get("dsr_neff", float("nan")) >= 0.80,
+    }
+    checks["passed_all"] = all(checks.values())
     return checks
 
 
+def _profit_factor(values: np.ndarray) -> float:
+    gains = float(values[values > 0].sum())
+    losses = float(-values[values < 0].sum())
+    return gains / losses if losses > 0 else (999.0 if gains > 0 else 0.0)
+
+
+def trial_from_closed_events(closed: pd.DataFrame, historical_trials: int = 737) -> dict:
+    payloads = list(closed["payload"])
+    pnl = np.asarray([float(p["pnl"]) for p in payloads], dtype=float)
+    costs = np.asarray([float(p["execution_cost_money"]) for p in payloads], dtype=float)
+    r = np.asarray([float(p.get("r_multiple", 0.0)) for p in payloads], dtype=float)
+    stressed = pnl - 0.5 * costs
+    dsr = deflated_sharpe_ratio(pnl, n_trials=historical_trials, t_eff=float(len(pnl)))
+    return {
+        "n_trades": int(len(pnl)),
+        "total_pnl": float(pnl.sum()),
+        "profit_factor": float(_profit_factor(pnl)),
+        "cost_x1_5_total_pnl": float(stressed.sum()),
+        "cost_x1_5_pf": float(_profit_factor(stressed)),
+        "t_block": float(block_bootstrap_t(r, block=20, n_boot=10000, seed=42)),
+        "dsr_neff": float(dsr["dsr"]),
+        "effective_n": float(dsr["t_eff"]),
+        "historical_trials": int(historical_trials),
+        "period_start_timestamp_utc": int(closed["bar_timestamp_utc"].min()),
+        "period_end_timestamp_utc": int(closed["bar_timestamp_utc"].max()),
+        "source": "frozen_append_only_paper_ledger",
+        "synthetic": False,
+    }
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Live-forward validation for a pre-registered candidate.")
-    parser.add_argument("--asset", required=True)
-    parser.add_argument("--variant", required=True)
-    parser.add_argument("--db-path", required=True)
-    parser.add_argument("--min-trades", type=int, default=50)
-    parser.add_argument("--pre-lock-end", default="2026-08-08")
+    parser = argparse.ArgumentParser(description="One-time frozen live-forward validation.")
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--paper-db", default="data/paper_forward.sqlite")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Explicitly confirm the single irreversible hold-out outcome read.",
+    )
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
 
-    cfg = load_config()
-    asset = args.asset
-    if asset not in cfg["assets"]:
-        raise SystemExit(f"Unknown asset: {asset}")
+    # Model is not needed to read already accumulated outcomes; the manifest and
+    # config hashes are still verified. This permits validation after archival.
+    manifest = load_frozen_manifest(args.manifest, verify_model=False)
+    run_id = manifest["run_id"]
+    status = paper_accumulation_status(args.paper_db, run_id)
+    minimum = int(manifest["min_closed_trades"])
+    if status["closed_trades"] < minimum:
+        raise SystemExit(
+            f"HOLD-OUT SEALED: {status['closed_trades']}/{minimum} closed paper trades. "
+            "No outcomes were read; keep accumulating."
+        )
+    if status["validation_reads"]:
+        raise SystemExit(
+            "HOLD-OUT ALREADY READ: validation_read exists for this frozen run; "
+            "refusing a sequential second look."
+        )
+    if not args.force:
+        raise SystemExit(
+            "HOLD-OUT READY BUT SEALED: re-run with --force to confirm the single "
+            "irreversible outcome read."
+        )
 
-    family = _variants_for(asset)
-    if args.variant not in family:
-        raise SystemExit(f"Variant {args.variant} not in {asset} family: {list(family)}")
-
-    timeframe = cfg["assets"][asset].get("timeframe", "M15")
-    raw = load_asset_history(args.db_path, timeframe, asset)
-    # IMPORTANT: we do NOT truncate. This run includes the hold-out.
-    df_full = build_full_df(cfg, raw, db_path=args.db_path, asset_key=asset)
-
-    candidate_overrides = family[args.variant]
-    # Run analysis on the FULL history including live-forward. This will
-    # generate walk-forward windows that may extend into the hold-out.
-    # Since we call run_analysis directly (not main), the enforced holdout
-    # check is bypassed intentionally — this is the pre-approved burn.
-    res = run_analysis(
-        cfg, asset, df_full,
-        variants={args.variant: candidate_overrides},
-        historical_trials=737,
-        cost_stress=True,
+    # Burn marker first. A crash after this line still counts as a consumed read.
+    marker_created = append_paper_event(
+        args.paper_db, run_id=run_id, event_type="validation_read",
+        idempotency_key=f"{run_id}:validation_read:1",
+        event_timestamp_utc=int(pd.Timestamp.now(tz="UTC").timestamp()),
+        payload={
+            "manifest_sha256": manifest["manifest_sha256"],
+            "closed_trades_at_read": status["closed_trades"],
+            "thresholds": {
+                "min_trades": minimum, "profit_factor": 1.30,
+                "cost_x1_5_pf": 1.20, "t_block": 1.50, "dsr_neff": 0.80,
+            },
+        },
     )
+    if not marker_created:
+        # A concurrent validator won the unique idempotency-key race. Do not let
+        # both processes inspect outcomes after observing the same pre-marker status.
+        raise SystemExit("HOLD-OUT ALREADY READ: concurrent validation marker exists.")
+    closed = read_paper_events(args.paper_db, run_id, event_type="close")
+    trial = trial_from_closed_events(closed)
+    trial.update({
+        "run_id": run_id,
+        "asset_key": manifest["asset_key"],
+        "variant": manifest["variant"],
+        "manifest_sha256": manifest["manifest_sha256"],
+        "model_sha256": manifest["model_sha256"],
+    })
+    checks = check_thresholds(trial, minimum)
+    result = {"trial": trial, "checks": checks}
 
-    trial = next(t for t in res["trials"] if t["variant"] == args.variant)
-    checks = check_thresholds(trial, args.min_trades)
-
-    print("\n=== Live-forward validation:", args.variant, "===")
-    print(f"Total trades (incl live-forward): {trial['n_trades']}")
-    print(f"Pre-registered threshold trades >= {args.min_trades}")
-    for k, v in checks.items():
-        if k == "passed_all":
-            continue
-        print(f"  [{'x' if v else ' '}] {k}  (value: {trial.get(k.lower().replace(' >= ','').replace(' ','_'), '?')})")
-    print(f"  => {'PROMOTE CANDIDATE READY' if checks['passed_all'] else 'NOT READY — keep accumulating'}" )
-
+    print(json.dumps(result, indent=2, sort_keys=True))
+    print("PROMOTE CANDIDATE READY" if checks["passed_all"] else "NOT READY — remain paper")
     if args.out:
-        pd.DataFrame([trial]).to_csv(args.out, index=False)
-        print(f"Saved trial metrics to {args.out}")
+        with open(args.out, "w", encoding="utf-8") as handle:
+            json.dump(result, handle, indent=2, sort_keys=True)
+            handle.write("\n")
 
 
 if __name__ == "__main__":

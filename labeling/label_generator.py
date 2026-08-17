@@ -213,8 +213,9 @@ def generate_labels_traded_event(
       actually be asked of it.
     - Entry price: the next bar's open plus half-spread plus one slippage, both
       adverse, exactly as _apply_slippage and the entry block do.
-    - Barrier widths: ATR of the ENTRY bar (the engine reads atrs[i] at the
-      entry bar), multiplied by the grid's tp1_mult / stop_mult.
+    - Barrier widths: the causal ATR of the SIGNAL bar, resolved through the
+      same fixed-step/clamp policy as live inference, then multiplied once by
+      tp1/stop mult. The entry bar's completed ATR is not known at its open.
     - Grid resolution: get_signal_grid with the per-asset section, and when
       use_regime_overrides is set, the regime of the SIGNAL bar, which is the
       regime the engine passes (regimes[i - 1] at entry bar i).
@@ -236,7 +237,7 @@ def generate_labels_traded_event(
 
     Returns a Series named "label_traded" aligned to df.index.
     """
-    from config.loader import get_signal_grid
+    from config.loader import get_signal_grid, resolve_signal_step
 
     if int(direction) not in (1, -1):
         raise ValueError(f"direction must be +1 or -1, got {direction!r}")
@@ -276,10 +277,10 @@ def generate_labels_traded_event(
         if entry_bar + 1 >= n:
             break
 
-        atr_e = atrs[entry_bar]
-        if pd.isna(atr_e) or atr_e <= 0:
+        atr_signal = atrs[s]
+        if pd.isna(atr_signal) or atr_signal <= 0:
             continue
-        atr_e = float(atr_e)
+        atr_signal = float(atr_signal)
 
         if has_regime:
             reg = regimes[s]
@@ -290,8 +291,9 @@ def generate_labels_traded_event(
         tp1_mult = float(grid.get("tp1_mult", 1.0))
         stop_mult = float(grid.get("stop_mult", 3.0))
         be_trigger = float(grid.get("breakeven_trigger_atr", 1.0))
+        step = resolve_signal_step(atr_signal, grid)
 
-        tp1_distance = atr_e * tp1_mult
+        tp1_distance = step * tp1_mult
         if require_net_positive and tp1_distance <= round_trip:
             # The first target cannot pay for its own execution.
             continue
@@ -301,7 +303,7 @@ def generate_labels_traded_event(
             entry = entry + dir_ * (spread / 2.0) + dir_ * slippage
 
         protect_level = entry + dir_ * be_trigger * tp1_distance
-        stop_level = entry - dir_ * atr_e * stop_mult
+        stop_level = entry - dir_ * step * stop_mult
 
         last_bar = min(n - 1, entry_bar + horizon)
         outcome = np.nan

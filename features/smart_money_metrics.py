@@ -6,11 +6,43 @@ Calculates strictly causal institutional indicators:
 3. SMF Ratio (Smart Money Flow Ratio) - institutional volume flow vs retail churn.
 4. Liquidity Grab Score (1-10) - sweeps of swing highs/lows, PDH/PDL, session liquidity.
 5. Delta Confidence (LOW/MEDIUM/HIGH/VERY HIGH) - multi-timeframe order flow delta alignment.
+
+SOURCE HONESTY (ТЗ Position Quality §5/§8/§12):
+All five metrics are computed from OHLCV candles ONLY. They are PROXY pattern
+scores, not evidence of real trade flow, L2/MBO/on-chain activity or confirmed
+institutional participation. ``SOURCE_KIND = "ohlcv_proxy"`` is attached to
+every parameter result so no downstream consumer can mistake the proxy for a
+real-flow source.
 """
 from __future__ import annotations
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Optional, List
+
+# The ONLY source kind this module can truthfully claim (§5): OHLCV proxy.
+SOURCE_KIND = "ohlcv_proxy"
+
+# Per-parameter minimum bars for a meaningful (non-default) calculation and the
+# lookback actually used. Used for honest data_status / lookback provenance.
+PARAMETER_META = {
+    "manipulation_index": {"min_bars": 5, "lookback": 20},
+    "zone_strength": {"min_bars": 10, "lookback": 50},
+    "smf_ratio": {"min_bars": 5, "lookback": 30},
+    "liquidity_grab": {"min_bars": 10, "lookback": 30},
+    "delta_confidence": {"min_bars": 10, "lookback": 30},
+}
+
+# Phrases that must NEVER appear in report text: they claim institutional
+# control / real flow from an OHLCV proxy (ТЗ §5/§12).
+FORBIDDEN_CLAIMS = (
+    "институциональный контроль",
+    "контролируют рынок",
+    "институционалы доминируют",
+    "умные деньги",
+    "крупные игроки продолжают активно работать",
+    "институциональная зона ликвидности",
+    "именно это объясняет резкие движения",
+)
 
 
 def calculate_manipulation_index(df: pd.DataFrame, window: int = 20) -> tuple[int, str]:
@@ -53,11 +85,11 @@ def calculate_manipulation_index(df: pd.DataFrame, window: int = 20) -> tuple[in
     score = int(np.clip(round(raw_score), 1, 10))
 
     if score >= 7:
-        text = "высокий уровень манипуляций сохраняется. Крупные игроки продолжают активно работать в этом диапазоне."
+        text = "высокий уровень манипулятивного паттерна по свечному прокси (фитили/ложные пробои). Контекст-скор, не подтверждение реального потока."
     elif score >= 5:
         text = "умеренная манипулятивная активность на локальных уровнях."
     else:
-        text = "низкий уровень манипуляций. Рынок движется в естественном потоке ордеров."
+        text = "низкий уровень манипулятивного паттерна по свечному прокси."
 
     return score, text
 
@@ -109,7 +141,7 @@ def calculate_zone_strength(df: pd.DataFrame, window: int = 50) -> tuple[int, st
     elif strength <= 60:
         text = "зона умеренной силы. Возможна локальная консолидация перед импульсом."
     else:
-        text = "сильная институциональная зона ликвидности с высоким потенциалом отскока."
+        text = "сильная структурная зона по свечному прокси (частые касания уровня, объём у уровня). Прокси-скор, не подтверждение ликвидности."
 
     return strength, text
 
@@ -146,11 +178,11 @@ def calculate_smf_ratio(df: pd.DataFrame, window: int = 30) -> tuple[float, str]
     dir_word = "вниз" if recent_delta <= 0 else "вверх"
 
     if ratio >= 2.0:
-        text = f"институционалы доминируют над розницей с коэффициентом {ratio:.1f} к 1. Умные деньги продолжают давить {dir_word}."
+        text = f"объёмный прокси направленного потока с коэффициентом {ratio:.1f} к 1 (крупные бары vs мелкие). Не является реальным торговым потоком."
     elif ratio >= 1.2:
-        text = f"преобладание институционального потока ({ratio:.2f}x). Направленное движение {dir_word}."
+        text = f"преобладание крупно-объёмного прокси ({ratio:.2f}x). Прокси-оценка, не реальный поток."
     else:
-        text = "паритет институциональных и розничных участников."
+        text = "паритет крупно- и мелко-объёмных баров по прокси."
 
     return ratio, text
 
@@ -186,7 +218,7 @@ def calculate_liquidity_grab(df: pd.DataFrame, window: int = 30) -> tuple[int, s
     score = int(np.clip(round(sweep_count * 2.0 + wick_atr_ratio * 3.0 + 2), 1, 10))
 
     if score >= 7:
-        text = "активная охота за ликвидностью. Именно это объясняет резкие движения на локальных уровнях перед продолжением тренда."
+        text = "активный паттерн прокси-свипа локальных уровней (фитиль за экстремум с возвратом). Паттерн-скор, не подтверждение ликвидности."
     elif score >= 4:
         text = "локальные сборы стопов вблизи ключевых экстремумов."
     else:
@@ -227,24 +259,43 @@ def calculate_delta_confidence(df: pd.DataFrame) -> tuple[str, str]:
     # looser one (norm_slope>0.4, consistency>0.65) and can never be reached.
     if norm_slope > 0.6 and consistency > 0.75:
         level = "VERY HIGH"
-        text = f"сверхвысокая уверенность в дельте. Полный институциональный контроль ({dir_party})."
+        text = f"сверхвысокая согласованность объёмного дельта-прокси ({dir_party}). Не подтверждение реального потока."
     elif norm_slope > 0.4 and consistency > 0.65:
         level = "HIGH"
-        text = f"уверенность модели в направлении дельты высокая. {dir_party} контролируют рынок на старших таймфреймах."
+        text = f"высокая согласованность объёмного дельта-прокси ({dir_party}). Прокси-скор, не реальный поток."
     elif norm_slope > 0.2:
         level = "MEDIUM"
-        text = f"умеренная уверенность в дельте. Преимущество на стороне {dir_party}."
+        text = f"умеренная согласованность объёмного дельта-прокси ({dir_party})."
     else:
         level = "LOW"
-        text = "низкая уверенность в дельте. Рынок находится в балансе покупателей и продавцов."
+        text = "низкая согласованность объёмного дельта-прокси."
 
     return level, text
+
+
+def _provenance_keys(name: str, n_bars: int) -> Dict[str, Any]:
+    """Honest per-parameter provenance: source_kind is ALWAYS ohlcv_proxy (the
+    only source this module can truthfully claim), lookback is the window the
+    calculator actually reads, data_status is explicit when the frame is too
+    short for a meaningful value (§5/§6/§12 — insufficient != valid)."""
+    meta = PARAMETER_META.get(name, {"min_bars": 1, "lookback": 0})
+    return {
+        "source_kind": SOURCE_KIND,
+        "lookback": int(meta["lookback"]),
+        "data_status": "sufficient" if n_bars >= int(meta["min_bars"])
+        else "insufficient",
+    }
 
 
 def compute_institutional_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Aggregates all 5 institutional microstructure metrics into a structured dictionary.
+
+    Every parameter carries ``source_kind=ohlcv_proxy`` + its real ``lookback``
+    and an explicit ``data_status`` — missing data is marked ``insufficient``,
+    never presented as a valid value (ТЗ Position Quality §5/§6/§24).
     """
+    n_bars = int(len(df))
     manip_score, manip_text = calculate_manipulation_index(df)
     zone_score, zone_text = calculate_zone_strength(df)
     smf_ratio, smf_text = calculate_smf_ratio(df)
@@ -257,28 +308,39 @@ def compute_institutional_metrics(df: pd.DataFrame) -> Dict[str, Any]:
             "max": 10,
             "text": manip_text,
             "display": f"{manip_score}/10",
+            **_provenance_keys("manipulation_index", n_bars),
         },
         "zone_strength": {
             "score": zone_score,
             "max": 100,
             "text": zone_text,
             "display": f"{zone_score}%",
+            **_provenance_keys("zone_strength", n_bars),
         },
         "smf_ratio": {
             "ratio": smf_ratio,
             "text": smf_text,
             "display": f"{smf_ratio:.2f}",
+            **_provenance_keys("smf_ratio", n_bars),
         },
         "liquidity_grab": {
             "score": liq_score,
             "max": 10,
             "text": liq_text,
             "display": f"{liq_score}/10",
+            **_provenance_keys("liquidity_grab", n_bars),
         },
         "delta_confidence": {
             "level": delta_conf,
             "text": delta_text,
             "display": delta_conf,
+            **_provenance_keys("delta_confidence", n_bars),
+        },
+        "source_provenance": {
+            "source_kind": SOURCE_KIND,
+            "lookbacks": {name: meta["lookback"]
+                          for name, meta in PARAMETER_META.items()},
+            "note": "OHLCV proxy only; NOT real trade flow / L2 / MBO / on-chain",
         },
     }
 
@@ -296,5 +358,6 @@ def format_institutional_metrics_report(metrics: Dict[str, Any]) -> str:
         f"**Zone Strength: {m['zone_strength']['display']}** — {m['zone_strength']['text']}\n\n"
         f"**SMF Ratio: {m['smf_ratio']['display']}** — {m['smf_ratio']['text']}\n\n"
         f"**Liquidity Grab: {m['liquidity_grab']['display']}** — {m['liquidity_grab']['text']}\n\n"
-        f"**Delta Confidence: {m['delta_confidence']['display']}** — {m['delta_confidence']['text']}"
+        f"**Delta Confidence: {m['delta_confidence']['display']}** — {m['delta_confidence']['text']}\n\n"
+        "_Источник: OHLCV-прокси (не реальный торговый поток / L2 / MBO / on-chain). Прокси-паттерн, не подтверждение институционального участия._"
     )

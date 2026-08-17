@@ -10,6 +10,8 @@ import sqlite3
 
 import pandas as pd
 
+OPTIONAL_MARKET_COLUMNS = ["spread", "real_volume"]
+
 REQUIRED_COLUMNS = [
     "timestamp_utc",
     "open",
@@ -47,9 +49,18 @@ def _create_table(conn: sqlite3.Connection, table: str) -> None:
             close REAL NOT NULL,
             volume REAL NOT NULL,
             session TEXT NOT NULL,
+            spread REAL,
+            real_volume REAL,
             PRIMARY KEY (symbol, timestamp_utc)
         );
     """)
+    # Idempotent in-place migration for symbol-aware databases created before
+    # broker spread/real_volume preservation was introduced. SQLite ADD COLUMN
+    # keeps all existing OHLCV rows and backfills the new fields as NULL.
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table});")}
+    for column in OPTIONAL_MARKET_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} REAL")
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{table}_symbol_ts "
         f"ON {table}(symbol, timestamp_utc);"
@@ -121,6 +132,11 @@ def upsert_candles(
     table = _table_name(timeframe)
     init_schema(db_path, [timeframe])
 
+    def _optional(value):
+        return None if pd.isna(value) else float(value)
+
+    stored_columns = REQUIRED_COLUMNS + OPTIONAL_MARKET_COLUMNS
+    prepared = df.reindex(columns=stored_columns)
     rows = [
         (
             symbol,
@@ -131,8 +147,10 @@ def upsert_candles(
             float(row.close),
             float(row.volume),
             str(row.session),
+            _optional(row.spread),
+            _optional(row.real_volume),
         )
-        for row in df[REQUIRED_COLUMNS].itertuples(index=False)
+        for row in prepared.itertuples(index=False)
     ]
 
     conn = get_connection(db_path)
@@ -140,15 +158,18 @@ def upsert_candles(
         conn.executemany(
             f"""
             INSERT INTO {table}
-                (symbol, timestamp_utc, open, high, low, close, volume, session)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (symbol, timestamp_utc, open, high, low, close, volume, session,
+                 spread, real_volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol, timestamp_utc) DO UPDATE SET
                 open=excluded.open,
                 high=excluded.high,
                 low=excluded.low,
                 close=excluded.close,
                 volume=excluded.volume,
-                session=excluded.session
+                session=excluded.session,
+                spread=COALESCE(excluded.spread, spread),
+                real_volume=COALESCE(excluded.real_volume, real_volume)
             """,
             rows,
         )

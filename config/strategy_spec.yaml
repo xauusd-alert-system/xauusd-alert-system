@@ -1,0 +1,33 @@
+strategy_version: "xauusd-system-v3-signalbar-2026-08-16"
+universe: [XAUUSD, XAGUSD, BTCUSD, EURUSD, GBPUSD]
+lifecycle: [watch, armed, confirmed, rejected, expired, no_trade]
+execution_policy: fully_systematic_when_promoted
+setup:
+  setup_timeframe: M15
+  context_timeframes: [H1, H4]
+  confirmation_predicates:
+    - candle_closed
+    - regime_allowed
+    - session_allowed
+    - spread_within_limit
+    - news_feed_available_and_clear
+  expiry_candles: 4
+risk:
+  sizing: stop_based
+  broker_leverage_is_not_strategy_risk: true
+  overnight_allowed: false
+  max_holding_from_labeling_horizon: true
+management:
+  signal_schema_arbitrary_target_legs: true
+  current_execution_target_leg_count: 3
+  nonstandard_leg_count_requires_new_strategy_version: true
+  stop_move_requires_broker_confirmation: true
+  partial_close_requires_broker_confirmation: true
+promotion_gate:
+  requires_purged_walk_forward: true
+  requires_cost_stress: true
+  requires_dsr_pbo_cscv: true
+  requires_frozen_live_forward: true
+telegram:
+  source_of_truth: false
+  publish_latency_audited: true

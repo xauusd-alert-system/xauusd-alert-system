@@ -96,7 +96,11 @@ from backtest.deflated_sharpe import (
     effective_number_trials,
     n_eff_participation_ratio,
 )
-from model.uniqueness import compute_trade_uniqueness, average_uniqueness_weights
+from model.uniqueness import (
+    compute_trade_uniqueness,
+    average_uniqueness_weights,
+    aligned_uniqueness_weights,
+)
 from backtest.metrics import block_bootstrap_t
 from model.ensemble_backtest import EnsembleBacktester
 from model.trainer import (
@@ -479,14 +483,14 @@ def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
         # weights handle the residual overlap among the survivors.
         horizon = int(cfg_inner.get("labeling", {}).get("horizon_candles_n", 36))
         try:
-            uniq = average_uniqueness_weights(len(train_df), horizon)
-            w_series = pd.Series(uniq, index=train_df.index)
-            sw = w_series.reindex(X_train.index).fillna(1.0).to_numpy()
+            sw = aligned_uniqueness_weights(
+                train_df.index, X_train.index, horizon=max(1, horizon)
+            )
         except Exception:
             sw = None
         try:
             base = train_model(X_train, y_train, cfg_inner, sample_weight=sw)
-            calibrated = calibrate_model(base, X_train, y_train, cfg_inner)
+            calibrated = calibrate_model(base, X_train, y_train, cfg_inner, sample_weight=sw)
         except DegenerateLabelSpaceError as exc:
             # Data condition, not a defect: degrade THIS fold to "no signal"
             # instead of aborting the whole multi-variant run.

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from regime.classifier import RegimeLabel
 from model.ensemble import compute_ensemble_signal
-from config.loader import get_signal_grid
+from config.loader import get_signal_grid, resolve_signal_step
 
 
 @dataclass
@@ -205,14 +205,14 @@ class EnsembleBacktester:
             # this bar's intrabar range before falling back to market logic.
             if (open_position is None and pending_limit is not None
                     and self.fill_mode == "limit"):
-                limit_price, ldir, bars_waited = pending_limit
+                limit_price, ldir, bars_waited, frozen_step, signal_regime, frozen_grid = pending_limit
                 touched = (lows[i] <= limit_price) if ldir == 1 else (highs[i] >= limit_price)
                 if touched:
                     direction = ldir
                     entry_price = limit_price
-                    atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
-                    reg_name = _regime_name(regimes[i - 1]) if i > 0 else _regime_name(regimes[i])
-                    grid = get_signal_grid(self.cfg, self.asset_cfg, regime=reg_name)
+                    reg_name = signal_regime
+                    grid = frozen_grid
+                    step = frozen_step
                     tp1_mult = float(grid.get("tp1_mult", self.tp1_mult))
                     tp2_mult = float(grid.get("tp2_mult", self.tp2_mult))
                     tp3_mult = float(grid.get("tp3_mult", self.tp3_mult))
@@ -226,11 +226,11 @@ class EnsembleBacktester:
                         entry_ts=int(timestamps[i]),
                         entry_price=entry_price,
                         direction=direction,
-                        stop_price=entry_price - direction * (atr_val * stop_mult),
-                        tp1_price=entry_price + direction * (atr_val * tp1_mult),
-                        tp2_price=entry_price + direction * (atr_val * tp2_mult),
-                        tp3_price=entry_price + direction * (atr_val * tp3_mult),
-                        initial_stop_price=entry_price - direction * (atr_val * stop_mult),
+                        stop_price=entry_price - direction * (step * stop_mult),
+                        tp1_price=entry_price + direction * (step * tp1_mult),
+                        tp2_price=entry_price + direction * (step * tp2_mult),
+                        tp3_price=entry_price + direction * (step * tp3_mult),
+                        initial_stop_price=entry_price - direction * (step * stop_mult),
                         session=str(sessions[i]),
                         regime_at_entry=reg_name,
                         volume=self.volume,
@@ -254,14 +254,15 @@ class EnsembleBacktester:
                     if bars_waited >= self.limit_timeout:
                         pending_limit = None  # unfilled -> cancelled
                     else:
-                        pending_limit = (limit_price, ldir, bars_waited)
+                        pending_limit = (limit_price, ldir, bars_waited, frozen_step, signal_regime, frozen_grid)
 
             if open_position is None and pending_direction is not None and pending_direction != 0:
                 direction = pending_direction
                 entry_price = opens[i] + (self.spread / 2 if direction == 1 else -self.spread / 2)
                 entry_price = self._apply_slippage(entry_price, direction)
 
-                atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
+                signal_i = i - 1 if i > 0 else i
+                atr_val = atrs[signal_i] if (atrs is not None and not np.isnan(atrs[signal_i])) else 1.0
 
                 # Per-trade exit policy resolved from the regime at SIGNAL time
                 # (bar i-1, same as regime_at_entry). signal_grid.regime_overrides
@@ -277,11 +278,12 @@ class EnsembleBacktester:
                 scaleout = grid.get("scaleout") or {}
                 so1 = float(scaleout.get("tp1_ratio", 0.5)) if isinstance(scaleout, dict) else 0.5
                 so2 = float(scaleout.get("tp2_ratio", 0.3)) if isinstance(scaleout, dict) else 0.3
+                step = resolve_signal_step(atr_val, grid)
 
-                stop_price = entry_price - direction * (atr_val * stop_mult)
-                tp1_price = entry_price + direction * (atr_val * tp1_mult)
-                tp2_price = entry_price + direction * (atr_val * tp2_mult)
-                tp3_price = entry_price + direction * (atr_val * tp3_mult)
+                stop_price = entry_price - direction * (step * stop_mult)
+                tp1_price = entry_price + direction * (step * tp1_mult)
+                tp2_price = entry_price + direction * (step * tp2_mult)
+                tp3_price = entry_price + direction * (step * tp3_mult)
 
                 open_position = Trade(
                     entry_ts=int(timestamps[i]),
@@ -514,8 +516,13 @@ class EnsembleBacktester:
                 if (self.fill_mode == "limit" and pending_direction != 0):
                     ldir = pending_direction
                     atr_here = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
-                    limit_price = closes[i] + (self.limit_frac * atr_here * ldir)
-                    pending_limit = (float(limit_price), ldir, 0)
+                    signal_regime = _regime_name(regimes[i])
+                    frozen_grid = get_signal_grid(self.cfg, self.asset_cfg, regime=signal_regime)
+                    frozen_step = resolve_signal_step(atr_here, frozen_grid)
+                    limit_price = closes[i] + (self.limit_frac * frozen_step * ldir)
+                    pending_limit = (
+                        float(limit_price), ldir, 0, frozen_step, signal_regime, frozen_grid
+                    )
                     pending_direction = None
 
                 # LOOK-AHEAD MEASUREMENT MODE ONLY: fill at the close of the
@@ -537,15 +544,16 @@ class EnsembleBacktester:
                     scaleout = grid.get("scaleout") or {}
                     so1 = float(scaleout.get("tp1_ratio", 0.5)) if isinstance(scaleout, dict) else 0.5
                     so2 = float(scaleout.get("tp2_ratio", 0.3)) if isinstance(scaleout, dict) else 0.3
+                    step = resolve_signal_step(atr_val, grid)
                     open_position = Trade(
                         entry_ts=int(timestamps[i]),
                         entry_price=entry_price,
                         direction=direction,
-                        stop_price=entry_price - direction * (atr_val * stop_mult),
-                        tp1_price=entry_price + direction * (atr_val * tp1_mult),
-                        tp2_price=entry_price + direction * (atr_val * tp2_mult),
-                        tp3_price=entry_price + direction * (atr_val * tp3_mult),
-                        initial_stop_price=entry_price - direction * (atr_val * stop_mult),
+                        stop_price=entry_price - direction * (step * stop_mult),
+                        tp1_price=entry_price + direction * (step * tp1_mult),
+                        tp2_price=entry_price + direction * (step * tp2_mult),
+                        tp3_price=entry_price + direction * (step * tp3_mult),
+                        initial_stop_price=entry_price - direction * (step * stop_mult),
                         session=str(sessions[i]),
                         regime_at_entry=reg_name,
                         volume=self.volume,
