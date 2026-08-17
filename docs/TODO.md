@@ -124,9 +124,53 @@ GOLD | ЗОЛОТО | XAUUSD
 
 ---
 
+## 3b. MQL5 observer wave (2026-08-16, план в `docs/MQL5_OBSERVER_PLAN.md`)
+
+- [x] **Контракты v1:** `SignalIntent` / `ExecutionEvent` / `EventEnvelope` + детерминированные `event_id` (`contracts/execution_contracts.py`, 12 тестов).
+- [x] **Wave 1 — MQL5 Observer EA (read-only):** `mql5/SignalDeskObserver/` (ObserverEA, EventSerializer, DiskOutbox, SymbolResolver, HistoryReconciler, JsonWriter; без `OrderSend`/`CTrade`; demo/contest-only; wire-contract golden tests). Компиляция и acceptance — на Windows-хосте (`mql5/SignalDeskObserver/README.md`).
+- [x] **Wave 0 — provenance manifest:** `data/provenance.py` + `scripts/build_provenance_manifest.py`; opt-in gate в `train_mt5`/`run_backtest` (`validation.require_provenance_manifest`).
+- [x] **Wave 2 — ledger bridge:** `data/ledger_bridge.py` (outbox + HMAC + retry), `scripts/run_ledger_bridge.py`, серверные endpoints `/api/ledger/ingest`, `/api/ledger/events`, `/api/ledger/execution-quality`, `/api/ledger/lifecycle/{intent_id}` (`realtime/app.py`, `data/ledger_events.py`), Python sender пишет `intent_created`/`request_result` и intent до `order_send` (`execution/mt5_trader.py`, `data/intent_ledger.py`, `data/execution_ledger.py` intent/precision columns).
+- [x] **`signal_journal.asset_key`:** nullable-колонка + in-place миграция (`logs/journal.py`).
+- [ ] **Wave 3+ (требуют Windows-хоста):** acceptance checklist, empirical cost dataset на demo, frozen paper baseline, revalidation. UI-views Execution Quality / Lifecycle Trace — API готов, HTML — будущая работа.
+
+## 3c. Web-UI honesty wave (2026-08-16, спецификация «Полная реализация личного веб-интерфейса», §12/§6.3; аудит в `docs/WEB_UI_HONESTY_AUDIT.md`)
+
+- [x] **DataEnvelope/freshness контракт:** `realtime/data_envelope.py` — `fresh/stale/offline/waiting/error` (5s/60s), ключи `source/mode/as_of_utc_ms/freshness_status/ingest_lag_ms/coverage/last_successful_at_utc_ms`; применён ко всем dashboard endpoints и ledger endpoints.
+- [x] **`/api/matrix` без neutral fallback:** per-asset `status=error` + `reason` при исключении, `status=unavailable` вне live-режима; `bias/confidence=None` — никогда не `neutral 0.50`.
+- [x] **Mutation controls отключены:** `/api/control/*` → `501` для всех действий (даже с токеном), `403` без токена; до command bus браузерных controls не существует (Telegram-бот остаётся единственным управлением). Из dashboard удалён мёртвый `sendControl`, добавлен баннер `INTERNAL DIAGNOSTIC VIEW`.
+- [x] **`/ws` — ledger event stream:** owner-only (`?token=`), push нормализованных `ledger_events` каждые 2s с freshness/heartbeat; без токена — `UNAUTHORIZED` + close 1008; строгий курсор без дубликатов. Требует `websockets`/`uvicorn[standard]`.
+- [x] **No-fallback тесты:** `realtime/tests/test_data_envelope.py`, `test_dashboard_honesty.py`; WS-тесты в `test_ledger_ingest.py`; control-тест в `test_app.py` обновлён (501).
+- [ ] **Signal Desk UI (другой проект `trading-system-playbook`):** страницы Overview/Signals/Lifecycle/Positions/Execution Quality/Risk/Research/System Health — вне этого репозитория.
+- [ ] **Wave 3+:** MT5 read-only views на Windows-хосте, empirical cost dataset, acceptance checklist.
+
+## 3d. TradeGroupSpec v1 (2026-08-16, ТЗ «TradeGroupSpec v1»; статус в `docs/TRADE_GROUP_SPEC.md`)
+
+- [x] **Domain-контракт:** `execution/trade_group.py` — `TradeGroupSpec` v1 (immutable), `TradeLeg`, `GroupState` (state machine + BE_RETRY), `BreakEvenPolicy`, `GroupRisk`, `allocate_leg_volumes` (floor-правило), `check_group_risk` (один раз на группу), ids `signalId/intentId/groupId/legId`.
+- [x] **Geometry engine:** `execution/trade_geometry.py` — pure: профили, step (ATR+clamps), TP1/2/3/SL, tick alignment, broker min stop distance, cost-aware admissibility, gross R, reason codes; `build_trade_group_from_signal()` — ML→spec мост.
+- [x] **Profiles:** `config.trade_profiles` — `xau_m15_intraday_v1` (validated), `btc_m5_scalp_v1` (validated:false, paper-only кандидат; live BTC signal_grid не тронут).
+- [x] **BE (ТЗ §17/§18):** raw = actual fill; protected = fill + spread + slippage + commission; BE_CONFIRMED только после modify + broker query; bounded retry.
+- [x] **Telegram parity:** `alerts/formatter.py` — authoritative final geometry для `trade-group.v1` (recomputation запрещена), legacy fallback только для старых сигналов, lifecycle update формат.
+- [x] **Ledger/logger:** 15 новых lifecycle event types + `group_id`/`leg_id` (nullable, in-place); `trade_logger` group-колонки.
+- [x] **Persistence + paper executor:** `data/trade_group_store.py` (submitted-guard против duplicate orders при restart), `execution/trade_group_executor.py` (PaperDriver netting/hedging, simulate_tick, restart recovery; demo по `TRADE_GROUP_ENABLE_DEMO=1`; live — `LiveExecutionForbidden`).
+- [x] **Broker adapter:** `get_account_mode()`, `get_symbol_constraints()`.
+- [ ] **P1.5 (отложено):** `mt5_trader.py` group execution (hedging/netting submit) — после acceptance; current live path неизменен.
+- [ ] **P2:** BTC profile frozen-data validation (ТЗ §30), live promotion (только с отдельным подтверждением).
+
+## 3e. TradeGroupSpec follow-up (2026-08-16): direction/BE/paper invariants
+
+- [x] **SHORT SL validation fix:** явные direction-цепочки (LONG `SL<entry<TP1<TP2<TP3`, SHORT зеркально) вместо знаковой формулы.
+- [x] **BE на все остаточные legs:** `confirm_break_even()` модифицирует+проверяет каждый `apply_to` ref (netting резолвит virtual legs).
+- [x] **Demo env gate:** `TRADE_GROUP_ENABLE_DEMO` (fail-closed), live всегда заблокирован; spy-тест: paper path → 0 вызовов `order_send`.
+- [x] **Parity helper:** Telegram читает уровни из `spec.as_geometry_payload()`.
+- [x] **+58 тестов:** direction (LONG/SHORT), BE direction/alignment/costs, immutability против ATR/spread/candle, write-once fill, allocation dust (0.03–0.10), risk symmetry, live-gate, BTC 20–50 нетронут, SHORT Telegram parity, missing-geometry per-field, hedging lifecycle, no premature BE, BE retry→success, restart recovery matrix (6 состояний), ledger chronological/dedup.
+- [x] **P1.5 — demo MT5 TradeGroup execution:** `execution/execution_intent.py` (intent + geometry-hash verification), `mt5_common.py` (fresh snapshot, account-mode detect, tick-align-only, ORDER_GEOMETRY_INVALID), `mt5_hedging_adapter.py` (3 physical legs), `mt5_netting_adapter.py` (aggregate + virtual legs, один BE modify), `mt5_trade_group.py` (demo executor + poll state machine), `reconciliation.py` (deal-history evidence, orphan detection, volume sync), store actions table (idempotency), ledger `leg_partially_filled/group_opened/orphan_broker_position/execution_error`. LIVE заблокирован; demo gate = `TRADE_GROUP_ENABLE_DEMO=1` + DEMO account. **+38 тестов** (34 demo-executor + 4 reconciliation; сценарии A–F §42, partial/reject/restart/orphan §43–§44, telegram §35–§36). Реальный Windows demo smoke test — на Windows-хосте.
+- [x] **P1.5.1 — partial submission + volume reconciliation:** компенсационный flow `PARTIAL_SUBMISSION → COMPENSATION_REQUESTED → COMPENSATION_CONFIRMED → FAILED` (открытые legs закрываются market-close с broker confirmation; `COMPENSATE-L<n>`/`COMPENSATE-GROUP` actionIds через `mark_action`; `FAILED_WITH_OPEN_RISK` — non-terminal, reconciliation продолжается с bounded retry); volume ledger на группу и leg (`requested/filled/closed/remaining`); netting close volume от ACTUAL broker volume + cumulative allocation (`min(desired_increment, remaining)`, floor to volume_step, TP3 = весь остаток); hedging partial fill → `PARTIALLY_FILLED` с management по фактическому объёму; ledger events `partial_submission/compensation_requested/compensation_confirmed/compensation_failed/failed_with_open_risk`; Telegram partial/failed/emergency. **+29 тестов** (§22–§27). Реальный Windows demo smoke test — на Windows-хосте.
+- [x] **P1.6 — ProvenanceSpec v1 / lineage / freshness:** `execution/provenance.py` (единый контракт source/sourceType/sourceId/mode/asOfUtcMs/observedAtUtcMs/freshness/dataHash/parentIds; frozen; legacy_unavailable для старых записей); `CostSnapshot.status` observed/estimated/unavailable + source (bare `CostSnapshot()` = unavailable, `COST_DATA_UNAVAILABLE` блокирует геометрию); `TradeGroupSpec.provenance` с lineage ids + раздельные `geometry_hash`/`provenance_hash` + `require_execution_provenance()`; `ExecutionIntent` provenance gate; ledger actor-vs-source колонки + TP/BE/stop события с `source=mt5/simulator`; `GET /api/provenance/{group_id}` (present/missing, owner-only); `scripts/verify_provenance.py`. **+30 тестов** (§43–§45). Реальные MT5 candle/broker IDs — на Windows-хосте; training manifest не придуман (явно unavailable).
+- [ ] **P2:** BTC profile frozen-data validation (ТЗ §30), live promotion (только с отдельным подтверждением).
+
 ## 4. Чек-лист проверки и эксплуатации
 
-- [x] **Тестовый набор:** `pytest -q` — **545 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation). Исторические counts в change log не являются текущим статусом.
+- [x] **Тестовый набор:** `pytest -q` — **834 passed, 11 warnings** (2026-08-16; warnings: малые synthetic CSCV fixtures и Starlette deprecation; +38 P1.5 +29 P1.5.1 +30 P1.6 provenance тестов). Исторические counts в change log не являются текущим статусом.
 - [x] **Веб-дашборд:** код/API реализованы; фактический deployment status определяется `/health`, а каждое значение обязано показывать `source/mode/as_of` — постоянный ONLINE здесь не утверждается.
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.

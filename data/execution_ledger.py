@@ -17,6 +17,12 @@ from data.storage import get_connection, read_candles
 
 TABLE_NAME = "execution_fills"
 
+# Wave-0 MQL5 plan: correlate execution attempts with the SignalIntent that
+# created them and tag the fact's precision (request/probe/passive/...).
+# Columns are nullable and added in-place so legacy databases migrate
+# non-destructively (same pattern as data/storage.py OPTIONAL_MARKET_COLUMNS).
+OPTIONAL_EXECUTION_COLUMNS = ["intent_id", "precision"]
+
 
 def init_execution_ledger(db_path: str) -> None:
     conn = get_connection(db_path)
@@ -41,9 +47,15 @@ def init_execution_ledger(db_path: str) -> None:
                 rejection_reason TEXT,
                 order_ticket INTEGER,
                 position_ticket INTEGER,
+                intent_id TEXT,
+                precision TEXT,
                 metadata_json TEXT NOT NULL
             );
         """)
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE_NAME});")}
+        for column in OPTIONAL_EXECUTION_COLUMNS:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN {column} TEXT")
         conn.execute(
             f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_asset_time "
             f"ON {TABLE_NAME}(asset_key, requested_at_ms);"
@@ -75,12 +87,17 @@ def log_execution_attempt(
     rejection_reason: str | None = None,
     order_ticket: int | None = None,
     position_ticket: int | None = None,
+    intent_id: str | None = None,
+    precision: str | None = "request",
     metadata: dict[str, Any] | None = None,
 ) -> int:
     """Append one immutable attempt and return its ledger id.
 
     ``adverse_slippage`` is positive when execution moved against the request:
     fill-request for buys, request-fill for sells. It remains NULL for rejects.
+    ``intent_id`` links the attempt to its SignalIntent; ``precision`` tags the
+    fact's nature (``request`` from the sender, ``probe`` from the FX probe,
+    etc.) so cost statistics never mix observation modes.
     """
     completed = int(completed_at_ms if completed_at_ms is not None else now_ms())
     requested = int(requested_at_ms)
@@ -104,13 +121,14 @@ def log_execution_attempt(
                 completed_at_ms, latency_ms, requested_price, filled_price,
                 adverse_slippage, volume_requested, volume_filled, status,
                 retcode, rejection_reason, order_ticket, position_ticket,
-                metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                intent_id, precision, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 asset_key, broker_symbol, action, normalized_side, requested,
                 completed, max(0, completed - requested), requested_price,
                 filled_price, slippage, volume_requested, volume_filled, status,
-                retcode, rejection_reason, order_ticket, position_ticket,
+                retcode, rejection_reason, order_ticket, position_ticket, intent_id,
+                precision,
                 json.dumps(metadata or {}, sort_keys=True, default=str),
             ),
         )

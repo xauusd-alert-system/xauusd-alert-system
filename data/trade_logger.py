@@ -17,6 +17,15 @@ def get_connection(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+# TradeGroupSpec v1 columns (ТЗ §27 data/trade_logger.py): nullable, added
+# in-place so legacy executed_trades rows migrate non-destructively.
+GROUP_COLUMNS = [
+    "group_id", "intent_id", "leg_id", "profile_id", "schema_version",
+    "requested_entry", "actual_fill", "tp1", "tp2", "tp3", "sl",
+    "be_requested", "be_confirmed",
+]
+
+
 def init_trade_log_schema(db_path: str):
     conn = get_connection(db_path)
     try:
@@ -34,30 +43,50 @@ def init_trade_log_schema(db_path: str):
                 features TEXT NOT NULL
             );
         """)
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE_NAME})")}
+        for column in GROUP_COLUMNS:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN {column} TEXT")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_symbol ON {TABLE_NAME}(symbol);")
         conn.commit()
     finally:
         conn.close()
 
 
-def log_trade_entry(db_path: str, ticket: int, symbol: str, bias: str, entry_time: int, entry_price: float, features: dict):
+def log_trade_entry(db_path: str, ticket: int, symbol: str, bias: str, entry_time: int,
+                    entry_price: float, features: dict, *,
+                    group_id: str | None = None, intent_id: str | None = None,
+                    leg_id: str | None = None, profile_id: str | None = None,
+                    schema_version: str | None = None, requested_entry: float | None = None,
+                    actual_fill: float | None = None, tp1: float | None = None,
+                    tp2: float | None = None, tp3: float | None = None,
+                    sl: float | None = None, be_requested: float | None = None,
+                    be_confirmed: float | None = None):
     """
     Logs trade entry with feature values serialized to JSON.
+
+    TradeGroupSpec v1 columns are optional; legacy callers keep working with
+    NULL group fields (migration is non-destructive).
     """
     init_trade_log_schema(db_path)
     conn = get_connection(db_path)
     try:
+        columns = (
+            "ticket, symbol, bias, entry_time, entry_price, close_time, close_price, "
+            "pnl, outcome, features, " + ", ".join(GROUP_COLUMNS)
+        )
+        placeholders = ", ".join("?" for _ in range(10 + len(GROUP_COLUMNS)))
         conn.execute(
             f"""INSERT OR REPLACE INTO {TABLE_NAME}
-                (ticket, symbol, bias, entry_time, entry_price, close_time, close_price, pnl, outcome, features)
-                VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)""",
+                ({columns})
+                VALUES ({placeholders})""",
             (
-                ticket,
-                symbol,
-                bias,
-                entry_time,
-                entry_price,
+                ticket, symbol, bias, entry_time, entry_price,
+                None, None, None, None,
                 json.dumps(features or {}),
+                group_id, intent_id, leg_id, profile_id, schema_version,
+                requested_entry, actual_fill, tp1, tp2, tp3, sl,
+                be_requested, be_confirmed,
             ),
         )
         conn.commit()

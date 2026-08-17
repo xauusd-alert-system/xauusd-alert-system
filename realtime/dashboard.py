@@ -36,9 +36,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <p class="text-slate-400 text-sm mt-1">Institutional Multi-Asset ML System &bull; Smart Money Concepts &bull; Causal No-Lookahead Architecture</p>
             </div>
             
-            <!-- Broker controls intentionally live only in authenticated Telegram. -->
-            <div class="text-xs text-slate-400 border border-slate-700 rounded-lg px-3 py-2">
-                <i class="fas fa-lock"></i> Управление исполнением: только авторизованный Telegram
+            <!-- Internal diagnostic view: never a live terminal. Mutation controls
+                 are disabled server-side (web-UI spec §11/§12); execution control
+                 lives only in authenticated Telegram. -->
+            <div class="text-xs text-slate-400 border border-amber-600/40 bg-amber-950/20 rounded-lg px-3 py-2">
+                <i class="fas fa-lock"></i> INTERNAL DIAGNOSTIC VIEW — не является live-терминалом<br>
+                <span class="text-slate-500">Управление исполнением: только авторизованный Telegram (браузерные controls отключены)</span>
             </div>
         </header>
 
@@ -493,21 +496,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if(icon) setTimeout(() => icon.classList.remove("fa-spin"), 400);
         }
 
-        async function sendControl(action) {
-            if(!confirm("Подтвердите действие: " + action.toUpperCase())) return;
-            try {
-                const res = await fetch("/api/control/" + action, { method: "POST" });
-                const json = await res.json();
-                if (!res.ok) {
-                    alert("Действие не выполнено: " + (json.detail || res.statusText));
-                    return;
-                }
-                alert(json.message || "Действие выполнено");
-                refreshData();
-            } catch(e) {
-                alert("Ошибка выполнения действия: " + e);
-            }
-        }
+        // NOTE: browser mutation controls are disabled server-side by design
+        // (web-UI spec §11/§12). No control buttons are rendered and no
+        // /api/control calls are issued from this page.
 
         async function loadMetrics() {
             const period = (document.getElementById("metrics-period") || {value:"week"}).value;

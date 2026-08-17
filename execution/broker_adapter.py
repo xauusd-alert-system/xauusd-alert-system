@@ -98,6 +98,30 @@ class BaseBrokerAdapter(ABC):
         """Modify SL/TP of an open position."""
         pass
 
+    def get_account_mode(self) -> str:
+        """Account margin mode: "hedging" | "netting" | "unknown" (ТЗ §13).
+
+        Default implementation returns "unknown"; adapters override with real
+        broker semantics. The trade-group executor MUST know the mode BEFORE
+        submitting (netting can never be presented as 3 independent positions).
+        """
+        return "unknown"
+
+    def get_symbol_constraints(self, symbol: str) -> Dict[str, Any]:
+        """Symbol/broker constraints snapshot (ТЗ §4/§28.9): tick size, point,
+        digits, stops/freeze levels, spread, contract size, volume grid and
+        execution mode. Pure values — the geometry engine consumes them without
+        touching MT5."""
+        return {
+            "symbol": symbol,
+            "symbol_point": 0.0, "tick_size": 0.0, "digits": 0,
+            "trade_stops_level": 0, "trade_freeze_level": 0, "spread": 0.0,
+            "contract_size": 0.0, "volume_min": 0.0, "volume_max": 0.0,
+            "volume_step": 0.0, "execution_mode": "unknown",
+            "account_margin_mode": self.get_account_mode(),
+            "available": False,
+        }
+
 
 class MT5BrokerAdapter(BaseBrokerAdapter):
     """Adapter bridging to MetaTrader 5 API."""
@@ -246,6 +270,62 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
             return OrderResult(success=True, ticket=ticket, retcode=res.retcode)
         return OrderResult(success=False, comment=getattr(res, "comment", "modify failed"), retcode=getattr(res, "retcode", -1) if res else -1)
 
+    def get_account_mode(self) -> str:
+        """MT5 account margin mode (ТЗ §13): RETAIL_HEDGING / RETAIL_NETTING."""
+        try:
+            account = self.mt5.account_info()
+            if account is None:
+                return "unknown"
+            margin_mode = int(getattr(account, "margin_mode", 0) or 0)
+            hedging = getattr(self.mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", None)
+            netting = getattr(self.mt5, "ACCOUNT_MARGIN_MODE_RETAIL_NETTING", None)
+            if hedging is not None and margin_mode == hedging:
+                return "hedging"
+            if netting is not None and margin_mode == netting:
+                return "netting"
+            return "unknown"
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("get_account_mode failed: %s", exc)
+            return "unknown"
+
+    def get_symbol_constraints(self, symbol: str) -> Dict[str, Any]:
+        """Read-only symbol specification snapshot from the MT5 terminal."""
+        try:
+            info = self.mt5.symbol_info(symbol)
+            if info is None:
+                result = super().get_symbol_constraints(symbol)
+                result.update({"symbol": symbol, "available": False,
+                               "account_margin_mode": self.get_account_mode(),
+                               "reason": "symbol_info unavailable"})
+                return result
+            tick = self.mt5.symbol_info_tick(symbol)
+            spread = 0.0
+            if tick is not None and getattr(tick, "ask", 0.0) > 0.0 and getattr(tick, "bid", 0.0) > 0.0:
+                spread = abs(float(tick.ask) - float(tick.bid))
+            point = float(getattr(info, "point", 0.0) or 0.0)
+            return {
+                "symbol": symbol,
+                "symbol_point": point,
+                "tick_size": float(getattr(info, "trade_tick_size", 0.0) or point or 0.0),
+                "digits": int(getattr(info, "digits", 0) or 0),
+                "trade_stops_level": int(getattr(info, "trade_stops_level", 0) or 0),
+                "trade_freeze_level": int(getattr(info, "trade_freeze_level", 0) or 0),
+                "spread": spread,
+                "contract_size": float(getattr(info, "trade_contract_size", 0.0) or 0.0),
+                "volume_min": float(getattr(info, "volume_min", 0.0) or 0.0),
+                "volume_max": float(getattr(info, "volume_max", 0.0) or 0.0),
+                "volume_step": float(getattr(info, "volume_step", 0.0) or 0.0),
+                "execution_mode": str(getattr(info, "trade_exec_mode", "unknown")),
+                "account_margin_mode": self.get_account_mode(),
+                "available": True,
+            }
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("get_symbol_constraints failed for %s: %s", symbol, exc)
+            result = super().get_symbol_constraints(symbol)
+            result["symbol"] = symbol
+            result["reason"] = str(exc)
+            return result
+
 
 class MockFIXBrokerAdapter(BaseBrokerAdapter):
     """
@@ -253,12 +333,35 @@ class MockFIXBrokerAdapter(BaseBrokerAdapter):
     Used for simulation and non-MT5 institutional gateways.
     """
 
-    def __init__(self, initial_balance: float = 100000.0):
+    def __init__(self, initial_balance: float = 100000.0, account_mode: str = "netting"):
         self.balance = initial_balance
         self.equity = initial_balance
         self.positions: Dict[int, PositionSnapshot] = {}
         self.ticket_counter = 10000
         self.connected = False
+        self._account_mode = account_mode if account_mode in {"hedging", "netting"} \
+            else "unknown"
+
+    def get_account_mode(self) -> str:
+        return self._account_mode
+
+    def get_symbol_constraints(self, symbol: str) -> Dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "symbol_point": 0.01,
+            "tick_size": 0.01,
+            "digits": 2,
+            "trade_stops_level": 0,
+            "trade_freeze_level": 0,
+            "spread": 0.2 if "XAU" in symbol else 0.0001,
+            "contract_size": 100.0 if "XAU" in symbol else 100000.0,
+            "volume_min": 0.01,
+            "volume_max": 100.0,
+            "volume_step": 0.01,
+            "execution_mode": "request",
+            "account_margin_mode": self._account_mode,
+            "available": True,
+        }
 
     def connect(self) -> bool:
         self.connected = True

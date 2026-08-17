@@ -4,12 +4,14 @@ correlation matrix, active positions, Monte Carlo risk analytics,
 Macro AI news sentiment, visual charts, and interactive bot controls.
 """
 from __future__ import annotations
+import asyncio
 import os
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Header
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 import pandas as pd
@@ -23,6 +25,16 @@ from backtest.monte_carlo import MonteCarloSimulator
 from alerts.chart_renderer import ChartRenderer
 from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
 from alerts import status_commands as sc
+from contracts.execution_contracts import event_envelope_from_dict
+from data.ledger_bridge import verify_signature
+from data.ledger_events import (
+    execution_quality_summary,
+    latest_ledger_activity_ms,
+    lifecycle_trace,
+    read_ledger_events,
+    upsert_ledger_event,
+)
+from realtime.data_envelope import freshness_status, stamp
 
 logger = logging.getLogger("realtime_app")
 
@@ -108,7 +120,12 @@ def get_signal(n_candles: int = 300, asset: str = "XAUUSD"):
 
 @app.get("/api/status")
 def get_status():
-    """Returns current system and account metrics (real MT5 when available)."""
+    """Returns current system and account metrics (real MT5 when available).
+
+    Honesty contract (web-UI spec §6.3 / §12): when MT5 is unavailable the
+    payload returns ``available=false`` with ``balance/equity/floating_pnl =
+    None`` and ``freshness_status=offline`` — never a fallback balance.
+    """
     account = None
     positions = []
     if sc.ensure_mt5_connection():
@@ -121,7 +138,8 @@ def get_status():
     available = account is not None
     balance = float(getattr(account, "balance", 0.0) or 0.0) if available else None
     equity = float(getattr(account, "equity", 0.0) or 0.0) if available else None
-    return {
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    payload = {
         "status": "online",
         "data_mode": DATA_MODE,
         "available": available,
@@ -139,6 +157,13 @@ def get_status():
         "deployment_mode": deployment_mode(CFG).value,
         **APP_STRATEGY_IDENTITY,
     }
+    return stamp(
+        payload,
+        last_activity_ms=now if available else None,
+        source="mt5_account" if available else "unavailable",
+        mode="live_verified" if available and DATA_MODE == "live" else "implemented_not_live_verified",
+        freshness=None if available else "offline",  # producer unreachable, not "no data yet"
+    )
 
 
 @app.get("/api/metrics")
@@ -151,19 +176,25 @@ def get_metrics(period: str = "week"):
     """
     if period not in ("today", "week", "2week", "month", "3month", "all"):
         period = "week"
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
     if not sc.ensure_mt5_connection():
-        return {"period": period, "period_label": sc.PERIODS.get(period, ""),
-                "n": 0, "available": False, "source": "unavailable",
-                "mode": "implemented_not_live_verified",
-                "as_of_utc": datetime.now(timezone.utc).isoformat()}
+        return stamp(
+            {"period": period, "period_label": sc.PERIODS.get(period, ""),
+             "n": 0, "available": False,
+             "as_of_utc": datetime.now(timezone.utc).isoformat()},
+            last_activity_ms=None, source="unavailable",
+            mode="implemented_not_live_verified", freshness="offline",
+        )
     dt_from, dt_to, label = sc.period_range(period)
     deals = sc.fetch_deals_between(dt_from, dt_to) if dt_from else sc.fetch_deals_between(
         datetime(1970, 1, 1, tzinfo=timezone.utc), dt_to)
     contexts = sc.load_position_contexts()
     m = sc.compute_deal_metrics(deals, contexts=contexts, cfg=CFG)
-    return {"period": period, "period_label": label, "available": True,
-            "source": "mt5_history_deals", "mode": "live_verified",
-            "as_of_utc": datetime.now(timezone.utc).isoformat(), **m}
+    return stamp(
+        {"period": period, "period_label": label, "available": True,
+         "as_of_utc": datetime.now(timezone.utc).isoformat(), **m},
+        last_activity_ms=now, source="mt5_history_deals", mode="live_verified",
+    )
 
 
 @app.get("/api/paper-status")
@@ -193,15 +224,21 @@ def get_paper_status():
 
 @app.get("/api/matrix")
 def get_signal_matrix():
-    """Generates signals across all 5 enabled assets."""
+    """Generates signals across all 5 enabled assets.
+
+    Honesty contract (web-UI spec §12): a per-asset failure is an explicit
+    ``status=error`` row with ``bias/confidence = None`` — never a fabricated
+    neutral ``confidence=0.50`` that looks model-computed.
+    """
     assets = ["XAUUSD", "XAGUSD", "BTCUSD", "EURUSD", "GBPUSD"]
+    as_of = datetime.now(timezone.utc).isoformat()
     if DATA_MODE != "live":
-        as_of = datetime.now(timezone.utc).isoformat()
         return {
             "signals": [{
                 "asset": asset, "bias": None, "confidence": None,
                 "regime": None, "session": None, "targets": [],
-                "invalidation": None, "available": False,
+                "invalidation": None, "available": False, "status": "unavailable",
+                "freshness_status": "offline",
                 "source": "unavailable", "mode": DATA_MODE, "as_of_utc": as_of,
             } for asset in assets],
             "source": "unavailable", "mode": DATA_MODE, "as_of_utc": as_of,
@@ -213,44 +250,51 @@ def get_signal_matrix():
             sig = pipe.generate_signal(n_candles=300)
             signals.append({
                 "asset": sym,
-                "bias": sig.get("bias", "neutral"),
-                "confidence": float(sig.get("confidence", 0.5)),
-                "regime": sig.get("regime", "range"),
-                "session": sig.get("session", "london"),
+                "bias": sig.get("bias"),
+                "confidence": sig.get("confidence"),
+                "regime": sig.get("regime"),
+                "session": sig.get("session"),
                 "targets": sig.get("targets", []),
                 "invalidation": sig.get("invalidation", None),
                 "available": True,
+                "status": "ok",
                 "source": "realtime_pipeline",
-                "mode": "live" if DATA_MODE == "live" else "mock",
-                "as_of_utc": sig.get("generated_at") or datetime.now(timezone.utc).isoformat(),
+                "mode": DATA_MODE,
+                "as_of_utc": sig.get("generated_at") or as_of,
             })
         except Exception as e:
-            logger.warning(f"Matrix signal generation fallback for {sym}: {e}")
+            logger.warning("Matrix signal generation failed for %s: %s", sym, e)
             signals.append({
                 "asset": sym,
-                "bias": "neutral",
-                "confidence": 0.50,
-                "regime": "range",
-                "session": "london",
+                "bias": None,
+                "confidence": None,
+                "regime": None,
+                "session": None,
                 "targets": [],
                 "invalidation": None,
                 "available": False,
-                "source": "error_fallback",
+                "status": "error",
+                "reason": str(e),
+                "source": "realtime_pipeline",
                 "mode": "unavailable",
-                "as_of_utc": datetime.now(timezone.utc).isoformat(),
+                "as_of_utc": as_of,
             })
     return {"signals": signals, "source": "per_asset_realtime_pipeline",
-            "mode": DATA_MODE, "as_of_utc": datetime.now(timezone.utc).isoformat()}
+            "mode": DATA_MODE, "as_of_utc": as_of}
 
 
 @app.get("/api/correlation")
 def get_correlation_matrix():
     """Rolling close-return correlation from real MT5 candles only."""
     as_of = datetime.now(timezone.utc).isoformat()
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
     if DATA_MODE != "live":
-        return {"available": False, "assets": [], "matrix": [],
-                "source": "unavailable", "mode": DATA_MODE, "as_of_utc": as_of,
-                "reason": "real_market_data_required"}
+        return stamp(
+            {"available": False, "assets": [], "matrix": [],
+             "as_of_utc": as_of, "reason": "real_market_data_required"},
+            last_activity_ms=None, source="unavailable", mode=DATA_MODE,
+            freshness="offline",
+        )
 
     returns = []
     for asset, asset_cfg in CFG.get("assets", {}).items():
@@ -273,30 +317,40 @@ def get_correlation_matrix():
             logger.warning("Correlation data unavailable for %s: %s", asset, exc)
 
     if len(returns) < 2:
-        return {"available": False, "assets": [], "matrix": [],
-                "source": "mt5_closed_candles", "mode": "live",
-                "as_of_utc": as_of, "reason": "fewer_than_two_assets_available"}
+        return stamp(
+            {"available": False, "assets": [], "matrix": [],
+             "as_of_utc": as_of, "reason": "fewer_than_two_assets_available"},
+            last_activity_ms=None, source="mt5_closed_candles", mode="live",
+        )
     aligned = pd.concat(returns, axis=1, join="inner").dropna()
     aligned = aligned.loc[:, aligned.std(ddof=0) > 0]
     if len(aligned) < 20 or aligned.shape[1] < 2:
-        return {"available": False, "assets": [], "matrix": [],
-                "source": "mt5_closed_candles", "mode": "live",
-                "as_of_utc": as_of, "reason": "insufficient_aligned_returns"}
+        return stamp(
+            {"available": False, "assets": [], "matrix": [],
+             "as_of_utc": as_of, "reason": "insufficient_aligned_returns"},
+            last_activity_ms=None, source="mt5_closed_candles", mode="live",
+        )
     corr = aligned.corr()
-    return {"available": True, "assets": corr.columns.tolist(),
-            "matrix": corr.to_numpy(dtype=float).tolist(),
-            "source": "mt5_closed_candle_returns", "mode": "live_verified",
-            "as_of_utc": as_of, "n_aligned_returns": int(len(aligned))}
+    return stamp(
+        {"available": True, "assets": corr.columns.tolist(),
+         "matrix": corr.to_numpy(dtype=float).tolist(),
+         "as_of_utc": as_of, "n_aligned_returns": int(len(aligned))},
+        last_activity_ms=now, source="mt5_closed_candle_returns",
+        mode="live_verified",
+    )
 
 
 @app.get("/api/sentiment")
 def get_sentiment():
     """No live-news adapter is configured; never present samples as current news."""
-    return {"available": False, "score": None, "bias": None, "confidence": None,
-            "matched_terms": [], "source": "unavailable",
-            "mode": "implemented_not_live_verified",
-            "as_of_utc": datetime.now(timezone.utc).isoformat(),
-            "reason": "no_live_news_source_configured"}
+    return stamp(
+        {"available": False, "score": None, "bias": None, "confidence": None,
+         "matched_terms": [],
+         "as_of_utc": datetime.now(timezone.utc).isoformat(),
+         "reason": "no_live_news_source_configured"},
+        last_activity_ms=None, source="unavailable",
+        mode="implemented_not_live_verified",
+    )
 
 
 @app.get("/api/monte-carlo")
@@ -308,9 +362,12 @@ def get_monte_carlo():
         default=CFG.get("general", {}).get("db_path", "data/market_data_mt5.sqlite"),
     ))
     if not os.path.exists(db_path):
-        return {"available": False, "source": "trading_events.position_closed",
-                "mode": "live_history", "as_of_utc": as_of,
-                "reason": "primary_event_ledger_missing"}
+        return stamp(
+            {"available": False,
+             "as_of_utc": as_of, "reason": "primary_event_ledger_missing"},
+            last_activity_ms=None, source="trading_events.position_closed",
+            mode="live_history",
+        )
     try:
         from data.trading_event_ledger import closed_position_pnls, verify_event_chain
         if not verify_event_chain(db_path):
@@ -318,14 +375,20 @@ def get_monte_carlo():
         pnls = np.asarray(closed_position_pnls(db_path), dtype=float)
     except Exception as exc:
         logger.warning("Could not load primary event ledger for Monte Carlo: %s", exc)
-        return {"available": False, "source": "trading_events.position_closed",
-                "mode": "live_history", "as_of_utc": as_of,
-                "reason": "primary_event_ledger_unreadable"}
+        return stamp(
+            {"available": False,
+             "as_of_utc": as_of, "reason": "primary_event_ledger_unreadable"},
+            last_activity_ms=None, source="trading_events.position_closed",
+            mode="live_history",
+        )
     if len(pnls) < 2:
-        return {"available": False, "source": "trading_events.position_closed",
-                "mode": "live_history", "as_of_utc": as_of,
-                "reason": "at_least_two_closed_trades_required",
-                "n_trades": int(len(pnls))}
+        return stamp(
+            {"available": False,
+             "as_of_utc": as_of, "reason": "at_least_two_closed_trades_required",
+             "n_trades": int(len(pnls))},
+            last_activity_ms=None, source="trading_events.position_closed",
+            mode="live_history",
+        )
 
     account = sc.get_mt5().account_info() if sc.ensure_mt5_connection() else None
     initial_balance = float(getattr(account, "balance", 0.0) or 0.0)
@@ -338,10 +401,12 @@ def get_monte_carlo():
         horizon_trades=100,
     )
     result = mc.run_simulation()
-    result.update({"available": True, "source": "trading_events.position_closed.realized_pnl",
-                   "mode": "live_history", "as_of_utc": as_of,
-                   "n_trades": int(len(pnls))})
-    return result
+    last_activity = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return stamp(
+        {"available": True, "as_of_utc": as_of, "n_trades": int(len(pnls)), **result},
+        last_activity_ms=last_activity,
+        source="trading_events.position_closed.realized_pnl", mode="live_history",
+    )
 
 
 @app.get("/api/chart/{asset}")
@@ -428,9 +493,13 @@ def get_institutional_metrics():
 def get_positions():
     """Read-only real MT5 positions; never return a synthetic empty portfolio."""
     as_of = datetime.now(timezone.utc).isoformat()
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
     if not sc.ensure_mt5_connection():
-        return {"available": False, "positions": [], "source": "unavailable",
-                "mode": "implemented_not_live_verified", "as_of_utc": as_of}
+        return stamp(
+            {"available": False, "positions": [], "as_of_utc": as_of},
+            last_activity_ms=None, source="unavailable",
+            mode="implemented_not_live_verified", freshness="offline",
+        )
     try:
         raw_positions = list(sc.get_mt5().positions_get() or [])
         positions = [{
@@ -444,46 +513,351 @@ def get_positions():
             "sl": float(getattr(p, "sl", 0.0) or 0.0),
             "tp": float(getattr(p, "tp", 0.0) or 0.0),
         } for p in raw_positions]
-        return {"available": True, "positions": positions, "source": "mt5_positions",
-                "mode": "live_verified", "as_of_utc": as_of}
+        return stamp(
+            {"available": True, "positions": positions, "as_of_utc": as_of},
+            last_activity_ms=now, source="mt5_positions", mode="live_verified",
+        )
     except Exception as exc:
-        return {"available": False, "positions": [], "source": "mt5_positions",
-                "mode": "live", "as_of_utc": as_of, "reason": str(exc)}
+        return stamp(
+            {"available": False, "positions": [], "as_of_utc": as_of, "reason": str(exc)},
+            last_activity_ms=None, source="mt5_positions", mode="live",
+        )
 
 
 @app.post("/api/control/{action}")
 def handle_control(action: str, authorization: str | None = Header(default=None)):
-    """Authenticated dashboard-process controls; broker mutation is not wired here."""
-    global TRADING_PAUSED
+    """All browser mutation controls are DISABLED (web-UI spec §11/§12).
+
+    ``pause``, ``resume`` and ``closeall`` stay off until a real command bus
+    exists (idempotency, typed confirmation, kill-switch semantics and broker
+    reconciliation). The only execution control remains the authenticated
+    Telegram bot. This endpoint exists so the disabled state is explicit, not
+    silent.
+    """
     expected = get_env("DASHBOARD_CONTROL_TOKEN", default=None)
     if not expected or authorization != f"Bearer {expected}":
         raise HTTPException(status_code=403, detail="dashboard control authorization required")
-    action_lower = action.lower()
-    if action_lower == "pause":
-        TRADING_PAUSED = True
-        return {"status": "ok", "scope": "dashboard_api_process_only",
-                "message": "⏸️ API generation paused; MT5 trader state was not changed"}
-    if action_lower == "resume":
-        TRADING_PAUSED = False
-        return {"status": "ok", "scope": "dashboard_api_process_only",
-                "message": "▶️ API generation resumed; MT5 trader state was not changed"}
-    if action_lower == "closeall":
-        raise HTTPException(
-            status_code=501,
-            detail=("closeall is not wired to the trader from this web process; "
-                    "use the authenticated Telegram control bot"),
-        )
-    raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            f"control action '{action}' is disabled: browser mutation controls are off "
+            "until a command bus with idempotency/confirmation/kill-switch exists; "
+            "use the authenticated Telegram control bot"
+        ),
+    )
+
+
+def _ledger_rows_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Serialize ledger rows to JSON-safe records (payload_json -> payload)."""
+    records = []
+    for row in df.to_dict("records"):
+        row = {k: (None if pd.isna(v) else v) for k, v in row.items()}
+        try:
+            row["payload"] = json.loads(row.pop("payload_json") or "{}")
+        except json.JSONDecodeError:
+            row["payload"] = {}
+        records.append(row)
+    return records
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """Real-time push WebSocket for streaming live ticks and signal updates."""
+async def websocket_endpoint(websocket: WebSocket, token: str | None = None):
+    """Owner-only push stream of normalized ledger events (replaces the old echo).
+
+    Auth: ``?token=<LEDGER_OWNER_TOKEN|LEDGER_INGEST_TOKEN>`` query parameter
+    (browser WebSockets cannot set headers). The stream sends an initial
+    snapshot of the latest events plus a freshness status, then pushes new
+    events as they arrive (2s poll) and a periodic heartbeat. No client
+    commands are accepted.
+    """
+    owner_token = _ledger_owner_token()
     await websocket.accept()
+    if not owner_token or token != owner_token:
+        await websocket.send_json({"type": "error", "code": "UNAUTHORIZED",
+                                   "detail": "owner token required as ?token= query parameter"})
+        await websocket.close(code=1008)
+        return
     try:
+        last_sent_ms = 0
         while True:
-            # Echo heartbeat or receive client commands
-            data = await websocket.receive_text()
-            await websocket.send_json({"status": "live", "echo": data, "paused": TRADING_PAUSED})
+            db_path = _ledger_db_path()
+            latest_ms = None
+            events: list[dict[str, Any]] = []
+            try:
+                latest_ms = latest_ledger_activity_ms(db_path)
+                df = read_ledger_events(db_path, since_ms=last_sent_ms, limit=200)
+                events = _ledger_rows_to_records(df)
+            except Exception as exc:
+                logger.warning("Ledger WS read failed: %s", exc)
+            if events:
+                # strictly-after cursor: read_ledger_events uses >= since_ms
+                last_sent_ms = max(int(e["received_at_utc_ms"]) for e in events) + 1
+            now = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await websocket.send_json({
+                "type": "events",
+                "count": len(events),
+                "events": events,
+                "as_of_utc_ms": latest_ms,
+                "freshness_status": freshness_status(latest_ms, now),
+                "server_time_utc_ms": now,
+                "deployment_mode": deployment_mode(CFG).value,
+                "data_mode": DATA_MODE,
+            })
+            await asyncio.sleep(2)
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
+        logger.info("Ledger WebSocket client disconnected")
+
+
+# =====================================================================
+# Signal Desk ledger bridge (Wave 2 of the MQL5 observer plan).
+#
+# Producers: Python sender (intent_created / request_result) and the
+# MQL5 SignalDeskObserver (deal_added / order_history_added /
+# position_modified / execution_reconciled / health_heartbeat). All
+# facts are normalized into one append-only ledger_events table
+# (data/ledger_events.py); event_id is a deterministic primary key, so
+# outbox retries and restart reconciliation dedupe safely.
+#
+# Auth: POST requires LEDGER_INGEST_TOKEN (bearer); reads require
+# LEDGER_OWNER_TOKEN (falls back to the ingest token). When
+# LEDGER_INGEST_SECRET is set, the Python bridge must additionally sign
+# the body (X-Ledger-Signature, HMAC-SHA256); the MQL5 observer relies
+# on HTTPS + bearer only. Unconfigured endpoints fail closed (403).
+# =====================================================================
+
+def _ledger_db_path() -> str:
+    return str(get_env("TRADE_LOG_DB_PATH",
+                       default=CFG.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
+
+
+def _ledger_owner_token() -> str | None:
+    return get_env("LEDGER_OWNER_TOKEN", default=None) or get_env("LEDGER_INGEST_TOKEN", default=None)
+
+
+def _check_bearer(authorization: str | None, expected: str | None) -> bool:
+    return bool(expected) and authorization == f"Bearer {expected}"
+
+
+@app.post("/api/ledger/ingest")
+async def ledger_ingest(request: Request, authorization: str | None = Header(default=None)):
+    """Strict signed, owner-only, idempotent fact ingest (Signal Desk contract).
+
+    REQUIRED, in order (security contract):
+      a. server-side HMAC secret configured  -> else 503 (signing policy unavailable)
+      b. remote bearer token configured + correct  -> else 401/403
+      c. raw body read BEFORE any parsing
+      d. X-Ledger-Signature present and HMAC-SHA256 valid over the EXACT raw
+         body (constant-time)  -> else 401
+      e. only then JSON/schema validation
+      f. only then ledger upsert (idempotent by event_id)
+
+    There is NO unsigned/opt-out path: bearer alone is never accepted.
+    ``signature_valid`` is set to True ONLY after a successful HMAC check.
+    """
+    # a. signing policy must be configured (fail-closed)
+    secret = get_env("LEDGER_INGEST_SECRET", default=None)
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="ledger signing policy unavailable (LEDGER_INGEST_SECRET not configured)",
+        )
+    # b. remote bearer authentication
+    ingest_token = get_env("LEDGER_INGEST_TOKEN", default=None)
+    if not ingest_token:
+        raise HTTPException(status_code=403, detail="ledger ingest is not configured")
+    if not _check_bearer(authorization, ingest_token):
+        raise HTTPException(status_code=401, detail="ledger ingest authorization required")
+
+    # c. raw body BEFORE any trusted parsing
+    body = await request.body()
+
+    # d. mandatory HMAC over the exact raw bytes (constant-time)
+    signature = request.headers.get("X-Ledger-Signature")
+    if not verify_signature(body, signature, secret):
+        raise HTTPException(status_code=401, detail="ledger signature required or mismatch")
+    signature_valid = True
+
+    # e. schema validation AFTER signature check
+    try:
+        envelope = event_envelope_from_dict(json.loads(body.decode("utf-8")))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid ledger envelope: {exc}")
+
+    db_path = _ledger_db_path()
+    accepted = 0
+    duplicates = 0
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    for event in envelope.events:
+        _, inserted = upsert_ledger_event(
+            db_path, event, signature_valid=signature_valid, received_at_utc_ms=now
+        )
+        if inserted:
+            accepted += 1
+        else:
+            duplicates += 1
+    return {
+        "status": "ok",
+        "accepted": accepted,
+        "duplicates": duplicates,
+        "signature_valid": signature_valid,
+        "source": envelope.producer,
+        "account_fingerprint": envelope.account_fingerprint,
+    }
+
+
+@app.get("/api/ledger/events")
+def ledger_events(
+    source: str | None = None,
+    event_type: str | None = None,
+    asset_key: str | None = None,
+    intent_id: str | None = None,
+    since_ms: int | None = None,
+    limit: int = 200,
+    authorization: str | None = Header(default=None),
+):
+    """Owner-only read of normalized execution facts."""
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    df = read_ledger_events(
+        _ledger_db_path(), source=source, event_type=event_type, asset_key=asset_key,
+        intent_id=intent_id, since_ms=since_ms, limit=min(max(1, limit), 5000),
+    )
+    records = _ledger_rows_to_records(df)
+    db_path = _ledger_db_path()
+    latest_ms = None
+    try:
+        latest_ms = latest_ledger_activity_ms(db_path)
+    except Exception as exc:
+        logger.warning("Ledger freshness read failed: %s", exc)
+    return stamp(
+        {"source": "ledger_events", "available": True, "count": len(records),
+         "events": records},
+        last_activity_ms=latest_ms, source="ledger_events", mode="demo",
+    )
+
+
+@app.get("/api/ledger/execution-quality")
+def ledger_execution_quality(
+    asset_key: str | None = None,
+    since_ms: int | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """Owner-only empirical execution-cost summary (plan Wave 3 view)."""
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    summary = execution_quality_summary(_ledger_db_path(), asset_key=asset_key, since_ms=since_ms)
+    if summary.get("available"):
+        summary = stamp(
+            summary,
+            last_activity_ms=summary.get("as_of_utc_ms"),
+            source="ledger_events", mode=summary.get("mode", "demo"),
+        )
+    else:
+        summary = stamp(
+            summary,
+            last_activity_ms=None, source="ledger_events", mode="demo",
+        )
+    return summary
+
+
+@app.get("/api/ledger/lifecycle/{intent_id}")
+def ledger_lifecycle(intent_id: str, authorization: str | None = Header(default=None)):
+    """Owner-only lifecycle trace: intent -> request -> deal -> reconciliation."""
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    trace = lifecycle_trace(_ledger_db_path(), intent_id)
+    latest_ms = None
+    try:
+        latest_ms = latest_ledger_activity_ms(_ledger_db_path())
+    except Exception as exc:
+        logger.warning("Ledger freshness read failed: %s", exc)
+    return stamp(
+        trace,
+        last_activity_ms=latest_ms,
+        source="ledger_events", mode="demo",
+    )
+
+
+# =====================================================================
+# P1.6 provenance audit endpoint (ТЗ §39)
+#
+# GET /api/provenance/{group_id} — owner-only lineage for a trade group:
+# spec provenance (market/feature/inference/profile/broker/cost ids +
+# both hashes), execution intent, broker orders/deals, and ledger events.
+# Missing nodes are reported as status="missing" — never a synthetic
+# placeholder.
+# =====================================================================
+
+@app.get("/api/provenance/{group_id}")
+def provenance_audit(group_id: str, authorization: str | None = Header(default=None)):
+    owner_token = _ledger_owner_token()
+    if not owner_token or not _check_bearer(authorization, owner_token):
+        raise HTTPException(status_code=403, detail="ledger owner authorization required")
+    db_path = _ledger_db_path()
+    try:
+        from data.trade_group_store import load_group
+        from execution.provenance import FRESHNESS_VALUES
+
+        group = load_group(db_path, group_id)
+    except Exception as exc:
+        logger.warning("Provenance audit read failed: %s", exc)
+        group = None
+    if group is None:
+        return stamp(
+            {"group_id": group_id, "available": False,
+             "lineage": {"group": {"status": "missing"}}},
+            last_activity_ms=None, source="ledger_events", mode="demo",
+        )
+    spec = group["spec"]
+    prov = spec.provenance or {}
+    lineage = {
+        "group": {
+            "status": "present",
+            "group_id": spec.group_id,
+            "mode": spec.mode,
+            "side": spec.side,
+            "geometry_hash": spec.geometry_hash(),
+            "provenance_hash": spec.provenance_hash() if prov else None,
+            "provenance_status": prov.get("provenance_status", "available"),
+        },
+        "market_snapshot": _provenance_node(prov, "market_snapshot_id"),
+        "feature_snapshot": _provenance_node(prov, "feature_snapshot_id"),
+        "model_inference": _provenance_node(prov, "model_inference_id"),
+        "profile": _provenance_node(prov, "profile_id", prefix="PROFILE"),
+        "broker_snapshot": _provenance_node(prov, "broker_snapshot_id"),
+        "cost_snapshot": _provenance_node(prov, "cost_snapshot_id"),
+    }
+    # trading-event ledger for the group (actor vs source separation, §26)
+    try:
+        from data.trading_event_ledger import read_trading_events
+        df = read_trading_events(db_path, signal_id=spec.signal_id)
+        records = []
+        for row in df.to_dict("records"):
+            row = {k: (None if pd.isna(v) else v) for k, v in row.items()}
+            try:
+                row["payload"] = json.loads(row.pop("payload_json") or "{}")
+            except json.JSONDecodeError:
+                row["payload"] = {}
+            records.append(row)
+        lineage["ledger_events"] = {
+            "status": "present" if len(records) else "missing",
+            "events": records,
+        }
+    except Exception as exc:
+        logger.warning("Provenance ledger read failed: %s", exc)
+        lineage["ledger_events"] = {"status": "error", "detail": str(exc)}
+    return stamp(
+        {"group_id": group_id, "available": True, "lineage": lineage},
+        last_activity_ms=None, source="ledger_events", mode=spec.mode,
+    )
+
+
+def _provenance_node(prov: dict, key: str, prefix: str | None = None) -> dict:
+    """One lineage node: present with the id, or explicit missing."""
+    value = prov.get(key)
+    if not value:
+        return {"status": "missing"}
+    return {"status": "present", "source_id": str(value)}

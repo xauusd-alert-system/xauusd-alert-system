@@ -13,6 +13,21 @@ EVENT_TYPES = {
     "signal_published", "order_submitted", "order_filled", "order_rejected",
     "stop_move_requested", "stop_move_confirmed", "stop_move_rejected",
     "partial_close_submitted", "partial_filled", "partial_rejected", "position_closed",
+    # Wave-0 MQL5 plan: immutable SignalIntent recorded before order_send.
+    "intent_created",
+    # TradeGroupSpec v1 lifecycle (ТЗ §26): every event carries groupId/legId,
+    # source, mode, broker ids, requested vs actual values, reason, retcode.
+    "signal_validated", "trade_intent_created", "group_submitted", "group_rejected",
+    "leg_submitted", "leg_filled", "tp1_filled", "be_requested", "be_retry",
+    "be_confirmed", "tp2_filled", "tp3_filled", "stop_filled", "leg_rejected",
+    "group_reconciled",
+    # P1.5 demo MT5 execution (ТЗ §37): partial fills, group opened, orphan
+    # broker positions and execution errors are explicit ledger facts.
+    "leg_partially_filled", "group_opened", "orphan_broker_position", "execution_error",
+    # P1.5.1 partial-submission compensation lifecycle (ТЗ P1.5.1 §20):
+    # every compensation step is an explicit, idempotent ledger fact.
+    "partial_submission", "compensation_requested", "compensation_confirmed",
+    "compensation_failed", "failed_with_open_risk",
 }
 
 
@@ -27,10 +42,22 @@ def init_trading_event_ledger(db_path: str) -> None:
             strategy_version TEXT NOT NULL, config_hash TEXT NOT NULL,
             model_hash TEXT, feature_snapshot_hash TEXT, actor TEXT NOT NULL,
             reason TEXT, payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
-            previous_event_hash TEXT, event_hash TEXT NOT NULL UNIQUE
+            previous_event_hash TEXT, event_hash TEXT NOT NULL UNIQUE,
+            group_id TEXT, leg_id TEXT,
+            source TEXT, source_type TEXT, source_id TEXT, observed_at_utc_ms INTEGER
         )""")
+        # In-place migration: TradeGroupSpec v1 columns, then P1.6 provenance
+        # columns (source vs actor separation, §26/§27).
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}
+        for column in ("group_id", "leg_id", "source", "source_type",
+                       "source_id", "observed_at_utc_ms"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN {column} TEXT"
+                             if column != "observed_at_utc_ms"
+                             else f"ALTER TABLE {TABLE} ADD COLUMN {column} INTEGER")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_signal ON {TABLE}(signal_id, sequence)")
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_position ON {TABLE}(position_ticket, sequence)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_group ON {TABLE}(group_id, sequence)")
         for action in ("UPDATE", "DELETE"):
             conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{TABLE}_{action.lower()}
                 BEFORE {action} ON {TABLE} BEGIN
@@ -45,7 +72,11 @@ def append_trading_event(db_path: str, *, event_type: str, signal_id: str, asset
                          event_timestamp_utc: int | None = None, model_hash: str | None = None,
                          feature_snapshot_hash: str | None = None, position_ticket: int | None = None,
                          order_ticket: int | None = None, reason: str | None = None,
-                         payload: dict | None = None, event_id: str | None = None) -> str:
+                         payload: dict | None = None, event_id: str | None = None,
+                         group_id: str | None = None, leg_id: str | None = None,
+                         source: str | None = None, source_type: str | None = None,
+                         source_id: str | None = None,
+                         observed_at_utc_ms: int | None = None) -> str:
     if event_type not in EVENT_TYPES:
         raise ValueError(f"unsupported trading event: {event_type}")
     init_trading_event_ledger(db_path)
@@ -67,12 +98,17 @@ def append_trading_event(db_path: str, *, event_type: str, signal_id: str, asset
             "timestamp": event_ts, "signal_id": signal_id, "asset": asset_key,
             "strategy": strategy_version, "config": config_hash, "model": model_hash,
             "feature": feature_snapshot_hash, "actor": actor, "reason": reason,
-            "payload_hash": payload_hash, "previous": previous}, sort_keys=True, separators=(",", ":"))
+            "payload_hash": payload_hash, "group_id": group_id, "leg_id": leg_id,
+            "source": source, "source_type": source_type, "source_id": source_id,
+            "observed_at_utc_ms": observed_at_utc_ms,
+            "previous": previous}, sort_keys=True, separators=(",", ":"))
         event_hash = hashlib.sha256(material.encode()).hexdigest()
-        conn.execute(f"INSERT INTO {TABLE} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+        conn.execute(f"INSERT INTO {TABLE} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             eid, sequence, event_type, event_ts, recorded, signal_id, position_ticket,
             order_ticket, asset_key, strategy_version, config_hash, model_hash,
-            feature_snapshot_hash, actor, reason, payload_json, payload_hash, previous, event_hash))
+            feature_snapshot_hash, actor, reason, payload_json, payload_hash, previous,
+            event_hash, group_id, leg_id, source, source_type, source_id,
+            observed_at_utc_ms))
         conn.commit()
         return eid
     finally:
@@ -114,7 +150,13 @@ def verify_event_chain(db_path: str) -> bool:
             "strategy": row["strategy_version"], "config": row["config_hash"],
             "model": nullable(row["model_hash"]), "feature": nullable(row["feature_snapshot_hash"]),
             "actor": row["actor"], "reason": nullable(row["reason"]),
-            "payload_hash": row["payload_hash"], "previous": previous}, sort_keys=True, separators=(",", ":"))
+            "payload_hash": row["payload_hash"], "group_id": nullable(row.get("group_id")),
+            "leg_id": nullable(row.get("leg_id")),
+            "source": nullable(row.get("source")),
+            "source_type": nullable(row.get("source_type")),
+            "source_id": nullable(row.get("source_id")),
+            "observed_at_utc_ms": nullable(row.get("observed_at_utc_ms")),
+            "previous": previous}, sort_keys=True, separators=(",", ":"))
         expected = hashlib.sha256(material.encode()).hexdigest()
         if expected != row["event_hash"] or hashlib.sha256(row["payload_json"].encode()).hexdigest() != row["payload_hash"]: return False
         previous = row["event_hash"]
