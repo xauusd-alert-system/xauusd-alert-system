@@ -1,0 +1,6 @@
+{
+  "name": "XAUUSD Multi-Asset ML Trading System",
+  "description": "Institutional Multi-Asset ML Trading and Alerting System with Smart Money Concepts (SMC), Real-Time Signals, Risk Analytics, and Execution Ledger.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
