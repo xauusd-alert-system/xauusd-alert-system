@@ -541,7 +541,7 @@ execution:
   fx_execution_probes:
     enabled: true
     assets: [EURUSD, GBPUSD]
-    volume: 0.01
+    volume: 1
     hold_seconds: 2
     min_interval_minutes: 120
     max_probes_per_asset_per_day: 4
@@ -557,7 +557,7 @@ execution:
   # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
   # it falls back to backtest.volume (default 0.10, which yields fillable
   # tranches 0.05 / 0.03 / 0.02).
-  volume: 0.10
+  volume: 1
   signal_ranking_metric: confidence   # confidence | ev | probability
 
 
@@ -583,7 +583,7 @@ risk:
     - [-0.04, 0.75]
     - [-0.06, 0.50]
     - [-0.08, 0.0]
-  min_lot: 0.1
+  min_lot: 1
 
 
 # ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====
@@ -604,13 +604,13 @@ validation:
     end: null              # open-ended: research never looks at fresh data
 
 
-# ===== CORRELATION FILTER (динамический) =====
+# ===== CORRELATION FILTER (dynamic) =====
 correlation_filter:
   enabled: true
-  # Порог абсолютного значения корреляции. Если |corr| >= threshold,
-  # активы считаются коррелированными.
+  # Threshold for the absolute value of the correlation. If |corr| >= threshold,
+  # the assets are considered correlated.
   threshold: 0.80
-  # Количество M5-баров для расчёта корреляции (скользящее окно).
+  # Number of M5 bars used to calculate correlation (moving window).
   history_bars: 500
-  # Как часто пересчитывать матрицу корреляций (в минутах).
+  # How often to recalculate the correlation matrix (in minutes).
   update_interval_minutes: 60

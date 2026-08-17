@@ -14,3 +14,11 @@ This revision is pre-registered before re-running the BTCUSD gate.
 - WR 60%, PF 0.79, total PnL -15.92
 - statistically indistinguishable from backtest (95% CI for WR at n=10: 54%–100%)
 - decision: keep live, next review at 30 trades
+
+## XAUUSD live execution snapshot 2026-08-15 (legacy current)
+
+- valid closed trades: 9 (1 malformed row excluded, pre-fix)
+- WR 66.7%, PF 0.86, total PnL -41.49
+- direction: 8 long / 1 short
+- matches pre-lock current (WR 66.3%, PF 0.99) within noise
+- wide_trend_filtered live-forward accumulation has NOT started yet
