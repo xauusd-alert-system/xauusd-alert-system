@@ -64,6 +64,7 @@ def momentum_5m(candles, rm_bars=6, sp=0.005, tr=1.5, side="both"):
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if sec >= FLAT_SEC:
                 px = b["close"] * (1 - SLIP * open_pos["side"])
+                open_pos["exit_ts"] = t
                 open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["side"] * open_pos["qty"] \
                                   - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                 trades.append(open_pos)
@@ -73,12 +74,14 @@ def momentum_5m(candles, rm_bars=6, sp=0.005, tr=1.5, side="both"):
             if open_pos["side"] == 1:
                 if b["low"] * (1 - SLIP) <= open_pos["stop"]:
                     px = open_pos["stop"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
                     open_pos = None
                 elif b["high"] * (1 + SLIP) >= open_pos["tp"]:
                     px = open_pos["tp"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
@@ -86,18 +89,21 @@ def momentum_5m(candles, rm_bars=6, sp=0.005, tr=1.5, side="both"):
             else:
                 if b["high"] * (1 + SLIP) >= open_pos["stop"]:
                     px = open_pos["stop"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (open_pos["entry"] - px) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
                     open_pos = None
                 elif b["low"] * (1 - SLIP) <= open_pos["tp"]:
                     px = open_pos["tp"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (open_pos["entry"] - px) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
                     open_pos = None
         if open_pos is not None and not day_flat:
             px = d[-1]["close"] * (1 - SLIP * open_pos["side"])
+            open_pos["exit_ts"] = d[-1]["time"]
             open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["side"] * open_pos["qty"] \
                               - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
             trades.append(open_pos)
@@ -148,6 +154,7 @@ def fade_range(candles, rm=30, tp_mode="mid", sp=0.006, tr=1.0):
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if sec >= FLAT_SEC:
                 px = b["close"] * (1 - SLIP * open_pos["side"])
+                open_pos["exit_ts"] = t
                 open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["side"] * open_pos["qty"] \
                                   - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                 trades.append(open_pos)
@@ -157,12 +164,14 @@ def fade_range(candles, rm=30, tp_mode="mid", sp=0.006, tr=1.0):
             if open_pos["side"] == 1:
                 if b["low"] * (1 - SLIP) <= open_pos["stop"]:
                     px = open_pos["stop"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
                     open_pos = None
                 elif b["high"] * (1 + SLIP) >= open_pos["tp"]:
                     px = open_pos["tp"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
@@ -170,18 +179,21 @@ def fade_range(candles, rm=30, tp_mode="mid", sp=0.006, tr=1.0):
             else:
                 if b["high"] * (1 + SLIP) >= open_pos["stop"]:
                     px = open_pos["stop"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (open_pos["entry"] - px) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
                     open_pos = None
                 elif b["low"] * (1 - SLIP) <= open_pos["tp"]:
                     px = open_pos["tp"]
+                    open_pos["exit_ts"] = t
                     open_pos["pnl"] = (open_pos["entry"] - px) * open_pos["qty"] \
                                       - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
                     trades.append(open_pos)
                     open_pos = None
         if open_pos is not None and not day_flat:
             px = bars[-1]["close"] * (1 - SLIP * open_pos["side"])
+            open_pos["exit_ts"] = bars[-1]["time"]
             open_pos["pnl"] = (px - open_pos["entry"]) * open_pos["side"] * open_pos["qty"] \
                               - fee(open_pos["entry"], open_pos["qty"]) - fee(px, open_pos["qty"])
             trades.append(open_pos)
