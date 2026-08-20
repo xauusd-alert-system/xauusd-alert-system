@@ -16,3 +16,4 @@ session_end_utc: "19:55"
 default_stage: 1
 default_profile: B
 reference_equity: 1000.0
+alert_poll_seconds: 90
