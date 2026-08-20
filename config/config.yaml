@@ -136,7 +136,9 @@ assets:
       # OWNER REQUEST 2026-08-19: loosened 0.71 -> 0.60 (the global default) so
       # more agree-path situations reach the signal gate; blended disagreement
       # (~0.3-0.5) still stays below the bar.
-      min_confidence_to_alert: 0.60
+      # OWNER REQUEST 2026-08-20: partially re-tightened 0.60 -> 0.66 (between the
+      # trial-window low and the pre-trial 0.71) to cut noisy/garbage signals.
+      min_confidence_to_alert: 0.66
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -151,9 +153,13 @@ assets:
     # where a fixed 3-4 pt step stays well above costs; silver/BTC/FX keep
     # their own grids (a 3-4 unit step there is below spread or breaks the
     # tuned FX profile).
+    # OWNER REQUEST 2026-08-20: stop moved CLOSER (stop_mult 2.0 -> 1.5) to cut
+    # the oversized loss tail (a 2-step stop = 2x TP1 was -$267 on the last
+    # stop-out vs a +$130 TP1 win).
     signal_grid:
       step_min_points: 3.0
       step_max_points: 4.0
+      stop_mult: 1.5
     # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
     # M5 -> M15 if cost_ratio > 15% on the real DB (measure first:
     #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M5
@@ -192,7 +198,8 @@ assets:
       # OWNER REQUEST 2026-08-19: loosened 0.75 -> 0.65 (trial window, demo).
       # XAGUSD signals with conf 0.88/0.97 were previously killed by the 6/6
       # position cap, not by this bar; the bar itself is now also lowered.
-      min_confidence_to_alert: 0.65
+      # OWNER REQUEST 2026-08-20: partially re-tightened 0.65 -> 0.70.
+      min_confidence_to_alert: 0.70
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
@@ -241,7 +248,8 @@ assets:
       # OWNER REQUEST 2026-08-19: bars loosened (0.68/0.68/0.60/0.62 -> 0.62/
       # 0.60/0.55/0.60) and the EV gate disabled (0.05 -> 0) so more situations
       # trade on the demo trial; floors still filter the weakest ML outputs.
-      min_confidence_to_alert: 0.62
+      # OWNER REQUEST 2026-08-20: partially re-tightened 0.62 -> 0.66.
+      min_confidence_to_alert: 0.66
       min_ml_probability: 0.55
       ml_confidence_floor: 0.60
       crypto_night_min_probability: 0.60
@@ -290,7 +298,8 @@ assets:
     ensemble:
       # OWNER REQUEST 2026-08-19: loosened 0.85 -> 0.70 (H1 + early BE keep the
       # loss tail in check; the high bar was cutting most EUR situations).
-      min_confidence_to_alert: 0.70
+      # OWNER REQUEST 2026-08-20: partially re-tightened 0.70 -> 0.78.
+      min_confidence_to_alert: 0.78
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -332,7 +341,8 @@ assets:
     ensemble:
       # OWNER REQUEST 2026-08-19: loosened 0.60 -> 0.55 (modest; GBP keeps its
       # protected grid-search exit profile unchanged).
-      min_confidence_to_alert: 0.55
+      # OWNER REQUEST 2026-08-20: partially re-tightened 0.55 -> 0.58.
+      min_confidence_to_alert: 0.58
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -396,9 +406,11 @@ assets:
 
 alerts:
   # TRIAL-48H (2026-08-18): cooldown lowered 15 -> 5 min for the observation window.
-  cooldown_minutes: 5
+  # OWNER REQUEST 2026-08-20: partially re-tightened 5 -> 10 min (fewer signals).
+  cooldown_minutes: 10
   # TRIAL-48H: alert budget raised 30 -> 60/day.
-  max_alerts_per_day: 60
+  # OWNER REQUEST 2026-08-20: partially re-tightened 60 -> 40/day.
+  max_alerts_per_day: 40
   # Append a compact metadata line (Conf / Regime / Session) to Telegram
   # signals. Default false keeps the clean ШОРТ/ЛОНГ layout from the spec.
   include_signal_meta: false
@@ -651,7 +663,8 @@ execution:
   # Daily cap on NEW trades per asset (circuit-breaker budget). Read by
   # execution/risk_manager.py (W8) instead of a hard-coded 10.
   # TRIAL-48H: raised 10 -> 20.
-  max_daily_trades_per_asset: 20
+  # OWNER REQUEST 2026-08-20: partially re-tightened 20 -> 15/day.
+  max_daily_trades_per_asset: 15
   # Owner request 2026-08-19: the trader must be OFF while the market is
   # inactive and while unattended. Windows in UTC (local = UTC+5). During a
   # halt window the trader flattens its positions and skips all trading
@@ -694,8 +707,9 @@ risk:
   enabled: true
   # TRIAL-48H (2026-08-18): risk budgets raised 4x for the observation window
   # (0.25% -> 1% per trade, cluster 0.4% -> 2%, total 0.75% -> 3% of equity).
+  # OWNER REQUEST 2026-08-20: partially re-tightened to 0.5% per trade.
   # fraction of equity risked per trade on a full stop-out (audit: 0.002-0.0025)
-  risk_per_trade_pct: 0.01
+  risk_per_trade_pct: 0.005
   # correlated-cluster stop-risk cap (fraction of equity)
   cluster_risk_cap: 0.02
   total_open_risk_cap: 0.03
