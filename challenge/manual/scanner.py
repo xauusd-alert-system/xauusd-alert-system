@@ -300,19 +300,25 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     trend15 = _trend(bars15)
     trend30 = _trend(bars30)
 
-    # Daily ATR filter (ТЗ §4.1): today's ATR vs mean ATR of the prior 20 days.
-    closes = sorted([c["time"] for c in candles_1m])
+    # Daily ATR filter (ТЗ §4.1): today's session range vs mean daily range of
+    # the prior 20 sessions. Uses the intraday range so it works live too.
     prior = [c for c in candles_1m if c["time"] < dt.datetime(
         date.year, date.month, date.day, tzinfo=dt.timezone.utc).timestamp()]
     prior_days = {}
     for c in prior:
         d = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc).date()
         prior_days.setdefault(d, []).append(c)
-    atr_today = atr(day, 14)
-    atr_hist = [atr(v, 14) for v in prior_days.values() if len(v) >= 15]
+    if day:
+        atr_today = max(c["high"] for c in day) - min(c["low"] for c in day)
+    else:
+        atr_today = 0.0
+    atr_hist = []
+    for v in prior_days.values():
+        if len(v) >= 10:
+            atr_hist.append(max(c["high"] for c in v) - min(c["low"] for c in v))
     if atr_hist:
         atr_mean = sum(atr_hist[-20:]) / min(20, len(atr_hist))
-        atr_normal = atr_mean > 0 and 0.70 <= atr_today / atr_mean <= 2.5
+        atr_normal = atr_mean > 0 and 0.30 <= atr_today / atr_mean <= 2.5
     else:
         atr_normal = True
 
