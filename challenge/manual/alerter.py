@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 import yaml
@@ -146,21 +147,31 @@ def format_setup(res) -> str:
 
 def scan_watchlist(access, only_sym=None) -> list:
     today = dt.datetime.now(dt.timezone.utc).date()
-    out = []
+    tasks = []
     for sym, sid in SYMBOLS.items():
         if only_sym and sym != only_sym:
             continue
         if sym not in CFG.get("watchlist", []):
             continue
+        tasks.append((sym, sid))
+
+    def _one(item):
+        sym, sid = item
         try:
             candles = fetch_candles(access, sid)
         except Exception as e:
             print(f"{sym}: {e}", file=sys.stderr)
-            continue
-        res = scanner_mod.scan_setup(sym, today, candles, SESSION_START, CFG)
-        if res.tradable:
-            out.append(res)
-    return out
+            return None
+        return scanner_mod.scan_setup(sym, today, candles, SESSION_START, CFG)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=min(12, len(tasks))) as ex:
+        futures = [ex.submit(_one, t) for t in tasks]
+        for fut in as_completed(futures):
+            res = fut.result()
+            if res is not None and res.tradable:
+                results.append(res)
+    return results
 
 
 def main() -> int:

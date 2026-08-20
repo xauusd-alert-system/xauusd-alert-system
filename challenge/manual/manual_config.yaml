@@ -10,10 +10,22 @@ watchlist:
   - MU
   - MRVL
   - PLTR
+  - CAN
+  - MSTR
+  - MARA
+  - RIOT
+  - CLSK
+  - IREN
+  - SOFI
+  - HOOD
+  - OKLO
+  - RGTI
+  - CRCL
+  - CORZ
 news_red_zone_utc: []   # e.g. ["13:30", "14:30"] — red-zone events (UTC), +/-30 min buffer
 session_start_utc: "13:30"
 session_end_utc: "19:55"
 default_stage: 1
 default_profile: B
 reference_equity: 1000.0
-alert_poll_seconds: 90
+alert_poll_seconds: 30
