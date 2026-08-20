@@ -136,11 +136,11 @@ async function runAllTests() {
       score: null,
       bias: null,
       confidence: null,
-      reason: 'no_live_news_source_configured',
+      reason: 'news_feed_unavailable',
     };
     assert(unavailableSentiment.score === null, 'Unavailable sentiment score is null');
     assert(unavailableSentiment.confidence === null, 'Unavailable sentiment confidence is null');
-    assert(unavailableSentiment.reason === 'no_live_news_source_configured', 'Unavailable sentiment reports exact reason');
+    assert(unavailableSentiment.reason === 'news_feed_unavailable', 'Unavailable sentiment reports exact reason');
 
     const unavailableMC = {
       available: false,

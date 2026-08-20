@@ -11,6 +11,8 @@ import os
 from datetime import datetime, timezone
 from typing import List, Dict
 
+from config.loader import get_env
+
 logger = logging.getLogger("news_guard")
 
 _NEWS_CACHE: List[Dict] = []
@@ -18,15 +20,70 @@ _LAST_FETCH_TS: float = 0.0
 _FETCH_FAILED_UNTIL: float = 0.0
 _LAST_FETCH_OK: bool | None = None
 _LAST_ERROR: str | None = None
+_LAST_SOURCE: str | None = None
 CACHE_TTL_SECONDS = 6 * 3600  # 6 часов кэша
+
+_FF_NFS_URL = "https://nfs.forexfactory.com/forexcalendar.json"
+_FF_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
+
+
+def _build_event(title: str, country: str, event_dt: datetime) -> Dict:
+    event_dt = event_dt.astimezone(timezone.utc)
+    return {
+        "title": title,
+        "country": country,
+        "timestamp_utc": int(event_dt.timestamp()),
+        "datetime_str": event_dt.strftime("%Y-%m-%d %H:%M UTC"),
+    }
+
+
+def _fetch_ff_json() -> tuple[List[Dict], str]:
+    """Forex Factory JSON API (nfs.forexfactory.com). Returns (events, source)."""
+    headers = {"User-Agent": _FF_UA}
+    proxy = get_env("NEWS_FEED_PROXY", default="")
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    resp = requests.get(_FF_NFS_URL, headers=headers, timeout=3, proxies=proxies)
+    resp.raise_for_status()
+    data = resp.json()
+    high_impact_events = []
+    for event in data:
+        if event.get("impact") == "High" and event.get("country") in ("USD", "ALL"):
+            date_str = event.get("date")
+            if date_str:
+                try:
+                    event_dt = datetime.fromisoformat(date_str)
+                    high_impact_events.append(
+                        _build_event(event.get("title", "High Impact News"),
+                                     event.get("country"), event_dt))
+                except Exception:
+                    pass
+    return high_impact_events, "forexfactory_json_api"
+
+
+def _fetch_ff_service() -> tuple[List[Dict], str]:
+    """Persistent background browser service (scripts/news_feed_server.py).
+    One shared Chromium lives in its own window; this is just an HTTP call."""
+    base = (get_env("NEWS_FEED_SERVICE_URL", default="http://127.0.0.1:8765") or "").rstrip("/")
+    resp = requests.get(f"{base}/calendar", timeout=90)
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("error"):
+        raise RuntimeError(payload["error"])
+    return payload.get("events", []), payload.get("source", "forexfactory_www_browser")
 
 
 def fetch_economic_calendar() -> List[Dict]:
     """
-    Fetches weekly economic events from Forex Factory JSON API with Chrome User-Agent.
-    Suppresses repeated failed attempts for 30 minutes to prevent hangs/log-spam.
+    Fetches High-Impact USD news events from Forex Factory.
+
+    Primary path: the shared background browser service (one persistent Chromium
+    owned by scripts/news_feed_server.py) - Cloudflare lets real browsers through
+    even when the JSON API host resets non-browser clients.
+    Fallback: the nfs.forexfactory.com/forexcalendar.json API (with optional
+    NEWS_FEED_PROXY). Suppresses repeated failed attempts for 30 minutes.
     """
-    global _NEWS_CACHE, _LAST_FETCH_TS, _FETCH_FAILED_UNTIL, _LAST_FETCH_OK, _LAST_ERROR
+    global _NEWS_CACHE, _LAST_FETCH_TS, _FETCH_FAILED_UNTIL, _LAST_FETCH_OK, _LAST_ERROR, _LAST_SOURCE
     now = time.time()
 
     # Если была ошибка сети, не повторяем запросы 30 минут
@@ -36,44 +93,35 @@ def fetch_economic_calendar() -> List[Dict]:
     if _NEWS_CACHE and (now - _LAST_FETCH_TS < CACHE_TTL_SECONDS):
         return _NEWS_CACHE
 
-    url = "https://nfs.forexfactory.com/forexcalendar.json"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    }
+    method = (get_env("NEWS_FEED_METHOD", default="browser") or "browser").lower()
+    attempts: List[tuple] = []
+    if method == "browser":
+        # 1) shared background browser service (scripts/news_feed_server.py),
+        # 2) JSON API. No inline browser: the service owns the single Chromium.
+        attempts = [(_fetch_ff_service,), (_fetch_ff_json,)]
+    else:
+        attempts = [(_fetch_ff_json,)]
 
-    try:
-        resp = requests.get(url, headers=headers, timeout=3)
-        resp.raise_for_status()
-        data = resp.json()
+    last_error: str | None = None
+    for fetcher, in attempts:
+        try:
+            events, source = fetcher()
+            _NEWS_CACHE = events
+            _LAST_FETCH_TS = now
+            _LAST_FETCH_OK = True
+            _LAST_ERROR = None
+            _LAST_SOURCE = source
+            return _NEWS_CACHE
+        except Exception as exc:
+            last_error = str(exc)
+            logger.warning("news feed fetch failed (%s): %s", getattr(fetcher, "__name__", fetcher), last_error)
 
-        high_impact_events = []
-        for event in data:
-            if event.get("impact") == "High" and event.get("country") in ("USD", "ALL"):
-                date_str = event.get("date")
-                if date_str:
-                    try:
-                        event_dt = datetime.fromisoformat(date_str).astimezone(timezone.utc)
-                        high_impact_events.append({
-                            "title": event.get("title", "High Impact News"),
-                            "country": event.get("country"),
-                            "timestamp_utc": int(event_dt.timestamp()),
-                            "datetime_str": event_dt.strftime("%Y-%m-%d %H:%M UTC")
-                        })
-                    except Exception:
-                        pass
-
-        _NEWS_CACHE = high_impact_events
-        _LAST_FETCH_TS = now
-        _LAST_FETCH_OK = True
-        _LAST_ERROR = None
-        return _NEWS_CACHE
-
-    except Exception as exc:
-        # При ошибке сети/SSL блокируем сетевые попытки на 30 минут, работаем без новостей
-        _FETCH_FAILED_UNTIL = now + 1800
-        _LAST_FETCH_OK = False
-        _LAST_ERROR = str(exc)
-        return _NEWS_CACHE
+    # Обе схемы недоступны: блокируем сетевые попытки на 30 минут, работаем без новостей
+    _FETCH_FAILED_UNTIL = now + 1800
+    _LAST_FETCH_OK = False
+    _LAST_ERROR = last_error or "no successful fetch"
+    _LAST_SOURCE = None
+    return _NEWS_CACHE
 
 
 def is_news_red_zone(
@@ -119,6 +167,7 @@ def news_feed_status() -> dict:
         "last_success_age_seconds": age if _LAST_FETCH_OK else None,
         "error": _LAST_ERROR,
         "event_count": len(_NEWS_CACHE),
+        "source": _LAST_SOURCE,
     }
 
 

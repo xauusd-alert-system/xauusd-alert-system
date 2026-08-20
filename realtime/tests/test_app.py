@@ -74,11 +74,62 @@ def test_api_correlation_endpoint_has_no_static_demo_fallback(client, monkeypatc
     assert payload["source"] == "unavailable"
 
 
-def test_api_sentiment_endpoint_does_not_publish_sample_headlines(client):
+def test_api_sentiment_endpoint_does_not_publish_sample_headlines(client, monkeypatch):
+    def _fail(*args, **kwargs):
+        raise RuntimeError("feed down")
+
+    monkeypatch.setattr("data.news_filter.fetch_economic_calendar", _fail)
+    monkeypatch.setattr(
+        "data.news_filter.news_feed_status",
+        lambda: {"available": False, "error": "feed down", "event_count": 0},
+    )
     payload = client.get("/api/sentiment").json()
     assert payload["available"] is False
     assert payload["score"] is None and payload["bias"] is None
     assert payload["matched_terms"] == []
+    assert payload["reason"] == "news_feed_unavailable"
+
+
+def test_api_sentiment_computes_aggregate_from_real_feed(client, monkeypatch):
+    events = [
+        {"title": "Fed Rate Cut Expectations Rise", "country": "USD",
+         "timestamp_utc": 1_800_000_000, "datetime_str": "2027-01-01 12:00 UTC"},
+        {"title": "Strong Jobs Report Beats", "country": "USD",
+         "timestamp_utc": 1_800_008_640, "datetime_str": "2027-01-02 12:00 UTC"},
+        {"title": "Geopolitical Tensions Escalate", "country": "USD",
+         "timestamp_utc": 1_800_017_280, "datetime_str": "2027-01-03 12:00 UTC"},
+    ]
+    monkeypatch.setattr("data.news_filter.fetch_economic_calendar", lambda: events)
+    monkeypatch.setattr(
+        "data.news_filter.news_feed_status",
+        lambda: {"available": True, "last_success_age_seconds": 120,
+                 "error": None, "event_count": 3},
+    )
+    payload = client.get("/api/sentiment").json()
+    assert payload["available"] is True
+    assert payload["bias"] in {"bullish", "bearish", "neutral"}
+    assert payload["score"] is not None and payload["confidence"] is not None
+    assert len(payload["events"]) == 3
+    assert payload["events"][0]["title"] == "Fed Rate Cut Expectations Rise"
+    assert payload["events"][0]["bias"] == "bullish"
+    assert payload["events"][1]["bias"] == "bearish"
+    assert payload["feed"]["available"] is True
+    assert payload["source"] == "forexfactory_economic_calendar"
+    assert payload["freshness_status"] == "fresh"
+
+
+def test_api_sentiment_available_empty_calendar_is_not_a_fallback(client, monkeypatch):
+    monkeypatch.setattr("data.news_filter.fetch_economic_calendar", lambda: [])
+    monkeypatch.setattr(
+        "data.news_filter.news_feed_status",
+        lambda: {"available": True, "last_success_age_seconds": 60,
+                 "error": None, "event_count": 0},
+    )
+    payload = client.get("/api/sentiment").json()
+    assert payload["available"] is True
+    assert payload["reason"] == "calendar_empty"
+    assert payload["score"] == 0.0 and payload["bias"] == "neutral"
+    assert payload["events"] == []
 
 
 def test_api_monte_carlo_endpoint_has_no_hypothetical_fallback(client, monkeypatch, tmp_path):

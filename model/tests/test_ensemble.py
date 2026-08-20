@@ -141,35 +141,37 @@ def test_hard_divergence_veto_blocks_opposing_rule():
 
 
 def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
-    """EURUSD ensemble override merges over the global ensemble section."""
+    """EURUSD ensemble override merges over the global ensemble section.
+    Bar loosened 0.85 -> 0.70 by owner request 2026-08-19 (trial)."""
     from scripts.run_backtest import merge_asset_cfg as _merge
     from config.loader import load_config
     cfg = load_config()
     eur_raw = cfg["assets"]["EURUSD"]["ensemble"]
-    assert eur_raw.get("min_confidence_to_alert") == pytest.approx(0.85)
+    assert eur_raw.get("min_confidence_to_alert") == pytest.approx(0.70)
     assert "ev_threshold" not in eur_raw
     assert "hard_divergence_veto" not in eur_raw
 
     merged = _merge(cfg, "EURUSD", "ensemble")
     ens = merged["ensemble"]
-    assert ens.get("min_confidence_to_alert") == pytest.approx(0.85)
+    assert ens.get("min_confidence_to_alert") == pytest.approx(0.70)
     assert ens.get("ev_threshold", 0) == pytest.approx(0)
     assert ens.get("hard_divergence_veto", False) is False
 
 
 def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
-    """Same contract for GBPUSD (legacy adopted 2026-08-08: bar 0.80 -> 0.60)."""
+    """Same contract for GBPUSD (legacy adopted 2026-08-08: bar 0.80 -> 0.60;
+    owner request 2026-08-19: 0.60 -> 0.55)."""
     from scripts.run_backtest import merge_asset_cfg as _merge
     from config.loader import load_config
     cfg = load_config()
     gbp_raw = cfg["assets"]["GBPUSD"]["ensemble"]
-    assert gbp_raw.get("min_confidence_to_alert") == pytest.approx(0.60)
+    assert gbp_raw.get("min_confidence_to_alert") == pytest.approx(0.55)
     assert "ev_threshold" not in gbp_raw
     assert "hard_divergence_veto" not in gbp_raw
 
     merged = _merge(cfg, "GBPUSD", "ensemble")
     ens = merged["ensemble"]
-    assert ens.get("min_confidence_to_alert") == pytest.approx(0.60)
+    assert ens.get("min_confidence_to_alert") == pytest.approx(0.55)
     assert ens.get("ev_threshold", 0) == pytest.approx(0)
     assert ens.get("hard_divergence_veto", False) is False
 
@@ -181,13 +183,13 @@ def test_per_asset_override_effective_cfg_in_pipeline():
     cfg = load_config()
 
     eur_pipe = RealtimePipeline(cfg=cfg, asset_key="EURUSD", data_mode="mock")
-    assert eur_pipe.effective_cfg["ensemble"].get("min_confidence_to_alert") == pytest.approx(0.85)
+    assert eur_pipe.effective_cfg["ensemble"].get("min_confidence_to_alert") == pytest.approx(0.70)
     assert eur_pipe.effective_cfg["ensemble"].get("ev_threshold", 0) == pytest.approx(0)
     assert eur_pipe.effective_cfg["ensemble"].get("hard_divergence_veto", False) is False
 
     gbp_pipe = RealtimePipeline(cfg=cfg, asset_key="GBPUSD", data_mode="mock")
     # legacy adopted 2026-08-08: bar 0.80 -> 0.60 (PF 1.39 vs 1.31 on the honest run)
-    assert gbp_pipe.effective_cfg["ensemble"].get("min_confidence_to_alert") == pytest.approx(0.60)
+    assert gbp_pipe.effective_cfg["ensemble"].get("min_confidence_to_alert") == pytest.approx(0.55)
     assert gbp_pipe.effective_cfg["ensemble"].get("ev_threshold", 0) == pytest.approx(0)
     assert gbp_pipe.effective_cfg["ensemble"].get("hard_divergence_veto", False) is False
 

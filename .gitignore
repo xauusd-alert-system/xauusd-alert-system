@@ -54,3 +54,15 @@ fix_ingestion.py
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite-journal
+
+# Prop challenge: auth-sensitive / volatile artifacts stay local only
+data/challenge_browser_profile/
+data/challenge_tokens.json
+logs/challenge/
+
+# UI node_modules and runtime log
+UI 3.7 flsah updated v3/node_modules/
+UI 3.7 flsah updated v3/ui_server.log
+
+# Forex trial-window heartbeat
+logs/trial_window_heartbeat.txt

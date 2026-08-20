@@ -12,7 +12,10 @@ Rules:
 - `/api/monte-carlo` uses persisted `executed_trades.pnl` and requires at least two
   closed trades.
 - `/api/chart/{asset}` and `/api/institutional-metrics` require real closed candles.
-- `/api/sentiment` remains unavailable until a real news adapter is configured.
+- `/api/sentiment` is computed from the real Forex Factory High-Impact USD calendar
+  (`data/news_filter.py`) scored with the gold/USD lexicon
+  (`data/sentiment_analyzer.py`); `available: false` only when the feed itself is
+  unreachable (no synthetic headlines).
 - `/api/paper-status` exposes liveness/counts only and never outcome metrics.
 - Web `closeall` is deliberately not wired to broker mutation. Emergency close is
   available only through the authenticated Telegram control bot.

@@ -104,7 +104,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     <div class="bg-amber-950/40 border border-amber-800/60 rounded-lg p-2.5 text-amber-200/90 leading-tight">
                         <i class="fas fa-shield-halved text-amber-400 mr-1.5"></i>
                         <span class="font-semibold">INTERNAL DIAGNOSTIC VIEW</span><br>
-                        <span class="text-slate-400 text-[11px]">Браузерные мутации отключены (501). Исполнение — только Telegram bot.</span>
+                        <span class="text-slate-400 text-[11px]">Исполнение — MT5 demo (3-ногий вход). Уведомления — Telegram bot. Браузерные мутации отключены (501).</span>
                     </div>
 
                     <!-- Owner Bearer Token Input -->
@@ -122,7 +122,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </div>
 
             <!-- Global Status Bar / Strategy Identity -->
-            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2 border-t border-slate-800/80 text-xs">
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 pt-2 border-t border-slate-800/80 text-xs">
                 <div>
                     <span class="text-slate-400 text-[11px] block">DATA_MODE</span>
                     <span id="sys-data-mode" class="font-mono font-bold text-indigo-300">UNKNOWN</span>
@@ -148,6 +148,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     <span id="sys-health-status" class="font-mono font-bold text-slate-400 flex items-center gap-1">
                         <i class="fas fa-hourglass-half"></i> WAITING
                     </span>
+                </div>
+                <div>
+                    <span class="text-slate-400 text-[11px] block">TRIAL WINDOW</span>
+                    <span id="sys-trial" class="font-mono font-bold text-amber-400">—</span>
                 </div>
             </div>
         </header>
@@ -182,7 +186,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                         <div>
                             <div class="flex items-center gap-2">
                                 <span class="text-xs font-mono uppercase bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded font-bold">
-                                    PRIMARY ASSET · M15
+                                    PRIMARY ASSET · LIVE
                                 </span>
                                 <h2 class="text-2xl font-bold font-mono text-slate-100">GOLD / XAUUSD</h2>
                             </div>
@@ -226,7 +230,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                         </div>
                     </div>
 
-                    <!-- Trade Geometry (Entry / SL / TP1-3) -->
+                    <!-- Trade Geometry (Entry / SL / TP1-3 per LEG) -->
                     <div>
                         <div class="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center justify-between">
                             <span>Authoritative Trade Geometry (из /signal payload)</span>
@@ -234,26 +238,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                         </div>
                         <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 font-mono text-xs text-center">
                             <div class="p-2.5 bg-slate-900/80 rounded border border-cyan-800/50">
-                                <div class="text-cyan-400 text-[10px] uppercase font-sans font-bold">Зона входа</div>
+                                <div class="text-cyan-400 text-[10px] uppercase font-sans font-bold">Вход (зона)</div>
                                 <div id="sig-entry" class="text-sm font-bold text-slate-100 mt-0.5">—</div>
                             </div>
                             <div class="p-2.5 bg-slate-900/80 rounded border border-rose-900/50">
-                                <div class="text-rose-400 text-[10px] uppercase font-sans font-bold">Stop Loss</div>
+                                <div class="text-rose-400 text-[10px] uppercase font-sans font-bold">SL (общий)</div>
                                 <div id="sig-sl" class="text-sm font-bold text-rose-300 mt-0.5">—</div>
                             </div>
                             <div class="p-2.5 bg-slate-900/80 rounded border border-emerald-900/50">
-                                <div class="text-emerald-400 text-[10px] uppercase font-sans font-bold">TP1 (50% + BE)</div>
+                                <div class="text-emerald-400 text-[10px] uppercase font-sans font-bold">LEG 1/3 · TP1 (⅓)</div>
                                 <div id="sig-tp1" class="text-sm font-bold text-emerald-300 mt-0.5">—</div>
                             </div>
                             <div class="p-2.5 bg-slate-900/80 rounded border border-emerald-900/50">
-                                <div class="text-emerald-400 text-[10px] uppercase font-sans font-bold">TP2 (30%)</div>
+                                <div class="text-emerald-400 text-[10px] uppercase font-sans font-bold">LEG 2/3 · TP2 (⅓)</div>
                                 <div id="sig-tp2" class="text-sm font-bold text-emerald-300 mt-0.5">—</div>
                             </div>
                             <div class="p-2.5 bg-slate-900/80 rounded border border-emerald-900/50">
-                                <div class="text-emerald-400 text-[10px] uppercase font-sans font-bold">TP3 (20% Runner)</div>
+                                <div class="text-emerald-400 text-[10px] uppercase font-sans font-bold">LEG 3/3 · TP3 (⅓)</div>
                                 <div id="sig-tp3" class="text-sm font-bold text-emerald-300 mt-0.5">—</div>
                             </div>
                         </div>
+                        <p class="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                            Открываются <span class="text-slate-300">3 отдельные позиции</span> (hedging-счёт): объём
+                            поровну (⅓ + ⅓ + ⅓, у последней ноги — остаток лота), каждая со
+                            своим TP (TP1/TP2/TP3), общий SL. Брокер закрывает каждую ногу по своему TP.
+                            При закрытии <span class="text-emerald-400">LEG 1/3</span> SL ног 2/3 переводится в безубыток.
+                        </p>
                     </div>
 
                     <!-- Envelope Lineage -->
@@ -351,7 +361,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                                 <th class="p-3">ML Confidence</th>
                                 <th class="p-3">Режим</th>
                                 <th class="p-3">Сессия</th>
-                                <th class="p-3">Targets (TP1/2/3)</th>
+                                <th class="p-3">Targets (TP1/2/3 · LEG 50/30/20)</th>
                                 <th class="p-3">Stop Loss</th>
                                 <th class="p-3">Source &amp; As Of</th>
                             </tr>
@@ -397,18 +407,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     <div class="space-y-2.5 text-xs font-mono">
                         <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
                             <span class="text-slate-400 block text-[11px]">EXECUTION ALLOWLIST</span>
-                            <span class="text-rose-400 font-bold block mt-0.5">[] (EMPTY DENY-ALL)</span>
-                            <p class="text-[11px] text-slate-500 mt-1 font-sans">Маршрутизация ордеров на брокера аппаратно заблокирована.</p>
+                            <span id="exec-allowlist" class="text-emerald-400 font-bold block mt-0.5">LOADING…</span>
+                            <p class="text-[11px] text-slate-500 mt-1 font-sans">Маршрутизация ордеров на брокера (MT5 demo, magic 777111) разрешена только для включённых активов.</p>
                         </div>
 
                         <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
                             <span class="text-slate-400 block text-[11px]">DEMO ACCOUNT REQUIREMENT</span>
-                            <span class="text-emerald-400 font-bold block mt-0.5">ENFORCED (true)</span>
+                            <span id="exec-demo-guard" class="text-emerald-400 font-bold block mt-0.5">ENFORCED (true)</span>
                         </div>
 
                         <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
-                            <span class="text-slate-400 block text-[11px]">CIRCUIT BREAKER</span>
-                            <span class="text-emerald-400 font-bold block mt-0.5">NORMAL (5% Max DD)</span>
+                            <span class="text-slate-400 block text-[11px]">CIRCUIT BREAKER / PAUSE</span>
+                            <span id="exec-cb" class="text-emerald-400 font-bold block mt-0.5">NORMAL (5% Max DD)</span>
+                        </div>
+
+                        <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
+                            <span class="text-slate-400 block text-[11px]">3-LEG EXECUTION MODEL</span>
+                            <span class="text-emerald-400 font-bold block mt-0.5">ACTIVE (⅓ / ⅓ / ⅓)</span>
+                            <p class="text-[11px] text-slate-500 mt-1 font-sans">3 отдельных маркет-ордера, общий SL, свои TP1/TP2/TP3; при закрытии LEG 1 SL ног 2/3 → безубыток.</p>
+                        </div>
+
+                        <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
+                            <span class="text-slate-400 block text-[11px]">NEWS GUARD (fail_closed)</span>
+                            <span id="exec-news-guard" class="text-amber-400 font-bold block mt-0.5">CHECKING…</span>
+                            <p class="text-[11px] text-slate-500 mt-1 font-sans">При недоступности новостного фида каждое решение блокируется (fail_closed); после сбоя — подавление фетча 30 мин.</p>
+                        </div>
+
+                        <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
+                            <span class="text-slate-400 block text-[11px]">BOOK GATE (fail_open)</span>
+                            <span id="exec-book-guard" class="text-amber-400 font-bold block mt-0.5">CHECKING…</span>
+                            <p class="text-[11px] text-slate-500 mt-1 font-sans">Стакан (DOM) на FxPro есть только у BITCOIN — для остальных активов всегда fail-open. Вето при сильном дисбалансе против направления сделки; сбор per-bar истории в data/book_bars/.</p>
                         </div>
 
                         <div class="p-3 bg-slate-900/60 rounded border border-slate-800">
@@ -498,13 +526,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     <i class="fas fa-newspaper text-cyan-400"></i> Macro News &amp; Sentiment (/api/sentiment)
                 </h3>
                 <div id="sentiment-card" class="p-4 bg-slate-900/60 rounded-lg border border-slate-800 text-xs space-y-2">
-                    <div class="flex justify-between">
+                    <div class="flex justify-between items-center">
                         <span class="text-slate-400">Статус источника новостей:</span>
-                        <span id="sentiment-status" class="font-bold text-amber-400">UNCONFIGURED (no live news feed)</span>
+                        <span id="sentiment-status" class="font-bold text-amber-400">CHECKING...</span>
                     </div>
-                    <p class="text-slate-500 text-[11px]">
-                        Реальный источник новостей не настроен. Синтетические новости не отображаются.
-                    </p>
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="p-2.5 bg-slate-950/60 rounded border border-slate-800">
+                            <div class="text-slate-500 text-[11px]">Агрегированный сентимент</div>
+                            <div id="sentiment-bias" class="text-base font-bold mt-1 text-slate-400 uppercase">—</div>
+                        </div>
+                        <div class="p-2.5 bg-slate-950/60 rounded border border-slate-800">
+                            <div class="text-slate-500 text-[11px]">Score</div>
+                            <div id="sentiment-score" class="text-base font-bold text-slate-100 mt-1">—</div>
+                        </div>
+                        <div class="p-2.5 bg-slate-950/60 rounded border border-slate-800">
+                            <div class="text-slate-500 text-[11px]">Уверенность</div>
+                            <div id="sentiment-conf" class="text-base font-bold text-amber-300 mt-1">—</div>
+                        </div>
+                    </div>
+                    <div id="sentiment-tags" class="text-slate-400 text-[11px] pt-1">Ключевые факторы: —</div>
+                    <div id="sentiment-events" class="text-[11px] space-y-1.5"></div>
+                    <p id="sentiment-note" class="text-slate-500 text-[11px] pt-1"></p>
                 </div>
             </div>
         </main>
@@ -708,6 +750,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             }
         }
 
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
         function copyMetricsText() {
             if (!institutionalReportText) {
                 alert('Отчёт недоступен.');
@@ -763,6 +813,37 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 document.getElementById('sys-data-mode').innerText = dMode.toUpperCase();
                 document.getElementById('sys-cfg-hash').innerText = cfgH;
                 document.getElementById('badge-deployment-mode').innerText = depM.toUpperCase();
+                var execAssets = st.execution_enabled_assets || [];
+                document.getElementById('sys-exec-assets').innerText = execAssets.length > 0 ? execAssets.join(' · ') : '[] (DENY-ALL)';
+                document.getElementById('sys-exec-assets').className = 'font-mono font-bold ' + (execAssets.length > 0 ? 'text-emerald-400' : 'text-rose-400');
+                var allowlistEl = document.getElementById('exec-allowlist');
+                if (allowlistEl) {
+                    allowlistEl.innerText = execAssets.length > 0 ? execAssets.join(' · ') : '[] (DENY-ALL)';
+                    allowlistEl.className = 'font-bold block mt-0.5 ' + (execAssets.length > 0 ? 'text-emerald-400' : 'text-rose-400');
+                }
+                var demoEl = document.getElementById('exec-demo-guard');
+                if (demoEl) {
+                    demoEl.innerText = st.require_demo_account ? 'ENFORCED (true)' : 'NOT ENFORCED (false)';
+                }
+                var cbEl = document.getElementById('exec-cb');
+                if (cbEl) {
+                    var cbText = st.circuit_breaker ? 'TRIPPED (5% Max DD)' : (st.trading_paused ? 'PAUSED (trading_paused)' : 'NORMAL (5% Max DD)');
+                    cbEl.innerText = cbText;
+                    cbEl.className = 'font-bold block mt-0.5 ' + (st.circuit_breaker || st.trading_paused ? 'text-rose-400' : 'text-emerald-400');
+                }
+                var trialEl = document.getElementById('sys-trial');
+                if (trialEl) {
+                    var TRIAL_END = Date.parse('2026-08-21T23:59:59Z');
+                    var remainMs = TRIAL_END - Date.now();
+                    if (remainMs > 0) {
+                        var dRem = Math.floor(remainMs / 86400000);
+                        var hRem = Math.floor((remainMs % 86400000) / 3600000);
+                        trialEl.innerText = dRem + 'д ' + hRem + 'ч (до 21.08 23:59 UTC)';
+                    } else {
+                        trialEl.innerText = 'EXPIRED';
+                        trialEl.className = 'font-mono font-bold text-rose-400';
+                    }
+                }
                 var stFresh = (st.freshness_status || 'UNKNOWN').toUpperCase();
                 var stIcon = stFresh === 'FRESH' ? 'fa-check-circle text-emerald-400' : (stFresh === 'STALE' ? 'fa-history text-amber-400' : 'fa-info-circle text-slate-400');
                 var stColor = stFresh === 'FRESH' ? 'text-emerald-400' : (stFresh === 'STALE' ? 'text-amber-400' : 'text-slate-400');
@@ -896,11 +977,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     var p = posData.positions[pIdx];
                     var pnlClass = p.profit >= 0 ? 'text-emerald-400' : 'text-rose-400';
                     var dirBadge = p.direction === 'buy' ? 'bg-emerald-950 text-emerald-300 border border-emerald-700' : 'bg-rose-950 text-rose-300 border border-rose-700';
+                    var legBadge = '';
+                    if (p.leg === 1) legBadge = '<span class="ml-2 px-1.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-bold">LEG 1/3 · TP1</span>';
+                    else if (p.leg === 2) legBadge = '<span class="ml-2 px-1.5 py-0.5 rounded text-[11px] bg-teal-950 text-teal-300 border border-teal-700/60 font-bold">LEG 2/3 · TP2</span>';
+                    else if (p.leg === 3) legBadge = '<span class="ml-2 px-1.5 py-0.5 rounded text-[11px] bg-sky-950 text-sky-300 border border-sky-700/60 font-bold">LEG 3/3 · TP3</span>';
                     posContainer.innerHTML += 
                         '<div class="p-3.5 bg-slate-900/70 rounded-lg border border-slate-800 flex justify-between items-center font-mono text-xs">' +
                             '<div>' +
                                 '<span class="font-bold text-sm text-slate-200">' + p.symbol + '</span>' +
                                 '<span class="ml-2 px-1.5 py-0.5 rounded text-[11px] ' + dirBadge + ' uppercase font-bold">' + p.direction + '</span>' +
+                                legBadge +
                                 '<div class="text-slate-400 mt-1">Ticket: #' + p.ticket + ' | ' + p.volume + ' lot @ ' + p.open_price + '</div>' +
                             '</div>' +
                             '<div class="text-right">' +
@@ -989,6 +1075,102 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             } else {
                 document.getElementById('paper-status-val').innerText = 'UNAVAILABLE';
                 document.getElementById('paper-trades-val').innerText = '— / —';
+            }
+
+            // Macro News & Sentiment — real Forex Factory High-Impact calendar
+            var sent = await fetchJSON('/api/sentiment', false);
+            var sentStatus = document.getElementById('sentiment-status');
+            var sentBias = document.getElementById('sentiment-bias');
+            var sentScore = document.getElementById('sentiment-score');
+            var sentConf = document.getElementById('sentiment-conf');
+            var sentTags = document.getElementById('sentiment-tags');
+            var sentEvents = document.getElementById('sentiment-events');
+            var sentNote = document.getElementById('sentiment-note');
+            if (sent && sent.available && sent.bias != null && sent.score != null) {
+                sentStatus.innerText = 'AVAILABLE (Forex Factory)';
+                sentStatus.className = 'font-bold text-emerald-400';
+                var ngEl = document.getElementById('exec-news-guard');
+                if (ngEl) {
+                    ngEl.innerText = 'ARMED (feed OK, решения не блокируются)';
+                    ngEl.className = 'font-bold block mt-0.5 text-emerald-400';
+                }
+                sentBias.innerText = sent.bias.toUpperCase() + ' (' + (sent.score > 0 ? '+' : '') + Number(sent.score).toFixed(2) + ')';
+                sentBias.className = 'text-base font-bold mt-1 uppercase ' + (sent.bias === 'bullish' ? 'text-emerald-400' : (sent.bias === 'bearish' ? 'text-rose-400' : 'text-slate-400'));
+                sentScore.innerText = (sent.score > 0 ? '+' : '') + Number(sent.score).toFixed(2);
+                sentConf.innerText = sent.confidence != null ? (Number(sent.confidence) * 100).toFixed(1) + '%' : '—';
+                var terms = Array.isArray(sent.matched_terms) ? sent.matched_terms : [];
+                sentTags.innerHTML = 'Ключевые факторы: <span class="text-slate-300 font-mono">' + (terms.join(', ') || 'нейтральный фон') + '</span>';
+                if (sent.events && sent.events.length > 0) {
+                    var sentRows = '';
+                    for (var si = 0; si < sent.events.length; si++) {
+                        var ev = sent.events[si];
+                        var chip = ev.bias === 'bullish' ? 'text-emerald-400' : (ev.bias === 'bearish' ? 'text-rose-400' : 'text-slate-400');
+                        var redZone = ev.active ? '<span class="text-amber-300 font-bold mr-1">● RED ZONE</span>' : '';
+                        sentRows += '<div class="flex justify-between gap-3 border-b border-slate-800/60 pb-1.5">' +
+                            '<span class="text-slate-300">' + redZone + escHtml(ev.title) + '</span>' +
+                            '<span class="font-mono ' + chip + ' whitespace-nowrap">' + (ev.score > 0 ? '+' : '') + Number(ev.score).toFixed(2) + ' ' + String(ev.bias).toUpperCase() + '</span>' +
+                        '</div>';
+                    }
+                    sentEvents.innerHTML = sentRows;
+                } else {
+                    sentEvents.innerHTML = '<span class="text-slate-500">Высоко-импактных событий USD в календаре нет.</span>';
+                }
+                var feedAge = (sent.feed && sent.feed.last_success_age_seconds != null) ? Math.round(Number(sent.feed.last_success_age_seconds) / 60) + ' мин назад' : 'только что';
+                sentNote.innerText = 'Источник: ' + (sent.source || 'forexfactory_economic_calendar') + ' · обновление календаря: ' + feedAge + ' · as of ' + (sent.as_of_utc || '—') + ' UTC';
+            } else {
+                sentStatus.innerText = 'UNAVAILABLE (news feed)';
+                sentStatus.className = 'font-bold text-amber-400';
+                var ngEl = document.getElementById('exec-news-guard');
+                if (ngEl) {
+                    ngEl.innerText = 'TRIPPED (fail_closed — сделки блокируются)';
+                    ngEl.className = 'font-bold block mt-0.5 text-rose-400';
+                }
+                sentBias.innerText = '—';
+                sentBias.className = 'text-base font-bold mt-1 uppercase text-slate-500';
+                sentScore.innerText = '—';
+                sentConf.innerText = '—';
+                sentTags.innerHTML = '<span class="text-slate-500">Сентимент недоступен: реальный новостной фид не отвечает. Синтетические новости не отображаются.</span>';
+                sentEvents.innerHTML = '';
+                var sentReason = (sent && sent.reason) || 'unknown';
+                var sentErr = (sent && sent.feed && sent.feed.error) ? ' · ' + sent.feed.error : '';
+                sentNote.innerText = 'Причина: ' + sentReason + sentErr;
+            }
+        }
+
+        // Book (DOM) gate status — real /api/book/status from the backend
+        try {
+            var book = await fetchJSON('/api/book/status', false);
+            var bookEl = document.getElementById('exec-book-guard');
+            if (bookEl) {
+                if (!book || !book.available) {
+                    bookEl.innerText = 'UNAVAILABLE (fail_open — решения не блокируются)';
+                    bookEl.className = 'font-bold block mt-0.5 text-amber-400';
+                } else {
+                    var liveAssets = [];
+                    var lastImb = null;
+                    for (var bKey in book.assets) {
+                        var st = book.assets[bKey];
+                        if (st.configured && st.subscribed && st.last_snapshot_ok) {
+                            liveAssets.push(bKey);
+                            if (st.last_bar_features && st.last_bar_features.imb5_last != null) {
+                                lastImb = Number(st.last_bar_features.imb5_last);
+                            }
+                        }
+                    }
+                    if (liveAssets.length > 0) {
+                        bookEl.innerText = 'LIVE (' + liveAssets.join(', ') + (lastImb != null ? ') · imb5_last=' + lastImb.toFixed(3) : ')');
+                        bookEl.className = 'font-bold block mt-0.5 text-emerald-400';
+                    } else {
+                        bookEl.innerText = 'NO DOM DATA (fail_open — решения не блокируются)';
+                        bookEl.className = 'font-bold block mt-0.5 text-amber-400';
+                    }
+                }
+            }
+        } catch (e) {
+            var bookEl = document.getElementById('exec-book-guard');
+            if (bookEl) {
+                bookEl.innerText = 'STATUS ERROR (fail_open)';
+                bookEl.className = 'font-bold block mt-0.5 text-amber-400';
             }
         }
 

@@ -62,9 +62,9 @@ export class SignalEngine {
       context_timeframes: ['M5', 'M15', 'H1'],
       expires_at_utc: Math.floor(now / 1000) + 3600,
       target_legs: [
-        { leg: 1, ratio: 0.5, price: targets[0], be_trigger: true },
-        { leg: 2, ratio: 0.3, price: targets[1] },
-        { leg: 3, ratio: 0.2, price: targets[2] },
+        { leg: 1, ratio: 1 / 3, price: targets[0], be_trigger: true },
+        { leg: 2, ratio: 1 / 3, price: targets[1] },
+        { leg: 3, ratio: 1 / 3, price: targets[2] },
       ],
       confirmation_predicates: ['causal_regime_check', 'atr_volatility_filter', 'session_liquidity_gate'],
       confirmed_by: 'institutional_ensemble_meta_filter',

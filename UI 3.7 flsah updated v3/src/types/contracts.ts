@@ -115,12 +115,33 @@ export interface CorrelationResponse extends DataEnvelope {
   n_aligned_returns?: number;
 }
 
+export interface SentimentEventItem {
+  title: string;
+  country: string;
+  datetime_str: string;
+  timestamp_utc: number;
+  active: boolean;
+  score: number;
+  bias: string;
+  confidence: number;
+  matched_terms: string[];
+}
+
+export interface SentimentFeedStatus {
+  available: boolean;
+  last_success_age_seconds?: number | null;
+  error?: string | null;
+  event_count: number;
+}
+
 export interface SentimentResponse extends DataEnvelope {
   asset?: string;
   score: number | null;
   bias: string | null;
   confidence: number | null;
   matched_terms: string[];
+  events?: SentimentEventItem[];
+  feed?: SentimentFeedStatus;
   reason?: string;
 }
 

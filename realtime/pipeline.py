@@ -51,9 +51,11 @@ class RealtimePipeline:
         model_path: str = None,
         asset_key: str = None,
         data_mode: str = "live",
+        book_feed=None,
     ):
         self.cfg = cfg or load_config()
         self.data_mode = data_mode
+        self.book_feed = book_feed
 
         # asset_key may be passed explicitly or inferred from model_path.
         if asset_key is None:
@@ -198,8 +200,24 @@ class RealtimePipeline:
             self.effective_cfg,
             session=session,
             timestamp_utc=int(latest["timestamp_utc"]),
-            asset_key=self.asset_key
+            asset_key=self.asset_key,
         )
+
+        # BOOK GATE (live-only overlay, fail-open): when a BookFeed is attached
+        # and the asset has DOM data, the just-closed bar's book features
+        # (top-of-book imbalance etc.) either veto a direction the book
+        # strongly opposes or add a small confidence boost when it agrees.
+        # No feed / no DOM / broken book => signal is passed through unchanged
+        # and the payload states the feed was unavailable.
+        book_gate = {"decision": "unavailable", "reason": "book feed not attached"}
+        book_features = None
+        if self.book_feed is not None and signal.bias in ("long", "short"):
+            feats = self.book_feed.bar_features(
+                self.asset_key, int(latest["timestamp_utc"])
+            )
+            if feats is not None:
+                book_features = feats
+                book_gate = self._apply_book_gate(signal, feats)
 
         entry_price = float(latest["close"])
         atr_val = float(latest["atr"]) if not pd.isna(latest["atr"]) else 1.0
@@ -244,7 +262,7 @@ class RealtimePipeline:
             json.dumps(feature_dict, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest() if feature_dict else None
         scaleout = grid_cfg.get("scaleout") or {}
-        ratios = [float(scaleout.get("tp1_ratio", 0.5)), float(scaleout.get("tp2_ratio", 0.3))]
+        ratios = [float(scaleout.get("tp1_ratio", 1 / 3)), float(scaleout.get("tp2_ratio", 1 / 3))]
         ratios.append(max(0.0, 1.0 - sum(ratios)))
         return {
             "signal_id": signal_id,
@@ -272,8 +290,53 @@ class RealtimePipeline:
             "timestamp_utc": signal_ts,
             "session": session,
             "features": feature_dict,
+            "book_gate": book_gate,
+            "book_features": book_features,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _apply_book_gate(self, signal, feats: dict) -> dict:
+        """Live book overlay: veto or confidence boost (mutates ``signal``).
+
+        Fail-open by contract: callers only reach this method when the feed
+        returned features, and an unexpected state falls back to 'boost-less
+        pass-through' (the signal is never blocked on book plumbing errors).
+        """
+        bg = self.cfg.get("book_gate") or {}
+        if not bg.get("enabled", True):
+            return {"decision": "disabled"}
+        veto_imb = float(bg.get("veto_imbalance", 0.35))
+        boost = float(bg.get("boost_confidence", 0.05))
+        imb = float(feats.get("imb5_last", 0.0))
+        direction = signal.bias
+        opposed = (direction == "long" and imb > veto_imb) or (
+            direction == "short" and imb < -veto_imb
+        )
+        if opposed:
+            old_confidence = signal.confidence
+            signal.bias = "no_trade"
+            signal.confidence = 0.0
+            signal.reasoning_summary = (
+                f"{signal.reasoning_summary} | BOOK VETO: {direction} blocked, "
+                f"imb5_last={imb:+.3f} (threshold {veto_imb:+.3f})"
+            )
+            return {
+                "decision": "veto",
+                "bias_blocked": direction,
+                "imbalance": imb,
+                "threshold": veto_imb,
+                "confidence_before": old_confidence,
+            }
+        if direction in ("long", "short"):
+            old_confidence = signal.confidence
+            signal.confidence = min(old_confidence + boost, 0.95)
+            return {
+                "decision": "boost",
+                "imbalance": imb,
+                "confidence_before": old_confidence,
+                "confidence_after": signal.confidence,
+            }
+        return {"decision": "no_data"}
 
     def _no_trade_response(self, latest, regime, reason: str) -> dict:
         signal_ts = int(latest["timestamp_utc"])

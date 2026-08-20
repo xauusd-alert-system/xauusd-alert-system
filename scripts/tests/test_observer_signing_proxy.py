@@ -140,12 +140,29 @@ class _FakeRemote:
         return type("R", (), {"status_code": self.status})()
 
 
+def _wait_ready(server, tries=50):
+    """The serve_forever accept loop starts asynchronously; under full-suite
+    load the client can hit 'connection refused' before it is listening. Poll
+    with a throwaway connection until the listener is ready."""
+    import socket
+    import time
+    host, port = server.server_address
+    for _ in range(tries):
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.01)
+    raise RuntimeError("proxy server did not become ready")
+
+
 def _run_proxy(monkeypatch, remote):
     import scripts.run_observer_signing_proxy as proxy_mod
     server = build_proxy_server(CONFIG)
     monkeypatch.setattr(proxy_mod, "_requests_post", remote)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    _wait_ready(server)
     return server
 
 
@@ -235,6 +252,7 @@ def test_proxy_remote_transport_error_returns_non_2xx(monkeypatch):
     server = build_proxy_server(CONFIG)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    _wait_ready(server)
     try:
         body = json.dumps(_observer_envelope()).encode("utf-8")
         status, _ = _proxy_post(server, body)

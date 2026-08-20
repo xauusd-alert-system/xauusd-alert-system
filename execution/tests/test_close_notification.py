@@ -157,6 +157,28 @@ def test_close_of_one_position_among_several_still_reported(monkeypatch, tmp_pat
     assert 789 in t.active_trades  # the still-open position is untouched
 
 
+def test_group_position_counts_three_legs_are_one_group(tmp_path):
+    """Audit 2026-08-19: the risk budget mapping counts a 3-leg group as ONE
+    slot; tickets unknown to active_trades (restart edge) fall back to single
+    positions via the position symbol."""
+    t = _trader(tmp_path, {
+        1: dict(TRACKED_LONG, leg=1, group_key="G1"),
+        2: dict(TRACKED_LONG, leg=2, group_key="G1"),
+        3: dict(TRACKED_LONG, leg=3, group_key="G1"),
+    })
+    positions = [
+        types.SimpleNamespace(ticket=1, symbol="GOLD"),
+        types.SimpleNamespace(ticket=2, symbol="GOLD"),
+        types.SimpleNamespace(ticket=3, symbol="GOLD"),
+        types.SimpleNamespace(ticket=99, symbol="EURUSD"),  # unknown to state
+    ]
+
+    groups, singles = t._group_position_counts(positions)
+
+    assert groups == {"XAUUSD": {"G1"}}
+    assert singles == {"EURUSD": 1}
+
+
 def test_history_lookup_failure_does_not_suppress_notification(monkeypatch, tmp_path):
     """A failing history_deals_get for one ticket must not take down the close
     handling (and notification) of the other tickets."""

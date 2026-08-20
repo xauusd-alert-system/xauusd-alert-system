@@ -389,7 +389,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 biasEl.innerText = "—";
                 biasEl.className = "font-bold text-slate-500 uppercase";
                 document.getElementById("sentiment-conf").innerText = "—";
-                document.getElementById("sentiment-tags").innerHTML = '<span class="text-slate-500">Данные недоступны: реальный источник новостей не настроен</span>';
+                var sentReason = (sent && sent.reason) || "news_feed_unavailable";
+                var sentErr = (sent && sent.feed && sent.feed.error) ? " · " + sent.feed.error : "";
+                document.getElementById("sentiment-tags").innerHTML = '<span class="text-slate-500">Данные недоступны: ' + sentReason + sentErr + '</span>';
             }
 
             // Monte Carlo — persisted executed trades only.

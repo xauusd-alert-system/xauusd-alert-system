@@ -464,23 +464,25 @@ def test_run_simulation_imports_plain_mt5_module():
 
 def test_build_virtual_cfg_registers_mt5_symbol_names():
     """build_virtual_cfg must extend symbol_overrides with the MT5 symbol
-    names from the main config (GOLD, SILVER, ...) so the trader's
-    validate_symbol(mt5_symbol) succeeds against the virtual terminal.
-
-    Shadow assets (XAGUSD `enabled: false` per the 2026-08-07 quant audit)
-    are intentionally NOT registered — the simulator mirrors the live symbol
-    set, so SILVER must be absent while the 4 live symbols are present.
+    names of every ENABLED asset from the main config (GOLD, SILVER, ...) so
+    the trader's validate_symbol(mt5_symbol) succeeds against the virtual
+    terminal. The simulator mirrors the LIVE symbol set: disabled (shadow)
+    assets are not registered. XAGUSD is temporarily re-enabled for the 48h
+    demo trial (scripts/trial_window.py), so SILVER is present while the
+    trial is active and absent after its auto-revert.
     """
+    from config.loader import load_config
     from scripts.run_simulation import build_virtual_cfg
     cfg = build_virtual_cfg()
     overrides = cfg["symbol_overrides"]
-    assert "GOLD" in overrides
-    assert "BITCOIN" in overrides
-    assert "EURUSD" in overrides
-    assert "GBPUSD" in overrides
-    # Shadow asset: XAGUSD is disabled -> its MT5 symbol must not be tradable
-    assert "SILVER" not in overrides
-    assert "XAGUSD" not in overrides
+    for asset_key, a_cfg in load_config()["assets"].items():
+        sym = a_cfg.get("mt5_symbol")
+        if not sym:
+            continue
+        if a_cfg.get("enabled", False):
+            assert sym in overrides, f"enabled {asset_key} -> {sym} must be registered"
+        else:
+            assert sym not in overrides, f"disabled {asset_key} -> {sym} must be absent"
     # MT5 name inherits the asset-key params (e.g. gold contract size 100).
     assert overrides["GOLD"].get("trade_contract_size") == overrides.get("XAUUSD", {}).get(
         "trade_contract_size", 100.0

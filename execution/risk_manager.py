@@ -33,6 +33,12 @@ class InstitutionalRiskManager:
         self.max_concurrent_positions = int(
             exec_cfg.get("max_concurrent_positions_global", 3)
         )
+        # Audit 2026-08-19 (owner request): the global budget counts GROUPS
+        # (3 legs of one signal = 1 slot), so N slots = N assets, not N/3
+        # assets. The per-asset group cap (long unwired) is now enforced too.
+        self.max_open_positions_per_asset = int(
+            exec_cfg.get("max_open_positions_per_asset", 2)
+        )
         self.max_daily_trades_per_asset = int(
             exec_cfg.get("max_daily_trades_per_asset", 10)
         )
@@ -115,9 +121,15 @@ class InstitutionalRiskManager:
             return list(positions)
         return [p for p in positions if getattr(p, "magic", None) == self.magic]
 
-    def can_trade(self, asset_key: str) -> tuple[bool, str]:
+    def can_trade(self, asset_key: str, groups_by_asset: dict = None,
+                  singles_by_asset: dict = None) -> tuple[bool, str]:
         """
         Validates whether a new trade is allowed under risk limits.
+
+        groups_by_asset / singles_by_asset (audit 2026-08-19): the caller
+        (mt5_trader) passes the OPEN positions grouped by identity: each
+        3-leg group consumes ONE budget slot. When both are None (legacy
+        callers/tests), every position consumes one slot (old behaviour).
         """
         if not mt5.initialize():
             return False, "MT5 not initialized"
@@ -141,10 +153,29 @@ class InstitutionalRiskManager:
         if self.circuit_breaker_tripped:
             return False, "Trading halted today by Circuit Breaker."
 
-        # 2. 🚨 ПРОВЕРКА МАКСИМУМА ОДНОВРЕМЕННЫХ ПОЗИЦИЙ (W9: only our own)
-        open_positions = self._positions()
-        if open_positions and len(open_positions) >= self.max_concurrent_positions:
-            return False, f"Max concurrent positions limit reached ({len(open_positions)}/{self.max_concurrent_positions})"
+        # 2. 🚨 ПРОВЕРКА МАКСИМУМА ОДНОВРЕМЕННЫХ ГРУПП/ПОЗИЦИЙ
+        # W9: only this system's positions (filtered by magic) count.
+        if groups_by_asset is not None and singles_by_asset is not None:
+            total_groups = (
+                sum(len(keys) for keys in groups_by_asset.values())
+                + sum(singles_by_asset.values())
+            )
+            if total_groups >= self.max_concurrent_positions:
+                return False, (
+                    f"Max concurrent groups limit reached "
+                    f"({total_groups}/{self.max_concurrent_positions})")
+            asset_groups = (
+                len(groups_by_asset.get(asset_key, ()))
+                + singles_by_asset.get(asset_key, 0)
+            )
+            if asset_groups >= self.max_open_positions_per_asset:
+                return False, (
+                    f"Max open groups for {asset_key} reached "
+                    f"({asset_groups}/{self.max_open_positions_per_asset})")
+        else:
+            open_positions = self._positions()
+            if open_positions and len(open_positions) >= self.max_concurrent_positions:
+                return False, f"Max concurrent positions limit reached ({len(open_positions)}/{self.max_concurrent_positions})"
 
         # 3. 🚨 ПРОВЕРКА ДНЕВНОГО ЛИМИТА СДЕЛОК НА АКТИВ
         asset_trades = self.daily_trades_count.get(asset_key, 0)

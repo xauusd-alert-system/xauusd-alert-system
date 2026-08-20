@@ -69,6 +69,83 @@ def test_limits_read_from_config(patched_mt5, state_path):
     mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state_path)
     assert mgr.max_concurrent_positions == 2
     assert mgr.max_daily_trades_per_asset == 5
+    assert mgr.max_open_positions_per_asset == 2
+
+
+def test_group_aware_counting_three_legs_consume_one_slot(patched_mt5, state_path):
+    """Audit 2026-08-19: a 3-leg group consumes ONE budget slot, so the 2-slot
+    budget allows a second ASSET's group even though 3+ positions are open."""
+    mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state_path)
+
+    # XAUUSD group open (3 legs, one group_key) -> another asset still fits.
+    ok, _ = mgr.can_trade(
+        "XAGUSD",
+        groups_by_asset={"XAUUSD": {"G1"}},
+        singles_by_asset={},
+    )
+    assert ok is True
+
+    # Two groups open -> the 2-slot budget is full.
+    ok2, reason2 = mgr.can_trade(
+        "BTCUSD",
+        groups_by_asset={"XAUUSD": {"G1"}, "XAGUSD": {"G2"}},
+        singles_by_asset={},
+    )
+    assert ok2 is False
+    assert "groups limit" in reason2
+
+
+def test_per_asset_group_cap_enforced(patched_mt5, state_path):
+    """Audit 2026-08-19: max_open_positions_per_asset (was declared but never
+    wired) now bounds groups per asset; other assets stay free."""
+    mgr = rm.InstitutionalRiskManager(
+        _cfg(max_concurrent_positions_global=6), magic=777111, state_path=state_path)
+
+    ok, reason = mgr.can_trade(
+        "XAUUSD",
+        groups_by_asset={"XAUUSD": {"G1", "G2"}},
+        singles_by_asset={},
+    )
+    assert ok is False
+    assert "Max open groups for XAUUSD" in reason
+
+    ok2, _ = mgr.can_trade(
+        "BTCUSD",
+        groups_by_asset={"XAUUSD": {"G1", "G2"}},
+        singles_by_asset={},
+    )
+    assert ok2 is True
+
+
+def test_unknown_tickets_count_as_single_positions(patched_mt5, state_path):
+    """Positions unknown to active_trades (restart edge) consume one slot each
+    — conservative, they cannot hide inside a group."""
+    mgr = rm.InstitutionalRiskManager(
+        _cfg(max_concurrent_positions_global=6), magic=777111, state_path=state_path)
+
+    ok, _ = mgr.can_trade(
+        "XAUUSD",
+        groups_by_asset={},
+        singles_by_asset={"XAUUSD": 1},
+    )
+    assert ok is True
+
+    ok2, reason2 = mgr.can_trade(
+        "XAUUSD",
+        groups_by_asset={},
+        singles_by_asset={"XAUUSD": 2},
+    )
+    assert ok2 is False
+    assert "Max open groups for XAUUSD" in reason2
+
+
+def test_legacy_can_trade_without_group_info_keeps_old_behavior(patched_mt5, state_path):
+    """Callers/tests that pass no group info keep the raw per-position count."""
+    patched_mt5._positions = [_FakePos(777111), _FakePos(777111)]
+    mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state_path)
+    ok, reason = mgr.can_trade("XAUUSD")
+    assert ok is False
+    assert "concurrent positions limit" in reason
 
 
 def test_concurrency_counts_only_own_magic(patched_mt5, state_path):

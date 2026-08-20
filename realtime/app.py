@@ -8,6 +8,10 @@ import asyncio
 import os
 import json
 import logging
+import re
+import threading
+import time
+from functools import wraps
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -34,6 +38,8 @@ from data.ledger_events import (
     read_ledger_events,
     upsert_ledger_event,
 )
+from data import news_filter
+from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
 from realtime.data_envelope import freshness_status, stamp
 
 logger = logging.getLogger("realtime_app")
@@ -48,8 +54,85 @@ DATA_MODE = get_env("DATA_MODE", default="mock")
 pipeline = RealtimePipeline(cfg=CFG, model_path=MODEL_PATH, data_mode=DATA_MODE)
 APP_STRATEGY_IDENTITY = pipeline.strategy_identity
 
+# Book (DOM) status feed for the dashboard: the backend runs its own
+# read-only poller (persist=False — only the trader process writes the
+# collection CSV). Fail-open by construction: assets without DOM report
+# "unavailable" and never influence signals.
+try:
+    from realtime.book_feed import BookFeed
+    BOOK_FEED = BookFeed(CFG, persist=False)
+    BOOK_FEED.start()
+except Exception as exc:  # the dashboard must not die with the book feed
+    logger.warning("Book feed unavailable in backend: %s", exc)
+    BOOK_FEED = None
+
 # Track trading paused state
 TRADING_PAUSED = False
+
+
+# ---------------------------------------------------------------------------
+# TTL cache for expensive dashboard endpoints. The web UI polls every 5s and
+# /api/matrix recomputes 5 ensemble pipelines serially (~40s), so without a
+# cache concurrent refreshes pile up and saturate the backend (the dashboard
+# appears frozen). Cached payloads carry their own as_of_utc, so serving a
+# cached copy is honest. Tests disable it via realtime/tests/conftest.py.
+# ---------------------------------------------------------------------------
+CACHE_BYPASS = False
+
+
+def _ttl_cache(ttl_seconds: float):
+    caches: Dict[Any, Any] = {}
+    locks: Dict[Any, threading.Lock] = {}
+    guard = threading.Lock()
+
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if CACHE_BYPASS:
+                return fn(*args, **kwargs)
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.monotonic()
+            with guard:
+                entry = caches.get(key)
+                if entry is not None and now - entry[0] < ttl_seconds:
+                    return entry[1]
+            with guard:
+                lock = locks.get(key)
+                if lock is None:
+                    lock = locks[key] = threading.Lock()
+            if lock.acquire(blocking=False):
+                # Single-flight: only ONE recompute per key at a time. Without
+                # this, /api/matrix (~40s of serial pipeline work) restarts its
+                # recompute for EVERY concurrent dashboard poll, piling up
+                # requests and saturating the backend (the dashboard froze).
+                try:
+                    payload = fn(*args, **kwargs)
+                    with guard:
+                        caches[key] = (time.monotonic(), payload)
+                    return payload
+                finally:
+                    lock.release()
+            # Another request is already recomputing: serve the STALE copy
+            # immediately (its as_of_utc is honest) instead of queueing or
+            # recomputing in parallel. First-ever call falls through below.
+            with guard:
+                stale = caches.get(key)
+            if stale is not None:
+                return stale[1]
+            with lock:
+                # The winner may have just populated the cache while we were
+                # waiting for the lock: re-check before computing (double-
+                # checked locking).
+                entry = caches.get(key)
+                if entry is not None:
+                    return entry[1]
+                payload = fn(*args, **kwargs)
+                with guard:
+                    caches[key] = (time.monotonic(), payload)
+                return payload
+        return wrapper
+
+    return deco
 
 
 class SignalResponse(BaseModel):
@@ -101,6 +184,7 @@ def health():
 
 
 @app.get("/signal", response_model=SignalResponse)
+@_ttl_cache(15)
 def get_signal(n_candles: int = 300, asset: str = "XAUUSD"):
     """
     Runs the pipeline for the specified asset and returns the structured signal JSON.
@@ -223,6 +307,7 @@ def get_paper_status():
 
 
 @app.get("/api/matrix")
+@_ttl_cache(25)
 def get_signal_matrix():
     """Generates signals across all 5 enabled assets.
 
@@ -281,6 +366,19 @@ def get_signal_matrix():
             })
     return {"signals": signals, "source": "per_asset_realtime_pipeline",
             "mode": DATA_MODE, "as_of_utc": as_of}
+
+
+def _warm_matrix_cache():
+    """Precompute the first matrix at startup so the first dashboard load
+    does not wait ~40s for five serial pipeline runs."""
+    try:
+        get_signal_matrix()
+        logger.info("Dashboard matrix cache warmed at startup")
+    except Exception as exc:
+        logger.warning("Matrix cache warm failed: %s", exc)
+
+
+threading.Thread(target=_warm_matrix_cache, daemon=True).start()
 
 
 @app.get("/api/correlation")
@@ -342,18 +440,104 @@ def get_correlation_matrix():
 
 @app.get("/api/sentiment")
 def get_sentiment():
-    """No live-news adapter is configured; never present samples as current news."""
+    """Macro News & Sentiment computed from the real Forex Factory High-Impact
+    calendar (data/news_filter.py) scored with the gold/USD lexicon in
+    data/sentiment_analyzer.py.
+
+    The aggregate is the mean of per-event scores over the weekly High-Impact
+    USD window; every event is listed with its own score. An unavailable feed
+    stays unavailable — no samples, no synthetic headlines, no numeric
+    fallback (W17 honesty contract).
+    """
+    as_of = datetime.now(timezone.utc).isoformat()
+    try:
+        events = news_filter.fetch_economic_calendar() or []
+        feed = news_filter.news_feed_status()
+    except Exception as exc:
+        logger.warning("Economic calendar fetch failed: %s", exc)
+        events = []
+        feed = {"available": False, "error": str(exc), "event_count": 0}
+
+    feed_block = {k: feed.get(k) for k in
+                  ("available", "last_success_age_seconds", "error", "event_count")}
+
+    if not feed.get("available"):
+        return stamp(
+            {"available": False, "asset": "XAUUSD", "score": None, "bias": None,
+             "confidence": None, "matched_terms": [], "events": [],
+             "feed": feed_block, "as_of_utc": as_of,
+             "reason": "news_feed_unavailable"},
+            last_activity_ms=None, source="unavailable",
+            mode="implemented_not_live_verified", freshness="waiting",
+        )
+
+    analyzer = MacroNewsSentimentAnalyzer()
+    now_ts = int(time.time())
+    red_zone_buffer_sec = 30 * 60
+    scored_events: List[Dict[str, Any]] = []
+    matched_terms: List[str] = []
+    for event in events:
+        title = event.get("title", "")
+        res = analyzer.analyze_headline(title)
+        for term in res["matched_terms"]:
+            if term not in matched_terms:
+                matched_terms.append(term)
+        try:
+            event_ts = int(event.get("timestamp_utc") or 0)
+        except (TypeError, ValueError):
+            event_ts = 0
+        scored_events.append({
+            "title": title,
+            "country": event.get("country", ""),
+            "datetime_str": event.get("datetime_str", ""),
+            "timestamp_utc": event_ts,
+            "active": bool(event_ts) and abs(now_ts - event_ts) <= red_zone_buffer_sec,
+            "score": res["score"],
+            "bias": res["bias"],
+            "confidence": res["confidence"],
+            "matched_terms": res["matched_terms"],
+        })
+
+    if not scored_events:
+        last_activity_ms = None
+        if feed.get("last_success_age_seconds") is not None:
+            last_activity_ms = int(time.time() * 1000) - int(feed["last_success_age_seconds"]) * 1000
+        return stamp(
+            {"available": True, "asset": "XAUUSD", "score": 0.0, "bias": "neutral",
+             "confidence": 0.0, "matched_terms": [], "events": [],
+             "feed": feed_block, "as_of_utc": as_of,
+             "reason": "calendar_empty"},
+            last_activity_ms=last_activity_ms,
+            source="forexfactory_economic_calendar", mode="live_verified",
+            freshness="fresh",
+        )
+
+    n_events = len(scored_events)
+    avg_score = sum(ev["score"] for ev in scored_events) / n_events
+    avg_confidence = sum(ev["confidence"] for ev in scored_events) / n_events
+    if avg_score > 0.15:
+        bias = "bullish"
+    elif avg_score < -0.15:
+        bias = "bearish"
+    else:
+        bias = "neutral"
+
+    last_activity_ms = None
+    if feed.get("last_success_age_seconds") is not None:
+        last_activity_ms = int(time.time() * 1000) - int(feed["last_success_age_seconds"]) * 1000
     return stamp(
-        {"available": False, "score": None, "bias": None, "confidence": None,
-         "matched_terms": [],
-         "as_of_utc": datetime.now(timezone.utc).isoformat(),
-         "reason": "no_live_news_source_configured"},
-        last_activity_ms=None, source="unavailable",
-        mode="implemented_not_live_verified",
+        {"available": True, "asset": "XAUUSD", "score": float(avg_score),
+         "bias": bias, "confidence": float(avg_confidence),
+         "matched_terms": matched_terms, "events": scored_events,
+         "feed": feed_block, "as_of_utc": as_of, "reason": None},
+        last_activity_ms=last_activity_ms,
+        source="forexfactory_economic_calendar", mode="live_verified",
+        freshness="fresh",
     )
 
 
 @app.get("/api/monte-carlo")
+@_ttl_cache(30)
 def get_monte_carlo():
     """Monte Carlo from persisted executed-trade PnL only; no hypothetical sample."""
     as_of = datetime.now(timezone.utc).isoformat()
@@ -451,7 +635,7 @@ def get_asset_chart(asset: str = "XAUUSD"):
         step = min(step, float(step_max))
     sl = entry - step * float(grid.get("stop_mult", 2.0))
     targets = [entry + step * float(grid.get(k, d)) for k, d in (
-        ("tp1_mult", 1.0), ("tp2_mult", 1.5), ("tp3_mult", 2.0)
+        ("tp1_mult", 1.0), ("tp2_mult", 2.0), ("tp3_mult", 3.0)
     )]
     svg = ChartRenderer.render_svg_candlestick(
         df=df.tail(35), symbol=asset, entry_price=entry,
@@ -502,6 +686,7 @@ def get_positions():
         )
     try:
         raw_positions = list(sc.get_mt5().positions_get() or [])
+        leg_re = re.compile(r"\bL([1-3])\b")
         positions = [{
             "ticket": getattr(p, "ticket", None),
             "symbol": getattr(p, "symbol", None),
@@ -512,6 +697,9 @@ def get_positions():
             "profit": float(getattr(p, "profit", 0.0)),
             "sl": float(getattr(p, "sl", 0.0) or 0.0),
             "tp": float(getattr(p, "tp", 0.0) or 0.0),
+            "leg": (lambda m: int(m.group(1)) if m else None)(
+                leg_re.search(getattr(p, "comment", "") or "")
+            ),
         } for p in raw_positions]
         return stamp(
             {"available": True, "positions": positions, "as_of_utc": as_of},
@@ -522,6 +710,20 @@ def get_positions():
             {"available": False, "positions": [], "as_of_utc": as_of, "reason": str(exc)},
             last_activity_ms=None, source="mt5_positions", mode="live",
         )
+
+
+@app.get("/api/book/status")
+def book_status():
+    """Read-only DOM feed status per asset (fail-open dashboard cell).
+
+    ``available`` reflects whether the book gate is configured at all; each
+    asset entry reports subscription, snapshot health and the last finalized
+    M5-bar features when the feed is healthy.
+    """
+    as_of = datetime.now(timezone.utc).isoformat()
+    if BOOK_FEED is None:
+        return {"available": False, "assets": {}, "as_of_utc": as_of}
+    return {"available": True, "assets": BOOK_FEED.overview(), "as_of_utc": as_of}
 
 
 @app.post("/api/control/{action}")

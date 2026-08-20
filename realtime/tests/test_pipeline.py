@@ -176,9 +176,9 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
     assert step > 0
     assert result["step"] > 0
     # rounding to 2 decimals gives ~0.01 tolerance per level
-    # Asymmetric grid (owner request 2026-08-11): TP1=1, TP2=1.5, TP3=2, Stop=2.
-    assert abs(abs(tp2 - entry) - 1.5 * step) < 0.05
-    assert abs(abs(tp3 - entry) - 2.0 * step) < 0.05
+    # Owner template (2026-08-18): TP1=1, TP2=2, TP3=3, Stop=2.
+    assert abs(abs(tp2 - entry) - 2.0 * step) < 0.05
+    assert abs(abs(tp3 - entry) - 3.0 * step) < 0.05
     assert abs(abs(result["invalidation"] - entry) - 2.0 * step) < 0.05
 
 

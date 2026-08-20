@@ -326,17 +326,19 @@ def test_be_tick_alignment(tick_size):
 
 
 # ==========================================================================
-# Follow-up ТЗ §12: BTC profile stays validation-gated; live 20-50 untouched
+# Follow-up ТЗ §12: BTC profile stays validation-gated; live 250-350 step
+# (raised 2026-08-18: FxPro BITCOIN stops_level = 20000 pts = $200 min SL/TP
+# distance > old [20,50] clamp, which collapsed TP1/TP2 onto TP3)
 # ==========================================================================
 
-def test_btc_live_signal_grid_unchanged_20_50():
-    """The current BTC live geometry (20-50 price units) must not be touched."""
+def test_btc_live_signal_grid_step_above_broker_minimum():
+    """BTC step clamp must keep TP1 >= broker minimum distance ($200)."""
     import yaml
     with open("config/config.yaml", "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
     grid = cfg["assets"]["BTCUSD"]["signal_grid"]
-    assert grid["step_min_points"] == 20.0
-    assert grid["step_max_points"] == 50.0
+    assert grid["step_min_points"] == 250.0
+    assert grid["step_max_points"] == 350.0
 
 
 def test_btc_candidate_profile_remains_validation_gated():

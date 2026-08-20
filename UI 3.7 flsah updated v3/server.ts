@@ -1,5 +1,27 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 dotenv.config();
+
+// Also load the project-root .env (LEDGER_OWNER_TOKEN etc.) so the UI picks
+// the owner token up automatically instead of requiring a manual paste.
+// Tries: cwd/.env, cwd/../.env (dev: run from the UI folder), and module-relative
+// paths (built dist/server.cjs). First existing file wins; already-set vars win.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const envCandidates = [
+  path.join(process.cwd(), '.env'),
+  path.join(process.cwd(), '..', '.env'),
+  path.join(__dirname, '..', '.env'),
+  path.join(__dirname, '..', '..', '.env'),
+];
+for (const candidate of envCandidates) {
+  if (fs.existsSync(candidate)) {
+    dotenv.config({ path: candidate });
+    break;
+  }
+}
 
 import express, { Request, Response, NextFunction } from 'express';
 import { DASHBOARD_HTML } from './src/dashboardHtml.js';
@@ -7,6 +29,25 @@ import { DASHBOARD_HTML } from './src/dashboardHtml.js';
 const app = express();
 const PORT = 3000;
 const getBackendBaseUrl = () => process.env.BACKEND_BASE_URL || 'http://127.0.0.1:8000';
+
+// Owner token auto-injection: when LEDGER_OWNER_TOKEN is present in .env, the
+// served dashboard writes it into sessionStorage BEFORE the page's own init
+// script runs, so the token input is prefilled and ledger calls are already
+// authorized — no manual paste needed.
+const OWNER_TOKEN_FROM_ENV = (process.env.LEDGER_OWNER_TOKEN || '').trim();
+
+function renderDashboard(): string {
+  if (!OWNER_TOKEN_FROM_ENV) {
+    return DASHBOARD_HTML;
+  }
+  const injectScript =
+    `<script>try { sessionStorage.setItem('xau_alert_owner_token', ${JSON.stringify(OWNER_TOKEN_FROM_ENV)}); } catch (e) {}</script>\n    `;
+  const marker = '<!-- Client-side Logic -->';
+  if (DASHBOARD_HTML.includes(marker)) {
+    return DASHBOARD_HTML.replace(marker, marker + '\n    ' + injectScript);
+  }
+  return DASHBOARD_HTML.replace('</body>', injectScript + '</body>');
+}
 
 // Byte-exact raw body preservation for signed ingress (HMAC X-Ledger-Signature)
 // Stores the raw incoming bytes as Buffer in req.body without parsing, pretty-printing, or modifying order
@@ -104,12 +145,12 @@ export async function proxyToBackend(req: Request, res: Response): Promise<void>
 // --------------------------------------------------------------------------
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(DASHBOARD_HTML);
+  res.send(renderDashboard());
 });
 
 app.get('/dashboard', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(DASHBOARD_HTML);
+  res.send(renderDashboard());
 });
 
 // --------------------------------------------------------------------------
@@ -153,5 +194,6 @@ if (process.env.NODE_ENV !== 'test' && isMainModule) {
     console.log(`[xauusd-control-terminal] Target Python FastAPI backend: ${getBackendBaseUrl()}`);
     console.log(`[xauusd-control-terminal] Byte-exact signed ingress: ENABLED (raw Buffer passthrough)`);
     console.log(`[xauusd-control-terminal] WebSocket architecture: Variant B (REST-only polling)`);
+    console.log(`[xauusd-control-terminal] Owner token auto-inject: ${OWNER_TOKEN_FROM_ENV ? 'ENABLED (from .env, no manual paste needed)' : 'DISABLED (set LEDGER_OWNER_TOKEN in .env)'}`);
   });
 }

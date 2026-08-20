@@ -104,6 +104,15 @@ def test_positions_offline_without_mt5(client, monkeypatch):
 
 def test_correlation_sentiment_include_freshness(client, monkeypatch):
     monkeypatch.setattr(app_module, "DATA_MODE", "mock")
+
+    def _fail(*args, **kwargs):
+        raise RuntimeError("feed offline")
+
+    monkeypatch.setattr("data.news_filter.fetch_economic_calendar", _fail)
+    monkeypatch.setattr(
+        "data.news_filter.news_feed_status",
+        lambda: {"available": False, "error": "feed offline", "event_count": 0},
+    )
     corr = client.get("/api/correlation").json()
     assert corr["freshness_status"] == "offline"  # MT5 producer not reachable
     assert corr["as_of_utc_ms"] is None

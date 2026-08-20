@@ -1,6 +1,8 @@
-deployment:
+﻿deployment:
   # Formal safety state; DRY_RUN is no longer the deployment authority.
-  mode: research  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic
+  # TRIAL-48H (2026-08-18): temporarily switched research -> demo_systematic;
+  # auto-revert by `python -m scripts.trial_window watch` after 48h.
+  mode: demo_systematic  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic
   live_approval_id: null
   require_telegram_admin_for_execution: true
 
@@ -131,18 +133,27 @@ assets:
       # path 0.5988 -> 0.5949; +/-0.4pp minimax split). Note the bar applies to a
       # BLENDED score, so a weight change without a bar change silently moves both
       # cuts (at 0.70 kept: agree +0.24pp stricter, neutral -0.55pp looser).
-      min_confidence_to_alert: 0.71
+      # OWNER REQUEST 2026-08-19: loosened 0.71 -> 0.60 (the global default) so
+      # more agree-path situations reach the signal gate; blended disagreement
+      # (~0.3-0.5) still stays below the bar.
+      min_confidence_to_alert: 0.60
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
     labeling:
       event: traded
-    # Equal-step signal grid clamps (price points). Gold M5 ATR ~3-7 -> keep the
-    # step inside 2..8 pts so extreme ATR cannot produce absurd TP/SL levels.
+    # Owner template (2026-08-18): TP/SL step ~0.1% of price (reference card:
+    # GOLD 4393.03 -> step 4.39). Clamp pins the ATR step to ~4.4 pts; wider
+    # ATRs no longer produce absurd TP/SL levels.
+    # OWNER REQUEST 2026-08-20: TP steps reworked to ~3-4 price units between
+    # TPs (entry 4400 -> TP1 4403 / TP2 4407 / TP3 4410). XAUUSD is the asset
+    # where a fixed 3-4 pt step stays well above costs; silver/BTC/FX keep
+    # their own grids (a 3-4 unit step there is below spread or breaks the
+    # tuned FX profile).
     signal_grid:
       step_min_points: 3.0
-      step_max_points: 9.0
+      step_max_points: 4.0
     # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
     # M5 -> M15 if cost_ratio > 15% on the real DB (measure first:
     #   python -m scripts.diag_r_metrics --asset XAUUSD --timeframe M5
@@ -157,13 +168,9 @@ assets:
 
   XAGUSD:
     # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).
-    # Rationale: PF_med ~0.91 (< 1), only 6/14 positive walk-forward folds —
-    # the positive aggregate PnL is concentrated in a few periods; combined
-    # with ~0.84 spot correlation to XAU the asset is not a diversifier.
-    # Research continues via explicit --asset scripts (run_backtest,
-    # deflated_sharpe, exit_profile); return to live only if outer-OOS shows
-    # dSharpe >= +0.10 vs the 4-asset portfolio or ES95/maxDD improves >= 10%.
-    enabled: false
+    # TRIAL-48H (2026-08-18): temporarily re-enabled for the 48h demo observation
+    # run (owner request); auto-revert by scripts/trial_window.py after the window.
+    enabled: true
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
@@ -182,14 +189,23 @@ assets:
     # BTCUSD keeps the default to preserve its valid, uncorrupted baseline.
     point_value_lot: 5000
     ensemble:
-      min_confidence_to_alert: 0.75
+      # OWNER REQUEST 2026-08-19: loosened 0.75 -> 0.65 (trial window, demo).
+      # XAGUSD signals with conf 0.88/0.97 were previously killed by the 6/6
+      # position cap, not by this bar; the bar itself is now also lowered.
+      min_confidence_to_alert: 0.65
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
       ml_weight: 0.85
+    # Owner template (2026-08-18): step ~0.1% of price (~65 -> 0.065).
+    # CAUTION: spread+slippage 0.04 is ~62% of the 0.065 TP1 step, far above
+    # the 15% cost_ratio red line that motivated the M15 timeframe; this clamp
+    # reverts silver to M5-era economics. Trial-only, review after the 48h run.
+    # (2026-08-20: the owner's 3-4-unit step trial (0.03-0.04) was reverted —
+    # costs ~100-150% of the step means constant noise stop-outs.)
     signal_grid:
-      step_min_points: 0.1
-      step_max_points: 1.0
+      step_min_points: 0.06
+      step_max_points: 0.08
 
 
   BTCUSD:
@@ -222,18 +238,27 @@ assets:
       # cut 0.6035 -> 0.6160, rule-neutral 0.6485 -> 0.6360; +/-1.25pp split).
       # Keeping 0.66 with the new weights would have made the trend-agree path
       # +0.85pp stricter and the rule-neutral path -1.65pp looser.
-      min_confidence_to_alert: 0.68
-      min_ml_probability: 0.60
-      ml_confidence_floor: 0.68
-      crypto_night_min_probability: 0.62
-      ev_threshold: 0.05
+      # OWNER REQUEST 2026-08-19: bars loosened (0.68/0.68/0.60/0.62 -> 0.62/
+      # 0.60/0.55/0.60) and the EV gate disabled (0.05 -> 0) so more situations
+      # trade on the demo trial; floors still filter the weakest ML outputs.
+      min_confidence_to_alert: 0.62
+      min_ml_probability: 0.55
+      ml_confidence_floor: 0.60
+      crypto_night_min_probability: 0.60
+      ev_threshold: 0
       suppress_sessions: []
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
     signal_grid:
-      step_min_points: 20.0
-      step_max_points: 50.0
+      # BTC step raised (2026-08-18): FxPro BITCOIN trade_stops_level = 20000 pts
+      # ($200 min SL/TP distance) > old step clamp [20,50] -> TP1/TP2 were
+      # unplaceable and collapsed onto TP3. Step >= 250 keeps TP1 (+250) / TP2
+      # (+500) / TP3 (+750) above the broker minimum and distinct. The owner
+      # 0.1%-of-price template (~64 pts) is BELOW the $200 broker minimum
+      # (~0.31% of price), so BTC keeps the broker-limited clamp.
+      step_min_points: 250.0
+      step_max_points: 350.0
     # PRE-REGISTERED HYPOTHESIS (quant audit 2026-08-07, Claude plan action 1):
     # M5 -> M15 if cost_ratio > 15% on the real DB (measure first with
     #   python -m scripts.diag_r_metrics --asset BTCUSD --timeframe M5|M15
@@ -263,7 +288,9 @@ assets:
     # too small, so the flat commission dominated and every trade showed -0.07.
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.85
+      # OWNER REQUEST 2026-08-19: loosened 0.85 -> 0.70 (H1 + early BE keep the
+      # loss tail in check; the high bar was cutting most EUR situations).
+      min_confidence_to_alert: 0.70
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -277,8 +304,11 @@ assets:
       tp2_atr_multiplier: 1.8
       tp3_atr_multiplier: 2.8
     signal_grid:
-      step_min_points: 0.0005
-      step_max_points: 0.005
+      # Owner template (2026-08-18): step ~0.1% of price (~1.09 -> 0.0011).
+      # (2026-08-20: the owner's 3-4 pip trial (0.0003-0.0004) was reverted —
+      # round-trip costs ~5 pips are ~100%+ of the step, noise stop-outs.)
+      step_min_points: 0.0010
+      step_max_points: 0.0012
       stop_mult: 2.0
       breakeven_trigger_atr: 0.5
 
@@ -300,7 +330,9 @@ assets:
     slippage_usd: 0.0002
     point_value_lot: 100000
     ensemble:
-      min_confidence_to_alert: 0.60
+      # OWNER REQUEST 2026-08-19: loosened 0.60 -> 0.55 (modest; GBP keeps its
+      # protected grid-search exit profile unchanged).
+      min_confidence_to_alert: 0.55
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
@@ -314,8 +346,12 @@ assets:
       tp2_atr_multiplier: 1.8
       tp3_atr_multiplier: 2.8
     signal_grid:
-      step_min_points: 0.0005
-      step_max_points: 0.006
+      # Owner template (2026-08-18): step ~0.1% of price (~1.27 -> 0.0013).
+      # Multipliers keep the protected grid-search values (tp2 2.5 / tp3 3.0 /
+      # stop 3.0) — do not touch. (2026-08-20: the 3-4 pip step trial and the
+      # uniform-multiplier change were reverted — same cost reason as EUR.)
+      step_min_points: 0.0012
+      step_max_points: 0.0014
       stop_mult: 3.0
       breakeven_trigger_atr: 1.0
       tp2_mult: 2.5
@@ -359,8 +395,10 @@ assets:
 
 
 alerts:
-  cooldown_minutes: 15
-  max_alerts_per_day: 30
+  # TRIAL-48H (2026-08-18): cooldown lowered 15 -> 5 min for the observation window.
+  cooldown_minutes: 5
+  # TRIAL-48H: alert budget raised 30 -> 60/day.
+  max_alerts_per_day: 60
   # Append a compact metadata line (Conf / Regime / Session) to Telegram
   # signals. Default false keeps the clean ШОРТ/ЛОНГ layout from the spec.
   include_signal_meta: false
@@ -441,21 +479,22 @@ labeling:
 
 # ---------------------------------------------------------------------------
 # Signal grid spec for Telegram (alerts/formatter.py, realtime/pipeline.py).
-# ASYMMETRIC grid (owner request 2026-08-11): step = step_points (if set) else
-# 1.0 * ATR, clamped to [step_min_points, step_max_points]; TP1 = entry ± 1*step,
-# TP2 = ±1.5*step, TP3 = ±2*step, Stop = entry ∓ 2*step (risk:TP3 = 1:1,
-# BE on TP1). This is TIGHTER than the previous equal-step (2/3/3) grid so
-# profits are banked faster and per-trade risk (stop distance) is reduced, at
-# the cost of giving winners less room. Per-asset overrides live in
-# assets.<key>.signal_grid; assets that override mults (EUR stop 2.0, GBP 3.0
-# with regime overrides) keep their own deliberately-tuned values.
+# OWNER TEMPLATE (2026-08-18): TP/SL spacing ~0.1% of entry price, exactly the
+# reference card (GOLD 4393.03 -> step 4.39; TP1 +1*step, TP2 +2*step,
+# TP3 +3*step, SL -2*step). step = step_points (if set) else 1.0 * ATR, clamped
+# to [step_min_points, step_max_points]; per-asset clamps below are sized to
+# ~0.1% of the typical price level. BTCUSD cannot follow (FxPro BITCOIN
+# trade_stops_level = $200 min stop distance ~ 0.31% of price) and keeps its
+# broker-limited [250, 350] clamp. Per-asset overrides live in
+# assets.<key>.signal_grid; assets with their own deliberately-tuned values
+# (GBP tp2 2.5/tp3 3.0/stop 3.0 from the protected grid-search) keep them.
 # NOTE: this changes live TP/SL distances — re-run backtests before trusting
 # new numbers (see docs/benchmarks.md).
 # ---------------------------------------------------------------------------
 signal_grid:
   tp1_mult: 1.0
-  tp2_mult: 1.5
-  tp3_mult: 2.0
+  tp2_mult: 2.0
+  tp3_mult: 3.0
   stop_mult: 2.0
   # Early breakeven: move the stop to entry once price reaches this fraction
   # of the TP1 distance in our favor. 1.0 = legacy (BE only when TP1 hits);
@@ -465,6 +504,36 @@ signal_grid:
   step_points: null        # fixed step in price points; null = dynamic 1.0*ATR
   step_min_points: null    # lower clamp (null = no clamp)
   step_max_points: null    # upper clamp (null = no clamp)
+
+
+# ---------------------------------------------------------------------------
+# Book (DOM) overlay, Phase 0+1 (2026-08-18): the live order book is polled by
+# realtime/book_feed.py (own daemon thread inside the trader process) into
+# per-M5-bar aggregates under data/book_bars/<MT5_SYMBOL>.csv (Phase 0
+# collection for offline validation/retraining), and the pipeline applies a
+# fail-open gate (Phase 1): veto when top-of-book imbalance strongly opposes
+# the ensemble direction, small confidence boost when it agrees.
+# Empirics on FxPro demo: only BITCOIN exposes a real book (10 levels/side);
+# XAUUSD/XAGUSD reject the subscription, EURUSD/GBPUSD stay empty. Assets
+# without DOM never affect signals (fail-open) and are reported as
+# "unavailable" in /api/book/status.
+# ---------------------------------------------------------------------------
+book_gate:
+  enabled: true
+  poll_interval_s: 3.0
+  veto_imbalance: 0.35      # |imb5_last| above this AGAINST the bias => veto
+  boost_confidence: 0.05    # agreement => add to blended confidence (cap 0.95)
+  assets:
+    BTCUSD:
+      enabled: true
+    XAUUSD:
+      enabled: false
+    XAGUSD:
+      enabled: false
+    EURUSD:
+      enabled: false
+    GBPUSD:
+      enabled: false
 
 
 sessions:
@@ -546,13 +615,16 @@ deploy_guard:
 # - per_asset: each single-asset engine (backtest/engine.py:14, model/ensemble_backtest.py:223)
 #   maintains at most ONE open position at a time per asset.
 # - global: account-level risk manager (execution/risk_manager.py:20) limits total concurrent
-#   open positions across all instruments to max_concurrent_positions_global (default 3).
+#   open GROUPS across all instruments to max_concurrent_positions_global. A 3-leg group
+#   counts as ONE slot (audit 2026-08-19, owner request: previously each leg consumed a
+#   slot, so 6 slots = only 2 assets and high-confidence signals on the 3rd asset were
+#   suppressed by "Max concurrent positions limit reached (6/6)").
 execution:
   # SAFETY FREEZE (2026-08-16): the causal signal-bar grid contract invalidates
   # every admission gate measured with entry-bar ATR, including BTCUSD. Empty is
   # an explicit deny-all list (mt5_trader distinguishes it from a missing key).
   # EURUSD/GBPUSD execution-quality probes remain separately guarded below.
-  enabled_assets: []
+  enabled_assets: [BTCUSD, XAUUSD, XAGUSD, EURUSD, GBPUSD]
   # Refuse model-driven execution on any non-demo terminal. Keep this true until
   # a separate, explicit real-money deployment review.
   require_demo_account: true
@@ -570,11 +642,42 @@ execution:
     max_spread_pips: {EURUSD: 0.8, GBPUSD: 1.2}
     log_path: logs/fx_execution_probes.csv
   max_open_positions_mode: per_asset  # per_asset | global
-  max_open_positions_per_asset: 1
-  max_concurrent_positions_global: 3
+  # Per-asset GROUP cap (now enforced by execution/risk_manager.py, audit
+  # 2026-08-19 — was declared but never wired). A 3-leg group = 1 slot.
+  max_open_positions_per_asset: 2
+  # Global GROUP budget: 6 groups covers all 5 enabled assets concurrently
+  # (3 legs per asset = 15 live positions worst case).
+  max_concurrent_positions_global: 6
   # Daily cap on NEW trades per asset (circuit-breaker budget). Read by
   # execution/risk_manager.py (W8) instead of a hard-coded 10.
-  max_daily_trades_per_asset: 10
+  # TRIAL-48H: raised 10 -> 20.
+  max_daily_trades_per_asset: 20
+  # Owner request 2026-08-19: the trader must be OFF while the market is
+  # inactive and while unattended. Windows in UTC (local = UTC+5). During a
+  # halt window the trader flattens its positions and skips all trading
+  # activity, then resumes automatically when the window ends. BTC is 24/7
+  # but is deliberately halted too (no unattended trading over the weekend).
+  trading_blackout:
+    enabled: true
+    # Night no-volatility window (owner request 2026-08-19/20): the market is
+    # inactive after the NY close and through the Asia session. 22:00 UTC =
+    # 03:00 local (New York closed), 08:00 UTC = 13:00 local (London open).
+    # Crosses midnight. Only NEW entries are skipped; existing positions and
+    # breakeven management are NOT touched.
+    daily_break_utc: ["22:00", "08:00"]
+    # Weekend inactivity: Friday 21:00 UTC -> Sunday 21:00 UTC (FX/metals
+    # close -> reopen). Positions are flattened when the window begins.
+    # end_dow is Python weekday(): 6 = Sunday, 0 = Monday.
+    weekend:
+      start_dow: 4          # Friday
+      start_utc: "21:00"
+      end_dow: 6            # Sunday
+      end_utc: "21:00"
+    flatten_before_minutes: 10
+    # Optional one-off full halt (feature): set e.g. "2026-08-24 07:00" to keep
+    # the trader completely OFF until a timestamp. Cleared (null) so day trading
+    # continues; the night window and weekend window still apply.
+    manual_halt_until_utc: null
   # Live order volume in lots. Read by execution/mt5_trader.py (W2) instead of a
   # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
   # it falls back to backtest.volume (default 0.10, which yields fillable
@@ -589,11 +692,13 @@ execution:
 # separate, audited step (execution/risk_sizer.py implements the math).
 risk:
   enabled: true
+  # TRIAL-48H (2026-08-18): risk budgets raised 4x for the observation window
+  # (0.25% -> 1% per trade, cluster 0.4% -> 2%, total 0.75% -> 3% of equity).
   # fraction of equity risked per trade on a full stop-out (audit: 0.002-0.0025)
-  risk_per_trade_pct: 0.0025
+  risk_per_trade_pct: 0.01
   # correlated-cluster stop-risk cap (fraction of equity)
-  cluster_risk_cap: 0.004
-  total_open_risk_cap: 0.0075
+  cluster_risk_cap: 0.02
+  total_open_risk_cap: 0.03
   # portfolio vol target (annualized) + leverage clip for vol targeting
   vol_target: 0.10
   leverage_lo: 0.5
@@ -729,3 +834,59 @@ correlation_filter:
   history_bars: 500
   # How often to recalculate the correlation matrix (in minutes).
   update_interval_minutes: 60
+
+
+# ===== PROP CHALLENGE (HashHedge "US STOCKS HEADLINERS", owner request 2026-08-19) =====
+# Browser automation over the web terminal (NOT MT5). Stage 1: +$80 on $1,000,
+# daily loss -$50, total loss -$100, 1:5 leverage, min 5 trading days, NYSE
+# session 18:30-00:55 local, positions auto-close at 00:55. Risk rules below
+# trade to HALF of the platform limits (cushion) and lock profits early.
+challenge:
+  platform:
+    url: "https://app.hashhedge.com/ru/app/dashboard?challengeId=f0622a04-2724-42c8-87cb-8473793533ad"
+    markets_url: "https://markets-app.hashhedge.com/stocks-usdt"
+    session_id: "770216147"
+    login_wait_seconds: 900
+    auto_start_challenge: false
+    poll_seconds: 5
+  session:
+    start_local: "18:30"
+    end_local: "00:55"
+    flatten_local: "00:45"
+    min_trading_days: 5
+  risk:
+    per_trade_risk_usd: 5
+    daily_loss_stop: 25
+    total_loss_stop: 60
+    daily_profit_lock: 20
+    max_open_positions: 2
+    max_leverage: 5
+    stop_pct: 0.005
+    tp_ratio: 1.5
+  strategy:
+    type: opening_range_breakout
+    range_minutes: 30
+    watchlist:
+      - AAPL
+      - NVDA
+      - TSLA
+      - SPY
+      - GLD
+      - COIN
+      - AMD
+      - MU
+      - MRVL
+      - PLTR
+      - SHOP
+      - SMCI
+      - RDDT
+      - RKLB
+      - ABNB
+      - BA
+      - CAT
+      - KO
+      - MRK
+      - CSCO
+  browser:
+    headless: false
+    profile_dir: data/challenge_browser_profile
