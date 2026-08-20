@@ -1,27 +1,23 @@
 # Manual-system config (ТЗ §2-§8). Overrides the code defaults when present.
 watchlist:
-  - AAPL
-  - NVDA
-  - TSLA
-  - SPY
-  - GLD
-  - COIN
-  - AMD
-  - MU
-  - MRVL
-  - PLTR
   - CAN
-  - MSTR
-  - MARA
-  - RIOT
-  - CLSK
+  - BTBT
+  - HIVE
+  - MRVL
+  - WULF
   - IREN
-  - SOFI
-  - HOOD
-  - OKLO
-  - RGTI
+  - MARA
+  - CIFR
   - CRCL
+  - MSTR
+  - RIOT
+  - LCID
+  - ACHR
+  - RGTI
   - CORZ
+  - CLSK
+  - COIN
+  - MU
 news_red_zone_utc: []   # e.g. ["13:30", "14:30"] — red-zone events (UTC), +/-30 min buffer
 session_start_utc: "13:30"
 session_end_utc: "19:55"
