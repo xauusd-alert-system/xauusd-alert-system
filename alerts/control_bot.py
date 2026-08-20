@@ -148,6 +148,8 @@ class TelegramControlBot:
     ADMIN_COMMANDS = frozenset({
         "/status", "/positions", "/metrics", "/why", "/account", "/paper",
         "/pause", "/resume", "/closeall",
+        # challenge (HashHedge manual system) commands
+        "/day", "/journal", "/scan", "/alert",
     })
 
     def _dispatch(self, cmd: str, chat_id: str, args: tuple = ()) -> None:
@@ -163,6 +165,11 @@ class TelegramControlBot:
             "/pause":     self._cmd_pause,
             "/resume":    self._cmd_resume,
             "/closeall":  self._cmd_closeall,
+            # challenge (HashHedge manual system) commands — one bot, two systems
+            "/day":       self._cmd_challenge_day,
+            "/journal":   self._cmd_challenge_journal,
+            "/scan":      self._cmd_challenge_scan,
+            "/alert":     self._cmd_challenge_alert,
         }
         fn = handlers.get(cmd)
         if fn is None:
@@ -203,14 +210,15 @@ class TelegramControlBot:
 
     def _cmd_start(self, chat_id: str, args: tuple = ()) -> None:
         self._send(chat_id,
-            "🤖 *XAUUSD AutoTrader Control Panel*\n\n"
-            "Use /help to see available commands.",
+            "🤖 *Control Panel — XAUUSD AutoTrader + HashHedge Challenge*\n\n"
+            "Один бот, две системы. Use /help to see available commands.",
             parse_mode="Markdown",
         )
 
     def _cmd_help(self, chat_id: str, args: tuple = ()) -> None:
         self._send(chat_id,
             "📖 *Available commands:*\n"
+            "— XAUUSD (forex-система) —\n"
             "/status — trader state + open positions (P&L в $ и в R)\n"
             "/positions — all open positions\n"
             "/why <ASSET> — почему открыта позиция (контекст входа из сигнала)\n"
@@ -221,12 +229,66 @@ class TelegramControlBot:
             "/pause — дополнительный runtime brake (dry-run)\n"
             "/resume — снять runtime brake; deployment.mode и allowlist всё равно обязательны\n"
             "/closeall — ⚠️ emergency close ALL open positions\n"
+            "— HashHedge Challenge (ручная система) —\n"
+            "/day — состояние дня (профиль, лимиты, PnL, статус)\n"
+            "/journal — последние сделки + сводка по дням\n"
+            "/scan — разовый live-скан watchlist (сетапы A/B)\n"
+            "/alert — статус алертера и отправленные сетапы\n"
             "/help — this message\n\n"
             "🔒 Команды с данными счёта (/status, /positions, /metrics, /why, /account) "
             "и мутирующие команды доступны только владельцу бота и работают в режиме "
             "«только чтение» (status-команды не могут открывать/закрывать ордера).",
             parse_mode="Markdown",
         )
+
+    # ------------------------------------------------------------------
+    # Challenge (HashHedge manual system) command handlers.
+    # Implemented in alerts/challenge_commands.py (separated file) and
+    # imported lazily so forex commands keep working regardless of branch.
+    # ------------------------------------------------------------------
+    def _cmd_challenge_day(self, chat_id: str, args: tuple = ()) -> None:
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from alerts import challenge_commands as cc
+            cc.cmd_day(self._send, chat_id, args)
+        except Exception as exc:
+            logger.exception("/day failed")
+            self._send(chat_id, f"❌ Day error: {exc}")
+
+    def _cmd_challenge_journal(self, chat_id: str, args: tuple = ()) -> None:
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from alerts import challenge_commands as cc
+            cc.cmd_journal(self._send, chat_id, args)
+        except Exception as exc:
+            logger.exception("/journal failed")
+            self._send(chat_id, f"❌ Journal error: {exc}")
+
+    def _cmd_challenge_scan(self, chat_id: str, args: tuple = ()) -> None:
+        if not self._require_admin(chat_id):
+            return
+        # Run the scan in a background thread so the polling loop (and with it
+        # the trader's only command channel) never blocks on API round-trips.
+        def _worker():
+            try:
+                from alerts import challenge_commands as cc
+                cc.cmd_scan(self._send, chat_id, args)
+            except Exception as exc:
+                logger.exception("/scan failed")
+                self._send(chat_id, f"❌ Scan error: {exc}")
+        threading.Thread(target=_worker, name="tg-challenge-scan", daemon=True).start()
+
+    def _cmd_challenge_alert(self, chat_id: str, args: tuple = ()) -> None:
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from alerts import challenge_commands as cc
+            cc.cmd_alert(self._send, chat_id, args)
+        except Exception as exc:
+            logger.exception("/alert failed")
+            self._send(chat_id, f"❌ Alert status error: {exc}")
 
     def _cmd_metrics(self, chat_id: str, args: tuple = ()) -> None:
         # /metrics <period> -> closed-trade statistics (read-only MT5 history).
