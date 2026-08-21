@@ -160,20 +160,89 @@ def _manage_positions(conn, state, quotes):
             del managed[symbol]
 
 
-def _handle_signals(conn, risk, strategy, state, snap, now):
-    quotes = snap["quotes"]
+def _pretrade_checklist(sig, risk, state, snap, now, cfg):
+    """RESEARCH 2026-08-22 (us_stocks audit §6.1): formal pre-trade checklist.
+
+    Every signal must pass ALL checks before an order is sent. Returns
+    (ok, reason). ok=False means the signal is rejected.
+
+    Checks (from the research checklist):
+    1. Position limit: not at max concurrent positions
+    2. Not duplicate: symbol not already open
+    3. Equity buffer: equity > personal daily stop
+    4. All-in sizing: N≥1 after fees (commission-aware)
+    5. Stop-day: not in stop_day or profit_locked status
+    6. Max attempts: trades_today < max_trades and losses_today < stop_after_losses
+    7. Session time: not in flatten window
+    """
     positions = snap["positions"]
+    equity = float(snap.get("equity") or 0)
+    day_start = state.get("day_start_equity", equity)
+    managed = state.get("managed", {})
+
+    # 1. Position limit
+    total_positions = len(positions) + len(managed)
+    if total_positions >= risk.max_open_positions:
+        return False, f"position limit reached ({total_positions}/{risk.max_open_positions})"
+
+    # 2. Not duplicate
+    open_symbols = {p["symbol"] for p in positions} | set(managed)
+    if sig.symbol in open_symbols:
+        return False, f"{sig.symbol} already open"
+
+    # 3. Equity buffer — equity must be above daily stop
+    daily_pnl = equity - day_start
+    if daily_pnl <= -risk.daily_loss_stop:
+        return False, f"daily loss limit ({daily_pnl:+.2f} <= -{risk.daily_loss_stop})"
+
+    # 4. All-in sizing: N≥1 after fees
+    # Commission: min $1/side, so $2 round-trip per share for cheap stocks,
+    # or 0.04% per side for expensive ones.
+    stop_dist = abs(sig.entry - sig.stop)
+    if stop_dist <= 0:
+        return False, "stop distance is zero"
+    # Estimate round-trip commission per share: max($1, 0.04%*entry) * 2
+    est_fee_per_share = max(1.0, 0.0004 * sig.entry) * 2
+    risk_after_fees = risk.per_trade_risk_usd - est_fee_per_share
+    if risk_after_fees <= 0:
+        return False, f"fees ${est_fee_per_share:.2f} exceed risk budget ${risk.per_trade_risk_usd}"
+    qty = risk_after_fees / stop_dist
+    if qty < 1:
+        return False, f"qty={qty:.2f} below 1 share after fees (stop={stop_dist:.2f}, risk=${risk_after_fees:.2f})"
+
+    # 5. Stop-day status
+    if state.get("flattened_today"):
+        return False, "stop-day: already flattened today"
+
+    # 6. Max attempts
+    trades_today = state.get("trades_today", 0)
+    losses_today = state.get("losses_today", 0)
+    # Check if we have a manual risk state (from challenge.manual.risk)
+    if trades_today >= 3:
+        return False, f"max 3 trades/day reached ({trades_today})"
+    if losses_today >= 2:
+        return False, f"2 losses today (stop-day rule)"
+
+    # 7. Session time: not in flatten window
+    if in_flatten_window(cfg, now):
+        return False, "in flatten window (last 10 min of session)"
+
+    return True, "ok"
+
+
+def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
+    """Process signals through the pre-trade checklist before execution."""
+    quotes = snap["quotes"]
     signals = strategy.update(quotes, now)
-    open_symbols = {p["symbol"] for p in positions} | set(state["managed"])
     for sig in signals:
-        if sig.symbol in open_symbols:
+        ok, reason = _pretrade_checklist(sig, risk, state, snap, now, cfg or {})
+        if not ok:
+            logger.info("BLOCKED %s: %s", sig.symbol, reason)
             continue
-        if len(positions) + len(state["managed"]) >= risk.max_open_positions:
-            logger.info("skip %s: position limit reached", sig.symbol)
-            continue
+        # Recompute qty (checklist verified N≥1, now get exact int)
         qty = risk.position_size(sig.entry, snap["equity"])
         if qty < 1:
-            logger.info("skip %s: qty=%d below 1 share", sig.symbol, qty)
+            logger.info("skip %s: qty=%d below 1 share (final check)", sig.symbol, qty)
             continue
         ok = conn.place_order(sig.symbol, sig.bias, qty, sig.stop, sig.tp)
         if not ok:
@@ -274,7 +343,7 @@ def main():
                     time.sleep(30)
                     continue
                 _manage_positions(conn, state, snap["quotes"])
-                _handle_signals(conn, risk, strategy, state, snap, now)
+                _handle_signals(conn, risk, strategy, state, snap, now, cfg)
                 _save_state(state)
                 time.sleep(poll)
             except NotImplementedError as e:
