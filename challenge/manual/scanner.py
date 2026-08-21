@@ -260,7 +260,14 @@ def _signal(bars5, pull_bars, idx_of, avg_vol, trend: str):
 
 def _grade(trend15, trend30, impulse, pull_retrace, signal_ok, atr_normal,
            news: bool) -> tuple[str, list]:
-    """ТЗ §5.1: A/B/C grading + explicit NO-GO list."""
+    """ТЗ §5.1: A/B/C grading + explicit NO-GO list.
+
+    IMPORTANT (2026-08-21, 24w backtest): the A/B split by retrace depth is
+    DESCRIPTIVE ONLY — it does not predict outcomes (A avgR -0.073 vs B +0.029,
+    and the ordering inverts with regime). Nothing downstream may gate on grade:
+    risk profiles allow both A and B (risk.only_a=False everywhere). The NO-GO
+    list is the real filter (news / dead-day ATR / trend conflict / signal).
+    """
     no_go = []
     if news:
         no_go.append("red-zone news")
@@ -300,25 +307,40 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     trend15 = _trend(bars15)
     trend30 = _trend(bars30)
 
-    # Daily ATR filter (ТЗ §4.1): today's session range vs mean daily range of
-    # the prior 20 sessions. Uses the intraday range so it works live too.
+    # Daily activity filter (ТЗ §4.1): how active today is vs prior sessions.
+    # The comparison window is clamped to the elapsed session time, so the rule
+    # is honest live (a normal day early in the session is compared with what
+    # prior days had moved by that same time of day) and equals the full-session
+    # ratio in backtests (elapsed >= full session => full window on both sides).
+    # Dead days (range < atr_min_ratio of normal) are NO-GO: 24w backtest data
+    # showed ~100% of the strategy's losses concentrate on atr_ratio < 0.7.
     prior = [c for c in candles_1m if c["time"] < dt.datetime(
         date.year, date.month, date.day, tzinfo=dt.timezone.utc).timestamp()]
     prior_days = {}
     for c in prior:
         d = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc).date()
         prior_days.setdefault(d, []).append(c)
-    if day:
-        atr_today = max(c["high"] for c in day) - min(c["low"] for c in day)
-    else:
-        atr_today = 0.0
-    atr_hist = []
-    for v in prior_days.values():
-        if len(v) >= 10:
-            atr_hist.append(max(c["high"] for c in v) - min(c["low"] for c in v))
-    if atr_hist:
+    sess_start_dt = dt.datetime.combine(date, session_start_utc, tzinfo=dt.timezone.utc)
+    sess_len_min = (SESSION_END_UTC.hour * 60 + SESSION_END_UTC.minute) - \
+                   (session_start_utc.hour * 60 + session_start_utc.minute)
+    last_ts = max((c["time"] for c in day), default=0)
+    elapsed_min = max(1.0, min(sess_len_min,
+                               (last_ts - sess_start_dt.timestamp()) / 60.0))
+
+    def _range_in_window(cs, d):
+        s = dt.datetime.combine(d, session_start_utc, tzinfo=dt.timezone.utc).timestamp()
+        w = [c for c in cs if s <= c["time"] <= s + elapsed_min * 60]
+        if len(w) < 5:
+            return None
+        return max(c["high"] for c in w) - min(c["low"] for c in w)
+
+    atr_today = _range_in_window(day, date) or 0.0
+    atr_hist = [r for r in (_range_in_window(v, d) for d, v in prior_days.items()) if r]
+    if atr_hist and atr_today > 0:
         atr_mean = sum(atr_hist[-20:]) / min(20, len(atr_hist))
-        atr_normal = atr_mean > 0 and 0.30 <= atr_today / atr_mean <= 2.5
+        lo = float(cfg.get("atr_min_ratio", 0.70))
+        hi = float(cfg.get("atr_max_ratio", 2.5))
+        atr_normal = atr_mean > 0 and lo <= atr_today / atr_mean <= hi
     else:
         atr_normal = True
 
@@ -361,6 +383,18 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     grade, no_go = _grade(trend15, trend30, impulse,
                           retrace if depth_ok else (None if not pull_bars else 1.0),
                           signal_ok, atr_normal, news)
+
+    # Signal dead zone (2026-08-21, 24w/411-setup backtest): signals printing
+    # 60-69 min after the open are the only consistently negative bucket
+    # (avgR -0.324, n=44; neighbours 50-59 +0.856 and 80-89 +1.014). Excluding
+    # them lifts avgR +0.295 -> +0.370 with pace unchanged (~20 days at $5
+    # risk) and improves every quarter. Configurable via signal_dead_zone.
+    if signal_bar is not None:
+        sig_min = (signal_bar["time"] - t_start.timestamp()) / 60.0
+        dz = cfg.get("signal_dead_zone")
+        if dz and len(dz) == 2 and dz[0] <= sig_min <= dz[1]:
+            no_go.append(f"signal dead zone {dz[0]}-{dz[1]} min")
+
     setup.impulse_bar = impulse
     setup.pullback_bars = pull_bars
     setup.signal_bar = signal_bar
@@ -368,7 +402,9 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     setup.no_go = no_go
 
     # Direction & levels (ТЗ §4.6): stop behind the pullback extreme + 0.5*ATR5,
-    # target >= 2R (target = entry + 2*risk).
+    # target = entry +/- target_rr*risk. target_rr defaults to 2.0 (ТЗ); the live
+    # config sets 3.5 — a far take-profit beats the 2R cap on the 24w/411-setup
+    # backtest (avgR +0.295 vs -0.021 for the old 50%@1R->BE->2R plan, 2026-08-21).
     if impulse is not None and signal_bar is not None and signal_ok and not no_go:
         if trend == "up":
             bias = "long"
@@ -384,12 +420,21 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
             atr5 = atr(day, 14)
             stop = extreme + 0.5 * atr5
             setup.entry, setup.stop = round(entry, 4), round(stop, 4)
-        risk = abs(entry - stop)
-        if risk > 0:
+        # ТЗ §4.6 guard: reject degenerate levels (stop on the wrong side of
+        # entry, or entry == stop). Such a setup must never reach alerts/tests:
+        # long requires stop < entry < target, short requires target < entry <
+        # stop. Keeps grade but marks NO-GO so `tradable` is False.
+        sane = (stop < entry) if bias == "long" else (entry < stop)
+        if sane:
+            risk = (entry - stop) if bias == "long" else (stop - entry)
+            target_rr = float(cfg.get("target_rr", 2.0))
             if bias == "long":
-                setup.target = round(entry + 2 * risk, 4)
+                setup.target = round(entry + target_rr * risk, 4)
             else:
-                setup.target = round(entry - 2 * risk, 4)
+                setup.target = round(entry - target_rr * risk, 4)
             setup.rr = round(abs(setup.target - entry) / risk, 2)
-        setup.bias = bias
+            setup.bias = bias
+        else:
+            setup.bias = "none"
+            setup.no_go.append("degenerate levels")
     return setup

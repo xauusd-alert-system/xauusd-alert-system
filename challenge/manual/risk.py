@@ -26,18 +26,23 @@ STAGE = {
 }
 
 # ТЗ §3: base parameters per profile. pause_usd is per stage.
+# only_a: False everywhere (2026-08-21). 24w data: the A/B grade (retrace
+# depth) does NOT predict outcomes — A avgR -0.073 vs B +0.029, and the split
+# inverts with regime (Feb-Apr prefers shallow, Jun-Aug prefers deep). Gating
+# on grade cuts the worse-or-equal half and removes trades; the real protection
+# is size + trade count, which are already scaled here.
 PROFILES = {
     "C": {"risk_usd": 2.0, "risk_pct": 0.002,
           "daily_limit_usd": 10.0, "daily_limit_pct": 0.01,
           "max_trades": 2, "stop_after_losses": 1,
           "pause_usd": {1: 50.0, 2: 40.0}, "pause_pct": {1: 0.05, 2: 0.04},
-          "only_a": True, "max_risk_usd": 2.0},
+          "only_a": False, "max_risk_usd": 2.0},
     "B": {"risk_usd": 2.5, "risk_pct": 0.0025,
           "daily_limit_usd": 15.0, "daily_limit_pct": 0.015,
           "max_trades": 3, "stop_after_losses": 2,
           "pause_usd": {1: 60.0, 2: 50.0}, "pause_pct": {1: 0.06, 2: 0.05},
-          "only_a": True, "max_risk_usd": 2.5},
-    "A": {"risk_usd": 3.5, "risk_pct": 0.0035,
+          "only_a": False, "max_risk_usd": 2.5},
+    "A": {"risk_usd": 5.0, "risk_pct": 0.005,
           "daily_limit_usd": 20.0, "daily_limit_pct": 0.02,
           "max_trades": 3, "stop_after_losses": 2,
           "pause_usd": {1: 50.0, 2: 50.0}, "pause_pct": {1: 0.05, 2: 0.05},
@@ -47,8 +52,9 @@ PROFILES = {
 # ТЗ §2.3: drawdown scaling steps (applied between days).
 # (total_drawdown_pct, risk_usd, max_trades, only_a)
 DRAWDOWN_STEPS = [
-    (0.030, 2.0, 2, True),    # -3%: risk 0.2%, 2 trades, A only
-    (0.045, 1.5, 1, True),    # -4.5% (S1) / -4% (S2): risk 0.15%, 1 trade, A only
+    (0.030, 2.0, 2, False),   # -3%: risk 0.2%, 2 trades (both grades — grade
+                              #       does not predict outcomes, see PROFILES)
+    (0.045, 1.5, 1, False),   # -4.5% (S1) / -4% (S2): risk 0.15%, 1 trade
 ]
 
 DEFAULT_STATE_PATH = os.path.join(
