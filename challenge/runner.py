@@ -222,6 +222,28 @@ def _pretrade_checklist(sig, risk, state, snap, now, cfg):
     if in_flatten_window(cfg, now):
         return False, "in flatten window (last 10 min of session)"
 
+    # 8. S/R clearance — entry not too close to support/resistance zones
+    sr_buffer = float((cfg or {}).get("sr_proximity_buffer_usd", 0))
+    if sr_buffer > 0:
+        try:
+            from challenge.manual.sr_zones import detect_sr_zones, check_proximity
+            # Need candle data to detect zones — use a cached file if available
+            sr_ok = True  # fail-open if we can't load candles
+            import json as _json
+            candle_path = os.path.join("data", "backtest", "candles",
+                                       f"{sig.symbol}.json")
+            if os.path.exists(candle_path):
+                with open(candle_path, encoding="utf-8") as _f:
+                    candles = _json.load(_f)
+                today = now.date()
+                zones = detect_sr_zones(candles, today)
+                sr_ok, sr_reason = check_proximity(
+                    sig.entry, sig.stop, sig.tp, sig.bias, zones, sr_buffer)
+                if not sr_ok:
+                    return False, f"S/R clearance: {sr_reason}"
+        except Exception:
+            pass  # fail-open: don't block trades if S/R check errors
+
     return True, "ok"
 
 
