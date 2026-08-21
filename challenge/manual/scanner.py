@@ -15,6 +15,8 @@ import datetime as dt
 from dataclasses import dataclass, field
 from typing import Optional
 
+from challenge.manual.sr_zones import detect_sr_zones, check_proximity
+
 SESSION_START_UTC = dt.time(13, 30)
 SESSION_END_UTC = dt.time(19, 55)
 IMPULSE_WINDOW_MIN = 60
@@ -434,6 +436,19 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
                 setup.target = round(entry - target_rr * risk, 4)
             setup.rr = round(abs(setup.target - entry) / risk, 2)
             setup.bias = bias
+
+            # RESEARCH 2026-08-22: S/R proximity filter (us_stocks audit §5.2)
+            # Reject signals too close to key support/resistance zones.
+            # This prevents entering right at a level that may cap the move.
+            # Default 0 = disabled; set sr_proximity_buffer_usd in cfg to enable.
+            sr_buffer = float(cfg.get("sr_proximity_buffer_usd", 0))
+            if sr_buffer > 0 and bias in ("long", "short"):
+                sr_zones = detect_sr_zones(candles_1m, date)
+                sr_ok, sr_reason = check_proximity(
+                    entry, stop, setup.target, bias, sr_zones, sr_buffer)
+                if not sr_ok:
+                    setup.bias = "none"
+                    setup.no_go.append(f"S/R proximity: {sr_reason}")
         else:
             setup.bias = "none"
             setup.no_go.append("degenerate levels")
