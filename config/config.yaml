@@ -538,6 +538,22 @@ backtest:
     embargo_candles: 100
 
 
+# ===== RISK THROTTLE =====
+# TradeThrottle: daily trade limit + loss-streak cooldown + risk step-down.
+# Blocks new trades when limits are hit and reduces position size after losses.
+risk_throttle:
+  max_trades_per_day: 5           # global daily trade cap (resets at UTC midnight)
+  loss_streak_threshold: 2       # consecutive losses before cooldown activates
+  cooldown_minutes: 45           # pause duration after loss_streak_threshold
+  hard_stop_streak: 3            # full halt for the day after this many consecutive losses
+  risk_step_down_map:
+    1: 1.0                       # 1 loss: full risk
+    2: 0.5                       # 2 losses: half risk
+    3: 0.25                      # 3+ losses: quarter risk
+  max_daily_loss_pct: 3.0        # equity-based circuit breaker (% from start-of-day)
+  reset_on_utc_midnight: true    # reset counters at UTC midnight
+
+
 # ===== RETRAINING =====
 retraining:
   # SAFETY FREEZE (2026-08-16): signal-bar grid parity invalidated the old

@@ -25,6 +25,7 @@ from data.execution_ledger import init_execution_ledger, log_execution_attempt, 
 from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
 from execution.risk_manager import InstitutionalRiskManager
+from execution.trade_throttle import TradeThrottle
 # Wave-0 contracts (MQL5 observer plan): SignalIntent is persisted BEFORE
 # order_send; ExecutionEvent facts are enqueued into the durable outbox for
 # delivery to the server ledger. Both are best-effort: a failure here must
@@ -185,6 +186,8 @@ class MultiAssetMT5Trader:
         # W8/W9: risk manager reads limits from config `execution.*` and counts
         # only our own positions (filtered by magic), not foreign/manual ones.
         self.risk_manager = InstitutionalRiskManager(self.cfg, magic=self.magic_number)
+        # TradeThrottle: daily trade limit, loss-streak cooldown, risk step-down.
+        self.trade_throttle = TradeThrottle(self.cfg)
         # W2: live volume comes from config (assets.<key>.volume or backtest.volume)
         # instead of a hard-coded 0.01 that made the 50/30/20 scale-out
         # unimplementable (round(0.5*0.01,2)=0.01 closed the whole position).
@@ -877,6 +880,9 @@ class MultiAssetMT5Trader:
             else:
                 self.streak_losses[symbol] = 0
 
+            # TradeThrottle: update cooldown/hard-stop counters
+            self.trade_throttle.on_trade_closed(total_pnl)
+
             status_emoji = "💵 PROFIT" if total_pnl >= 0 else "🛑 LOSS/BREAKEVEN"
             leg_label = f" (Leg {trade_info.get('leg')})" if trade_info.get("leg") else ""
             close_msg = (
@@ -1413,6 +1419,17 @@ class MultiAssetMT5Trader:
             logger.warning(f"Trade suppressed for {asset_key} by Risk Manager: {reason}")
             return
 
+        # TradeThrottle: daily limit, cooldown, hard stop, daily loss
+        try:
+            acct = mt5.account_info()
+            equity = acct.equity if acct else 0.0
+        except Exception:
+            equity = 0.0
+        throttle_ok, throttle_reason = self.trade_throttle.can_trade(equity)
+        if not throttle_ok:
+            logger.warning(f"TradeThrottle blocked {asset_key}: {throttle_reason}")
+            return
+
         mt5_symbol = self.cfg["assets"][asset_key]["mt5_symbol"]
         if not mt5.initialize():
             return
@@ -1475,6 +1492,13 @@ class MultiAssetMT5Trader:
             self._normalize_tp_level(mt5_symbol, bias, targets[2]),
         ]
 
+        # TradeThrottle risk step-down: apply multiplier to volume
+        risk_mult = self.trade_throttle.risk_multiplier()
+        original_volume = self.volume
+        if risk_mult < 1.0:
+            self.volume = round(self.volume * risk_mult, 6)
+            logger.info(f"TradeThrottle: risk step-down {risk_mult}x -> volume {self.volume} (was {original_volume})")
+
         if self.dry_run:
             for leg_volume, (_, leg_no) in zip(self._leg_volumes(info), self.SCALEOUT_RATIOS):
                 if leg_volume <= 0:
@@ -1483,6 +1507,8 @@ class MultiAssetMT5Trader:
                     f"[DRY RUN] Leg {leg_no} order NOT sent for {asset_key}: "
                     f"volume={leg_volume}, SL={sl_price}, TP={leg_tps[leg_no - 1]}"
                 )
+            if risk_mult < 1.0:
+                self.volume = original_volume
             return
 
         # Wave-0 contract (MQL5 observer plan): persist the immutable
@@ -1707,6 +1733,9 @@ class MultiAssetMT5Trader:
             self._save_management_state()
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)
+        # Restore volume after risk step-down
+        if risk_mult < 1.0:
+            self.volume = original_volume
 
     def _validate_contract_sizes(self):
         """T8 (audit 2026-08-10): warn when a symbol's live contract size or
