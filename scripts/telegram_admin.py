@@ -247,6 +247,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/logs` — последние {MAX_LOG_LINES} строк лога\n"
         f"• `/config` — конфигурация активов (без секретов)\n"
         f"• `/positions` — открытые позиции\n"
+        f"• `/discipline` — отчёт дисциплины (чек-лист, regimes, комиссии)\n"
         f"• `/ls` — список файлов\n"
         f"• *Загрузка файла* — только `.py`/`.yaml` в безопасные папки"
     )
