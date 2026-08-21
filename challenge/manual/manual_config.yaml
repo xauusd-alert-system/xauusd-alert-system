@@ -1,70 +1,57 @@
-# Manual-system config (ТЗ §2-§8). Overrides the code defaults when present.
-watchlist:
-  - CAN
-  - BTBT
-  - HIVE
-  - MRVL
-  - WULF
-  - IREN
-  - MARA
-  - CIFR
-  - CRCL
-  - MSTR
-  - RIOT
-  - LCID
-  - ACHR
-  - RGTI
-  - CORZ
-  - CLSK
-  - COIN
-  - MU
-  # Independent-axis volatility additions (2026-08-20): quantum (IONQ/QBTS),
-  # nuclear (OKLO), fintech (HOOD), AI-audio (SOUN), satellite (ASTS),
-  # hydrogen (PLUG) — борются с концентрацией watchlist в крипто-майнерах.
-  - IONQ
-  - OKLO
-  - HOOD
-  - QBTS
-  - SOUN
-  - ASTS
-  - PLUG
-news_red_zone_utc: []   # e.g. ["13:30", "14:30"] — red-zone events (UTC), +/-30 min buffer
-session_start_utc: "13:30"
-session_end_utc: "19:55"
-# Фильтр "мёртвого дня" (ТЗ §4.1): размах сегодня vs прошлых сессий за то же
-# прошедшее время. Ниже порога — NO-GO: на 24 неделях бэктеста ~100% убытков
-# стратегии сконцентрированы на днях с atr_ratio < 0.7 (2026-08-21).
+# Hash Hedge US Stocks Headliners — analysis-only runtime configuration.
+# All times are the user's terminal time (UTC+4). Confirm the displayed terminal
+# countdown before each session because published general documentation can differ.
+workflow: analysis_only
+market: us_stocks_headliners
+account_size_usd: 1000.0
+
+# Populate manually at preparation time with one to three liquid Headliners from
+# the terminal. An empty list is intentionally a safe no-scan default.
+watchlist: []
+max_watchlist_size: 3
+max_open_positions: 1
+
+session_timezone_offset_minutes: 240
+session_start_local: "18:30"
+session_end_local: "00:55"
+manual_flatten_local: "00:50"
+no_entry_first_minutes: 15
+entry_cutoff_minutes: 90
+minimum_minutes_to_close: 45
+
+# The operator records the date-specific earnings/CPI/FOMC red-zone list before
+# the session. If calendar status is unknown, the manual workflow must stay NO-GO.
+news_red_zone_local: []
+news_buffer_minutes: 30
+calendar_status: "unknown"
+
+# Day-quality filters. Values remain hypotheses until causal replay validates them.
 atr_min_ratio: 0.70
-atr_max_ratio: 2.5
-# Мёртвая зона сигнала (2026-08-21, 411 сетапов за 24 недели на 3.5R-исходах):
-# сигналы на 60-69-й минуте после открытия — единственный устойчиво
-# отрицательный бакет (avgR −0.324, n=44; соседи 50-59: +0.856, 80-89: +1.014).
-# Исключение зоны даёт avgR +0.295 → +0.370, темп без изменений (~20 дней при
-# $5), все кварталы положительные, устойчивость к топ-сделкам лучше (+0.189
-# против +0.131 без фильтра).
-signal_dead_zone: [60, 69]
-# План выхода (2026-08-21, 411 сетапов за 24 недели): ВСЯ позиция едет до тейка,
-# стоп −1R, иначе закрытие EOD 19:55. Дальний тейк +3.5R даёт avgR +0.295 против
-# −0.021 у «50% на 1R → BE → 2R» (частичная фиксация обрезала победителей).
-# «Без тейка» (+0.332) лучше сыро, но держится на 20 хвостовых сделках (+0.009
-# без них) — 3.5R устойчив к этому (+0.132 без топ-20).
-target_rr: 3.5
+atr_max_ratio: 2.50
+impulse_range_min_multiple: 1.50
+impulse_volume_min_multiple: 1.30
+trend_ema_period: 20
+trend_slope_bars: 6
+pullback_min_ratio: 0.382
+pullback_max_ratio: 0.618
+stop_atr_buffer_multiple: 0.50
+signal_volume_min_multiple: 0.80
+
+# Manual position-management specification. The software may report the planned
+# levels but must never place or change these orders in a terminal.
+outcome_plan:
+  first_target_r: 1.0
+  first_target_fraction: 0.50
+  move_remainder_to_break_even: true
+  final_target_r: 2.0
+  manual_flatten_required: true
+
+# Default risk profile from the updated TЗ. Profile A requires an explicit human
+# confirmation plus a stage profit buffer in the risk engine.
 default_stage: 1
-# Профиль A, риск $5 (2026-08-21): при безлимитном времени челленджа MC 40k
-# прогонов даёт P(провала −$100)=0 на любом риске (пауза + скейлинг держат дно).
-# $5 — оптимум темпа: медиана ~20 дней (69% за месяц) при пауза-зоне лишь в ~6%
-# прогонов; дальше $7+ темп не растёт, а простой по паузе душат. Грейд A/B по-
-# прежнему не фильтрует (only_a: False везде).
-default_profile: A
-reference_equity: 1000.0
+default_profile: B
+reference_balance: 1000.0
 alert_poll_seconds: 30
 
-# Pair signals (pairs_analysis модуль, ТЗ §4.4-§4.5)
-# Опрашивает PairAnalyzer + SignalEngine на H1, шлёт алерт при MEAN-REV.
-# Независимо от US-сессии: крипта 24/7, forex — свои часы.
-pair_alerts:
-  enabled: true
-  pairs: ["XAU/XAG", "BTC/ETH", "BTC/SOL"]  # какие пары мониторить
-  timeframe: H1                                  # H1 — больше сделок, кэш ускоряет до ~8s
-  poll_minutes: 55                               # интервал опроса (<=60, чтобы не пропустить H1-бар)
-  alert_cooldown_hours: 23                       # дедуп: один алерт на пару в сутки
+# No terminal credentials, browser profile, order-routing or pair-alert settings
+# belong in this file. Alerts are informational only and cannot submit orders.
