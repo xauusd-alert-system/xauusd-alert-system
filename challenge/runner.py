@@ -244,6 +244,27 @@ def _pretrade_checklist(sig, risk, state, snap, now, cfg):
         except Exception:
             pass  # fail-open: don't block trades if S/R check errors
 
+    # 9. Session quality score — rank signal quality before entry
+    try:
+        from challenge.manual.quality_score import compute_quality_score, format_quality
+        vol_ratio = getattr(sig, "volume_ratio", 1.0)
+        regime = getattr(sig, "regime", "")
+        quality = compute_quality_score(
+            signal_ts=int(now.timestamp()),
+            volume_ratio=vol_ratio,
+            regime=regime,
+            bias=sig.bias,
+        )
+        # Store quality score on the signal for logging
+        sig._quality = quality
+        # Optional: reject D-grade signals
+        min_grade = (cfg or {}).get("min_quality_grade", "D")
+        grade_order = {"A": 4, "B": 3, "C": 2, "D": 1}
+        if grade_order.get(quality["grade"], 0) < grade_order.get(min_grade, 0):
+            return False, f"quality {quality['total']}/100 [{quality['grade']}] below min {min_grade}"
+    except Exception:
+        pass  # fail-open
+
     return True, "ok"
 
 
@@ -280,9 +301,11 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
                     "status": "open", "exit_price": "", "pnl": "",
                     "session_bucket": getattr(sig, "session_bucket", ""),
                     "volume_ratio": f"{getattr(sig, 'volume_ratio', 0):.2f}"})
-        logger.info("OPENED %s %s x%d @ %.2f (stop %.2f / tp %.2f) [%s, vol %.1fx]",
+        quality = getattr(sig, "_quality", {})
+        q_str = f"Q={quality.get('total', '?')}/{quality.get('grade', '?')}" if quality else "Q=?"
+        logger.info("OPENED %s %s x%d @ %.2f (stop %.2f / tp %.2f) [%s, vol %.1fx, %s]",
                     sig.bias, sig.symbol, qty, sig.entry, sig.stop, sig.tp,
-                    getattr(sig, "session_bucket", "?"), getattr(sig, "volume_ratio", 0))
+                    getattr(sig, "session_bucket", "?"), getattr(sig, "volume_ratio", 0), q_str)
 
 
 def main():
