@@ -49,6 +49,10 @@ signal_dead_zone: [60, 69]
 # «Без тейка» (+0.332) лучше сыро, но держится на 20 хвостовых сделках (+0.009
 # без них) — 3.5R устойчив к этому (+0.132 без топ-20).
 target_rr: 3.5
+# S/R proximity filter (2026-08-22, us_stocks audit §5.2): reject signals
+# too close to key support/resistance zones. $2 buffer balances quality vs
+# quantity: 71% of weak signals filtered, 96% correctly identified near zones.
+sr_proximity_buffer_usd: 2.0
 default_stage: 1
 # Профиль A, риск $5 (2026-08-21): при безлимитном времени челленджа MC 40k
 # прогонов даёт P(провала −$100)=0 на любом риске (пауза + скейлинг держат дно).
