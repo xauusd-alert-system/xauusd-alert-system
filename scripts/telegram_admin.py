@@ -39,7 +39,7 @@ logger = logging.getLogger("telegram_remote")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.INFO)
 
-BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN", required=True)
+BOT_TOKEN = get_env("TELEGRAM_ADMIN_BOT_TOKEN", required=False) or get_env("TELEGRAM_BOT_TOKEN", required=True)
 MY_CHAT_ID = int(get_env("TELEGRAM_CHAT_ID", required=True))
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
