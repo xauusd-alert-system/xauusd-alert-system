@@ -25,6 +25,7 @@ import os
 import threading
 import time
 import urllib.request
+import requests
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -36,6 +37,8 @@ _WEEKS = ["lastweek", "thisweek", "nextweek"]
 
 # In-memory cache TTL (seconds)
 _CACHE_TTL = 3600  # 1 hour
+# Disk cache TTL — allow stale cache for 24h if API fails
+_DISK_CACHE_TTL = 86400  # 24 hours
 
 
 @dataclass
@@ -108,26 +111,38 @@ class CalendarFeed:
         self._disk_cache_path = os.path.join("data", "news_calendar_cache.json")
         self._load_disk_cache()
 
-    def _fetch_week(self, week: str) -> list[CalendarEvent]:
-        """Fetch events for one week from ForexFactory."""
+    def _fetch_week(self, week: str, retries: int = 3) -> list[CalendarEvent]:
+        """Fetch events for one week from faireconomy.media (FF mirror)."""
         url = _FF_BASE.format(week=week)
-        try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; NewsGuard/1.0)",
-                "Accept": "application/json",
-            })
-            resp = urllib.request.urlopen(req, timeout=15)
-            raw = json.loads(resp.read().decode("utf-8"))
-            events = []
-            for item in raw:
-                ev = _parse_event(item)
-                if ev is not None:
-                    events.append(ev)
-            logger.info("Fetched %d events from %s", len(events), week)
-            return events
-        except Exception as e:
-            logger.warning("Failed to fetch calendar for %s: %s", week, e)
-            return []
+        for attempt in range(retries):
+            try:
+                resp = requests.get(url, timeout=15, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; NewsGuard/1.0)",
+                })
+                if resp.status_code == 429:
+                    wait = 2 ** attempt * 2  # 2s, 4s, 8s
+                    logger.warning("Rate limited on %s, waiting %ds", week, wait)
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                raw = resp.json()
+                events = []
+                for item in raw:
+                    ev = _parse_event(item)
+                    if ev is not None:
+                        events.append(ev)
+                logger.info("Fetched %d events from %s", len(events), week)
+                return events
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 404:
+                    logger.info("No data for %s (404)", week)
+                    return []
+                logger.warning("Failed to fetch calendar for %s: %s", week, e)
+                return []
+            except Exception as e:
+                logger.warning("Failed to fetch calendar for %s: %s", week, e)
+                return []
+        return []
 
     def _refresh(self) -> None:
         """Refresh the cache from the API."""
@@ -165,8 +180,10 @@ class CalendarFeed:
             with open(self._disk_cache_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             cache_ts = data.get("ts", 0)
-            if time.time() - cache_ts > _CACHE_TTL:
-                return  # stale
+            age = time.time() - cache_ts
+            if age > _DISK_CACHE_TTL:
+                logger.warning("Disk cache too old (%.0fh), ignoring", age / 3600)
+                return
             events = []
             for item in data.get("events", []):
                 ev = _parse_event(item)
@@ -175,6 +192,9 @@ class CalendarFeed:
             if events:
                 self._cache = events
                 self._cache_ts = cache_ts
+                if age > _CACHE_TTL:
+                    logger.info("Loaded stale disk cache (%.0fh old, %d events)",
+                                age / 3600, len(events))
         except Exception:
             pass  # corrupt cache, ignore
 
@@ -205,7 +225,11 @@ class CalendarFeed:
                 # Double-check after acquiring lock
                 if now - self._cache_ts > _CACHE_TTL or not self._cache:
                     self._refresh()
-                    self._save_disk_cache()
+                    if self._cache:  # only save if refresh succeeded
+                        self._save_disk_cache()
+                    # If refresh failed (empty cache), try to restore from disk
+                    if not self._cache:
+                        self._load_disk_cache()
 
     def get_all(self) -> list[CalendarEvent]:
         """Get all cached events (sorted by datetime)."""
