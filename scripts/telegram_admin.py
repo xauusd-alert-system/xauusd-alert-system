@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from config.loader import load_config, get_env
 from execution.mt5_trader import positions_get_by_magic
+from challenge.manual.discipline_report import generate_report, format_report
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -659,6 +660,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit_message_text(query, help_txt, parse_mode="HTML", reply_markup=get_back_keyboard())
 
 
+async def discipline_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate and send the discipline report.
+    
+    Usage: /discipline           — report for today
+           /discipline 2026-08-22 — report for a specific date
+    """
+    if not await is_authorized(update):
+        return
+
+    # Optional date argument
+    date_filter = ""
+    if context.args:
+        date_filter = context.args[0].strip()
+        # Basic validation
+        if len(date_filter) != 10 or date_filter[4] != "-" or date_filter[7] != "-":
+            await update.message.reply_text(
+                "⚠️ Формат: `/discipline` (сегодня) или `/discipline 2026-08-22`",
+                parse_mode="Markdown",
+            )
+            return
+
+    await update.message.reply_text("⏳ Формирую отчёт дисциплины...")
+
+    try:
+        report = generate_report(date_filter=date_filter)
+        text = format_report(report)
+
+        if len(text) > MAX_OUTPUT_LENGTH:
+            # Split into chunks
+            for i in range(0, len(text), MAX_OUTPUT_LENGTH):
+                await update.message.reply_text(f"<pre>{text[i:i+MAX_OUTPUT_LENGTH]}</pre>", parse_mode="HTML")
+        else:
+            await update.message.reply_text(f"<pre>{text}</pre>", parse_mode="HTML")
+
+        log_action(update.effective_user.id, "discipline", date_filter or "today")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка формирования отчёта: {e}")
+
+
 def main():
     logger.info("Starting Telegram Full Remote Terminal Bot (safe mode)...")
     app = (
@@ -680,6 +720,7 @@ def main():
     app.add_handler(CommandHandler("logs", logs_command))
     app.add_handler(CommandHandler("config", config_command))
     app.add_handler(CommandHandler("positions", positions_command))
+    app.add_handler(CommandHandler("discipline", discipline_command))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
     app.add_handler(CallbackQueryHandler(button_handler))
 
