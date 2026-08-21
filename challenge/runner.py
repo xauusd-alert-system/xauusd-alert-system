@@ -20,6 +20,7 @@ from challenge.connector import HashHedgeConnector
 from challenge.risk import ChallengeRisk
 from challenge.strategy import OpeningRangeBreakout
 from challenge.windows import in_flatten_window, in_session_window
+from challenge.manual.discipline_report import generate_report, format_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +31,7 @@ logger = logging.getLogger("challenge_runner")
 STATE_PATH = "data/challenge_state.json"
 TRADES_PATH = "data/challenge_trades.csv"
 CHECKLIST_LOG = "data/challenge/checklist_log.csv"
+REPORT_DIR = "data/challenge/reports"
 OUT_DIR = "logs/challenge"
 
 
@@ -42,7 +44,7 @@ def _load_state():
             pass
     return {"day": None, "day_start_equity": None, "total_start_equity": None,
             "trading_days": 0, "flattened_today": False, "halted": False,
-            "halt_reason": None, "managed": {}}
+            "halt_reason": None, "managed": {}, "report_sent_today": False}
 
 
 def _save_state(state):
@@ -171,6 +173,43 @@ def _log_checklist_result(now, symbol, passed, reason):
             "passed": str(passed),
             "reason": reason,
         })
+
+
+def _generate_and_send_report(cfg, now):
+    """Generate discipline report at session end and send to Telegram.
+
+    Called once per session after all positions are flattened.
+    Saves the report to disk and sends a formatted version to the
+    challenge Telegram channel.
+    """
+    try:
+        today = now.date().isoformat()
+        report = generate_report(date_filter=today)
+        text = format_report(report)
+
+        # Save report to disk
+        os.makedirs(REPORT_DIR, exist_ok=True)
+        report_path = os.path.join(REPORT_DIR, f"discipline_{today}.txt")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        logger.info("Discipline report saved: %s", report_path)
+
+        # Send to Telegram
+        try:
+            from alerts.telegram_bot import TelegramAlertBot
+            bot = TelegramAlertBot(cfg or {})
+            # Split long messages (Telegram limit = 4096 chars)
+            chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+            for chunk in chunks:
+                sent = bot.send_text_message(chunk)
+                if sent:
+                    logger.info("Discipline report sent to Telegram")
+                else:
+                    logger.warning("Failed to send discipline report to Telegram")
+        except Exception as e:
+            logger.error("Telegram send error: %s", e)
+    except Exception as e:
+        logger.error("Failed to generate discipline report: %s", e)
 
 
 def _pretrade_checklist(sig, risk, state, snap, now, cfg):
@@ -366,6 +405,7 @@ def main():
                     state["day"] = today
                     state["day_start_equity"] = equity
                     state["flattened_today"] = False
+                    state["report_sent_today"] = False
                 if state.get("day_start_equity") is None:
                     state["day_start_equity"] = equity
                     state["day"] = today
@@ -400,6 +440,11 @@ def main():
                         conn.flatten()
                         state["managed"] = {}
                         logger.info("Session-close flatten (00:45)")
+                    # Generate discipline report once per session end
+                    if not state.get("report_sent_today"):
+                        _generate_and_send_report(cfg, now)
+                        state["report_sent_today"] = True
+                        _save_state(state)
                     time.sleep(30)
                     continue
                 _manage_positions(conn, state, snap["quotes"], cfg)
