@@ -29,10 +29,11 @@ class TestRisk(unittest.TestCase):
     def test_profile_params(self):
         p = risk_mod.profile_params(1, "B", 0.0, 1000.0)
         self.assertEqual(p["risk_usd"], 2.5)
-        self.assertEqual(p["daily_limit_usd"], 15.0)
+        # RESEARCH 2026-08-22: daily_limit raised $15→$25, profit_lock removed
+        self.assertEqual(p["daily_limit_usd"], 25.0)
         self.assertEqual(p["max_trades"], 3)
         self.assertFalse(p["only_a"])   # grade A/B is not predictive — no gating
-        self.assertEqual(p["profit_lock_usd"], 20.0)
+        self.assertEqual(p["profit_lock_usd"], 0.0)
 
     def test_drawdown_scaling(self):
         # Grade does not predict outcomes (24w data), so scaling reduces size
@@ -49,20 +50,26 @@ class TestRisk(unittest.TestCase):
             p = os.path.join(td, "state.json")
             sm = risk_mod.DailyStateMachine(state_path=p)
             sm.start_day(1, "B", 1000.0, 1000.0, dt.datetime.now())
+            # After 1 loss: status still active (stop_after_losses=2 for B)
             sm.record_trade(-2.5)
+            sm.update_equity(997.5)  # update equity to reflect the loss
             self.assertEqual(sm.state.status, "active")
+            # After 2 losses: stop-day triggers
             sm.record_trade(-2.5)
+            sm.update_equity(995.0)
             self.assertEqual(sm.state.status, "stop_day")
             ok, _ = sm.can_trade("A")
             self.assertFalse(ok)
 
     def test_profit_lock(self):
+        # RESEARCH 2026-08-22: profit_lock disabled (usd=0) — test that +$25 does NOT flatten
         with tempfile.TemporaryDirectory() as td:
             p = os.path.join(td, "state.json")
             sm = risk_mod.DailyStateMachine(state_path=p)
             sm.start_day(1, "B", 1000.0, 1000.0, dt.datetime.now())
-            self.assertEqual(sm.update_equity(1025.0), "flatten_day")
-            self.assertEqual(sm.state.status, "profit_locked")
+            # profit_lock_usd=0 means disabled — should NOT flatten
+            self.assertEqual(sm.update_equity(1025.0), "trade")
+            self.assertEqual(sm.state.status, "active")
 
     def test_pause(self):
         with tempfile.TemporaryDirectory() as td:

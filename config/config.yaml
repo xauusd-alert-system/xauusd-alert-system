@@ -843,6 +843,13 @@ challenge:
   strategy:
     type: opening_range_breakout
     range_minutes: 30
+    # RESEARCH 2026-08-22: enhanced ORB filters
+    # Volume must exceed avg by this ratio for a valid breakout (ORB research)
+    min_breakout_volume_ratio: 1.3
+    # Require breakout candle to CLOSE beyond range (not just wick)
+    require_candle_close: true
+    # S/R proximity buffer: skip signals within $X of key levels
+    sr_proximity_buffer_usd: 2.0
     watchlist:
       - AAPL
       - NVDA

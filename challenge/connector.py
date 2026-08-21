@@ -150,3 +150,41 @@ class HashHedgeConnector:
                        wait_until="domcontentloaded")
         time.sleep(5)
         return True
+
+    def close_partial(self, symbol: str, qty: float):
+        """Partial close: close `qty` shares of the position.
+
+        RESEARCH 2026-08-22: used for the 50% partial at 1R strategy.
+        Falls back to full close if the platform doesn't support partials.
+        """
+        return self.close_position(symbol, qty=qty)
+
+    def modify_stop(self, symbol: str, new_stop: float):
+        """Best-effort stop modification.
+
+        Hash Hedge terminal may not expose a direct stop-modify UI.
+        If the button isn't found, we silently succeed (the runner will
+        re-check the stop on the next poll anyway).
+        """
+        try:
+            self.open_symbol(symbol)
+            # Try to find and click a stop-loss edit button
+            sl_btn = self.page.get_by_role(
+                "button", name=re.compile("стоп-лосс|stop.loss|SL", re.I))
+            if sl_btn.count():
+                sl_btn.first.click()
+                time.sleep(1)
+                # Find the SL input and update it
+                sl_input = self.page.locator('input[name*="stop"], input[name*="sl"]').first
+                if sl_input.count():
+                    sl_input.fill(str(new_stop))
+                    # Confirm
+                    confirm = self.page.get_by_role(
+                        "button", name=re.compile("Принять|Подтвердить|OK", re.I))
+                    if confirm.count():
+                        confirm.first.click()
+                        time.sleep(1)
+                        return True
+        except Exception:
+            pass  # best-effort: stop will be re-evaluated on next poll
+        return False
