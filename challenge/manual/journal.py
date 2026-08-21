@@ -19,8 +19,9 @@ DEFAULT_JOURNAL = os.path.join(
 HEADER = ["num", "date", "time", "instrument", "direction", "setup_class",
           "entry_price", "stop", "target", "risk_usd", "risk_pct", "result_usd",
           "result_r", "outcome", "by_plan", "violation", "comment",
-          # RESEARCH 2026-08-22: expanded columns for commission + session tracking
-          "commission_usd", "session_bucket", "time_in_trade_min", "volume_ratio"]
+          # RESEARCH 2026-08-22: expanded columns for commission + session + regime
+          "commission_usd", "session_bucket", "time_in_trade_min", "volume_ratio",
+          "regime"]
 
 
 def _ensure(path: str) -> None:
@@ -35,7 +36,7 @@ def add_trade(path: str, date, time, instrument, direction, setup_class,
               result_r=None, outcome="", by_plan="да", violation="", comment="",
               num: int | None = None, commission_usd: float = 0.0,
               session_bucket: str = "", time_in_trade_min: float = 0.0,
-              volume_ratio: float = 0.0) -> int:
+              volume_ratio: float = 0.0, regime: str = "") -> int:
     """Append one trade. Returns its number."""
     _ensure(path)
     if num is None:
@@ -50,7 +51,7 @@ def add_trade(path: str, date, time, instrument, direction, setup_class,
                     "" if result_r is None else result_r,
                     outcome, by_plan, violation, comment,
                     commission_usd, session_bucket,
-                    time_in_trade_min, volume_ratio])
+                    time_in_trade_min, volume_ratio, regime])
     return num
 
 
