@@ -46,6 +46,11 @@ import requests
 
 from config.loader import get_env
 
+try:
+    from alerts.pair_monitor import PairMonitor
+except ImportError:
+    PairMonitor = None
+
 if TYPE_CHECKING:
     from execution.mt5_trader import MultiAssetMT5Trader
 
@@ -71,6 +76,8 @@ class TelegramControlBot:
         self._offset: int = 0
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Pair monitor: background thread for pair-signal alerts (24/7)
+        self._pair_monitor: Optional[PairMonitor] = None
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -87,9 +94,20 @@ class TelegramControlBot:
         )
         self._thread.start()
         logger.info("Telegram control bot started (admin_id=%s)", self.admin_id or "<any>")
+        # Start pair monitor (24/7 background thread)
+        try:
+            self._pair_monitor = PairMonitor(
+                send_fn=self._send,
+                admin_chat_id=self.admin_id,
+            )
+            self._pair_monitor.start()
+        except Exception as e:
+            logger.warning("Pair monitor failed to start: %s", e)
 
     def stop(self) -> None:
         self._stop.set()
+        if self._pair_monitor:
+            self._pair_monitor.stop()
         if self._thread:
             self._thread.join(timeout=5)
 
@@ -149,7 +167,11 @@ class TelegramControlBot:
         "/status", "/positions", "/metrics", "/why", "/account", "/paper",
         "/pause", "/resume", "/closeall",
         # challenge (HashHedge manual system) commands
-        "/day", "/journal", "/scan", "/alert",
+        "/day", "/journal", "/scan", "/alert", "/stats",
+        # forex: pairs analysis (pairs_analysis module)
+        "/pairs",
+        # news: economic calendar
+        "/news",
     })
 
     def _dispatch(self, cmd: str, chat_id: str, args: tuple = ()) -> None:
@@ -170,6 +192,9 @@ class TelegramControlBot:
             "/journal":   self._cmd_challenge_journal,
             "/scan":      self._cmd_challenge_scan,
             "/alert":     self._cmd_challenge_alert,
+            "/stats":     self._cmd_challenge_stats,
+            "/pairs":     self._cmd_challenge_pairs,
+            "/news":      self._cmd_news,
         }
         fn = handlers.get(cmd)
         if fn is None:
@@ -229,11 +254,14 @@ class TelegramControlBot:
             "/pause — дополнительный runtime brake (dry-run)\n"
             "/resume — снять runtime brake; deployment.mode и allowlist всё равно обязательны\n"
             "/closeall — ⚠️ emergency close ALL open positions\n"
+            "/pairs [TF] — z-scores и сигналы по всем парам (pairs_analysis, 24/7)\n"
+            "/news — ближайшие HIGH-impact события + статус news guard\n"
             "— HashHedge Challenge (ручная система) —\n"
             "/day — состояние дня (профиль, лимиты, PnL, статус)\n"
             "/journal — последние сделки + сводка по дням\n"
             "/scan — разовый live-скан watchlist (сетапы A/B)\n"
             "/alert — статус алертера и отправленные сетапы\n"
+            "/stats — накопительная статистика исходов сетапов A/B\n"
             "/help — this message\n\n"
             "🔒 Команды с данными счёта (/status, /positions, /metrics, /why, /account) "
             "и мутирующие команды доступны только владельцу бота и работают в режиме "
@@ -289,6 +317,75 @@ class TelegramControlBot:
         except Exception as exc:
             logger.exception("/alert failed")
             self._send(chat_id, f"❌ Alert status error: {exc}")
+
+    def _cmd_challenge_stats(self, chat_id: str, args: tuple = ()) -> None:
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from alerts import challenge_commands as cc
+            cc.cmd_stats(self._send, chat_id, args)
+        except Exception as exc:
+            logger.exception("/stats failed")
+            self._send(chat_id, f"❌ Stats error: {exc}")
+
+    def _cmd_news(self, chat_id: str, args: tuple = ()) -> None:
+        "/news — upcoming high-impact events + news guard status."""
+        if not self._require_admin(chat_id):
+            return
+        try:
+            from news.calendar_feed import get_feed
+            from news.guard import get_guard
+
+            feed = get_feed()
+            guard = get_guard()
+
+            # Determine asset context from args
+            asset_key = str(args[0]).upper() if args else None
+            if asset_key and asset_key not in ("XAUUSD", "XAGUSD", "BTCUSD", "EURUSD", "GBPUSD", "ALL"):
+                self._send(chat_id, f"❓ Неизвестный актив: {asset_key}. Доступные: XAUUSD, XAGUSD, BTCUSD, EURUSD, GBPUSD, ALL")
+                return
+
+            hours = 48.0
+            # /news 24 or /news 72 — custom window
+            for a in args:
+                try:
+                    hours = float(a)
+                except ValueError:
+                    pass
+
+            # Guard status
+            guard_status = guard.status_text(asset_key if asset_key != "ALL" else None)
+
+            # Upcoming events
+            currencies = None
+            if asset_key and asset_key != "ALL":
+                from news.guard import ASSET_CURRENCIES
+                currencies = ASSET_CURRENCIES.get(asset_key)
+
+            events_text = feed.format_upcoming(hours=hours)
+
+            msg = f"{guard_status}\n\n{events_text}"
+            self._send(chat_id, msg)
+        except Exception as exc:
+            logger.exception("/news failed")
+            self._send(chat_id, f"❌ News error: {exc}")
+
+    def _cmd_challenge_pairs(self, chat_id: str, args: tuple = ()) -> None:
+        "/pairs [TF] — z-scores and signals for all monitored pairs."
+        if not self._require_admin(chat_id):
+            return
+        self._send(chat_id, "⏳ Loading pair data...")
+        try:
+            if self._pair_monitor:
+                msg = self._pair_monitor.query_all()
+            else:
+                from alerts.pair_monitor import PairMonitor
+                pm = PairMonitor(send_fn=self._send, admin_chat_id=chat_id)
+                msg = pm.query_all()
+            self._send(chat_id, msg)
+        except Exception as exc:
+            logger.exception("/pairs failed")
+            self._send(chat_id, f"❌ Pairs error: {exc}")
 
     def _cmd_metrics(self, chat_id: str, args: tuple = ()) -> None:
         # /metrics <period> -> closed-trade statistics (read-only MT5 history).

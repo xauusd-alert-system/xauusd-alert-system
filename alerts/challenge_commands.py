@@ -24,6 +24,8 @@ MANUAL_DIR = os.path.join(ROOT, "challenge", "manual")
 STATE_FILE = os.path.join(ROOT, "data", "manual", "day_state.json")
 SENT_FILE = os.path.join(ROOT, "data", "manual", "alerts_sent.json")
 JOURNAL_FILE = os.path.join(ROOT, "data", "manual", "journal.csv")
+STATS_FILE = os.path.join(ROOT, "data", "manual", "setup_stats.json")
+OUTCOMES_CSV = os.path.join(ROOT, "data", "manual", "setup_outcomes.csv")
 
 
 def _import_manual():
@@ -128,6 +130,104 @@ def cmd_scan(send, chat_id, args=()):
         return
     for res in hits:
         send(chat_id, alerter.format_setup(res))
+
+
+def cmd_stats(send, chat_id, args=()):
+    """/stats — накопительная статистика исходов сетапов A/B (авто-журнал)."""
+    if os.path.exists(STATS_FILE):
+        try:
+            stats = json.load(open(STATS_FILE, encoding="utf-8"))
+        except Exception:
+            stats = None
+        if stats:
+            try:
+                from challenge.manual import outcomes as outcomes_mod
+                send(chat_id, outcomes_mod.format_stats_summary(stats))
+            except Exception as exc:
+                send(chat_id, f"❌ Stats unavailable: {exc}")
+            return
+    try:
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        from challenge.manual import outcomes as outcomes_mod
+    except Exception as exc:
+        send(chat_id, f"❌ Stats unavailable: {exc}")
+        return
+    if not os.path.exists(OUTCOMES_CSV):
+        send(chat_id, "❓ Журнал исходов пуст — сетапов с алертами ещё не было.")
+        return
+    rows = outcomes_mod.read_journal(OUTCOMES_CSV)
+    stats = outcomes_mod.compute_stats(rows)
+    outcomes_mod.save_stats(STATS_FILE, stats)
+    send(chat_id, outcomes_mod.format_stats_summary(stats))
+
+
+def cmd_pairs(send, chat_id, args=()):
+    "/pairs [TF] — z-scores и сигналы по всем парам (D1 по умолчанию)."""
+    try:
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        from pairs_analysis import load_config, PairAnalyzer, SignalEngine, EnsembleEngine
+    except Exception as exc:
+        send(chat_id, f"❌ Pairs module unavailable: {exc}")
+        return
+    try:
+        cfg = load_config()
+        analysis = cfg.get("analysis", {})
+        thresholds = cfg.get("thresholds", {})
+        bt_cfg = dict(analysis)
+        bt_cfg.update(cfg.get("backtest", {}) or {})
+        tf = args[0].upper() if args else analysis.get("default_timeframe", "D1")
+        sig_engine = SignalEngine(thresholds, bt_cfg)
+        ens_engine = EnsembleEngine(cfg)
+    except Exception as exc:
+        send(chat_id, f"❌ Config error: {exc}")
+        return
+    send(chat_id, f"⏳ Анализирую {len(cfg.get('pairs', []))} пар на {tf}…")
+    lines = [f"📊 *PAIRS — {tf}*\n"]
+    for pair in cfg.get("pairs", []):
+        name = pair["name"]
+        try:
+            pa = PairAnalyzer(pair, analysis)
+            m = pa.analyze(tf)
+            sig = sig_engine.current(m)
+            ens = ens_engine.forecast(m)
+            z = sig.z
+            adf_icon = "✅" if m.adf_p < 0.05 else "❌"
+            hurst_icon = "✅" if m.hurst < 0.5 else "⚠️"
+            sig_icon = {"long": "🟢 LONG", "short": "🔴 SHORT", "none": "⚪ NO EDGE"}
+            ens_arrow = {"long": "↑", "short": "↓", "neutral": "→"}
+            hl = f"{m.half_life_days:.1f}д" if m.half_life_days < 100 else "∞"
+            lines.append(
+                f"*{name}* [{m.n_bars} баров]\n"
+                f"  z: {z:+.3f}σ | β: {m.beta:.2f} | ratio: {m.ratio:.1f}\n"
+                f"  {adf_icon} ADF p={m.adf_p:.4f} | {hurst_icon} H={m.hurst:.2f} | HL={hl}\n"
+                f"  Signal: {sig_icon.get(sig.direction, sig.direction)}"
+            )
+            if sig.valid:
+                lines.append(f"    {sig.reason}")
+            lines.append(
+                f"  Ensemble: {ens_arrow.get(ens.direction, '?')} {ens.direction.upper()} "
+                f"CONF {ens.confidence:.0f}%"
+            )
+            lines.append("")
+        except Exception as exc:
+            lines.append(f"*{name}* — ❌ {exc}\n")
+    # Cumulative pair stats
+    try:
+        from pairs_analysis.integrations import pair_cumulative_stats
+        stats = pair_cumulative_stats()
+        if stats["total_trades"] > 0:
+            lines.append(
+                f"📈 Pair stats: {stats['total_trades']} сделок, "
+                f"WR {stats['win_rate_pct']}%, avgR {stats['avg_r']:+.2f}, "
+                f"sumR {stats['sum_r']:+.2f}"
+            )
+    except Exception:
+        pass
+    send(chat_id, "\n".join(lines), parse_mode="Markdown")
 
 
 def cmd_alert(send, chat_id, args=()):
