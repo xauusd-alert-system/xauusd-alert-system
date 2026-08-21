@@ -29,6 +29,7 @@ logger = logging.getLogger("challenge_runner")
 
 STATE_PATH = "data/challenge_state.json"
 TRADES_PATH = "data/challenge_trades.csv"
+CHECKLIST_LOG = "data/challenge/checklist_log.csv"
 OUT_DIR = "logs/challenge"
 
 
@@ -155,6 +156,23 @@ def _manage_positions(conn, state, quotes, cfg=None):
             del managed[symbol]
 
 
+def _log_checklist_result(now, symbol, passed, reason):
+    """Append checklist result to CSV for discipline report."""
+    os.makedirs(os.path.dirname(CHECKLIST_LOG), exist_ok=True)
+    header = ["ts", "symbol", "passed", "reason"]
+    new = not os.path.exists(CHECKLIST_LOG)
+    with open(CHECKLIST_LOG, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        if new:
+            w.writeheader()
+        w.writerow({
+            "ts": now.isoformat(timespec="seconds"),
+            "symbol": symbol,
+            "passed": str(passed),
+            "reason": reason,
+        })
+
+
 def _pretrade_checklist(sig, risk, state, snap, now, cfg):
     """RESEARCH 2026-08-22 (us_stocks audit §6.1): formal pre-trade checklist.
 
@@ -274,6 +292,8 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
     signals = strategy.update(quotes, now)
     for sig in signals:
         ok, reason = _pretrade_checklist(sig, risk, state, snap, now, cfg or {})
+        # Log checklist result
+        _log_checklist_result(now, sig.symbol, ok, reason)
         if not ok:
             logger.info("BLOCKED %s: %s", sig.symbol, reason)
             continue

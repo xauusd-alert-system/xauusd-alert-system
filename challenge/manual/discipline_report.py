@@ -213,6 +213,82 @@ def compute_streak_analysis(rows: list[dict]) -> dict:
     }
 
 
+def compute_checklist_stats(date_filter: str = "") -> dict:
+    """Read checklist_log.csv and compute pass/fail statistics.
+
+    The checklist log is written by runner.py for every signal evaluation.
+    """
+    log_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "data", "challenge", "checklist_log.csv")
+    if not os.path.exists(log_path):
+        return {"total": 0, "passed": 0, "blocked": 0, "pass_rate": 0.0,
+                "block_reasons": {}, "by_symbol": {}}
+
+    rows = []
+    with open(log_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            if date_filter and not r.get("ts", "").startswith(date_filter):
+                continue
+            rows.append(r)
+
+    if not rows:
+        return {"total": 0, "passed": 0, "blocked": 0, "pass_rate": 0.0,
+                "block_reasons": {}, "by_symbol": {}}
+
+    total = len(rows)
+    passed = sum(1 for r in rows if r.get("passed") == "True")
+    blocked = total - passed
+
+    # Block reason breakdown
+    block_reasons = defaultdict(int)
+    for r in rows:
+        if r.get("passed") == "False":
+            reason = r.get("reason", "unknown")
+            # Normalize: extract the check name
+            if "position limit" in reason:
+                block_reasons["position_limit"] += 1
+            elif "already open" in reason:
+                block_reasons["duplicate"] += 1
+            elif "daily loss" in reason:
+                block_reasons["equity_buffer"] += 1
+            elif "below 1 share" in reason or "fees exceed" in reason:
+                block_reasons["sizing"] += 1
+            elif "stop-day" in reason:
+                block_reasons["stop_day"] += 1
+            elif "max" in reason and "trades" in reason:
+                block_reasons["max_attempts"] += 1
+            elif "losses today" in reason:
+                block_reasons["max_losses"] += 1
+            elif "flatten window" in reason:
+                block_reasons["session_time"] += 1
+            elif "S/R" in reason:
+                block_reasons["sr_proximity"] += 1
+            elif "quality" in reason:
+                block_reasons["quality_score"] += 1
+            else:
+                block_reasons["other"] += 1
+
+    # By symbol
+    by_symbol = defaultdict(lambda: {"passed": 0, "blocked": 0})
+    for r in rows:
+        sym = r.get("symbol", "?")
+        if r.get("passed") == "True":
+            by_symbol[sym]["passed"] += 1
+        else:
+            by_symbol[sym]["blocked"] += 1
+
+    return {
+        "total": total,
+        "passed": passed,
+        "blocked": blocked,
+        "pass_rate": round(100 * passed / total, 1) if total else 0.0,
+        "block_reasons": dict(block_reasons),
+        "by_symbol": dict(by_symbol),
+    }
+
+
 def generate_report(journal_path: str = DEFAULT_JOURNAL, date_filter: str = "") -> dict:
     """Generate the full discipline report.
 
@@ -230,6 +306,7 @@ def generate_report(journal_path: str = DEFAULT_JOURNAL, date_filter: str = "") 
         "as_of": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "trade_count": len(rows),
         "adherence": compute_adherence(rows),
+        "checklist": compute_checklist_stats(date_filter),
         "regime_breakdown": compute_regime_breakdown(rows),
         "time_bucket_stats": compute_time_bucket_stats(rows),
         "commission_drag": compute_commission_drag(rows),
@@ -255,6 +332,20 @@ def format_report(report: dict) -> str:
     lines.append(f"  By-plan trades:  {a.get('by_plan_pct', 0):.0f}%")
     if a.get("missing_fields"):
         lines.append(f"  Missing fields:  {a['missing_fields']}")
+
+    # --- Checklist ---
+    cl = report.get("checklist", {})
+    if cl.get("total", 0) > 0:
+        lines.append("")
+        lines.append("CHECKLIST PASS/FAIL")
+        lines.append(f"  Total signals:  {cl['total']}")
+        lines.append(f"  Passed:         {cl['passed']}  ({cl['pass_rate']:.0f}%)")
+        lines.append(f"  Blocked:        {cl['blocked']}")
+        if cl.get("block_reasons"):
+            lines.append(f"  Block reasons:")
+            for reason, count in sorted(cl["block_reasons"].items(),
+                                        key=lambda x: -x[1]):
+                lines.append(f"    {reason:<20s} {count}")
 
     # --- Regime breakdown ---
     rb = report.get("regime_breakdown", {})
