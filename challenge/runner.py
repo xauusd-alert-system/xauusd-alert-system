@@ -56,7 +56,7 @@ def _log_trade(row):
     # RESEARCH 2026-08-22: expanded header with management + session metadata
     header = ["ts", "symbol", "side", "qty", "entry", "stop", "tp",
               "status", "exit_price", "pnl", "be_moved", "partial_closed",
-              "session_bucket", "volume_ratio"]
+              "session_bucket", "volume_ratio", "regime"]
     # Ensure row has all keys (backward-compatible with old callers)
     for k in header:
         row.setdefault(k, "")
@@ -151,7 +151,10 @@ def _manage_positions(conn, state, quotes, cfg=None):
                         "tp": info["tp"], "status": hit[0],
                         "exit_price": hit[1], "pnl": "",
                         "be_moved": info.get("be_moved", False),
-                        "partial_closed": info.get("partial_closed", False)})
+                        "partial_closed": info.get("partial_closed", False),
+                        "session_bucket": info.get("session_bucket", ""),
+                        "volume_ratio": f"{info.get('volume_ratio', 0):.2f}",
+                        "regime": info.get("regime", "")})
             logger.info("CLOSED %s %s at %.2f (%s) BE=%s partial=%s",
                         symbol, info["side"], hit[1], hit[0],
                         info.get("be_moved"), info.get("partial_closed"))
@@ -305,7 +308,7 @@ def _pretrade_checklist(sig, risk, state, snap, now, cfg):
     try:
         from challenge.manual.quality_score import compute_quality_score, format_quality
         vol_ratio = getattr(sig, "volume_ratio", 1.0)
-        regime = getattr(sig, "regime", "")
+        regime = getattr(sig, "regime", "unknown")
         quality = compute_quality_score(
             signal_ts=int(now.timestamp()),
             volume_ratio=vol_ratio,
@@ -351,6 +354,7 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
             "opened": datetime.now().isoformat(timespec="seconds"),
             "session_bucket": getattr(sig, "session_bucket", "unknown"),
             "volume_ratio": getattr(sig, "volume_ratio", 0.0),
+            "regime": getattr(sig, "regime", "unknown"),
         }
         if state["day"] != now.date().isoformat():
             state["trading_days"] += 1
@@ -359,7 +363,8 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
                     "entry": sig.entry, "stop": sig.stop, "tp": sig.tp,
                     "status": "open", "exit_price": "", "pnl": "",
                     "session_bucket": getattr(sig, "session_bucket", ""),
-                    "volume_ratio": f"{getattr(sig, 'volume_ratio', 0):.2f}"})
+                    "volume_ratio": f"{getattr(sig, 'volume_ratio', 0):.2f}",
+                    "regime": getattr(sig, "regime", "")})
         quality = getattr(sig, "_quality", {})
         q_str = f"Q={quality.get('total', '?')}/{quality.get('grade', '?')}" if quality else "Q=?"
         logger.info("OPENED %s %s x%d @ %.2f (stop %.2f / tp %.2f) [%s, vol %.1fx, %s]",

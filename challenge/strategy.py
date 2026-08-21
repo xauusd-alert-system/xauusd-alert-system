@@ -41,6 +41,7 @@ class Signal:
     session_bucket: str = "normal"  # prime | normal | degraded
     volume_ratio: float = 0.0        # actual_vol / avg_vol at breakout
     close_confirmed: bool = False    # breakout candle closed beyond range
+    regime: str = "unknown"         # trend_up | trend_down | range | compression
 
 
 class OpeningRangeBreakout:
@@ -62,12 +63,14 @@ class OpeningRangeBreakout:
         self._session_date = None
         self._symbols = {}
         self._avg_volumes = {}  # rolling avg volume per symbol
+        self._price_history = {}  # rolling price per symbol for regime detection
 
     def _reset_if_needed(self, now):
         if self._session_date != now.date():
             self._session_date = now.date()
             self._symbols = {}
             self._avg_volumes = {}
+            self._price_history = {}
 
     def _session_bucket(self, now) -> str:
         """Classify current time into session quality bucket (research §5.2)."""
@@ -89,6 +92,46 @@ class OpeningRangeBreakout:
         hist = self._avg_volumes.get(symbol, [])
         return sum(hist) / len(hist) if hist else 1.0
 
+    def _detect_regime(self, symbol: str) -> str:
+        """Classify regime from rolling price momentum (20 ticks).
+
+        Uses EMA slope + spread compression to distinguish:
+        - trend_up: rising EMA, widening spread
+        - trend_down: falling EMA, widening spread
+        - range: flat EMA, stable spread
+        - compression: flat EMA, narrowing spread (potential breakout)
+        """
+        hist = self._price_history.get(symbol, [])
+        if len(hist) < 10:
+            return "unknown"
+        # EMA-5 slope over last 10 ticks
+        k = 2.0 / 6.0  # EMA-5 smoothing
+        ema = hist[0]
+        for p in hist[1:]:
+            ema = p * k + ema * (1 - k)
+        ema_prev = hist[0]
+        for p in hist[:-1]:
+            ema_prev = p * k + ema_prev * (1 - k)
+        slope_pct = (ema - ema_prev) / ema_prev * 100 if ema_prev else 0
+        # Spread: range of last 10 vs first 10
+        recent = hist[-10:]
+        old = hist[:max(10, len(hist) - 10)]
+        spread_recent = max(recent) - min(recent) if recent else 0
+        spread_old = max(old) - min(old) if old else 0
+        # Normalize slope to ticker scale (use 0.01% as threshold)
+        if slope_pct > 0.01:
+            if spread_recent >= spread_old:
+                return "trend_up"
+            return "range"  # uptrend but compressing
+        elif slope_pct < -0.01:
+            if spread_recent >= spread_old:
+                return "trend_down"
+            return "range"  # downtrend but compressing
+        else:
+            if spread_recent < 0.6 * spread_old:
+                return "compression"
+            return "range"
+
     def update(self, quotes: dict, now) -> list:
         self._reset_if_needed(now)
         signals = []
@@ -106,6 +149,11 @@ class OpeningRangeBreakout:
             vol = float(q.get("volume", 0) or q.get("vol", 0) or 0)
             if vol > 0:
                 self._update_avg_volume(symbol, vol)
+            # Track price for regime detection
+            phist = self._price_history.setdefault(symbol, [])
+            phist.append(last)
+            if len(phist) > 40:
+                phist.pop(0)
             st = self._symbols.setdefault(
                 symbol, {"high": None, "low": None, "signaled": False,
                          "range_high": None, "range_low": None})
@@ -132,6 +180,7 @@ class OpeningRangeBreakout:
             if not vol_ok:
                 logger.debug(f"{symbol}: volume ratio {vol_ratio:.2f} < {self.min_volume_ratio} — skip")
                 continue
+            regime = self._detect_regime(symbol)
             if close_beyond_high:
                 st["signaled"] = True
                 stop = last * (1 - self.stop_pct)
@@ -139,7 +188,8 @@ class OpeningRangeBreakout:
                 signals.append(Signal(symbol, "long", last, stop, tp,
                                       session_bucket=bucket,
                                       volume_ratio=vol_ratio,
-                                      close_confirmed=True))
+                                      close_confirmed=True,
+                                      regime=regime))
             elif close_beyond_low:
                 st["signaled"] = True
                 stop = last * (1 + self.stop_pct)
@@ -147,5 +197,6 @@ class OpeningRangeBreakout:
                 signals.append(Signal(symbol, "short", last, stop, tp,
                                       session_bucket=bucket,
                                       volume_ratio=vol_ratio,
-                                      close_confirmed=True))
+                                      close_confirmed=True,
+                                      regime=regime))
         return signals
