@@ -813,8 +813,57 @@ correlation_filter:
   update_interval_minutes: 60
 
 
-# ===== PROP CHALLENGE =====
-# The US Stocks Headliners workflow is implemented exclusively in challenge/manual.
-# It is analysis-only: no terminal URL, browser profile, session credential,
-# order-routing, or automated position-management setting may live in config.yaml.
-# See challenge/manual/manual_config.yaml for the versioned research configuration.
+# ===== PROP CHALLENGE (HashHedge "US STOCKS HEADLINERS", owner request 2026-08-19) =====
+# Browser automation over the web terminal (NOT MT5). Stage 1: +$80 on $1,000,
+# daily loss -$50, total loss -$100, 1:5 leverage, min 5 trading days, NYSE
+# session 18:30-00:55 local, positions auto-close at 00:55. Risk rules below
+# trade to HALF of the platform limits (cushion) and lock profits early.
+challenge:
+  platform:
+    url: "https://app.hashhedge.com/ru/app/dashboard?challengeId=f0622a04-2724-42c8-87cb-8473793533ad"
+    markets_url: "https://markets-app.hashhedge.com/stocks-usdt"
+    session_id: "770216147"
+    login_wait_seconds: 900
+    auto_start_challenge: false
+    poll_seconds: 5
+  session:
+    start_local: "18:30"
+    end_local: "00:55"
+    flatten_local: "00:45"
+    min_trading_days: 5
+  risk:
+    per_trade_risk_usd: 5
+    daily_loss_stop: 25
+    total_loss_stop: 60
+    daily_profit_lock: 20
+    max_open_positions: 2
+    max_leverage: 5
+    stop_pct: 0.005
+    tp_ratio: 1.5
+  strategy:
+    type: opening_range_breakout
+    range_minutes: 30
+    watchlist:
+      - AAPL
+      - NVDA
+      - TSLA
+      - SPY
+      - GLD
+      - COIN
+      - AMD
+      - MU
+      - MRVL
+      - PLTR
+      - SHOP
+      - SMCI
+      - RDDT
+      - RKLB
+      - ABNB
+      - BA
+      - CAT
+      - KO
+      - MRK
+      - CSCO
+  browser:
+    headless: false
+    profile_dir: data/challenge_browser_profile
