@@ -65,15 +65,12 @@ def _log_trade(row):
         w.writerow({k: row.get(k, "") for k in header})
 
 
-def _manage_positions(conn, state, quotes):
-    """Manage open positions: breakeven, partial close, full TP/stop.
+def _manage_positions(conn, state, quotes, cfg=None):
+    """Manage open positions: stop/TP check.
 
-    RESEARCH 2026-08-22: breakeven at 0.5R + partial 50% at 1R + rest to 2R.
-    This implements the classic risk-free + let-run approach:
-    - At 0.5R profit: move stop to entry (breakeven) — eliminates risk
-    - At 1R profit: close 50% of position (locks in partial profit)
-    - At 2R (TP): close remaining 50% (full target)
-    - Stop hit: close all (full loss capped at entry risk)
+    BE + partial close are DISABLED by default (backtest 2026-08-22 showed
+    they hurt WR and PF on 1-min timeframe). Enable via
+    challenge.risk.manage_positions: true in config.
     """
     managed = state["managed"]
     for symbol in list(managed):
@@ -87,60 +84,58 @@ def _manage_positions(conn, state, quotes):
         risk_dist = abs(entry - original_stop)
         if risk_dist <= 0:
             continue
-        # Track management state: be_moved, partial_closed
-        if "be_moved" not in info:
-            info["be_moved"] = False
-        if "partial_closed" not in info:
-            info["partial_closed"] = False
+        # BACKTEST 2026-08-22: BE+partial HURT on 1-min timeframe
+        # (WR 34%->17%, PF 0.37->0.07). Disabled by default.
+        # Enable via config: challenge.risk.manage_positions: true
+        manage = (cfg or {}).get("risk", {}).get("manage_positions", False)
 
         hit = None
         if info["side"] == "long":
             unrealized = last - entry
-            # RESEARCH: breakeven at 0.5R
-            if not info["be_moved"] and unrealized >= 0.5 * risk_dist:
-                info["stop"] = entry  # move stop to entry
-                info["be_moved"] = True
-                logger.info("BE %s: stop moved to %.2f (entry) at 0.5R", symbol, entry)
-                # Try to modify stop on the platform
-                try:
-                    conn.modify_stop(symbol, entry)
-                except Exception:
-                    pass  # best-effort; next poll will re-check
-            # RESEARCH: partial close 50% at 1R
-            if not info["partial_closed"] and unrealized >= risk_dist:
-                info["partial_closed"] = True
-                half_qty = max(1, int(info["qty"] / 2))
-                logger.info("PARTIAL %s: closing %d/%s shares at 1R (%.2f)",
-                            symbol, half_qty, info["qty"], last)
-                try:
-                    conn.close_partial(symbol, half_qty)
-                except Exception:
-                    pass  # best-effort
+            if manage:
+                # Breakeven at 0.5R
+                if not info.get("be_moved") and unrealized >= 0.5 * risk_dist:
+                    info["stop"] = entry
+                    info["be_moved"] = True
+                    logger.info("BE %s: stop moved to %.2f (entry) at 0.5R", symbol, entry)
+                    try:
+                        conn.modify_stop(symbol, entry)
+                    except Exception:
+                        pass
+                # Partial close 50% at 1R
+                if not info.get("partial_closed") and unrealized >= risk_dist:
+                    info["partial_closed"] = True
+                    half_qty = max(1, int(info["qty"] / 2))
+                    logger.info("PARTIAL %s: closing %d/%s shares at 1R (%.2f)",
+                                symbol, half_qty, info["qty"], last)
+                    try:
+                        conn.close_partial(symbol, half_qty)
+                    except Exception:
+                        pass
             if last <= info["stop"]:
                 hit = ("stop", last)
             elif last >= tp:
                 hit = ("tp", last)
         else:  # short
             unrealized = entry - last
-            # RESEARCH: breakeven at 0.5R
-            if not info["be_moved"] and unrealized >= 0.5 * risk_dist:
-                info["stop"] = entry  # move stop to entry
-                info["be_moved"] = True
-                logger.info("BE %s: stop moved to %.2f (entry) at 0.5R", symbol, entry)
-                try:
-                    conn.modify_stop(symbol, entry)
-                except Exception:
-                    pass
-            # RESEARCH: partial close 50% at 1R
-            if not info["partial_closed"] and unrealized >= risk_dist:
-                info["partial_closed"] = True
-                half_qty = max(1, int(info["qty"] / 2))
-                logger.info("PARTIAL %s: closing %d/%s shares at 1R (%.2f)",
-                            symbol, half_qty, info["qty"], last)
-                try:
-                    conn.close_partial(symbol, half_qty)
-                except Exception:
-                    pass
+            if manage:
+                if not info.get("be_moved") and unrealized >= 0.5 * risk_dist:
+                    info["stop"] = entry
+                    info["be_moved"] = True
+                    logger.info("BE %s: stop moved to %.2f (entry) at 0.5R", symbol, entry)
+                    try:
+                        conn.modify_stop(symbol, entry)
+                    except Exception:
+                        pass
+                if not info.get("partial_closed") and unrealized >= risk_dist:
+                    info["partial_closed"] = True
+                    half_qty = max(1, int(info["qty"] / 2))
+                    logger.info("PARTIAL %s: closing %d/%s shares at 1R (%.2f)",
+                                symbol, half_qty, info["qty"], last)
+                    try:
+                        conn.close_partial(symbol, half_qty)
+                    except Exception:
+                        pass
             if last >= info["stop"]:
                 hit = ("stop", last)
             elif last <= tp:
@@ -342,7 +337,7 @@ def main():
                         logger.info("Session-close flatten (00:45)")
                     time.sleep(30)
                     continue
-                _manage_positions(conn, state, snap["quotes"])
+                _manage_positions(conn, state, snap["quotes"], cfg)
                 _handle_signals(conn, risk, strategy, state, snap, now, cfg)
                 _save_state(state)
                 time.sleep(poll)
