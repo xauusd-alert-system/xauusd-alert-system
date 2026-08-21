@@ -1457,23 +1457,28 @@ class MultiAssetMT5Trader:
         for leg_volume, (_, leg_no) in zip(self._leg_volumes(info), self.SCALEOUT_RATIOS):
             if leg_volume <= 0:
                 continue
-            leg_tp = leg_tps[leg_no - 1]
             leg_signal = dict(signal)
             leg_signal["leg"] = leg_no
-            # Market orders fill at the CURRENT price; between leg fills the
-            # market can move past the signal-time levels and the broker then
-            # rejects SL/TP with Retcode 10016 ("Invalid stops"). Recenter each
-            # leg's SL/TP on the live price, preserving the exact entry->SL and
-            # entry->TP distances of the signal-time geometry.
-            leg_sl = sl_price
+            # Market orders fill at the CURRENT tick price, not the signal-time
+            # `price`. Drift-correcting the signal-time levels by a per-leg delta
+            # introduces inconsistent TP distances across legs when the market
+            # moves between fills. Instead, recompute each leg's SL/TP directly
+            # from the LIVE tick, preserving the exact entry->SL and entry->TP
+            # distances of the signal-time geometry.
             try:
                 live_tick = mt5.symbol_info_tick(mt5_symbol)
                 if live_tick is not None:
                     live_price = float(live_tick.ask if bias == "long" else live_tick.bid)
-                    drift = live_price - price
-                    leg_sl = round(sl_price + drift, digits)
-                    leg_tp = round(leg_tp + drift, digits)
+                    leg_mult = float(grid.get(f"tp{leg_no}_mult", float(leg_no)))
+                    leg_stop_mult = float(grid.get("stop_mult", 2.0))
+                    leg_tp = round(live_price + direction * step * leg_mult, digits)
+                    leg_sl = round(live_price - direction * step * leg_stop_mult, digits)
+                else:
+                    leg_tp = leg_tps[leg_no - 1]
+                    leg_sl = sl_price
             except Exception as exc:
+                leg_tp = leg_tps[leg_no - 1]
+                leg_sl = sl_price
                 logger.warning(
                     "[%s] Live tick unavailable (%s); using signal-time levels", asset_key, exc)
             request = {
