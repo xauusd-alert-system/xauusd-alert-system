@@ -34,6 +34,7 @@ _DEFAULTS = {
     "hard_stop_streak": 3,
     "risk_step_down_map": {1: 1.0, 2: 0.5, 3: 0.25},
     "max_daily_loss_pct": 3.0,
+    "max_daily_loss_usd": None,
     "reset_on_utc_midnight": True,
 }
 
@@ -64,8 +65,16 @@ class TradeThrottle:
         self.loss_streak_threshold = int(tc.get("loss_streak_threshold", _DEFAULTS["loss_streak_threshold"]))
         self.cooldown_minutes = int(tc.get("cooldown_minutes", _DEFAULTS["cooldown_minutes"]))
         self.hard_stop_streak = int(tc.get("hard_stop_streak", _DEFAULTS["hard_stop_streak"]))
-        self.risk_step_down_map: dict[int, float] = tc.get("risk_step_down_map") or _DEFAULTS["risk_step_down_map"]
+        self.risk_step_down_map: dict[int, float] = {
+            int(k): float(v)
+            for k, v in dict(tc.get("risk_step_down_map") or _DEFAULTS["risk_step_down_map"]).items()
+        }  # audit 2026-08-23 D: int-cast keys — YAML strings ("1") would silently
+        # never match the int consecutive_losses and the multiplier stayed 1.0
         self.max_daily_loss_pct = float(tc.get("max_daily_loss_pct", _DEFAULTS["max_daily_loss_pct"]))
+        # audit 2026-08-23 B: absolute USD circuit breaker — on a large demo
+        # account the %-based limit (3% of $10M = $300k) can never fire.
+        mdlu = tc.get("max_daily_loss_usd")
+        self.max_daily_loss_usd = float(mdlu) if mdlu is not None else None
         self.reset_on_utc_midnight = bool(tc.get("reset_on_utc_midnight", _DEFAULTS["reset_on_utc_midnight"]))
 
         self.state_path = state_path
@@ -79,6 +88,10 @@ class TradeThrottle:
         self.cooldown_until: float = 0.0  # epoch seconds
         self.hard_stopped: bool = False
         self.halt_reason: str | None = None
+        # audit 2026-08-23 C: optional callback fired ONCE per halt transition
+        # (hard stop by streak, daily loss limit). The trader wires it to the
+        # Telegram bot so halts are visible without reading logs.
+        self.on_halt = None
 
         self._load_state()
 
@@ -148,8 +161,13 @@ class TradeThrottle:
         self.current_day = today
         self.starting_equity = current_equity
         if prev_day is not None:
-            # Real day change: full reset
+            # Real day change: full reset. consecutive_losses included
+            # (audit 2026-08-23 A): previously the streak carried over, so 3
+            # losses late Monday made Tuesday's FIRST loss an instant hard
+            # stop and kept risk at 0.25x until a win — "until next session"
+            # semantics require a clean streak per session.
             self.trades_today = 0
+            self.consecutive_losses = 0
             self.cooldown_until = 0.0
             self.hard_stopped = False
             self.halt_reason = None
@@ -192,16 +210,38 @@ class TradeThrottle:
             if self.trades_today >= self.max_trades_per_day:
                 return False, f"daily_limit_reached: {self.trades_today}/{self.max_trades_per_day} trades today"
 
-            # 4. Daily loss limit (equity-based)
+            # 4. Daily loss limit — absolute USD first (fires on any account
+            # size), then the %-based fallback for small accounts.
             if self.starting_equity > 0 and current_equity > 0:
-                daily_pnl_pct = ((current_equity - self.starting_equity) / self.starting_equity) * 100.0
+                daily_pnl = current_equity - self.starting_equity
+                if self.max_daily_loss_usd is not None \
+                        and daily_pnl <= -self.max_daily_loss_usd:
+                    self.hard_stopped = True
+                    self.halt_reason = (
+                        f"daily_loss_limit: ${daily_pnl:,.2f} <= "
+                        f"-${self.max_daily_loss_usd:,.2f}"
+                    )
+                    self._save_state()
+                    self._notify_halt()
+                    return False, self.halt_reason
+                daily_pnl_pct = (daily_pnl / self.starting_equity) * 100.0
                 if daily_pnl_pct <= -self.max_daily_loss_pct:
                     self.hard_stopped = True
                     self.halt_reason = f"daily_loss_limit: {daily_pnl_pct:.1f}% <= -{self.max_daily_loss_pct}%"
                     self._save_state()
+                    self._notify_halt()
                     return False, self.halt_reason
 
             return True, "OK"
+
+    def _notify_halt(self):
+        """Fire the on_halt callback once per halt transition (audit C)."""
+        if self.on_halt is None:
+            return
+        try:
+            self.on_halt(self.halt_reason)
+        except Exception as exc:  # never break the gate on a notify failure
+            logger.warning(f"TradeThrottle on_halt callback failed: {exc}")
 
     # ------------------------------------------------------------------
     # Public: risk_multiplier()
@@ -242,12 +282,15 @@ class TradeThrottle:
 
                 # Hard stop
                 if self.consecutive_losses >= self.hard_stop_streak:
+                    newly_halted = not self.hard_stopped
                     self.hard_stopped = True
                     self.halt_reason = (
                         f"hard_stop_streak: {self.consecutive_losses} consecutive losses "
                         f">= {self.hard_stop_streak}"
                     )
                     logger.warning(f"TradeThrottle: {self.halt_reason}")
+                    if newly_halted:
+                        self._notify_halt()
 
                 # Cooldown (only if not already hard-stopped)
                 elif self.consecutive_losses >= self.loss_streak_threshold:
