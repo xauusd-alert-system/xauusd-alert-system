@@ -200,7 +200,10 @@ def test_day_reset_clears_counters(throttle):
 
     assert throttle.trades_today == 0
     assert throttle.hard_stopped is False
-    assert throttle.consecutive_losses == 3  # losses kept across days
+    # Audit 2026-08-23 A: the streak MUST reset with the session. The old
+    # behavior (kept across days) meant 3 losses late Monday made Tuesday's
+    # first loss an instant hard stop and held risk at 0.25x until a win.
+    assert throttle.consecutive_losses == 0
 
 
 # ---- State persistence ----

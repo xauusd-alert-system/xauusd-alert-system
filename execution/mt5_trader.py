@@ -188,6 +188,16 @@ class MultiAssetMT5Trader:
         self.risk_manager = InstitutionalRiskManager(self.cfg, magic=self.magic_number)
         # TradeThrottle: daily trade limit, loss-streak cooldown, risk step-down.
         self.trade_throttle = TradeThrottle(self.cfg)
+        # Audit 2026-08-23 C: halts (hard stop / daily loss limit) must be
+        # visible in Telegram, not only in logs. self.bot is created earlier
+        # in __init__; guard anyway in case of init-order changes.
+        if getattr(self, "bot", None) is not None:
+            _bot = self.bot
+            self.trade_throttle.on_halt = (
+                lambda reason: _bot.send_text_message(
+                    f"⛔ TradeThrottle HALT — новые сделки остановлены до следующей сессии.\nПричина: {reason}"
+                )
+            )
         # W2: live volume comes from config (assets.<key>.volume or backtest.volume)
         # instead of a hard-coded 0.01 that made the 50/30/20 scale-out
         # unimplementable (round(0.5*0.01,2)=0.01 closed the whole position).
