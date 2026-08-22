@@ -16,29 +16,50 @@ STAGE = {
     1: {"target_usd": 80.0, "target_pct": 0.08,
         "max_daily_loss_usd": 50.0, "max_daily_loss_pct": 0.05,
         "max_dd_usd": 100.0, "max_dd_pct": 0.10,
-        "profit_lock_usd": 20.0, "profit_lock_pct": 0.02,
+        # RESEARCH (deep-research-report): experts recommend NOT using profit
+        # lock — it caps upside without reducing risk. Remove from active rules.
+        # Kept as 0 so the evaluate() code path still works if needed.
+        "profit_lock_usd": 0.0, "profit_lock_pct": 0.0,
         "pause_usd": 60.0, "pause_pct": 0.06},
     2: {"target_usd": 60.0, "target_pct": 0.06,
         "max_daily_loss_usd": 50.0, "max_daily_loss_pct": 0.05,
         "max_dd_usd": 80.0, "max_dd_pct": 0.08,
-        "profit_lock_usd": 15.0, "profit_lock_pct": 0.015,
+        "profit_lock_usd": 0.0, "profit_lock_pct": 0.0,
         "pause_usd": 50.0, "pause_pct": 0.05},
 }
 
 # ТЗ §3: base parameters per profile. pause_usd is per stage.
+# only_a: False everywhere (2026-08-21). 24w data: the A/B grade (retrace
+# depth) does NOT predict outcomes — A avgR -0.073 vs B +0.029, and the split
+# inverts with regime (Feb-Apr prefers shallow, Jun-Aug prefers deep). Gating
+# on grade cuts the worse-or-equal half and removes trades; the real protection
+# is size + trade count, which are already scaled here.
+#
+# RESEARCH 2026-08-22: deep-research-report + us_stocks audit.
+# - Risk 0.25-0.5% of $1000 = $2.5-$5 per trade (matches B/A).
+# - Personal daily stop: experts recommend 3.5-4% ($35-40), well below
+#   firm's -$50. Raised B daily_limit $15→$25 to avoid cutting winners.
+# - Profit lock removed (experts: it limits upside unnecessarily).
+# - 2-loss stop-day is validated by research (prevents tilt).
+# - Commission feasibility: at $2.50 risk, min fee $2 leaves only $0.50
+#   for stop movement. Added commission-aware sizing check.
 PROFILES = {
     "C": {"risk_usd": 2.0, "risk_pct": 0.002,
           "daily_limit_usd": 10.0, "daily_limit_pct": 0.01,
           "max_trades": 2, "stop_after_losses": 1,
           "pause_usd": {1: 50.0, 2: 40.0}, "pause_pct": {1: 0.05, 2: 0.04},
-          "only_a": True, "max_risk_usd": 2.0},
+          "only_a": False, "max_risk_usd": 2.0},
     "B": {"risk_usd": 2.5, "risk_pct": 0.0025,
-          "daily_limit_usd": 15.0, "daily_limit_pct": 0.015,
+          # RAISED from $15: research says profit lock caps upside.
+          # Personal stop at -$25 is already 50% of firm's -$50.
+          "daily_limit_usd": 25.0, "daily_limit_pct": 0.025,
           "max_trades": 3, "stop_after_losses": 2,
           "pause_usd": {1: 60.0, 2: 50.0}, "pause_pct": {1: 0.06, 2: 0.05},
-          "only_a": True, "max_risk_usd": 2.5},
-    "A": {"risk_usd": 3.5, "risk_pct": 0.0035,
-          "daily_limit_usd": 20.0, "daily_limit_pct": 0.02,
+          "only_a": False, "max_risk_usd": 2.5},
+    "A": {"risk_usd": 5.0, "risk_pct": 0.005,
+          # RAISED from $20: at 0.5% risk, $5 risk is at the upper edge
+          # of the research-recommended range. Allow bigger daily swings.
+          "daily_limit_usd": 30.0, "daily_limit_pct": 0.03,
           "max_trades": 3, "stop_after_losses": 2,
           "pause_usd": {1: 50.0, 2: 50.0}, "pause_pct": {1: 0.05, 2: 0.05},
           "only_a": False, "max_risk_usd": 5.0},
@@ -47,8 +68,9 @@ PROFILES = {
 # ТЗ §2.3: drawdown scaling steps (applied between days).
 # (total_drawdown_pct, risk_usd, max_trades, only_a)
 DRAWDOWN_STEPS = [
-    (0.030, 2.0, 2, True),    # -3%: risk 0.2%, 2 trades, A only
-    (0.045, 1.5, 1, True),    # -4.5% (S1) / -4% (S2): risk 0.15%, 1 trade, A only
+    (0.030, 2.0, 2, False),   # -3%: risk 0.2%, 2 trades (both grades — grade
+                              #       does not predict outcomes, see PROFILES)
+    (0.045, 1.5, 1, False),   # -4.5% (S1) / -4% (S2): risk 0.15%, 1 trade
 ]
 
 DEFAULT_STATE_PATH = os.path.join(
@@ -203,7 +225,7 @@ class DailyStateMachine:
             s.status = "stop_day"
             s.status_reason = f"daily limit ({daily:+.2f} <= -{eff['daily_limit_usd']:.0f}$)"
             return "flatten_day"
-        if daily >= st["profit_lock_usd"]:
+        if st["profit_lock_usd"] > 0 and daily >= st["profit_lock_usd"]:
             s.status = "profit_locked"
             s.status_reason = f"profit lock ({daily:+.2f} >= +{st['profit_lock_usd']:.0f}$)"
             return "flatten_day"
@@ -232,14 +254,25 @@ class DailyStateMachine:
             return False, f"profile {s.profile} allows A-setups only"
         return True, "ok"
 
-    def position_size(self, price: float, stop_price: float, bias: str) -> int:
+    def position_size(self, price: float, stop_price: float, bias: str,
+                      commission_per_share: float = 0.0) -> int:
         """Fractional share count so the max loss on a full stop-out equals
-        the effective risk in dollars (ТЗ §4.6)."""
+        the effective risk in dollars (ТЗ §4.6).
+
+        RESEARCH 2026-08-22: commission-aware sizing. At $2.50 risk and
+        $1/share commission, two-side commission eats $2, leaving only $0.50
+        for the actual stop. This method now subtracts estimated round-trip
+        commission from the risk budget before computing qty.
+        """
         s = self.state
         stop_dist = abs(price - stop_price)
         if stop_dist <= 0 or price <= 0:
             return 0
-        qty = s.effective_risk_usd / stop_dist
+        # Subtract estimated round-trip commission from risk budget
+        risk_after_costs = s.effective_risk_usd - 2 * commission_per_share
+        if risk_after_costs <= 0:
+            return 0  # commissions exceed risk budget — no-trade
+        qty = risk_after_costs / stop_dist
         return round(qty, 2)
 
     def risk_check(self, price: float, stop_price: float) -> dict:

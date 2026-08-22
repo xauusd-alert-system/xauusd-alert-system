@@ -18,7 +18,10 @@ DEFAULT_JOURNAL = os.path.join(
 
 HEADER = ["num", "date", "time", "instrument", "direction", "setup_class",
           "entry_price", "stop", "target", "risk_usd", "risk_pct", "result_usd",
-          "result_r", "outcome", "by_plan", "violation", "comment"]
+          "result_r", "outcome", "by_plan", "violation", "comment",
+          # RESEARCH 2026-08-22: expanded columns for commission + session + regime
+          "commission_usd", "session_bucket", "time_in_trade_min", "volume_ratio",
+          "regime"]
 
 
 def _ensure(path: str) -> None:
@@ -31,7 +34,9 @@ def _ensure(path: str) -> None:
 def add_trade(path: str, date, time, instrument, direction, setup_class,
               entry_price, stop, target, risk_usd, risk_pct, result_usd=None,
               result_r=None, outcome="", by_plan="да", violation="", comment="",
-              num: int | None = None) -> int:
+              num: int | None = None, commission_usd: float = 0.0,
+              session_bucket: str = "", time_in_trade_min: float = 0.0,
+              volume_ratio: float = 0.0, regime: str = "") -> int:
     """Append one trade. Returns its number."""
     _ensure(path)
     if num is None:
@@ -44,7 +49,9 @@ def add_trade(path: str, date, time, instrument, direction, setup_class,
                     entry_price, stop, target, risk_usd, risk_pct,
                     "" if result_usd is None else result_usd,
                     "" if result_r is None else result_r,
-                    outcome, by_plan, violation, comment])
+                    outcome, by_plan, violation, comment,
+                    commission_usd, session_bucket,
+                    time_in_trade_min, volume_ratio, regime])
     return num
 
 
@@ -82,7 +89,8 @@ def read(path: str = DEFAULT_JOURNAL) -> list[dict]:
 
 
 def daily_summary(path: str = DEFAULT_JOURNAL) -> list[dict]:
-    """Per-day aggregates: trades, PnL, win rate, avg R, by-plan share."""
+    """Per-day aggregates: trades, PnL, win rate, avg R, by-plan share,
+    commission, session bucket distribution."""
     rows = read(path)
     days = OrderedDict()
     for r in rows:
@@ -94,6 +102,10 @@ def daily_summary(path: str = DEFAULT_JOURNAL) -> list[dict]:
         planned = [x for x in rs if x["by_plan"].strip().lower() in ("да", "yes", "1")]
         wins = [x for x in rs if x["outcome"].strip().upper() in ("W", "WIN")]
         losses = [x for x in rs if x["outcome"].strip().upper() in ("L", "LOSS")]
+        # RESEARCH 2026-08-22: new metrics
+        commissions = [float(x.get("commission_usd", 0) or 0) for x in rs]
+        buckets = [x.get("session_bucket", "") for x in rs if x.get("session_bucket")]
+        time_in = [float(x.get("time_in_trade_min", 0) or 0) for x in rs]
         out.append({
             "date": d,
             "trades": len(rs),
@@ -102,6 +114,9 @@ def daily_summary(path: str = DEFAULT_JOURNAL) -> list[dict]:
             "win_rate_pct": round(100 * len(wins) / len(rs), 1) if rs else 0.0,
             "losses": len(losses),
             "by_plan_pct": round(100 * len(planned) / len(rs), 1) if rs else 0.0,
+            "total_commission_usd": round(sum(commissions), 2),
+            "avg_time_in_trade_min": round(sum(time_in) / len(time_in), 1) if time_in else 0.0,
+            "session_buckets": dict((b, buckets.count(b)) for b in set(buckets)) if buckets else {},
         })
     return out
 
