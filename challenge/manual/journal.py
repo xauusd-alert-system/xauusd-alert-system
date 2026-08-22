@@ -88,6 +88,17 @@ def read(path: str = DEFAULT_JOURNAL) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def _safe_float(val):
+    """Audit C 2026-08-23: manual CSV — one malformed cell must not crash the
+    summaries. Returns None for empty/invalid values (callers skip Nones)."""
+    if val in ("", None):
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def daily_summary(path: str = DEFAULT_JOURNAL) -> list[dict]:
     """Per-day aggregates: trades, PnL, win rate, avg R, by-plan share,
     commission, session bucket distribution."""
@@ -97,15 +108,15 @@ def daily_summary(path: str = DEFAULT_JOURNAL) -> list[dict]:
         days.setdefault(r["date"], []).append(r)
     out = []
     for d, rs in days.items():
-        usd = [float(x["result_usd"]) for x in rs if x["result_usd"] not in ("", None)]
-        rr = [float(x["result_r"]) for x in rs if x["result_r"] not in ("", None)]
+        usd = [v for v in (_safe_float(x["result_usd"]) for x in rs) if v is not None]
+        rr = [v for v in (_safe_float(x["result_r"]) for x in rs) if v is not None]
         planned = [x for x in rs if x["by_plan"].strip().lower() in ("да", "yes", "1")]
         wins = [x for x in rs if x["outcome"].strip().upper() in ("W", "WIN")]
         losses = [x for x in rs if x["outcome"].strip().upper() in ("L", "LOSS")]
         # RESEARCH 2026-08-22: new metrics
-        commissions = [float(x.get("commission_usd", 0) or 0) for x in rs]
+        commissions = [v for v in (_safe_float(x.get("commission_usd")) for x in rs) if v is not None]
         buckets = [x.get("session_bucket", "") for x in rs if x.get("session_bucket")]
-        time_in = [float(x.get("time_in_trade_min", 0) or 0) for x in rs]
+        time_in = [v for v in (_safe_float(x.get("time_in_trade_min")) for x in rs) if v is not None]
         out.append({
             "date": d,
             "trades": len(rs),
@@ -136,9 +147,9 @@ def weekly_metrics(path: str = DEFAULT_JOURNAL) -> list[dict]:
 
     out = []
     for key, rs in weeks.items():
-        rr = [float(x["result_r"]) for x in rs if x["result_r"] not in ("", None)]
+        rr = [v for v in (_safe_float(x["result_r"]) for x in rs) if v is not None]
         a_rs = [x for x in rs if x["setup_class"].strip().upper() == "A"]
-        a_rr = [float(x["result_r"]) for x in a_rs if x["result_r"] not in ("", None)]
+        a_rr = [v for v in (_safe_float(x["result_r"]) for x in a_rs) if v is not None]
         planned = [x for x in rs if x["by_plan"].strip().lower() in ("да", "yes", "1")]
         wins_a = [x for x in a_rs if x["outcome"].strip().upper() in ("W", "WIN")]
 
@@ -152,7 +163,7 @@ def weekly_metrics(path: str = DEFAULT_JOURNAL) -> list[dict]:
 
         by_day = {}
         for x in rs:
-            usd = float(x["result_usd"]) if x["result_usd"] not in ("", None) else 0.0
+            usd = _safe_float(x["result_usd"]) or 0.0
             by_day[x["date"]] = by_day.get(x["date"], 0.0) + usd
         max_dd = 0.0
         for d, pnl in by_day.items():

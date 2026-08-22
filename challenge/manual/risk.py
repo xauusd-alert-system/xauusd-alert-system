@@ -92,6 +92,7 @@ class DayState:
     status_reason: str = ""
     effective_risk_usd: float = 2.5     # after profile + drawdown scaling
     effective_max_trades: int = 3
+    effective_stop_after_losses: int = 2   # audit B: per-day effective rule
     effective_only_a: bool = True
     risk_reduced: bool = False
     paused_until: str = ""              # ISO date when a pause ends
@@ -167,6 +168,7 @@ class DailyStateMachine:
             current_equity=day_start_equity,
             effective_risk_usd=float(eff["risk_usd"]),
             effective_max_trades=int(eff["max_trades"]),
+            effective_stop_after_losses=int(eff["stop_after_losses"]),
             effective_only_a=bool(eff["only_a"]),
             risk_reduced=(float(eff["risk_usd"]) < float(PROFILES[profile]["risk_usd"])),
         )
@@ -217,9 +219,14 @@ class DailyStateMachine:
         eff = effective_profile(s.stage, s.profile, total, s.total_start_equity)
 
         if total <= -pause_usd:
-            s.status = "paused"
-            s.status_reason = f"challenge pause -{pause_usd:.0f}$ reached ({total:+.2f})"
-            s.paused_until = (dt.date.today() + dt.timedelta(days=5)).isoformat()
+            # Audit A 2026-08-23: anchor the pause ONCE at the transition.
+            # Previously every equity update while paused re-wrote
+            # paused_until = today+5d, so monitoring during a pause slid the
+            # end date forward forever.
+            if s.status != "paused":
+                s.status = "paused"
+                s.status_reason = f"challenge pause -{pause_usd:.0f}$ reached ({total:+.2f})"
+                s.paused_until = (dt.date.today() + dt.timedelta(days=5)).isoformat()
             return "halt"
         if daily <= -eff["daily_limit_usd"]:
             s.status = "stop_day"
@@ -248,8 +255,11 @@ class DailyStateMachine:
             return False, f"day status is {s.status} ({s.status_reason})"
         if s.trades_today >= s.effective_max_trades:
             return False, f"max {s.effective_max_trades} trades/day reached"
-        if s.losses_today >= 2:
-            return False, "2 losses today (stop-day)"
+        # Audit B: use the day's effective rule instead of a hard-coded 2
+        # (profile C stops after 1 loss; drawdown modes may differ).
+        if s.losses_today >= s.effective_stop_after_losses:
+            return False, (f"{s.losses_today} losses today "
+                           f"(stop-day at {s.effective_stop_after_losses})")
         if s.effective_only_a and setup_class != "A":
             return False, f"profile {s.profile} allows A-setups only"
         return True, "ok"
