@@ -542,7 +542,13 @@ backtest:
 # TradeThrottle: daily trade limit + loss-streak cooldown + risk step-down.
 # Blocks new trades when limits are hit and reduces position size after losses.
 risk_throttle:
-  max_trades_per_day: 5           # global daily trade cap (resets at UTC midnight)
+  # CALIBRATION 2026-08-23 (all-time deal history): the counter increments per
+  # closed LEG (on_trade_closed fires per leg). 16 traded days: mean 27.8
+  # legs/day, median 14, p90=71; the 58-122 spike days ran on the 4x TRIAL
+  # risk window; with XAGUSD off expect ~15-25 legs/day normally.
+  # 30 = never blocks a busy-but-normal day, still stops signal storms
+  # (the old 5 blocked ~90% of signals from the first hour).
+  max_trades_per_day: 30          # global daily trade cap (resets at UTC midnight)
   loss_streak_threshold: 2       # consecutive losses before cooldown activates
   cooldown_minutes: 45           # pause duration after loss_streak_threshold
   hard_stop_streak: 3            # full halt for the day after this many consecutive losses

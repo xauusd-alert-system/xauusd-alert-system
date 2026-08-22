@@ -568,7 +568,9 @@ class MultiAssetMT5Trader:
             if not tick:
                 continue
             price = tick.bid if pos.type == 0 else tick.ask
-            ok = self._close_partial_position(pos, price, pos.volume, label="blackout-halt")
+            ok = self._close_partial_position(pos, price, pos.volume,
+                                              label="blackout-halt",
+                                              quiet_market_closed=True)
             logger.info(f"[blackout] close #{pos.ticket} ({pos.symbol}) "
                         f"{'OK' if ok else 'REJECTED'}: {reason}")
         logger.info(f"[blackout] flatten pass done ({reason})")
@@ -1305,7 +1307,8 @@ class MultiAssetMT5Trader:
             logger.debug(f"Modify failed: {res.comment} ({res.retcode})")
             return False
 
-    def _close_partial_position(self, pos, price, volume, label):
+    def _close_partial_position(self, pos, price, volume, label,
+                                quiet_market_closed: bool = False):
         """Close a partial volume. Returns True only if the order was accepted
         (retcode == TRADE_RETCODE_DONE).
 
@@ -1314,6 +1317,10 @@ class MultiAssetMT5Trader:
         volume) was forever treated as executed — leaving the position full-size,
         without breakeven and without a retry. Success is now signalled by the
         return value and the state is advanced only on real execution.
+
+        quiet_market_closed (audit 2026-08-23): blackout flatten passes run on
+        weekends/holidays when every order is rejected with retcode 10018;
+        demote that expected case to INFO without event spam.
         """
         close_type = mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY
         request = {
@@ -1359,6 +1366,11 @@ class MultiAssetMT5Trader:
                                               "volume": volume})
             logger.info(f"✅ Closed {label} for #{pos.ticket} ({volume} lots)")
             return True
+        retcode_market_closed = getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018)
+        if quiet_market_closed and res.retcode == retcode_market_closed:
+            logger.info(f"[blackout] market closed for {pos.symbol} — "
+                        f"close of #{pos.ticket} deferred to next session")
+            return False
         self._append_trade_event("partial_rejected", asset_key, signal,
                                  position_ticket=pos.ticket, reason=str(res.comment),
                                  payload={"retcode": res.retcode, "label": label})
@@ -1761,11 +1773,19 @@ class MultiAssetMT5Trader:
                     f"Money PnL may be mis-scaled."
                 )
             live_step = float(getattr(info, "volume_step", 0.0) or 0.0)
-            if live_step > 0 and abs(self.volume * 0.5 % live_step) > 1e-9:
-                logger.warning(
-                    f"[{asset_key}] 50% scale-out of live volume {self.volume} is not a "
-                    f"multiple of volume_step {live_step}; partial close may be skipped."
-                )
+            if live_step > 0:
+                # Mirror _scaleout_volume quantization (audit 2026-08-23): the
+                # previous float modulo (`volume*0.5 % step`) fired on exact
+                # multiples because binary floats make 0.5 % 0.01 ~= 0.01.
+                half = self.volume * 0.5
+                tranche = math.floor(half / live_step) * live_step
+                min_lot = float(getattr(info, "volume_min", live_step) or live_step)
+                if tranche < min_lot - 1e-9 or tranche <= 0.0:
+                    logger.warning(
+                        f"[{asset_key}] 50% scale-out of volume {self.volume} "
+                        f"= {half:.4f} lots < min fillable {min_lot:.2f} "
+                        f"(step {live_step:.2f}); partial close would be skipped."
+                    )
 
     def run_loop(self):
         initialize_mt5()
