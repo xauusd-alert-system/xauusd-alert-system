@@ -568,7 +568,9 @@ class MultiAssetMT5Trader:
             if not tick:
                 continue
             price = tick.bid if pos.type == 0 else tick.ask
-            ok = self._close_partial_position(pos, price, pos.volume, label="blackout-halt")
+            ok = self._close_partial_position(pos, price, pos.volume,
+                                              label="blackout-halt",
+                                              quiet_market_closed=True)
             logger.info(f"[blackout] close #{pos.ticket} ({pos.symbol}) "
                         f"{'OK' if ok else 'REJECTED'}: {reason}")
         logger.info(f"[blackout] flatten pass done ({reason})")
@@ -690,6 +692,55 @@ class MultiAssetMT5Trader:
                     )
                     if not leg1_open and self._move_sl_to_entry(pos, entry):
                         trade_data["be_done"] = True
+
+            # CALIBRATION 2026-08-21: PROFIT TRAILING — after breakeven (BE done),
+            # trail the stop into profit. The SL ratchets in our favor, locking
+            # in lock_pct of unrealized profit. Never moves back.
+            # LONG: trail_sl moves UP (closer to current price) = tighter.
+            # SHORT: trail_sl moves DOWN (closer to current price) = tighter.
+            if trade_data.get("be_done", False) and not trade_data.get("trailing_active", False):
+                profit_trail_cfg = self._get_profit_trail_config(symbol)
+                if profit_trail_cfg:
+                    activation_atr = profit_trail_cfg.get("activation_atr", 0.5)
+                    lock_pct = profit_trail_cfg.get("lock_pct", 0.60)
+                    min_profit_price = profit_trail_cfg.get("min_profit_price", 0)
+                    try:
+                        atr_now = self._latest_causal_atr(trade_data.get("symbol", symbol))
+                    except Exception:
+                        atr_now = 0
+                    entry_price = trade_data.get("entry_price", pos.price_open)
+                    if pos.type == 0:  # LONG
+                        unrealized = current_price - entry_price
+                        activation_dist = activation_atr * atr_now if atr_now > 0 else min_profit_price
+                        if unrealized > max(activation_dist, min_profit_price):
+                            # LONG trail: SL moves UP toward current price, locking profit
+                            trail_sl = round(current_price - unrealized * (1 - lock_pct), digits)
+                            min_sl = current_price - self._get_min_dist(symbol, tick, info)
+                            if trail_sl < min_sl:
+                                trail_sl = min_sl
+                            if trail_sl > pos.sl:
+                                self._modify_sl_tp(pos, trail_sl, pos.tp)
+                                trade_data["trailing_active"] = True
+                                logger.info(
+                                    f"PROFIT TRAIL [{symbol}] LONG: SL {pos.sl} -> {trail_sl} "
+                                    f"(profit={unrealized:.5f}, locked={unrealized*lock_pct:.5f})"
+                                )
+                    else:  # SHORT
+                        unrealized = entry_price - current_price
+                        activation_dist = activation_atr * atr_now if atr_now > 0 else min_profit_price
+                        if unrealized > max(activation_dist, min_profit_price):
+                            # SHORT trail: SL moves DOWN toward current price, locking profit
+                            trail_sl = round(current_price + unrealized * (1 - lock_pct), digits)
+                            min_sl = current_price + self._get_min_dist(symbol, tick, info)
+                            if trail_sl > min_sl:
+                                trail_sl = min_sl
+                            if trail_sl < pos.sl:
+                                self._modify_sl_tp(pos, trail_sl, pos.tp)
+                                trade_data["trailing_active"] = True
+                                logger.info(
+                                    f"PROFIT TRAIL [{symbol}] SHORT: SL {pos.sl} -> {trail_sl} "
+                                    f"(profit={unrealized:.5f}, locked={unrealized*lock_pct:.5f})"
+                                )
 
             # Частичные закрытия. W2: each tranche is quantized to the broker's
             # volume_step/volume_min (so a 0.01 base lot no longer closes the whole
@@ -873,6 +924,21 @@ class MultiAssetMT5Trader:
 
         # W10: reflect closed-ticket removal in the persisted management state.
         self._save_management_state()
+
+    def _get_profit_trail_config(self, symbol: str) -> dict | None:
+        """Read profit_trail config for a symbol from signal_grid.
+        Returns dict with activation_atr, lock_pct, min_profit_price or None.
+        """
+        for a_cfg in self.cfg.get("assets", {}).values():
+            if a_cfg.get("mt5_symbol") == symbol:
+                grid = a_cfg.get("signal_grid", {})
+                pt = grid.get("profit_trail")
+                if pt:
+                    return pt
+                break
+        # Fallback to global signal_grid
+        global_grid = self.cfg.get("signal_grid", {})
+        return global_grid.get("profit_trail")
 
     def _latest_causal_atr(self, asset_key: str) -> float:
         pipeline = self.pipelines.get(asset_key)
@@ -1241,7 +1307,8 @@ class MultiAssetMT5Trader:
             logger.debug(f"Modify failed: {res.comment} ({res.retcode})")
             return False
 
-    def _close_partial_position(self, pos, price, volume, label):
+    def _close_partial_position(self, pos, price, volume, label,
+                                quiet_market_closed: bool = False):
         """Close a partial volume. Returns True only if the order was accepted
         (retcode == TRADE_RETCODE_DONE).
 
@@ -1250,6 +1317,10 @@ class MultiAssetMT5Trader:
         volume) was forever treated as executed — leaving the position full-size,
         without breakeven and without a retry. Success is now signalled by the
         return value and the state is advanced only on real execution.
+
+        quiet_market_closed (audit 2026-08-23): blackout flatten passes run on
+        weekends/holidays when every order is rejected with retcode 10018;
+        demote that expected case to INFO without event spam.
         """
         close_type = mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY
         request = {
@@ -1295,6 +1366,11 @@ class MultiAssetMT5Trader:
                                               "volume": volume})
             logger.info(f"✅ Closed {label} for #{pos.ticket} ({volume} lots)")
             return True
+        retcode_market_closed = getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018)
+        if quiet_market_closed and res.retcode == retcode_market_closed:
+            logger.info(f"[blackout] market closed for {pos.symbol} — "
+                        f"close of #{pos.ticket} deferred to next session")
+            return False
         self._append_trade_event("partial_rejected", asset_key, signal,
                                  position_ticket=pos.ticket, reason=str(res.comment),
                                  payload={"retcode": res.retcode, "label": label})
@@ -1483,28 +1559,23 @@ class MultiAssetMT5Trader:
         for leg_volume, (_, leg_no) in zip(self._leg_volumes(info), self.SCALEOUT_RATIOS):
             if leg_volume <= 0:
                 continue
+            leg_tp = leg_tps[leg_no - 1]
             leg_signal = dict(signal)
             leg_signal["leg"] = leg_no
-            # Market orders fill at the CURRENT tick price, not the signal-time
-            # `price`. Drift-correcting the signal-time levels by a per-leg delta
-            # introduces inconsistent TP distances across legs when the market
-            # moves between fills. Instead, recompute each leg's SL/TP directly
-            # from the LIVE tick, preserving the exact entry->SL and entry->TP
-            # distances of the signal-time geometry.
+            # Market orders fill at the CURRENT price; between leg fills the
+            # market can move past the signal-time levels and the broker then
+            # rejects SL/TP with Retcode 10016 ("Invalid stops"). Recenter each
+            # leg's SL/TP on the live price, preserving the exact entry->SL and
+            # entry->TP distances of the signal-time geometry.
+            leg_sl = sl_price
             try:
                 live_tick = mt5.symbol_info_tick(mt5_symbol)
                 if live_tick is not None:
                     live_price = float(live_tick.ask if bias == "long" else live_tick.bid)
-                    leg_mult = float(grid.get(f"tp{leg_no}_mult", float(leg_no)))
-                    leg_stop_mult = float(grid.get("stop_mult", 2.0))
-                    leg_tp = round(live_price + direction * step * leg_mult, digits)
-                    leg_sl = round(live_price - direction * step * leg_stop_mult, digits)
-                else:
-                    leg_tp = leg_tps[leg_no - 1]
-                    leg_sl = sl_price
+                    drift = live_price - price
+                    leg_sl = round(sl_price + drift, digits)
+                    leg_tp = round(leg_tp + drift, digits)
             except Exception as exc:
-                leg_tp = leg_tps[leg_no - 1]
-                leg_sl = sl_price
                 logger.warning(
                     "[%s] Live tick unavailable (%s); using signal-time levels", asset_key, exc)
             request = {
@@ -1702,11 +1773,19 @@ class MultiAssetMT5Trader:
                     f"Money PnL may be mis-scaled."
                 )
             live_step = float(getattr(info, "volume_step", 0.0) or 0.0)
-            if live_step > 0 and abs(self.volume * 0.5 % live_step) > 1e-9:
-                logger.warning(
-                    f"[{asset_key}] 50% scale-out of live volume {self.volume} is not a "
-                    f"multiple of volume_step {live_step}; partial close may be skipped."
-                )
+            if live_step > 0:
+                # Mirror _scaleout_volume quantization (audit 2026-08-23): the
+                # previous float modulo (`volume*0.5 % step`) fired on exact
+                # multiples because binary floats make 0.5 % 0.01 ~= 0.01.
+                half = self.volume * 0.5
+                tranche = math.floor(half / live_step) * live_step
+                min_lot = float(getattr(info, "volume_min", live_step) or live_step)
+                if tranche < min_lot - 1e-9 or tranche <= 0.0:
+                    logger.warning(
+                        f"[{asset_key}] 50% scale-out of volume {self.volume} "
+                        f"= {half:.4f} lots < min fillable {min_lot:.2f} "
+                        f"(step {live_step:.2f}); partial close would be skipped."
+                    )
 
     def run_loop(self):
         initialize_mt5()
