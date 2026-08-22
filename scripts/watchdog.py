@@ -33,6 +33,11 @@ MAX_RESTARTS = int(os.getenv("WATCHDOG_MAX_RESTARTS", "20"))
 COOLDOWN_SECS = int(os.getenv("WATCHDOG_COOLDOWN_SECS", "10"))
 # If the trader runs longer than this without crashing, reset the crash counter
 STABLE_SECONDS = int(os.getenv("WATCHDOG_STABLE_SECONDS", "300"))
+# Audit 2026-08-23 D: cooldown grows exponentially between consecutive fast
+# crashes so a broken terminal isn't hammered every 10s.
+MAX_BACKOFF_SECS = int(os.getenv("WATCHDOG_MAX_BACKOFF_SECS", "60"))
+# Audit A: heartbeat refresh interval while the trader is healthy.
+HEARTBEAT_SECS = int(os.getenv("WATCHDOG_HEARTBEAT_SECS", "30"))
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -120,6 +125,29 @@ def _acquire_single_instance_lock() -> bool:
     return True
 
 
+def _cooldown_for(crashes: int) -> float:
+    """Audit D: exponential cooldown between consecutive fast crashes."""
+    return min(float(COOLDOWN_SECS) * (2 ** max(0, crashes - 1)), float(MAX_BACKOFF_SECS))
+
+
+def _tg(text: str) -> None:
+    """Audit C: fire-and-forget Telegram notify (send-only, no polling — no
+    getUpdates conflict). Used for crash-restart and give-up visibility: when
+    the trader is down, its own bot can't tell you anything."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_ADMIN_CHAT_ID")
+    if not token or not chat:
+        return
+    try:
+        import requests  # local import: watchdog stays stdlib-only at startup
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat, "text": text}, timeout=10,
+        )
+    except Exception as exc:
+        log.warning("Telegram notify failed: %s", exc)
+
+
 def _launch_trader() -> subprocess.Popen:
     """Start the trader as a subprocess, inheriting the current env."""
     env = os.environ.copy()
@@ -127,15 +155,20 @@ def _launch_trader() -> subprocess.Popen:
     trader_log = open(os.path.join(PROJECT_ROOT, "logs", "trader_stdout.log"), "a", encoding="utf-8")
     trader_err = open(os.path.join(PROJECT_ROOT, "logs", "trader_stderr.log"), "a", encoding="utf-8")
 
-    proc = subprocess.Popen(
-        [sys.executable, "-u", TRADER_PATH],
-        cwd=PROJECT_ROOT,
-        env=env,
-        stdout=trader_log,
-        stderr=trader_err,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # no console popup on Windows
-    )
-    return proc
+    try:
+        # Audit B: close the parent-side handles right after spawn — the child
+        # keeps its inherited copies. Previously they leaked per restart.
+        return subprocess.Popen(
+            [sys.executable, "-u", TRADER_PATH],
+            cwd=PROJECT_ROOT,
+            env=env,
+            stdout=trader_log,
+            stderr=trader_err,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # no console popup on Windows
+        )
+    finally:
+        trader_log.close()
+        trader_err.close()
 
 
 def main():
@@ -153,6 +186,8 @@ def main():
     while not shutdown_requested:
         if consecutive_crashes >= MAX_RESTARTS:
             log.error(f"Hit max consecutive crashes ({MAX_RESTARTS}). Watchdog stopping.")
+            _tg(f"⛔ Watchdog сдался после {MAX_RESTARTS} рестартов подряд. "
+                f"Трейдер НЕ работает — нужен ручной запуск.")
             break
 
         log.info(f"Launching trader (attempt #{consecutive_crashes + 1})...")
@@ -166,12 +201,20 @@ def main():
 
         log.info(f"Trader started — PID={proc.pid}")
         start_time = time.time()
+        _write_heartbeat(proc.pid)
 
-        # Block until trader exits
-        try:
-            returncode = proc.wait()
-        except Exception:
-            returncode = -1
+        # Block until trader exits; audit A: refresh the heartbeat while
+        # healthy so external monitors can detect watchdog liveness.
+        returncode = -1
+        while True:
+            try:
+                returncode = proc.wait(timeout=HEARTBEAT_SECS)
+                break
+            except subprocess.TimeoutExpired:
+                _write_heartbeat(proc.pid)
+            except Exception:
+                returncode = -1
+                break
 
         uptime = time.time() - start_time
         log.info(f"Trader exited — code={returncode}, uptime={uptime:.0f}s")
@@ -185,11 +228,17 @@ def main():
             consecutive_crashes = 0
         else:
             consecutive_crashes += 1
+            # Audit C: a fast crash is abnormal — make it visible in Telegram.
+            _tg(f"🔄 Trader упал (code={returncode}, uptime={uptime:.0f}s). "
+                f"Рестарт {consecutive_crashes}/{MAX_RESTARTS}...")
 
         _write_heartbeat(proc.pid)
 
-        # Cooldown before restart
+        # Cooldown before restart — audit D: exponential on consecutive fast
+        # crashes (10s -> 20s -> ... capped), plain cooldown after healthy runs.
         remaining = COOLDOWN_SECS - uptime
+        if consecutive_crashes > 0:
+            remaining = max(remaining, _cooldown_for(consecutive_crashes))
         if remaining > 0:
             log.info(f"Cooling down {remaining:.0f}s before restart...")
             time.sleep(remaining)
