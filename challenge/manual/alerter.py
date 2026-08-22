@@ -26,6 +26,49 @@ import yaml
 ROOT = r"C:\Users\botbo\Desktop\xauusd-alert-system"
 sys.path.insert(0, ROOT)
 
+# Audit G 2026-08-23: under pythonw (scheduled task) stdout/stderr are None
+# and every print() would silently vanish. Route them to a log file instead.
+os.makedirs(os.path.join(ROOT, "logs", "challenge"), exist_ok=True)
+if sys.stderr is None:
+    sys.stderr = open(os.path.join(ROOT, "logs", "challenge", "alerter_stderr.log"),
+                      "a", encoding="utf-8")
+if sys.stdout is None:
+    sys.stdout = open(os.path.join(ROOT, "logs", "challenge", "alerter_stdout.log"),
+                      "a", encoding="utf-8")
+
+# Audit G: single-instance guard — a second copy would double-scan and race
+# the sent-file dedupe. Same pattern as watchdog.lock.
+_LOCK_FILE = os.path.join(ROOT, "logs", "alerter.lock")
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        return '"python' in out
+    except Exception:
+        return False
+
+
+def acquire_single_instance() -> bool:
+    if os.path.exists(_LOCK_FILE):
+        try:
+            old_pid = int(open(_LOCK_FILE, encoding="utf-8").read().strip())
+            if old_pid != os.getpid() and _pid_alive(old_pid):
+                print(f"another alerter alive (pid={old_pid}) — exiting",
+                      file=sys.stderr)
+                return False
+        except (ValueError, OSError):
+            pass
+    with open(_LOCK_FILE, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+import subprocess  # noqa: E402  (used by the instance guard above)
+
 from config.loader import get_env  # loads .env via dotenv
 from challenge.manual import scanner as scanner_mod
 from challenge.manual import risk as risk_mod
@@ -266,6 +309,11 @@ def main() -> int:
     print(f"Алертер запущен: poll {POLL_SECONDS}s, сессия {SESSION_START}-{SESSION_END} UTC, "
           f"watchlist {len(CFG.get('watchlist', []))}", file=sys.stderr)
     last_summary_date = ""
+    # Audit A: token-death monitor — if the UTEX refresh token rots, the loop
+    # used to fail silently every cycle forever. Now: 5 failures in a row ->
+    # one Telegram scream, then a reminder every 10 min until it recovers.
+    refresh_failures = 0
+    last_dead_alert = 0.0
     while True:
         now = dt.datetime.now(dt.timezone.utc)
         t = now.time()
@@ -277,8 +325,20 @@ def main() -> int:
             print(f"{now:%H:%M:%S} UTC: вне сессии, жду", file=sys.stderr)
             time.sleep(POLL_SECONDS)
             continue
+        access = None
         try:
             access = refresh_access()
+            refresh_failures = 0
+        except Exception as e:
+            refresh_failures += 1
+            print(f"{now:%H:%M:%S} UTC: refresh failed ({refresh_failures}): {e}",
+                  file=sys.stderr)
+            if refresh_failures >= 5 and now.timestamp() - last_dead_alert > 600:
+                tg_send("🚨 Алерты челленджа МЕРТВЫ: UTEX-токен не обновляется "
+                        f"({refresh_failures} неудач подряд). Нужен релогин в браузере.")
+                last_dead_alert = now.timestamp()
+            time.sleep(POLL_SECONDS)
+            continue
             if finalizing:
                 # Сессия закончилась: финализируем EOD-исходы и шлём сводку дня.
                 try:
@@ -323,4 +383,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if not acquire_single_instance():
+        sys.exit(1)
     sys.exit(main())

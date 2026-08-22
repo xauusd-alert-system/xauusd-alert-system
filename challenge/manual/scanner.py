@@ -361,8 +361,13 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
                    if b["time"] > t_end.timestamp()), len(bars5))
 
     closes5 = [b["close"] for b in bars5]
-    avg_range = sum(b["high"] - b["low"] for b in bars5[-20:]) / min(20, len(bars5))
-    avg_vol = sum(b.get("volume", 0) for b in bars5[-20:]) / min(20, len(bars5))
+    # Audit K 2026-08-23: baselines over SESSION bars only. The day's last-20
+    # window includes pre-market early on, where volume is a fraction of RTH —
+    # that made the 0.8x signal-volume threshold trivially easy to pass.
+    sess_bars5 = [b for b in bars5 if b["time"] >= t_start.timestamp()]
+    base_bars = sess_bars5[-20:] if len(sess_bars5) >= 10 else bars5[-20:]
+    avg_range = sum(b["high"] - b["low"] for b in base_bars) / max(1, len(base_bars))
+    avg_vol = sum(b.get("volume", 0) for b in base_bars) / max(1, len(base_bars))
 
     setup = Setup(symbol, str(date), "none", "none", trend15=trend15, trend30=trend30)
     trend = trend15 if trend15 == trend30 else ("up" if trend15 != "flat" else "flat")
