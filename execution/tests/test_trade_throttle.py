@@ -100,15 +100,15 @@ def test_cooldown_resets_on_win(throttle):
     assert ok
 
 
-def test_cooldown_expires(throttle_short_cooldown):
-    throttle_short_cooldown.on_trade_closed(-10.0)
-    throttle_short_cooldown.on_trade_closed(-10.0)
-    ok, _ = throttle_short_cooldown.can_trade(10000.0)
+def test_cooldown_expires(throttle):
+    throttle.on_trade_closed(-10.0)
+    throttle.on_trade_closed(-10.0)
+    ok, _ = throttle.can_trade(10000.0)
     assert not ok  # cooldown active
 
     # Force cooldown to expire by setting it in the past
-    throttle_short_cooldown.cooldown_until = time.time() - 1.0
-    ok, _ = throttle_short_cooldown.can_trade(10000.0)
+    throttle.cooldown_until = time.time() - 1.0
+    ok, _ = throttle.can_trade(10000.0)
     assert ok
 
 
