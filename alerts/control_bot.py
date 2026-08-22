@@ -62,6 +62,8 @@ class TelegramControlBot:
 
     POLL_TIMEOUT = 30          # seconds for long-poll
     RETRY_SLEEP  = 5           # seconds between retries on network error
+    MAX_BACKOFF  = 60          # audit B: cap for exponential poll backoff
+    STALE_UPDATE_SECONDS = 600 # audit C: ignore updates older than this
 
     def __init__(self, trader: "MultiAssetMT5Trader") -> None:
         self.trader = trader
@@ -115,14 +117,19 @@ class TelegramControlBot:
     # Polling
     # ------------------------------------------------------------------
     def _poll_loop(self) -> None:
+        # Audit B: exponential backoff — a 409 conflict / network outage used
+        # to produce a log line every 5s indefinitely.
+        backoff = self.RETRY_SLEEP
         while not self._stop.is_set():
             try:
                 updates = self._get_updates()
+                backoff = self.RETRY_SLEEP  # success resets the backoff
                 for upd in updates:
                     self._handle_update(upd)
             except Exception as exc:
-                logger.warning("Poll error: %s", exc)
-                time.sleep(self.RETRY_SLEEP)
+                logger.warning("Poll error: %s (retrying in %ss)", exc, backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, self.MAX_BACKOFF)
 
     def _get_updates(self) -> list:
         resp = requests.get(
@@ -141,6 +148,19 @@ class TelegramControlBot:
         msg = upd.get("message") or upd.get("edited_message")
         if not msg:
             return
+        # Audit C: replay guard. The offset lives only in memory, so after a
+        # crash+restart every unconfirmed update re-fires — including mutating
+        # commands like /closeall. Commands older than 10 minutes are stale.
+        # Updates without a timestamp can't be judged -> treat as fresh.
+        date_ts = msg.get("date")
+        if date_ts is not None:
+            try:
+                age = time.time() - int(date_ts)
+            except (TypeError, ValueError):
+                age = 0
+            if age > self.STALE_UPDATE_SECONDS:
+                logger.info("Skipping stale update (%ss old)", int(age))
+                return
         chat_id = str(msg["chat"]["id"])
         text = (msg.get("text") or "").strip()
         if not text.startswith("/"):
@@ -644,6 +664,15 @@ class TelegramControlBot:
         if parse_mode:
             params["parse_mode"] = parse_mode
         try:
-            requests.post(f"{self._base}/sendMessage", data=params, timeout=10)
+            resp = requests.post(f"{self._base}/sendMessage", data=params, timeout=10)
+            # Audit A: check delivery. Telegram answers 400 for broken Markdown
+            # (a symbol with _ or * in /positions output) — retry once as plain
+            # text so the answer is never silently lost.
+            if not resp.ok and parse_mode:
+                params.pop("parse_mode")
+                resp = requests.post(f"{self._base}/sendMessage", data=params, timeout=10)
+            if not resp.ok:
+                logger.warning("sendMessage to %s failed: %s %s",
+                               chat_id, resp.status_code, resp.text[:200])
         except Exception as exc:
             logger.warning("Send failed: %s", exc)
