@@ -234,9 +234,13 @@ def detect_sr_zones(candles: list, current_date: dt.date,
         direction = "resistance" if kind == "swing_high" else "support"
         zones.append(SRZone(price, source, direction, 1, 0.35, str(current_date - dt.timedelta(days=1))))
 
-    # Cluster nearby zones
-    levels = [(z.price, z.zone_type, z.source_date) for z in zones]
-    clustered = _cluster_zones(levels, tolerance_pct=0.002)
+    # Cluster nearby zones — audit A 2026-08-23: pass the pre-assigned
+    # direction through and use the direction-aware clusterer. The old 3-tuple
+    # path re-derived direction from substrings of the type name, so a
+    # "prev_close" cluster (no "high"/"low" in the name) silently flipped to
+    # "support" regardless of where the close sat in the day's range.
+    levels = [(z.price, z.zone_type, z.source_date, z.direction) for z in zones]
+    clustered = _cluster_zones_with_direction(levels, tolerance_pct=0.002)
 
     return clustered
 
@@ -266,7 +270,8 @@ def _resample_5min(candles: list) -> list:
 
 
 def check_proximity(entry: float, stop: float, target: float, bias: str,
-                    zones: list[SRZone], buffer_usd: float = 2.0) -> tuple[bool, str]:
+                    zones: list[SRZone], buffer_usd: float = 2.0,
+                    buffer_pct: float = 0.0) -> tuple[bool, str]:
     """Check if entry/stop/target are too close to S/R zones.
 
     Per us_stocks audit §5.2:
@@ -275,10 +280,16 @@ def check_proximity(entry: float, stop: float, target: float, bias: str,
     - Stop should be placed BEYOND the opposing zone, not inside it
     - Target should not be right at a zone (partial exit zone)
 
+    Audit B 2026-08-23: buffer is price-scaled when buffer_pct > 0 — an
+    absolute $2 buffer on a $0.28 stock (CAN) covered ±700% of price and
+    blocked every setup, while being negligible on a $950 one (MU).
+    buffer_pct wins when both are provided; buffer_usd stays as legacy.
+
     Returns (ok, reason). ok=True means the setup passes the S/R check.
     """
     if not zones:
         return True, ""
+    buffer_usd = entry * (buffer_pct / 100.0) if buffer_pct > 0 else buffer_usd
 
     # Sort zones by distance from entry
     nearby = sorted(zones, key=lambda z: z.distance_from(entry))
