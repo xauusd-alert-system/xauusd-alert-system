@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAIRS MODEL — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+  .header { background:var(--panel); border-bottom:1px solid var(--border); padding:12px 20px;
+             display:flex; align-items:center; gap:16px; }
+  .header h1 { font-size:16px; color:var(--accent); font-weight:600; }
+  .header .method { color:var(--dim); font-size:12px; }
+  select { background:var(--panel); color:var(--text); border:1px solid var(--border);
+            padding:4px 8px; border-radius:4px; font-family:var(--mono); font-size:12px; }
+  .container { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); }
+  .panel { background:var(--panel); padding:14px 18px; }
+  .panel h3 { color:var(--accent); font-size:11px; text-transform:uppercase; letter-spacing:1px;
+               margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  .params { display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .param { display:flex; justify-content:space-between; padding:2px 0; }
+  .param .label { color:var(--dim); }
+  .param .value { color:var(--text); font-weight:600; }
+  .formula { grid-column:1/-1; color:var(--dim); font-size:11px; padding:6px 0;
+              border-top:1px solid var(--border); margin-top:4px; }
+  .signal-bar { padding:10px 14px; border-radius:4px; font-size:14px; font-weight:700;
+                 text-align:center; margin:8px 0; }
+  .signal-bar.long { background:rgba(63,185,80,0.15); color:var(--green); border:1px solid var(--green); }
+  .signal-bar.short { background:rgba(248,81,73,0.15); color:var(--red); border:1px solid var(--red); }
+  .signal-bar.neutral { background:rgba(139,148,158,0.1); color:var(--dim); border:1px solid var(--border); }
+  .chart-panel { min-height:280px; }
+  .math-board { display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; }
+  .math-item { display:flex; justify-content:space-between; padding:2px 0; }
+  .math-item .label { color:var(--dim); }
+  .math-item .value { font-weight:600; }
+  .hurst-label { font-size:11px; margin-top:6px; padding:4px 8px; border-radius:3px; }
+  .hurst-label.trending { background:rgba(248,81,73,0.1); color:var(--red); }
+  .hurst-label.meanrev { background:rgba(63,185,80,0.1); color:var(--green); }
+  .hurst-label.random { background:rgba(139,148,158,0.1); color:var(--dim); }
+  .ensemble-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .ensemble-table th { text-align:left; color:var(--dim); font-weight:400; padding:4px 6px;
+                        border-bottom:1px solid var(--border); }
+  .ensemble-table td { padding:4px 6px; border-bottom:1px solid var(--border); }
+  .ensemble-table .dir-long { color:var(--green); }
+  .ensemble-table .dir-short { color:var(--red); }
+  .ensemble-table .dir-neutral { color:var(--dim); }
+  .conf-bar { display:inline-block; height:6px; border-radius:3px; min-width:2px; }
+  .ensemble-summary { margin-top:8px; font-size:14px; font-weight:700; text-align:center; }
+  .full-width { grid-column:1/-1; }
+  canvas { max-height:240px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>PAIRS MODEL</h1>
+  <select id="pairSelect" onchange="showPair()"></select>
+  <select id="tfSelect" onchange="showPair()">
+    <option value="D1">D1</option><option value="H1">H1</option>
+  </select>
+  <span class="method" id="methodLabel"></span>
+</div>
+<div class="container" id="main"></div>
+
+<script>
+const DATA = {"timeframe": "D1", "pairs": [{"name": "XAU/XAG", "timeframe": "D1", "n_bars": 679, "start": "2024-01-02", "end": "2026-08-18", "beta": 2.0096, "beta_method": "kalman", "half_life_days": 1.9, "theta": 0.36232, "adf_p": 0.0, "z": -0.14, "mu": 0.0055, "sigma": 0.0421, "sigma_annual": 0.67, "ratio": 67.58, "p1_last": 4389.42, "p2_last": 64.96, "formula": "e_t = ln(8.3870) − 2.0096·ln(4.1737) = -0.0004", "hurst": 0.472, "skew": 1.311, "ex_kurtosis": 12.46, "acf1": -0.204, "realized_vol_pct": 3.41, "signal_direction": "none", "signal_valid": false, "signal_reason": "NO EDGE — STAND ASIDE (|z|=0.14 < 2σ)", "ensemble_direction": "neutral", "ensemble_confidence": 52.5, "ensemble_line": "ENSEMBLE → NEUTRAL XAU · CONF 53%", "ensemble_engines": [{"name": "OU", "direction": "long", "confidence": 11.8, "z": -0.14, "theta": 0.36232, "half_life_days": 1.9}, {"name": "KalmanTrend", "direction": "neutral", "confidence": 0.4, "slope": -0.000292, "norm_slope": -0.0077, "kalman_state_last": -0.0101}, {"name": "GARCH", "direction": "neutral", "confidence": 50.0, "omega": 6.06e-06, "alpha": 0.1281, "beta": 0.842, "sigma_forecast": 0.015159, "vol_ratio": 0.94}, {"name": "GBM_MC", "direction": "neutral", "confidence": 5.9, "E_S": 4393.1555, "S0": 4389.42, "P_up": 53.0, "mu_daily": 0.001116, "sigma_daily": 0.013359}, {"name": "Heston", "direction": "neutral", "confidence": 45.0, "xi_vol_of_vol": 0.4764, "rv_mean": 0.012193, "rv_std": 0.005808}, {"name": "BayesRegime", "direction": "neutral", "confidence": 95.3, "p_mean_rev": 95.3, "adf_p": 0.0, "hurst": 0.472, "variance_ratio": 0.628, "log_odds": 3.015}], "z_dates": ["2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06", "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19", "2026-03-20", "2026-03-23", "2026-03-24", "2026-03-25", "2026-03-26", "2026-03-27", "2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02", "2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16", "2026-04-17", "2026-04-20", "2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24", "2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01", "2026-05-04", "2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-11", "2026-05-12", "2026-05-13", "2026-05-14", "2026-05-15", "2026-05-18", "2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22", "2026-05-25", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09", "2026-06-10", "2026-06-11", "2026-06-12", "2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24", "2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18"], "z_values": [1.4661, 0.8259, 0.7903, 0.2959, -0.2734, -0.2459, 0.415, 0.579, 1.0368, 0.6972, 0.8445, 1.1552, 1.09, 1.6628, 0.6524, 0.1001, 0.1866, 0.7392, 0.3259, 0.2044, -0.6956, -0.2141, 0.2476, 0.2063, 0.252, -0.0283, -0.1827, -0.2572, -0.0628, -0.695, -0.3662, -0.0753, -0.4479, -0.0468, 0.4811, 0.1492, 0.5487, 0.3499, 0.2347, 0.5716, 0.7108, 0.0305, -0.3689, 0.2059, 0.1583, -0.7235, -0.7422, -0.8519, -1.6837, -1.1909, -1.0012, 0.1085, 1.4735, 0.6168, 1.1322, 0.3282, -0.0237, 0.1459, -0.4302, -0.1717, 0.3028, -0.0034, 0.1295, 0.0256, -0.0984, 0.3607, -0.051, 1.231, 0.7359, 1.2933, 0.9866, -0.4257, -0.5731, -0.8682, -0.5425, 0.209, 0.8386, 0.7961, 0.4521, 1.5496, 2.5263, 1.4887, 0.529, 0.473, 0.0692, -0.2219, -0.8247, -1.123, -0.7177, 0.2562, 0.8567, -0.1898, -0.157, 0.5285, -0.1054, 0.3595, 1.0675, 0.5427, -0.0111, -1.1104, -1.0862, 0.007, -0.3377, -0.2904, 0.29, -0.0093, -0.6771, 0.0536, -0.3005, -0.8909, -1.3473, -0.6869, -1.1763, -1.6555, -0.7073, -0.6631, -0.2612, -0.2436, -0.5697, -0.1401]}, {"name": "EURUSD/GBPUSD", "timeframe": "D1", "n_bars": 682, "start": "2024-01-02", "end": "2026-08-18", "beta": 0.4813, "beta_method": "kalman", "half_life_days": 24.1, "theta": 0.02879, "adf_p": 0.0229, "z": 1.048, "mu": -0.0047, "sigma": 0.0052, "sigma_annual": 0.08, "ratio": 0.86, "p1_last": 1.16, "p2_last": 1.35, "formula": "e_t = ln(0.1462) − 0.4813·ln(0.3022) = 0.0007", "hurst": 0.608, "skew": 0.545, "ex_kurtosis": 4.546, "acf1": -0.021, "realized_vol_pct": 0.16, "signal_direction": "none", "signal_valid": false, "signal_reason": "NO EDGE — гейты не пройдены (Hurst 0.61 ≥ 0.5 (трендовый режим))", "ensemble_direction": "neutral", "ensemble_confidence": 47.6, "ensemble_line": "ENSEMBLE → NEUTRAL EURUSD · CONF 48%", "ensemble_engines": [{"name": "OU", "direction": "short", "confidence": 18.9, "z": 1.048, "theta": 0.02879, "half_life_days": 24.1}, {"name": "KalmanTrend", "direction": "short", "confidence": 0.5, "slope": 4.7e-05, "norm_slope": 0.0101, "kalman_state_last": 0.0003}, {"name": "GARCH", "direction": "neutral", "confidence": 50.0, "omega": 4.9e-07, "alpha": 0.0709, "beta": 0.9026, "sigma_forecast": 0.002795, "vol_ratio": 0.982}, {"name": "GBM_MC", "direction": "neutral", "confidence": 0.9, "E_S": 1.1574, "S0": 1.1574, "P_up": 50.4, "mu_daily": 8.2e-05, "sigma_daily": 0.004211}, {"name": "Heston", "direction": "neutral", "confidence": 55.0, "xi_vol_of_vol": 0.3577, "rv_mean": 0.004017, "rv_std": 0.001437}, {"name": "BayesRegime", "direction": "neutral", "confidence": 51.9, "p_mean_rev": 51.9, "adf_p": 0.1412, "hurst": 0.608, "variance_ratio": 0.511, "log_odds": 0.077}], "z_dates": ["2026-03-04", "2026-03-05", "2026-03-06", "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19", "2026-03-20", "2026-03-23", "2026-03-24", "2026-03-25", "2026-03-26", "2026-03-27", "2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02", "2026-04-03", "2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16", "2026-04-17", "2026-04-20", "2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24", "2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01", "2026-05-04", "2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-11", "2026-05-12", "2026-05-13", "2026-05-14", "2026-05-15", "2026-05-18", "2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22", "2026-05-25", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09", "2026-06-10", "2026-06-11", "2026-06-12", "2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24", "2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18"], "z_values": [-2.1492, -2.3468, -2.6569, -2.2812, -2.4426, -2.9318, -3.1945, -3.5332, -2.5585, -2.1944, -2.4721, -1.7044, -1.2138, -1.1031, -1.0145, -1.3572, -1.4903, -1.3098, -1.4031, -0.2909, -0.2999, -0.4876, -0.6351, -0.4529, -0.0164, 0.2607, 0.5264, 0.7068, 0.8615, 0.9565, 1.0057, 0.9414, 0.7304, 0.9274, 0.4617, -0.0416, -0.1084, 0.0328, 0.0205, 0.0131, -0.245, -0.2431, -0.1661, -0.3053, -0.3102, 0.1747, 0.0975, 0.4728, 0.5527, 0.3728, 0.0863, 0.2476, 0.094, -0.1908, -0.6639, -0.6323, -0.6967, -0.9053, -0.7674, -0.4924, -0.4299, -0.1553, -0.0382, -0.4662, -0.5043, -0.6525, -0.4589, -1.2511, -1.0049, -1.0706, -1.0497, -0.642, -0.7253, -0.349, -0.0901, -0.865, -0.8845, -0.8193, -1.6109, -1.9837, -1.9767, -1.8359, -1.5285, -1.2281, -1.1902, -1.9441, -1.4222, -1.2885, -1.4106, -1.5804, -1.6008, -1.4178, -1.5243, -1.6001, -1.1701, -1.4011, -1.2664, -1.1285, -1.3128, -1.1372, -0.8708, -0.9717, -1.0722, -0.8218, -0.4691, 0.3353, 0.6523, 0.5273, 0.546, 0.7945, 1.0165, 0.6364, 0.917, 0.5739, 0.5757, 0.4053, 0.5535, 0.9173, 1.0185, 1.0478]}, {"name": "BTC/ETH", "timeframe": "D1", "n_bars": 800, "start": "2024-06-13", "end": "2026-08-21", "beta": 1.4475, "beta_method": "kalman", "half_life_days": 1.3, "theta": 0.52513, "adf_p": 0.0, "z": -0.559, "mu": -0.0016, "sigma": 0.0159, "sigma_annual": 0.25, "ratio": 31.9, "p1_last": 74971.0, "p2_last": 2349.92, "formula": "e_t = ln(11.2249) − 1.4475·ln(7.7621) = -0.0105", "hurst": 0.412, "skew": -0.416, "ex_kurtosis": 3.65, "acf1": -0.244, "realized_vol_pct": 1.63, "signal_direction": "none", "signal_valid": false, "signal_reason": "NO EDGE — STAND ASIDE (|z|=0.56 < 2σ)", "ensemble_direction": "neutral", "ensemble_confidence": 53.2, "ensemble_line": "ENSEMBLE → NEUTRAL BTC · CONF 53%", "ensemble_engines": [{"name": "OU", "direction": "long", "confidence": 20.5, "z": -0.559, "theta": 0.52513, "half_life_days": 1.3}, {"name": "KalmanTrend", "direction": "neutral", "confidence": 0.2, "slope": -6.5e-05, "norm_slope": -0.0044, "kalman_state_last": -0.017}, {"name": "GARCH", "direction": "neutral", "confidence": 50.0, "omega": 6.568e-05, "alpha": 0.13, "beta": 0.7583, "sigma_forecast": 0.019852, "vol_ratio": 1.119}, {"name": "GBM_MC", "direction": "neutral", "confidence": 0.7, "E_S": 74946.5165, "S0": 74971.0, "P_up": 49.6, "mu_daily": 0.000145, "sigma_daily": 0.023706}, {"name": "Heston", "direction": "neutral", "confidence": 55.0, "xi_vol_of_vol": 0.3544, "rv_mean": 0.022371, "rv_std": 0.007929}, {"name": "BayesRegime", "direction": "neutral", "confidence": 95.7, "p_mean_rev": 95.7, "adf_p": 0.0, "hurst": 0.412, "variance_ratio": 0.661, "log_odds": 3.113}], "z_dates": ["2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13", "2026-05-14", "2026-05-15", "2026-05-16", "2026-05-17", "2026-05-18", "2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23", "2026-05-24", "2026-05-25", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-05-30", "2026-05-31", "2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-06", "2026-06-07", "2026-06-08", "2026-06-09", "2026-06-10", "2026-06-11", "2026-06-12", "2026-06-13", "2026-06-14", "2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04", "2026-07-05", "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-11", "2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19", "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24", "2026-07-25", "2026-07-26", "2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"], "z_values": [0.1951, 0.0274, -0.535, 0.3487, -0.0323, 0.3656, 0.2499, 0.0924, -0.2061, -0.2746, -0.0899, 0.1281, 0.5954, 1.031, 0.1905, -0.1393, -0.4042, 0.355, 1.198, 0.4058, 0.4382, 0.7209, 1.0491, 1.4881, 0.4746, 0.6277, 0.1743, -0.0127, 0.8012, -0.4539, 0.4567, -0.0213, 0.356, 0.8104, 0.348, -0.1142, -0.0838, 0.3007, -1.2747, 1.3687, 0.4955, 1.5886, 5.1749, 2.6951, -1.3484, -0.8581, 0.3653, 0.5524, -0.2967, -0.0322, -0.1006, -0.9556, -2.5359, -1.5767, -0.1748, 0.1908, 0.361, -0.4498, 0.2299, -0.2719, 1.0559, 0.9614, 1.5151, 0.4264, 0.2303, -0.221, -1.2958, -0.3359, -0.7436, -2.6067, -2.4969, -1.6071, -0.6982, -0.6215, 0.0875, 0.1998, 0.5086, -0.9068, -0.4365, -0.9337, -0.4692, -2.1397, -1.9409, -0.0335, 0.6222, 0.1498, -0.3289, -0.8329, -0.4419, -0.6095, 0.6561, 0.2057, -0.2106, -1.7465, -0.0897, -0.7926, -0.0536, 0.1782, 0.5315, 0.6717, -0.4275, 0.4185, 0.2301, -0.686, -0.4093, -0.1687, -0.1595, 0.0296, 0.5152, -0.2444, -0.1239, -0.2403, -0.2611, -0.1061, 0.0353, -0.0991, -0.0473, -4.9964, -2.0745, -0.5595]}, {"name": "BTC/SOL", "timeframe": "D1", "n_bars": 800, "start": "2024-06-13", "end": "2026-08-21", "beta": 2.5159, "beta_method": "kalman", "half_life_days": 1.6, "theta": 0.42867, "adf_p": 0.0, "z": -1.302, "mu": -0.0006, "sigma": 0.0559, "sigma_annual": 0.89, "ratio": 840.72, "p1_last": 74975.16, "p2_last": 89.18, "formula": "e_t = ln(11.2249) − 2.5159·ln(4.4907) = -0.0734", "hurst": 0.432, "skew": -0.01, "ex_kurtosis": 3.918, "acf1": -0.189, "realized_vol_pct": 3.99, "signal_direction": "none", "signal_valid": false, "signal_reason": "NO EDGE — STAND ASIDE (|z|=1.30 < 2σ)", "ensemble_direction": "neutral", "ensemble_confidence": 53.3, "ensemble_line": "ENSEMBLE → NEUTRAL BTC · CONF 53%", "ensemble_engines": [{"name": "OU", "direction": "long", "confidence": 35.2, "z": -1.302, "theta": 0.42867, "half_life_days": 1.6}, {"name": "KalmanTrend", "direction": "neutral", "confidence": 0.1, "slope": 0.000119, "norm_slope": 0.0026, "kalman_state_last": -0.0184}, {"name": "GARCH", "direction": "neutral", "confidence": 50.0, "omega": 6.569e-05, "alpha": 0.1301, "beta": 0.7583, "sigma_forecast": 0.019863, "vol_ratio": 1.12}, {"name": "GBM_MC", "direction": "neutral", "confidence": 0.7, "E_S": 74950.6803, "S0": 74975.16, "P_up": 49.6, "mu_daily": 0.000145, "sigma_daily": 0.023706}, {"name": "Heston", "direction": "neutral", "confidence": 55.0, "xi_vol_of_vol": 0.3544, "rv_mean": 0.022371, "rv_std": 0.007929}, {"name": "BayesRegime", "direction": "neutral", "confidence": 96.0, "p_mean_rev": 96.0, "adf_p": 0.0, "hurst": 0.432, "variance_ratio": 0.616, "log_odds": 3.166}], "z_dates": ["2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12", "2026-05-13", "2026-05-14", "2026-05-15", "2026-05-16", "2026-05-17", "2026-05-18", "2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23", "2026-05-24", "2026-05-25", "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29", "2026-05-30", "2026-05-31", "2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-06", "2026-06-07", "2026-06-08", "2026-06-09", "2026-06-10", "2026-06-11", "2026-06-12", "2026-06-13", "2026-06-14", "2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19", "2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04", "2026-07-05", "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-11", "2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19", "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24", "2026-07-25", "2026-07-26", "2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"], "z_values": [-0.2691, -0.2324, -0.3444, 0.1983, 0.1333, 0.2652, 0.1441, 0.0683, -0.1354, -0.0502, 0.0393, -0.705, -1.6867, -1.0544, -2.129, -1.6951, -2.0342, -1.6714, -0.0931, 1.0182, 0.5917, 1.2311, 1.7549, 1.5346, 0.809, 0.972, -0.0906, -0.5833, 0.515, -0.046, 0.2626, 0.3172, 0.5331, 0.6287, 0.3689, 0.2071, -0.1537, -0.0357, 0.0153, 2.6439, 2.4356, 2.9315, 3.9494, 3.1619, 0.1943, -0.1711, 0.4985, 1.1521, -0.8871, -0.6224, -1.4056, -1.911, -2.4141, -1.5351, -0.629, 0.2929, 0.2259, -1.3417, -0.8, -0.2227, 0.5552, 0.7237, 0.3405, -1.7139, -0.5339, -0.8858, -2.0706, -1.0687, -1.9347, -2.1358, -1.7221, -0.8083, -0.3443, -0.2783, 0.1859, 0.9227, 0.6808, 0.5624, 0.7972, 0.4425, 0.7428, -0.1322, 0.0527, 0.598, 0.4926, 0.2771, -0.1926, -0.6059, -0.2834, -0.2171, 0.4592, 0.8559, 0.3513, -0.4734, 0.3781, 0.4047, 0.3181, 0.0021, 0.2983, 0.5365, -0.214, -0.1441, -0.0987, -0.114, 0.3673, -0.1023, -1.0836, -0.8814, -0.6764, -0.6685, -0.22, -0.4329, -0.0271, -0.0051, 0.2523, -0.1265, -0.4877, -2.5677, -1.7713, -1.3023]}]};
+let charts = {};
+
+function showPair() {
+  const sel = document.getElementById('pairSelect');
+  const pair = DATA.pairs[sel.value];
+  if (!pair) return;
+
+  document.getElementById('methodLabel').textContent =
+    `${pair.beta_method} · ${pair.n_bars} bars · ${pair.start} → ${pair.end}`;
+
+  const zDir = pair.signal_direction;
+  const ensDir = pair.ensemble_direction;
+  const ensConf = pair.ensemble_confidence;
+  const hurst = pair.hurst;
+  const hurstClass = hurst < 0.5 ? 'meanrev' : hurst > 0.5 ? 'trending' : 'random';
+  const hurstText = hurst < 0.5 ? 'mean-reverting' : hurst > 0.5 ? 'trending' : 'random walk';
+  const hlText = pair.half_life_days !== null ? pair.half_life_days + ' d' : '∞';
+  const adfColor = pair.adf_p < 0.05 ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('main').innerHTML = `
+    <div class="panel">
+      <h3>Parameters</h3>
+      <div class="params">
+        <div class="param"><span class="label">β (${pair.beta_method})</span><span class="value">${pair.beta}</span></div>
+        <div class="param"><span class="label">z-score</span><span class="value">${pair.z}</span></div>
+        <div class="param"><span class="label">half-life</span><span class="value">${hlText}</span></div>
+        <div class="param"><span class="label">μ (spread)</span><span class="value">${pair.mu}</span></div>
+        <div class="param"><span class="label">θ</span><span class="value">${pair.theta}</span></div>
+        <div class="param"><span class="label">σ (spread)</span><span class="value">${pair.sigma}</span></div>
+        <div class="param"><span class="label">ADF p</span><span class="value" style="color:${adfColor}">${pair.adf_p}</span></div>
+        <div class="param"><span class="label">σ annual</span><span class="value">${pair.sigma_annual}</span></div>
+        <div class="param"><span class="label">ratio</span><span class="value">${pair.ratio}</span></div>
+        <div class="param"><span class="label">P1/P2</span><span class="value">${pair.p1_last} / ${pair.p2_last}</span></div>
+        <div class="formula">${pair.formula}</div>
+      </div>
+    </div>
+
+    <div class="panel chart-panel">
+      <h3>Z-Score</h3>
+      <canvas id="zChart"></canvas>
+    </div>
+
+    <div class="panel">
+      <h3>Signal</h3>
+      <div class="signal-bar ${zDir}">${pair.signal_reason}</div>
+      <div style="margin-top:8px; font-size:11px; color:var(--dim);">Entry z: ±2.0σ · Exit z: 0.0 · Stop: ±3.0σ</div>
+    </div>
+
+    <div class="panel">
+      <h3>Math Board</h3>
+      <div class="math-board">
+        <div class="math-item"><span class="label">Hurst (R/S)</span><span class="value">${pair.hurst}</span></div>
+        <div class="math-item"><span class="label">ACF(1)</span><span class="value">${pair.acf1}</span></div>
+        <div class="math-item"><span class="label">Skew</span><span class="value">${pair.skew}</span></div>
+        <div class="math-item"><span class="label">Ex-Kurt</span><span class="value">${pair.ex_kurtosis}</span></div>
+        <div class="math-item"><span class="label">σ realized</span><span class="value">${pair.realized_vol_pct}%</span></div>
+      </div>
+      <div class="hurst-label ${hurstClass}">
+        H = ${pair.hurst} ${pair.hurst >= 0.5 ? '≥' : '<'} 0.5 ⇒ ${hurstText} regime
+      </div>
+    </div>
+
+    <div class="panel full-width">
+      <h3>Model Ensemble — Forecasts</h3>
+      <table class="ensemble-table">
+        <tr><th>Engine</th><th>Direction</th><th>Confidence</th><th>Key metric</th></tr>
+        ${pair.ensemble_engines.map(e => {
+          const dClass = e.direction === 'long' ? 'dir-long' : e.direction === 'short' ? 'dir-short' : 'dir-neutral';
+          const entries = Object.entries(e).filter(([k]) => !['name','direction','confidence'].includes(k));
+          const key = entries[0];
+          const keyStr = key ? key[0] + '=' + (typeof key[1] === 'number' ? key[1].toFixed(3) : key[1]) : '';
+          const confW = Math.round(e.confidence * 0.6);
+          const confColor = e.confidence > 60 ? 'var(--green)' : e.confidence > 40 ? 'var(--yellow)' : 'var(--dim)';
+          return `<tr>
+            <td>${e.name}</td>
+            <td class="${dClass}">${e.direction.toUpperCase()}</td>
+            <td><span class="conf-bar" style="width:${confW}px;background:${confColor}"></span> ${e.confidence.toFixed(1)}%</td>
+            <td style="color:var(--dim);font-size:11px">${keyStr}</td>
+          </tr>`;
+        }).join('')}
+      </table>
+      <div class="ensemble-summary" style="color:${ensDir==='long'?'var(--green)':ensDir==='short'?'var(--red)':'var(--dim)'}">
+        ${pair.ensemble_line} (confidence ${ensConf}%)
+      </div>
+    </div>
+  `;
+
+  // Z-score chart
+  if (charts.zChart) charts.zChart.destroy();
+  const ctx = document.getElementById('zChart').getContext('2d');
+  const zVals = pair.z_values;
+  const zLabels = pair.z_dates;
+  const entryZ = 2.0;
+  const stopZ = 3.0;
+
+  charts.zChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: zLabels,
+      datasets: [
+        { label: 'z-score', data: zVals, borderColor: '#e6edf3', borderWidth: 1.5,
+          pointRadius: 0, fill: false, tension: 0.1 },
+        { label: '+2σ', data: Array(zVals.length).fill(entryZ), borderColor: '#f85149',
+          borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
+        { label: '-2σ', data: Array(zVals.length).fill(-entryZ), borderColor: '#3fb950',
+          borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
+        { label: '+3σ', data: Array(zVals.length).fill(stopZ), borderColor: '#f8514966',
+          borderWidth: 1, borderDash: [2,4], pointRadius: 0, fill: false },
+        { label: '-3σ', data: Array(zVals.length).fill(-stopZ), borderColor: '#3fb95066',
+          borderWidth: 1, borderDash: [2,4], pointRadius: 0, fill: false },
+        { label: '0', data: Array(zVals.length).fill(0), borderColor: '#30363d',
+          borderWidth: 1, pointRadius: 0, fill: false },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+      scales: {
+        x: { display: true, ticks: { color: '#8b949e', maxTicksLimit: 8, font: { size: 10 } },
+              grid: { color: '#30363d33' } },
+        y: { ticks: { color: '#8b949e', font: { size: 10 } },
+              grid: { color: '#30363d33' } }
+      }
+    }
+  });
+}
+
+// Init
+const sel = document.getElementById('pairSelect');
+DATA.pairs.forEach((p, i) => {
+  const opt = document.createElement('option');
+  opt.value = i; opt.text = p.name;
+  sel.appendChild(opt);
+});
+if (DATA.pairs.length) showPair();
+</script>
+</body>
+</html>
