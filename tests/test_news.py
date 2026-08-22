@@ -146,13 +146,12 @@ class TestCalendarFeed:
             },
         ]
 
-    @patch("news.calendar_feed.urllib.request.urlopen")
-    def test_fetch_week(self, mock_urlopen):
+    @patch("news.calendar_feed.requests.get")
+    def test_fetch_week(self, mock_get):
         mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(self._make_events()).encode()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = self._make_events()
+        mock_get.return_value = mock_resp
 
         feed = CalendarFeed()
         feed._cache_ts = 0  # force refresh
@@ -170,13 +169,12 @@ class TestCalendarFeed:
         assert len(high) == 2
         assert all(e.is_high for e in high)
 
-    @patch("news.calendar_feed.urllib.request.urlopen")
-    def test_is_red_zone_within_buffer(self, mock_urlopen):
+    @patch("news.calendar_feed.requests.get")
+    def test_is_red_zone_within_buffer(self, mock_get):
         mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(self._make_events()).encode()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = self._make_events()
+        mock_get.return_value = mock_resp
 
         feed = CalendarFeed()
         feed._cache_ts = 0
@@ -194,13 +192,12 @@ class TestCalendarFeed:
         now3 = dt.datetime(2026, 8, 18, 11, 59)
         assert feed.is_red_zone(now3, buffer_min=30) is False
 
-    @patch("news.calendar_feed.urllib.request.urlopen")
-    def test_is_red_zone_outside_buffer(self, mock_urlopen):
+    @patch("news.calendar_feed.requests.get")
+    def test_is_red_zone_outside_buffer(self, mock_get):
         mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(self._make_events()).encode()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = self._make_events()
+        mock_get.return_value = mock_resp
 
         feed = CalendarFeed()
         feed._cache_ts = 0
@@ -210,13 +207,12 @@ class TestCalendarFeed:
         now = dt.datetime(2026, 8, 18, 10, 0)
         assert feed.is_red_zone(now, buffer_min=30) is False
 
-    @patch("news.calendar_feed.urllib.request.urlopen")
-    def test_is_red_zone_currency_filter(self, mock_urlopen):
+    @patch("news.calendar_feed.requests.get")
+    def test_is_red_zone_currency_filter(self, mock_get):
         mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(self._make_events()).encode()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = self._make_events()
+        mock_get.return_value = mock_resp
 
         feed = CalendarFeed()
         feed._cache_ts = 0

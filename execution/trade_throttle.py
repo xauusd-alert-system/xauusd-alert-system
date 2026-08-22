@@ -69,7 +69,7 @@ class TradeThrottle:
         self.reset_on_utc_midnight = bool(tc.get("reset_on_utc_midnight", _DEFAULTS["reset_on_utc_midnight"]))
 
         self.state_path = state_path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # reentrant: get_state() calls risk_multiplier() which also acquires
 
         # --- mutable state ---
         self.current_day: datetime.date | None = None
