@@ -10,7 +10,7 @@ Integration with control_bot.py:
     monitor = PairMonitor(send_fn)
     monitor.start()
 
-The send_fn is control_bot._send (chat_id, text) — or any callable that
+The send_fn is control_bot._send(chat_id, text) — or any callable that
 posts a Telegram message.
 """
 from __future__ import annotations
@@ -122,7 +122,7 @@ class PairMonitor:
         thresholds = self.pairs_cfg.get("thresholds", {})
         analysis = self.pairs_cfg.get("analysis", {})
         bt_cfg = dict(analysis)
-        bt_cfg.update(self.pairs_cfg.get("backtest", {}) or {})
+        bt_cfg.update(self.pairs_cfg.get("backtest") or {})
 
         self._pair_analyzer = PairAnalyzer
         self._signal_engine = SignalEngine(thresholds, bt_cfg)
@@ -130,31 +130,65 @@ class PairMonitor:
 
     def _format_alert(self, sig, m, ensemble=None) -> str:
         side_ru = "LONG" if sig.direction == "long" else "SHORT"
-        p1 = m.name.split("/")[0]
-        p2 = m.name.split("/")[1]
+        side_emoji = "\U0001f7e2" if sig.direction == "long" else "\U0001f534"
+        p1, p2 = m.name.split("/")
         rec = (f"long {p1} / short {p2}" if sig.direction == "long"
                else f"short {p1} / long {p2}")
-        ens_line = ""
+
+        # z-score strength indicator
+        z_abs = abs(sig.z)
+        if z_abs >= 3.0:
+            z_power = "\u26a1 EXTREME"
+        elif z_abs >= 2.5:
+            z_power = "\U0001f525 STRONG"
+        else:
+            z_power = "\U0001f4a1 NORMAL"
+
+        # Build ensemble section
+        ens_section = ""
         if ensemble is not None:
-            ens_line = (f"\nEnsemble: {ensemble.summary_line()} "
-                        f"(conf {ensemble.confidence:.0f}%)")
+            ens_summary = ensemble.summary_line()
+            ens_conf = ensemble.confidence
             top = sorted(ensemble.engines, key=lambda e: e.confidence,
-                         reverse=True)[:3]
-            engines_str = " | ".join(
-                f"{e.name}={e.direction[0].upper()} {e.confidence:.0f}%"
-                for e in top)
-            ens_line += f"\n  Движки: {engines_str}"
+                         reverse=True)[:4]
+            engine_lines = []
+            for e in top:
+                dir_label = {"long": "LONG", "short": "SHORT",
+                             "neutral": "NEUTRAL"}.get(e.direction, e.direction.upper())
+                engine_lines.append(
+                    f"  {e.name:<14} {dir_label:>8}  {e.confidence:>4.0f}%")
+            engines_block = "\n".join(engine_lines)
+            ens_section = (
+                f"\n\U0001f9e0 ENSEMBLE\n"
+                f"{ens_summary} ({ens_conf:.0f}% confidence)\n"
+                f"{engines_block}")
+
+        # Period label
+        hl_label = f"{m.half_life_days:.1f}d"
+        if m.half_life_days < 0.1:
+            hl_label = f"{m.half_life_days * 24:.0f}h"
+
+        hurst_label = "\u2193 MR" if m.hurst < 0.5 else "\u2191 Trend"
+
         return (
-            f"PAIR SIGNAL: MEAN-REV {side_ru} {m.name}\n"
-            f"z-score: {sig.z:+.2f}σ (entry_z: 2.0σ)\n"
-            f"β (Kalman): {m.beta:.2f} | ratio: {m.ratio:.2f}\n"
-            f"HL: {m.half_life_days:.1f} дн | ADF p: {m.adf_p:.4f} | "
-            f"Hurst: {m.hurst:.2f}\n"
-            f"Рекомендация: {rec}\n"
-            f"Стоп: |z| > 3.0σ\n"
-            f"Выход: z = 0.0 (среднее)\n"
-            f"Таймаут: 2×HL = {2 * m.half_life_days:.1f} дн"
-            f"{ens_line}\n"
+            f"{'─' * 30}\n"
+            f"{side_emoji} {side_ru} {m.name}\n"
+            f"{'─' * 30}\n"
+            f"σ {sig.z:+.2f}  ({z_power})\n"
+            f"Entry: σ = 2.0 | Target: σ = 0.0\n"
+            f"Stop: |σ| > 3.0\n"
+            f"\n"
+            f"\U0001f4ca {m.name} Parameters\n"
+            f"  β Kalman    {m.beta:.2f}\n"
+            f"  Ratio       {m.ratio:.2f}\n"
+            f"  Half-life   {hl_label}\n"
+            f"  ADF p-val   {m.adf_p:.4f}\n"
+            f"  Hurst       {m.hurst:.2f}  {hurst_label}\n"
+            f"\n"
+            f"\U0001f4a8 Plan: {rec}\n"
+            f"\U0001f552 Timeout: {2 * m.half_life_days:.1f}d"
+            f"{ens_section}\n"
+            f"{'─' * 30}"
         )
 
     def _check_signals(self) -> list:
@@ -285,7 +319,7 @@ class PairMonitor:
     def query_all(self) -> str:
         """Synchronous query of all pairs. Returns formatted text for Telegram."""
         self._ensure_imports()
-        lines = [f"📊 PAIRS — {self.timeframe}\n"]
+        lines = [f"\U0001f4ca PAIRS — {self.timeframe}\n"]
         for pair in self.pairs_cfg.get("pairs", []):
             name = pair["name"]
             if self.pairs_to_watch and name.lower() not in self.pairs_to_watch:
@@ -296,20 +330,20 @@ class PairMonitor:
                 sig = self._signal_engine.current(m)
                 forecast = self._ensemble_engine.forecast(m)
 
-                icon = {"long": "🟢 LONG", "short": "🔴 SHORT"}.get(
-                    sig.direction, "⚪ NO EDGE")
-                adf_icon = "✅" if m.adf_p < 0.05 else "❌"
-                hurst_icon = "✅" if m.hurst < 0.5 else "❌"
+                icon = {"long": "\U0001f7e2 LONG", "short": "\U0001f534 SHORT"}.get(
+                    sig.direction, "\u26aa NO EDGE")
+                adf_icon = "\u2705" if m.adf_p < 0.05 else "\u274c"
+                hurst_icon = "\u2705" if m.hurst < 0.5 else "\u274c"
 
                 lines.append(
-                    f"{name} [{m.n_bars} баров]\n"
-                    f"  z: {sig.z:+.3f}σ | β: {m.beta:.2f} | "
+                    f"{name} [{m.n_bars} bars]\n"
+                    f"  z: {sig.z:+.3f}\u03c3 | \u03b2: {m.beta:.2f} | "
                     f"ratio: {m.ratio:.1f}\n"
                     f"  {adf_icon} ADF p={m.adf_p:.4f} | "
                     f"{hurst_icon} H={m.hurst:.2f} | "
-                    f"HL={m.half_life_days:.1f}д\n"
+                    f"HL={m.half_life_days:.1f}d\n"
                     f"  Signal: {icon}\n"
-                    f"  Ensemble: → {forecast.direction.upper()} "
+                    f"  Ensemble: \u2192 {forecast.direction.upper()} "
                     f"CONF {forecast.confidence:.0f}%"
                 )
             except Exception as e:
@@ -322,7 +356,7 @@ class PairMonitor:
             stats = compute_stats(rows)
             if stats.get("total", 0) > 0:
                 lines.append(
-                    f"\n📈 Pair stats: {stats['total']} сделок, "
+                    f"\n\U0001f4c8 Pair stats: {stats['total']} trades, "
                     f"WR {stats.get('win_rate', 0):.0f}%, "
                     f"avgR {stats.get('avg_r', 0):+.2f}")
         except Exception:
