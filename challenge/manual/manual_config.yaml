@@ -52,7 +52,9 @@ target_rr: 3.5
 # S/R proximity filter (2026-08-22, us_stocks audit §5.2): reject signals
 # too close to key support/resistance zones. $2 buffer balances quality vs
 # quantity: 71% of weak signals filtered, 96% correctly identified near zones.
-sr_proximity_buffer_usd: 2.0
+# AUDIT B 2026-08-23: price-scaled S/R buffer (% of entry price) — the flat
+# $2 buffer covered ±700% of CAN's price and blocked every setup there.
+sr_proximity_buffer_pct: 0.3
 default_stage: 1
 # Профиль A, риск $5 (2026-08-21): при безлимитном времени челленджа MC 40k
 # прогонов даёт P(провала −$100)=0 на любом риске (пауза + скейлинг держат дно).

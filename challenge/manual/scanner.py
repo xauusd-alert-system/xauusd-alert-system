@@ -445,12 +445,16 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
             # RESEARCH 2026-08-22: S/R proximity filter (us_stocks audit §5.2)
             # Reject signals too close to key support/resistance zones.
             # This prevents entering right at a level that may cap the move.
-            # Default 0 = disabled; set sr_proximity_buffer_usd in cfg to enable.
+            # Default 0 = disabled. Audit B 2026-08-23: sr_proximity_buffer_pct
+            # (price-scaled, e.g. 0.3) supersedes the absolute USD buffer —
+            # a flat $2 on a $0.28 ticker blocked every CAN setup.
             sr_buffer = float(cfg.get("sr_proximity_buffer_usd", 0))
-            if sr_buffer > 0 and bias in ("long", "short"):
+            sr_buffer_pct = float(cfg.get("sr_proximity_buffer_pct", 0))
+            if (sr_buffer > 0 or sr_buffer_pct > 0) and bias in ("long", "short"):
                 sr_zones = detect_sr_zones(candles_1m, date)
                 sr_ok, sr_reason = check_proximity(
-                    entry, stop, setup.target, bias, sr_zones, sr_buffer)
+                    entry, stop, setup.target, bias, sr_zones,
+                    buffer_usd=sr_buffer, buffer_pct=sr_buffer_pct)
                 if not sr_ok:
                     setup.bias = "none"
                     setup.no_go.append(f"S/R proximity: {sr_reason}")
