@@ -80,6 +80,46 @@ def _signal_handler(signum, frame):
     shutdown_requested = True
 
 
+# ---------------------------------------------------------------------------
+# Single-instance guard: a second watchdog would spawn a second trader, and
+# both traders would fight over one MT5 account AND double-poll the Telegram
+# bot token (409 Conflict on getUpdates). The lock records our PID; if that
+# PID is still alive as a python process, refuse to start.
+# ---------------------------------------------------------------------------
+LOCK_FILE = os.path.join(PROJECT_ROOT, "logs", "watchdog.lock")
+
+
+def _pid_alive_as_python(pid: int) -> bool:
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        return ('"pythonw.exe"' in out) or ('"python.exe"' in out)
+    except Exception:
+        return False
+
+
+def _acquire_single_instance_lock() -> bool:
+    """Returns True if we may run; False if another live watchdog holds the lock."""
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, encoding="utf-8") as f:
+                old_pid = int(f.read().strip())
+            if old_pid != os.getpid() and _pid_alive_as_python(old_pid):
+                log.warning(
+                    "Another watchdog appears alive (pid=%s from %s). Exiting "
+                    "to avoid a duplicate trader / Telegram 409 conflict.",
+                    old_pid, LOCK_FILE,
+                )
+                return False
+        except (ValueError, OSError):
+            pass  # stale/corrupt lock - overwrite below
+    with open(LOCK_FILE, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
 def _launch_trader() -> subprocess.Popen:
     """Start the trader as a subprocess, inheriting the current env."""
     env = os.environ.copy()
@@ -103,6 +143,9 @@ def main():
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
+
+    if not _acquire_single_instance_lock():
+        return
 
     log.info(f"Watchdog starting — trader={TRADER_PATH}")
     log.info(f"Max restarts={MAX_RESTARTS}, cooldown={COOLDOWN_SECS}s, stable_after={STABLE_SECONDS}s")
