@@ -176,7 +176,10 @@ assets:
     # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).
     # TRIAL-48H (2026-08-18): temporarily re-enabled for the 48h demo observation
     # run (owner request); auto-revert by scripts/trial_window.py after the window.
-    enabled: true
+    # OFF 2026-08-23 (all-time stats): 90 legs, WR 41%, PF 0.61, net -$5121 —
+    # the only asset with a statistically significant negative edge. GOLD pays
+    # for everything (+$7421, PF 1.73); silver gives it back.
+    enabled: false
     mt5_symbol: SILVER
     display_name: XAG/USD
     model_path: output/models/xagusd_direction_model.joblib
@@ -329,7 +332,9 @@ assets:
     # (PF ~0.84). GBP is trending: give it room to run — wide stop (3.0), NO
     # early BE (BE only at TP1), further TP2 (2.5) and TP3 (3.0), lower conf
     # bar (0.80 -> 0.60 legacy adopted), horizon 36.
-    enabled: true
+    # PARKED 2026-08-23 (all-time stats): 16 legs, WR 44%, PF 0.38, net -$157.
+    # Small sample — revisit after the FX probe collects more data.
+    enabled: false
     mt5_symbol: GBPUSD
     display_name: GBP/USD
     model_path: output/models/gbpusd_direction_model.joblib
