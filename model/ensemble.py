@@ -191,7 +191,11 @@ def compute_ensemble_signal(
     ev_threshold = float(ens_cfg.get("ev_threshold", 0.0))
     if ev_threshold > 0.0:
         reg_name = regime.value if hasattr(regime, "value") else str(regime)
-        grid_cfg = get_signal_grid(cfg, regime=reg_name)
+        # AUDIT 2026-08-23 (module 8e): resolve the grid THROUGH the asset
+        # section — per-asset signal_grid overrides must win here too, or this
+        # gate computes payoff_ratio from a different geometry than execution.
+        asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+        grid_cfg = get_signal_grid(cfg, asset_cfg, regime=reg_name)
         tp3_mult = float(grid_cfg.get("tp3_mult", 3.0))
         stop_mult = float(grid_cfg.get("stop_mult", 3.0))
         payoff_ratio = (tp3_mult / stop_mult) if stop_mult > 0 else 1.0
