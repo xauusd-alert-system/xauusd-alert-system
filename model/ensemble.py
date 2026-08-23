@@ -111,6 +111,23 @@ def compute_ensemble_signal(
             ml_p_short = 0.5
 
     ml_p_max = max(ml_p_long, ml_p_short)
+    ml_edge = abs(ml_p_long - ml_p_short)  # directional edge
+
+    # CALIBRATION 2026-08-21: EDGE FILTER — reject low-conviction signals
+    # where the model has no strong directional opinion (edge too small).
+    # Per-asset min_edge overrides the global default.
+    min_edge = float(ens_cfg.get("min_edge", 0.15))
+    if ml_edge < min_edge:
+        return EnsembleSignal(
+            bias="no_trade",
+            confidence=0.0,
+            rule_vote=0,
+            ml_p_long=float(ml_p_long),
+            ml_p_short=float(ml_p_short),
+            regime=regime.value if hasattr(regime, "value") else str(regime),
+            suppressed_by_meta_filter=True,
+            reasoning_summary=f"Low edge: |p_long-p_short|={ml_edge:.3f} < min_edge={min_edge}",
+        )
 
     # 2. 🚨 УМНЫЙ ФИЛЬТР СЕССИЙ
     suppress_sessions = ens_cfg.get("suppress_sessions", ["asia", "off_session"])
@@ -174,7 +191,11 @@ def compute_ensemble_signal(
     ev_threshold = float(ens_cfg.get("ev_threshold", 0.0))
     if ev_threshold > 0.0:
         reg_name = regime.value if hasattr(regime, "value") else str(regime)
-        grid_cfg = get_signal_grid(cfg, regime=reg_name)
+        # AUDIT 2026-08-23 (module 8e): resolve the grid THROUGH the asset
+        # section — per-asset signal_grid overrides must win here too, or this
+        # gate computes payoff_ratio from a different geometry than execution.
+        asset_cfg = cfg.get("assets", {}).get(asset_key, {})
+        grid_cfg = get_signal_grid(cfg, asset_cfg, regime=reg_name)
         tp3_mult = float(grid_cfg.get("tp3_mult", 3.0))
         stop_mult = float(grid_cfg.get("stop_mult", 3.0))
         payoff_ratio = (tp3_mult / stop_mult) if stop_mult > 0 else 1.0
@@ -264,8 +285,16 @@ def compute_ensemble_signal(
         ml_comp = weight_ml * ml_confidence if ml_vote != 0 else 0.0
         blended_confidence = rule_comp + ml_comp
     else:
-        blended_confidence = min(rule_conf, ml_confidence) * 0.3
-        final_vote = ml_vote if ml_confidence > rule_conf else rule_vote
+        # CALIBRATION 2026-08-21: when ML is confident (>=0.70) and disagrees
+        # with rule, let ML dominate instead of hard-collapsing to 30%.
+        # Weak ML (<0.70) keeps the old conservative 0.3x collapse.
+        if ml_confidence >= 0.70:
+            # Strong ML overrides rule: ML carries full weight, rule adds small bonus
+            blended_confidence = weight_ml * ml_confidence + weight_rule * rule_conf * 0.2
+            final_vote = ml_vote
+        else:
+            blended_confidence = min(rule_conf, ml_confidence) * 0.3
+            final_vote = ml_vote if ml_confidence > rule_conf else rule_vote
 
     suppressed = False
     regime_val = regime.value if hasattr(regime, "value") else str(regime)
