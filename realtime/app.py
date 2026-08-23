@@ -41,10 +41,42 @@ from data.ledger_events import (
 from data import news_filter
 from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
 from realtime.data_envelope import freshness_status, stamp
+from scripts.pairs_dashboard import _collect_data as pairs_collect_data
+from pairs_analysis.integrations import read_pair_journal, pair_cumulative_stats
 
 logger = logging.getLogger("realtime_app")
 
 app = FastAPI(title="XAUUSD Multi-Asset Predictive Trading System", version="2.1.0")
+
+# AUDIT 2026-08-23 (module 9): loopback-by-default guard. The dashboard serves
+# UNAUTHENTICATED read endpoints (live MT5 positions, PnL, metrics) and was
+# found running on 0.0.0.0, exposing the account to the whole LAN. Every other
+# service in this repo binds 127.0.0.1 (news_feed_server.py,
+# run_observer_signing_proxy.py — the latter with an enforcing test). This
+# middleware rejects any request whose Host header is not loopback unless
+# DASHBOARD_ALLOW_REMOTE=1 is explicitly set in the environment.
+_DASHBOARD_ALLOW_REMOTE = get_env("DASHBOARD_ALLOW_REMOTE", default="") == "1"
+_DASHBOARD_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "testserver", "testserver.local"}
+if _DASHBOARD_ALLOW_REMOTE:
+    _extra = get_env("DASHBOARD_ALLOWED_HOSTS", default="")
+    _DASHBOARD_ALLOWED_HOSTS.update(h.strip().lower() for h in _extra.split(",") if h.strip())
+
+
+@app.middleware("http")
+async def _loopback_only_guard(request: Request, call_next):
+    if not _DASHBOARD_ALLOW_REMOTE:
+        host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+        if host and host not in _DASHBOARD_ALLOWED_HOSTS:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=403,
+                content={"detail": (
+                    f"dashboard is loopback-only (host '{host}' rejected). "
+                    "Set DASHBOARD_ALLOW_REMOTE=1 to serve non-local interfaces."
+                )},
+            )
+    return await call_next(request)
+
 
 CFG = load_config()
 MODEL_PATH = get_env("MODEL_PATH", default=None)
@@ -709,6 +741,82 @@ def get_positions():
         return stamp(
             {"available": False, "positions": [], "as_of_utc": as_of, "reason": str(exc)},
             last_activity_ms=None, source="mt5_positions", mode="live",
+        )
+
+
+@app.get("/api/pairs")
+@_ttl_cache(60)
+def get_pairs(timeframe: str = "H1"):
+    """Pairs Model analytics: z-scores, signals, ensemble forecasts for all configured pairs.
+
+    Uses the pairs_analysis module (PairAnalyzer + SignalEngine + EnsembleEngine).
+    Cached for 60s — expensive multi-pair computation.
+    """
+    as_of = datetime.now(timezone.utc).isoformat()
+    try:
+        data = pairs_collect_data(timeframe)
+        return stamp(
+            {"available": True, **data, "as_of_utc": as_of},
+            last_activity_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+            source="pairs_analysis",
+            mode="live_verified" if DATA_MODE == "live" else DATA_MODE,
+        )
+    except Exception as exc:
+        logger.warning("Pairs analytics unavailable: %s", exc)
+        return stamp(
+            {"available": False, "pairs": [], "timeframe": timeframe,
+             "as_of_utc": as_of, "reason": str(exc)},
+            last_activity_ms=None, source="pairs_analysis", mode="unavailable",
+        )
+
+
+@app.get("/api/pairs/equity")
+def get_pairs_equity():
+    """Pair journal equity curve: cumulative R per trade + cumulative stats.
+
+    Reads from data/manual/pair_journal.csv (written by pair_outcomes / pair_monitor).
+    """
+    as_of = datetime.now(timezone.utc).isoformat()
+    try:
+        rows = read_pair_journal()
+        if not rows:
+            return stamp(
+                {"available": True, "trades": 0, "equity": [],
+                 "stats": None, "as_of_utc": as_of},
+                last_activity_ms=None, source="pair_journal", mode="live_verified",
+            )
+        equity = []
+        cum_r = 0.0
+        for r in rows:
+            try:
+                r_val = float(r.get("r", 0))
+            except (ValueError, TypeError):
+                r_val = 0.0
+            cum_r += r_val
+            equity.append({
+                "num": int(r.get("num", len(equity) + 1)),
+                "date": r.get("date", ""),
+                "pair": r.get("pair", ""),
+                "direction": r.get("direction", ""),
+                "exit_reason": r.get("exit_reason", ""),
+                "r": round(r_val, 3),
+                "cum_r": round(cum_r, 3),
+                "entry_z": r.get("entry_z", ""),
+                "bars_held": r.get("bars_held", ""),
+            })
+        stats = pair_cumulative_stats()
+        return stamp(
+            {"available": True, "trades": len(equity), "equity": equity,
+             "stats": stats, "as_of_utc": as_of},
+            last_activity_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+            source="pair_journal", mode="live_verified",
+        )
+    except Exception as exc:
+        logger.warning("Pair equity unavailable: %s", exc)
+        return stamp(
+            {"available": False, "trades": 0, "equity": [],
+             "stats": None, "as_of_utc": as_of, "reason": str(exc)},
+            last_activity_ms=None, source="pair_journal", mode="unavailable",
         )
 
 
