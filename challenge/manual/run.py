@@ -211,6 +211,54 @@ def cmd_journal(args) -> int:
     return 0
 
 
+def cmd_earnings(args) -> int:
+    """earnings add|list|remove — ведение календаря отчётностей (YAML)."""
+    cfg = load_cfg()
+    path = cfg.get("earnings_calendar_path") or "challenge/manual/earnings_calendar.yaml"
+    if not os.path.isabs(path):
+        path = os.path.join(ROOT, path)
+    cal = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            cal = yaml.safe_load(f) or {}
+
+    if args.sub == "add":
+        day = cal.setdefault(args.date, [])
+        if isinstance(day, str):
+            day = [day]
+        if args.symbol.upper() not in [s.upper() for s in day]:
+            day.append(args.symbol.upper())
+        cal[args.date] = sorted(set(s.upper() for s in day))
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cal, f, allow_unicode=True, sort_keys=True)
+        print(f"added: {args.symbol.upper()} on {args.date} (блок: день отчёта + следующий)")
+        return 0
+
+    if args.sub == "remove":
+        if args.date and args.date in cal:
+            if args.symbol:
+                syms = [s for s in cal[args.date] if s.upper() != args.symbol.upper()]
+                if syms:
+                    cal[args.date] = syms
+                else:
+                    del cal[args.date]
+            else:
+                del cal[args.date]
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(cal, f, allow_unicode=True, sort_keys=True)
+            print("removed")
+        else:
+            print("date not found")
+        return 0
+
+    # list
+    for d in sorted(cal):
+        print(d, "=", ", ".join(cal[d]))
+    if not cal:
+        print("(пусто) — добавляй: earnings add --symbol NVDA --date 2026-08-28")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="python -m challenge.manual.run",
                                      description="Prop-challenge manual system (ТЗ)")
@@ -257,6 +305,19 @@ def main() -> int:
     sc.add_argument("--date", required=True)
     sc.add_argument("--all-watchlist", action="store_true")
     sc.set_defaults(func=cmd_scan)
+
+    e = sub.add_parser("earnings")
+    esub = e.add_subparsers(dest="sub", required=True)
+    ea = esub.add_parser("add")
+    ea.add_argument("--symbol", required=True)
+    ea.add_argument("--date", required=True)
+    ea.set_defaults(func=cmd_earnings, sub="add")
+    el = esub.add_parser("list")
+    el.set_defaults(func=cmd_earnings, sub="list")
+    er = esub.add_parser("remove")
+    er.add_argument("--date", required=True)
+    er.add_argument("--symbol")
+    er.set_defaults(func=cmd_earnings, sub="remove")
 
     j = sub.add_parser("journal")
     j.add_argument("sub", choices=["add", "close", "summary", "weekly"])

@@ -284,6 +284,14 @@ def scan_watchlist(access, only_sym=None) -> list:
     return results
 
 
+def symbol_cluster(sym: str) -> str:
+    """Cluster name from manual_config (anti-correlation cap), '' if none."""
+    for name, members in (CFG.get("clusters") or {}).items():
+        if sym in members:
+            return name
+    return ""
+
+
 def main() -> int:
     once = "--once" in sys.argv
     test = "--test" in sys.argv
@@ -362,14 +370,33 @@ def main() -> int:
                 key = f"{today}:{res.symbol}"
                 if sent.get(key):
                     continue
-                ok = tg_send(format_setup(res))
+                msg = format_setup(res)
+                # Anti-correlation cap visibility: warn when a same-cluster
+                # symbol already alerted today (max 1 position per cluster).
+                cluster = symbol_cluster(res.symbol)
+                same_cluster = []
+                if cluster:
+                    for k in sent:
+                        try:
+                            k_date, k_sym = k.split(":", 1)
+                        except ValueError:
+                            continue
+                        if k_date == today and k_sym != res.symbol \
+                                and symbol_cluster(k_sym) == cluster:
+                            same_cluster.append(k_sym)
+                if cluster and same_cluster:
+                    msg += (f"\n⚠️ Кластер «{cluster}»: сегодня уже алертились "
+                            f"{', '.join(sorted(set(same_cluster)))}. Кап: "
+                            f"макс 1 позиция на кластер в день — входи только "
+                            f"если уверен, что та сделка не открыта.")
+                ok = tg_send(msg)
                 if ok:
                     sb = res.signal_bar or res.impulse_bar or {}
                     sent[key] = {"sent_at": now.isoformat(), "grade": res.grade,
                                  "entry": res.entry, "stop": res.stop,
                                  "target": res.target, "bias": res.bias,
                                  "signal_time": sb.get("time") if sb else None,
-                                 "rr": res.rr}
+                                 "rr": res.rr, "cluster": cluster}
                     save_sent(sent)
                     print(f"{now:%H:%M:%S} UTC: alert sent for {res.symbol}", file=sys.stderr)
             # После скана — разрешение открытых сетапов.

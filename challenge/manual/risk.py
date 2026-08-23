@@ -94,6 +94,7 @@ class DayState:
     effective_max_trades: int = 3
     effective_stop_after_losses: int = 2   # audit B: per-day effective rule
     effective_only_a: bool = True
+    clusters_used_today: list = field(default_factory=list)  # anti-correlation cap
     risk_reduced: bool = False
     paused_until: str = ""              # ISO date when a pause ends
 
@@ -188,12 +189,14 @@ class DailyStateMachine:
         return now.date() < end
 
     def record_trade(self, result_usd: float, was_planned: bool = True,
-                     violation: str = "") -> None:
+                     violation: str = "", cluster: str = "") -> None:
         """Register a closed trade for the day. Hard-rule violations force a
         stop-day immediately (ТЗ §6.2)."""
         self.state.trades_today += 1
         if result_usd < 0:
             self.state.losses_today += 1
+        if cluster and cluster not in (self.state.clusters_used_today or []):
+            self.state.clusters_used_today.append(cluster)
         if violation:
             self.state.status = "stop_day"
             self.state.status_reason = "violation: " + violation
@@ -248,7 +251,7 @@ class DailyStateMachine:
         s.status_reason = "ok"
         return "trade"
 
-    def can_trade(self, setup_class: str = "A") -> tuple[bool, str]:
+    def can_trade(self, setup_class: str = "A", cluster: str = "") -> tuple[bool, str]:
         """ТЗ §5.2 / §6: gate a signal before entry."""
         s = self.state
         if s.status != "active":
@@ -262,6 +265,12 @@ class DailyStateMachine:
                            f"(stop-day at {s.effective_stop_after_losses})")
         if s.effective_only_a and setup_class != "A":
             return False, f"profile {s.profile} allows A-setups only"
+        # Anti-correlation cap (2026-08-23): max ONE position per cluster per
+        # day — 12/18 watchlist names are bitcoin-beta and fire together.
+        used = getattr(s, "clusters_used_today", []) or []
+        if cluster and cluster in used:
+            return False, (f"кластер «{cluster}» уже торговался сегодня "
+                           f"(анти-корреляционный кап: 1 позиция на кластер)")
         return True, "ok"
 
     def position_size(self, price: float, stop_price: float, bias: str,

@@ -12,6 +12,7 @@ Session model (US stocks on the challenge terminal):
 from __future__ import annotations
 
 import datetime as dt
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -98,6 +99,47 @@ def check_news_red_zone(now: dt.datetime, zones) -> bool:
         if abs(t_ts - ev_ts) <= 30 * 60:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Earnings blackout (audit 2026-08-23): a symbol with a report on day X is
+# untradeable on X and the following `block_days` sessions (gap risk both
+# directions: report after close -> next-day gap; before open -> same open).
+# Calendar is a plain YAML: { "YYYY-MM-DD": [SYM, ...] }, "*" matches all.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _load_earnings(cfg) -> dict:
+    path = cfg.get("earnings_calendar_path")
+    if not path:
+        return {}
+    if not os.path.isabs(path):
+        path = os.path.join(_REPO_ROOT, path)
+    try:
+        import yaml as _yaml
+        with open(path, encoding="utf-8") as f:
+            data = _yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        print(f"[scanner] earnings calendar unreadable: {e}")
+        return {}
+
+
+def earnings_blackout(symbol: str, date, cal: dict, block_days: int = 2):
+    """Returns (blocked, report_date_iso). Blocks [X, X+block_days-1] where X
+    is the report date."""
+    sym = symbol.upper()
+    for k in range(max(1, block_days)):
+        d = date - dt.timedelta(days=k)
+        syms = cal.get(d.isoformat()) or []
+        if isinstance(syms, str):
+            syms = [syms]
+        up = [s.upper() for s in syms]
+        if "*" in up or sym in up:
+            return True, d.isoformat()
+    return False, None
 
 
 @dataclass
@@ -401,6 +443,14 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
         dz = cfg.get("signal_dead_zone")
         if dz and len(dz) == 2 and dz[0] <= sig_min <= dz[1]:
             no_go.append(f"signal dead zone {dz[0]}-{dz[1]} min")
+
+    # Earnings blackout (audit 2026-08-23): report day + next session.
+    ecal = _load_earnings(cfg)
+    if ecal:
+        blocked, src = earnings_blackout(
+            symbol, date, ecal, int(cfg.get("earnings_block_days", 2)))
+        if blocked:
+            no_go.append(f"earnings blackout (отчёт {src})")
 
     setup.impulse_bar = impulse
     setup.pullback_bars = pull_bars

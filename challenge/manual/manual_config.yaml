@@ -55,6 +55,29 @@ target_rr: 3.5
 # AUDIT B 2026-08-23: price-scaled S/R buffer (% of entry price) — the flat
 # $2 buffer covered ±700% of CAN's price and blocked every setup there.
 sr_proximity_buffer_pct: 0.3
+
+# Анти-корреляционные кластеры: максимум ОДНА позиция из кластера в день
+# (12 из 18 тикеров ходят за биткоином — без капа «3 сделки» превращаются
+# в одну тройную ставку).
+clusters:
+  crypto_beta:
+    - CAN
+    - BTBT
+    - HIVE
+    - WULF
+    - IREN
+    - MARA
+    - CIFR
+    - CORZ
+    - CLSK
+    - RIOT
+    - MSTR
+    - COIN
+
+# Календарь отчётностей: символ блокируется в день отчёта и на следующий
+# день (гэп). Заполнение: python -m challenge.manual.run earnings add ...
+earnings_calendar_path: challenge/manual/earnings_calendar.yaml
+earnings_block_days: 2
 default_stage: 1
 # Профиль A, риск $5 (2026-08-21): при безлимитном времени челленджа MC 40k
 # прогонов даёт P(провала −$100)=0 на любом риске (пауза + скейлинг держат дно).
