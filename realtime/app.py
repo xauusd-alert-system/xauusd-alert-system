@@ -48,6 +48,36 @@ logger = logging.getLogger("realtime_app")
 
 app = FastAPI(title="XAUUSD Multi-Asset Predictive Trading System", version="2.1.0")
 
+# AUDIT 2026-08-23 (module 9): loopback-by-default guard. The dashboard serves
+# UNAUTHENTICATED read endpoints (live MT5 positions, PnL, metrics) and was
+# found running on 0.0.0.0, exposing the account to the whole LAN. Every other
+# service in this repo binds 127.0.0.1 (news_feed_server.py,
+# run_observer_signing_proxy.py — the latter with an enforcing test). This
+# middleware rejects any request whose Host header is not loopback unless
+# DASHBOARD_ALLOW_REMOTE=1 is explicitly set in the environment.
+_DASHBOARD_ALLOW_REMOTE = get_env("DASHBOARD_ALLOW_REMOTE", default="") == "1"
+_DASHBOARD_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "testserver", "testserver.local"}
+if _DASHBOARD_ALLOW_REMOTE:
+    _extra = get_env("DASHBOARD_ALLOWED_HOSTS", default="")
+    _DASHBOARD_ALLOWED_HOSTS.update(h.strip().lower() for h in _extra.split(",") if h.strip())
+
+
+@app.middleware("http")
+async def _loopback_only_guard(request: Request, call_next):
+    if not _DASHBOARD_ALLOW_REMOTE:
+        host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+        if host and host not in _DASHBOARD_ALLOWED_HOSTS:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=403,
+                content={"detail": (
+                    f"dashboard is loopback-only (host '{host}' rejected). "
+                    "Set DASHBOARD_ALLOW_REMOTE=1 to serve non-local interfaces."
+                )},
+            )
+    return await call_next(request)
+
+
 CFG = load_config()
 MODEL_PATH = get_env("MODEL_PATH", default=None)
 DATA_MODE = get_env("DATA_MODE", default="mock")
