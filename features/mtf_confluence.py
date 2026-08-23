@@ -24,6 +24,14 @@ def merge_htf_feature(ltf_df: pd.DataFrame, htf_df: pd.DataFrame, feature_col: s
     ltf_sorted = ltf_df.sort_values("timestamp_utc").reset_index(drop=True)
     htf_sorted = htf_df[["timestamp_utc", feature_col]].sort_values("timestamp_utc").reset_index(drop=True)
     htf_sorted = htf_sorted.rename(columns={feature_col: out_col_name})
+    # AUDIT 2026-08-23 (module 8b): HTF bars are stamped at bar OPEN. A plain
+    # backward merge lets an LTF row inside [T, T+dT) receive HTF bar T's FINAL
+    # close — information that does not exist until T+dT. Offline training reads
+    # those bars from history (leak), while live inference only ever sees closed
+    # bars -> systematic train/serve skew. Shifting by one HTF row means an LTF
+    # row can only see the previous COMPLETED HTF bar; the first row becomes NaN
+    # and stays neutral downstream (pandas sum skips NaN).
+    htf_sorted[out_col_name] = htf_sorted[out_col_name].shift(1)
 
     merged = pd.merge_asof(
         ltf_sorted, htf_sorted,

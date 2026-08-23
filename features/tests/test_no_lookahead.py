@@ -197,6 +197,31 @@ def test_mtf_merge_asof_never_uses_future_htf_candle():
                     "Look-ahead detected: merge_asof pulled a future HTF candle!"
 
 
+def test_mtf_merge_does_not_see_incomplete_htf_bar():
+    """AUDIT 2026-08-23 (module 8b): HTF bars are stamped at bar OPEN. An M5
+    row at 13:05 sits inside the H1 bar stamped 13:00, which only CLOSES at
+    14:00 — its close must never reach that row. Only the previous completed
+    H1 bar (12:00) is allowed. The stamp-ordering test above cannot catch this
+    (the leaked stamp IS <= the LTF timestamp)."""
+    base = int(pd.Timestamp("2026-01-02 12:00", tz="UTC").timestamp())
+    ltf_df = pd.DataFrame([
+        {"timestamp_utc": base + m * 60, "close": 100.0 + m * 0.1}
+        for m in range(0, 120, 5)          # M5 rows 12:00 .. 13:55
+    ])
+    htf_df = pd.DataFrame([
+        {"timestamp_utc": base - 3600, "close": 50.0},   # 11:00 bar — closed
+        {"timestamp_utc": base,        "close": 99.0},   # 12:00 bar — closes 13:00
+    ])
+
+    merged = merge_htf_feature(ltf_df, htf_df, "close", "htf_close")
+
+    pre_close = merged[merged["timestamp_utc"] < base + 3600]
+    assert len(pre_close) > 0
+    # Rows before 13:00 may only see the previous completed bar's value.
+    assert (pre_close["htf_close"] == 50.0).all(), \
+        f"intra-period leak: future H1 close seen pre-13:00: {pre_close['htf_close'].unique()}"
+
+
 # ---------------------------------------------------------------------------
 # N2 (audit 2026-08-10): extend no-look-ahead coverage to the modules the
 # original suite skipped (order_flow, smart_money_metrics, fractional_diff,
