@@ -103,7 +103,33 @@ def cmd_journal(send, chat_id, args=()):
             f"{d['date']}: {d['trades']} сделок, PnL {d['pnl_usd']:+.2f}$, "
             f"WR {d['win_rate_pct']}%, avg R {d['avg_r']}"
         )
+    # AUDIT follow-up 2026-08-23: machine-measured setup outcomes (the
+    # alerter resolves every alerted setup on real candles) — no manual work.
+    try:
+        import sys as _sys
+        if ROOT not in _sys.path:
+            _sys.path.insert(0, ROOT)
+        from challenge.manual import outcomes as _outcomes
+        from challenge.manual.alerter import OUTCOMES_CSV
+        rows = _outcomes.read_journal(OUTCOMES_CSV)
+        if rows:
+            st = _outcomes.compute_stats(rows)
+            t = st.get("total", {})
+            a = st.get("A", {})
+            b = st.get("B", {})
+            lines.append(
+                f"Авто-исходы сетапов ({t.get('n', 0)} всего, avgR {_fmt(st.get('total'))}): "
+                f"A {a.get('n', 0)} сд. WR {a.get('win_rate_pct')}% avgR {_fmt(a)} | "
+                f"B {b.get('n', 0)} сд. WR {b.get('win_rate_pct')}% avgR {_fmt(b)}"
+            )
+    except Exception:
+        pass
     send(chat_id, "\n".join(lines), parse_mode="Markdown")
+
+
+def _fmt(bucket) -> str:
+    v = bucket.get("avg_r") if bucket else None
+    return "—" if v is None else f"{v:+.2f}"
 
 
 def cmd_scan(send, chat_id, args=()):
