@@ -333,28 +333,11 @@ def main() -> int:
             print(f"{now:%H:%M:%S} UTC: вне сессии, жду", file=sys.stderr)
             time.sleep(POLL_SECONDS)
             continue
-        # --- refresh with error classification ---
-        # Сетевые сбои (SSLEOF/ReadTimeout из РФ) — не считаем «смертью» токена,
-        # иначе ложная тревога каждые 10 мин при блоировке сети.
         access = None
         try:
             access = refresh_access()
             refresh_failures = 0
         except Exception as e:
-            msg = str(e)
-            is_network = (
-                isinstance(e, (requests.exceptions.SSLError,
-                               requests.exceptions.ConnectionError,
-                               requests.exceptions.ReadTimeout,
-                               requests.exceptions.Timeout))
-                or "SSLEOF" in msg or "Read timed out" in msg
-                or "handshake" in msg.lower() or "Max retries" in msg
-            )
-            if is_network:
-                print(f"{now:%H:%M:%S} UTC: refresh network fail: {e}",
-                      file=sys.stderr)
-                time.sleep(POLL_SECONDS)
-                continue
             refresh_failures += 1
             print(f"{now:%H:%M:%S} UTC: refresh failed ({refresh_failures}): {e}",
                   file=sys.stderr)
@@ -364,26 +347,22 @@ def main() -> int:
                 last_dead_alert = now.timestamp()
             time.sleep(POLL_SECONDS)
             continue
-
-        if finalizing:
-            # Сессия закончилась: финализируем EOD-исходы и шлём сводку дня.
-            try:
-                resolve_open_setups(access)
-            except Exception as e:
-                print(f"{now:%H:%M:%S} UTC: resolve error: {e}", file=sys.stderr)
-            if now.date().isoformat() != last_summary_date:
-                last_summary_date = now.date().isoformat()
-                stats = outcomes_mod.load_stats(STATS_FILE)
-                if stats:
-                    try:
-                        tg_send(outcomes_mod.format_stats_summary(stats))
-                    except Exception as e:
-                        print(f"{now:%H:%M:%S} UTC: tg stats msg failed: {e}", file=sys.stderr)
-            time.sleep(POLL_SECONDS)
-            continue
-
-        # --- normal in-session scan ---
-        try:
+            if finalizing:
+                # Сессия закончилась: финализируем EOD-исходы и шлём сводку дня.
+                try:
+                    resolve_open_setups(access)
+                except Exception as e:
+                    print(f"{now:%H:%M:%S} UTC: resolve error: {e}", file=sys.stderr)
+                if now.date().isoformat() != last_summary_date:
+                    last_summary_date = now.date().isoformat()
+                    stats = outcomes_mod.load_stats(STATS_FILE)
+                    if stats:
+                        try:
+                            tg_send(outcomes_mod.format_stats_summary(stats))
+                        except Exception as e:
+                            print(f"{now:%H:%M:%S} UTC: tg stats msg failed: {e}", file=sys.stderr)
+                time.sleep(POLL_SECONDS)
+                continue
             sent = load_sent()
             today = now.date().isoformat()
             hits = scan_watchlist(access)
@@ -426,7 +405,7 @@ def main() -> int:
             except Exception as e2:
                 print(f"{now:%H:%M:%S} UTC: resolve error: {e2}", file=sys.stderr)
         except Exception as e:
-            print(f"{now:%H:%M:%S} UTC: scan error: {e}", file=sys.stderr)
+            print(f"{now:%H:%M:%S} UTC: error: {e}", file=sys.stderr)
         time.sleep(POLL_SECONDS)
 
 
