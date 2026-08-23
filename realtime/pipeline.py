@@ -132,6 +132,12 @@ class RealtimePipeline:
         df = candle_anatomy(df)
         df = detect_structure(df, lookback=self.cfg["features"]["structure_lookback"])
         df = add_regime_indicators(df, self.cfg)
+        try:
+            from features.bifurcation import add_bifurcation_features
+            df = add_bifurcation_features(df)
+        except Exception as e:
+            import logging
+            logging.getLogger("realtime.pipeline").warning("bifurcation features skipped: %s", e)
 
         htf_frames = {}
         ref_tfs = self.cfg.get("features", {}).get("mtf_reference_timeframes", ["M15", "H1"])

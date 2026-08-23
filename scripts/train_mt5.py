@@ -55,6 +55,15 @@ def build_full_df(
     df = candle_anatomy(df)
     df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
     df = add_regime_indicators(df, cfg)
+    # Agent-based bifurcation (features/bifurcation.py) — causal entropy of
+    # trend/counter-trend/noise populations; must run after regime/order_flow
+    # so it can use adx/cvd/bb_width_percentile.
+    try:
+        from features.bifurcation import add_bifurcation_features
+        df = add_bifurcation_features(df)
+    except Exception as e:
+        import logging
+        logging.getLogger("train_mt5").warning("bifurcation features skipped: %s", e)
 
     # Загружаем старшие таймфреймы (H1, H4) из SQLite для расчета MTF Confluence
     if db_path and asset_key:
