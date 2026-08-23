@@ -124,39 +124,111 @@ def tg_send(text: str) -> bool:
 def refresh_access():
     with open(TOKEN_FILE, encoding="utf-8") as f:
         rt = json.load(f)["refresh_token"]
-    r = requests.post(REFRESH_URL,
-                      json={"realm": REALM, "clientId": CLIENT_ID, "refreshToken": rt},
-                      headers={"Authorization": "Bearer",
-                               "Content-Type": "application/json",
-                               "X-UT-GRPC-METADATA": "{}",
-                               "Origin": "https://markets-app.hashhedge.com",
-                               "Referer": "https://markets-app.hashhedge.com/",
-                               "User-Agent": "Mozilla/5.0"}, timeout=30)
-    r.raise_for_status()
-    return r.json()["accessToken"]
+    payload = {"realm": REALM, "clientId": CLIENT_ID, "refreshToken": rt}
+    headers = {"Authorization": "Bearer",
+               "Content-Type": "application/json",
+               "X-UT-GRPC-METADATA": "{}",
+               "Origin": "https://markets-app.hashhedge.com",
+               "Referer": "https://markets-app.hashhedge.com/",
+               "User-Agent": "Mozilla/5.0"}
+    # 1) обычный путь через requests
+    try:
+        r = requests.post(REFRESH_URL, json=payload, headers=headers, timeout=30)
+        r.raise_for_status()
+        return r.json()["accessToken"]
+    except Exception as e:
+        msg = str(e)
+        is_network = (
+            isinstance(e, (requests.exceptions.SSLError,
+                           requests.exceptions.ConnectionError,
+                           requests.exceptions.ReadTimeout,
+                           requests.exceptions.Timeout))
+            or "SSLEOF" in msg or "Read timed out" in msg
+            or "handshake" in msg.lower() or "Max retries" in msg
+            or "Timeout" in type(e).__name__
+        )
+        if not is_network:
+            raise
+        print(f"refresh via requests failed ({type(e).__name__}), "
+              f"пробую через Playwright…", file=sys.stderr)
+        try:
+            import json as _json
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True,
+                    args=["--disable-blink-features=AutomationControlled"])
+                ctx = browser.new_context()
+                resp = ctx.request.post(REFRESH_URL,
+                    data=_json.dumps(payload),
+                    headers=headers)
+                if not resp.ok:
+                    raise RuntimeError(f"playwright refresh {resp.status}: {resp.text()[:200]}")
+                data = resp.json()
+                browser.close()
+                return data["accessToken"]
+        except Exception as e2:
+            print(f"playwright fallback also failed: {e2}", file=sys.stderr)
+            raise e
 
 
 def fetch_candles(access, symbol_id, candles_count=720):
-    r = requests.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
-                      json={"to": int(time.time()), "symbolId": symbol_id,
-                            "candlesCount": candles_count, "interval": "Min1"},
-                      headers={"Authorization": "Bearer " + access,
-                               "Content-Type": "application/json",
-                               "X-UT-GRPC-METADATA": "{}",
-                               "X-B3-SpanId": uuid.uuid4().hex[:16],
-                               "X-B3-TraceId": uuid.uuid4().hex[:16],
-                               "Origin": "https://markets-app.hashhedge.com",
-                               "Referer": "https://markets-app.hashhedge.com/",
-                               "User-Agent": "Mozilla/5.0"}, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
-    out = []
-    for c in r.json().get("candles", []):
-        out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
-                    "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
-                    "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
-    out.sort(key=lambda x: x["time"])
-    return out
+    payload = {"to": int(time.time()), "symbolId": symbol_id,
+               "candlesCount": candles_count, "interval": "Min1"}
+    headers = {"Authorization": "Bearer " + access,
+               "Content-Type": "application/json",
+               "X-UT-GRPC-METADATA": "{}",
+               "X-B3-SpanId": uuid.uuid4().hex[:16],
+               "X-B3-TraceId": uuid.uuid4().hex[:16],
+               "Origin": "https://markets-app.hashhedge.com",
+               "Referer": "https://markets-app.hashhedge.com/",
+               "User-Agent": "Mozilla/5.0"}
+    # 1) requests
+    try:
+        r = requests.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
+                          json=payload, headers=headers, timeout=60)
+        if r.status_code != 200:
+            raise RuntimeError(f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
+        out = []
+        for c in r.json().get("candles", []):
+            out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
+                        "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
+                        "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
+        out.sort(key=lambda x: x["time"])
+        return out
+    except Exception as e:
+        msg = str(e)
+        is_network = (
+            isinstance(e, (requests.exceptions.SSLError,
+                           requests.exceptions.ConnectionError,
+                           requests.exceptions.ReadTimeout,
+                           requests.exceptions.Timeout))
+            or "SSLEOF" in msg or "Read timed out" in msg
+            or "handshake" in msg.lower() or "Max retries" in msg
+            or "Timeout" in type(e).__name__
+        )
+        if not is_network:
+            raise
+        print(f"getCandles {symbol_id} via requests failed ({type(e).__name__}), "
+              f"пробую Playwright…", file=sys.stderr)
+        import json as _json
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True,
+                args=["--disable-blink-features=AutomationControlled"])
+            ctx = browser.new_context()
+            resp = ctx.request.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
+                data=_json.dumps(payload), headers=headers)
+            if not resp.ok:
+                raise RuntimeError(f"playwright getCandles {symbol_id}: {resp.status}: {resp.text()[:200]}")
+            data = resp.json()
+            browser.close()
+            out = []
+            for c in data.get("candles", []):
+                out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
+                            "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
+                            "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
+            out.sort(key=lambda x: x["time"])
+            return out
 
 
 def load_sent() -> dict:
