@@ -364,6 +364,35 @@ class TestOutcomes(unittest.TestCase):
             self.assertEqual(rows[0]["r"], "3.5")
 
 
+class TestClusterCapAndEarnings(unittest.TestCase):
+    """2026-08-23: anti-correlation cluster cap + earnings blackout."""
+
+    def test_cluster_cap_blocks_second_same_cluster(self):
+        with tempfile.TemporaryDirectory() as td:
+            sm = risk_mod.DailyStateMachine(state_path=os.path.join(td, "s.json"))
+            sm.start_day(1, "B", 1000.0, 1000.0, dt.datetime.now())
+            ok, _ = sm.can_trade("B", cluster="crypto_beta")
+            self.assertTrue(ok)
+            # First trade in the cluster consumes the day's cluster slot.
+            sm.record_trade(-2.5, cluster="crypto_beta")   # stop-day anyway (2nd rule is 2 losses; 1st loss ok)
+            ok2, reason = sm.can_trade("B", cluster="crypto_beta")
+            self.assertFalse(ok2)
+            self.assertIn("кластер", reason)
+
+    def test_earnings_blackout_window(self):
+        from challenge.manual.scanner import earnings_blackout
+        cal = {"2026-08-27": ["NVDA"], "2026-08-20": "*"}
+        d = dt.date(2026, 8, 27)
+        blocked, src = earnings_blackout("NVDA", d, cal, block_days=2)      # report day
+        self.assertTrue(blocked); self.assertEqual(src, "2026-08-27")
+        blocked2, src2 = earnings_blackout("NVDA", d + dt.timedelta(days=1), cal, 2)  # gap day
+        self.assertTrue(blocked2); self.assertEqual(src2, "2026-08-27")
+        blocked3, _ = earnings_blackout("NVDA", d + dt.timedelta(days=2), cal, 2)     # window over
+        self.assertFalse(blocked3)
+        wildcard, wsrc = earnings_blackout("ANY", dt.date(2026, 8, 21), cal, 2)       # "*" next day
+        self.assertTrue(wildcard); self.assertEqual(wsrc, "2026-08-20")
+
+
 class TestJournal(unittest.TestCase):
     def test_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:
