@@ -1,8 +1,12 @@
 """
 Unsupervised Market Regime Classifier.
-Uses Gaussian Mixture Models (GMM) to discover latent market regimes
+Uses a Gaussian Mixture Model (GMM) to discover latent market regimes
 (e.g., low-volatility trend, high-volatility range, compression, shock)
-strictly causally without forward-looking bias.
+from causal technical features.
+
+NOTE: despite the historical file name, this is a GMM, not an HMM — no
+temporal transition modelling is performed. Kept under this name to avoid
+churn; the class is currently NOT wired into any production pipeline.
 """
 from __future__ import annotations
 import numpy as np
@@ -75,10 +79,20 @@ class UnsupervisedRegimeClassifier:
 
         return self
 
+    def _require_fitted(self, df: pd.DataFrame) -> None:
+        """Audit A 2026-08-23: the old auto-fit-on-predict trained the scaler
+        and GMM on the very frame being predicted (transductive leakage in any
+        walk-forward use). Fail loudly instead."""
+        if not self.is_fitted:
+            raise RuntimeError(
+                "UnsupervisedRegimeClassifier.predict_* called before fit(). "
+                "Auto-fitting on the prediction frame would leak test data "
+                "into the model. Call fit() on a training frame first."
+            )
+
     def predict_regime(self, df: pd.DataFrame) -> pd.Series:
         """Predicts causal regime labels for the dataframe."""
-        if not self.is_fitted:
-            self.fit(df)
+        self._require_fitted(df)
 
         feats = self._extract_features(df)
         X_scaled = self.scaler.transform(feats)
@@ -88,8 +102,7 @@ class UnsupervisedRegimeClassifier:
 
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
         """Returns regime posterior probability matrix."""
-        if not self.is_fitted:
-            self.fit(df)
+        self._require_fitted(df)
 
         feats = self._extract_features(df)
         X_scaled = self.scaler.transform(feats)
