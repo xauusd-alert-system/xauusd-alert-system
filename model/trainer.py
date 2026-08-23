@@ -80,6 +80,8 @@ FEATURE_COLUMNS = [
     # Order-flow / microstructure (features/order_flow.py, causal, per-row)
     "cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50",
     "dist_vwap_atr",
+    # Agent-based bifurcation (features/bifurcation.py, causal entropy)
+    "break_score", "break_intensity", "agent_long_ratio",
 ]
 
 
