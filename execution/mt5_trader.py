@@ -633,6 +633,7 @@ class MultiAssetMT5Trader:
                     "original_volume": pos.volume,
                     "tp1": None, "tp2": None, "tp3": None,
                     "tp1_hit": False, "tp2_hit": False,
+                    "be_done": False, "trailing_active": False,
                 }
             # CRIT 5: keep the DB logging row keyed by the same position ticket.
             if ticket not in self.signal_features:
@@ -1710,6 +1711,8 @@ class MultiAssetMT5Trader:
                 "tp3": None,
                 "tp1_hit": False,
                 "tp2_hit": False,
+                "be_done": False,
+                "trailing_active": False,
                 "signal_contract": {
                     k: signal.get(k) for k in (
                         "signal_id", "strategy_version", "config_hash", "model_hash",

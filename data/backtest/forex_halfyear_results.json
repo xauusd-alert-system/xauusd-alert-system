@@ -1,0 +1,2283 @@
+{
+  "status": "completed",
+  "started_at_utc": "2026-08-24T15:12:51.833286+00:00",
+  "evaluation_start_utc": "2026-02-08T00:00:00+00:00",
+  "cutoff_exclusive_utc": "2026-08-08T00:00:00+00:00",
+  "train_days": 300,
+  "test_days": 30,
+  "step_days": 30,
+  "assets_requested": [
+    "XAUUSD",
+    "XAGUSD",
+    "EURUSD",
+    "GBPUSD",
+    "BTCUSD"
+  ],
+  "folds_total": 7,
+  "causal": true,
+  "production_models_touched": false,
+  "candidate_model_switched_live": false,
+  "assets": {
+    "XAUUSD": {
+      "status": "completed",
+      "enabled_in_config": true,
+      "timeframe": "M15",
+      "raw_rows": 31182,
+      "featured_rows": 31182,
+      "data_start_utc": "2025-04-14T01:00:00+00:00",
+      "data_end_exclusive_utc": "2026-08-08T00:00:00+00:00",
+      "folds": [
+        {
+          "fold": 0,
+          "train_start_utc": "2025-04-14T00:00:00+00:00",
+          "train_end_utc": "2026-02-08T00:00:00+00:00",
+          "test_start_utc": "2026-02-08T00:00:00+00:00",
+          "test_end_utc": "2026-03-10T00:00:00+00:00",
+          "purged_train_rows": 19329,
+          "test_rows": 1921,
+          "scoring_seconds": 3.18
+        },
+        {
+          "fold": 1,
+          "train_start_utc": "2025-05-14T00:00:00+00:00",
+          "train_end_utc": "2026-03-10T00:00:00+00:00",
+          "test_start_utc": "2026-03-10T00:00:00+00:00",
+          "test_end_utc": "2026-04-09T00:00:00+00:00",
+          "purged_train_rows": 19265,
+          "test_rows": 1932,
+          "scoring_seconds": 2.98
+        },
+        {
+          "fold": 2,
+          "train_start_utc": "2025-06-13T00:00:00+00:00",
+          "train_end_utc": "2026-04-09T00:00:00+00:00",
+          "test_start_utc": "2026-04-09T00:00:00+00:00",
+          "test_end_utc": "2026-05-09T00:00:00+00:00",
+          "purged_train_rows": 19145,
+          "test_rows": 2024,
+          "scoring_seconds": 2.85
+        },
+        {
+          "fold": 3,
+          "train_start_utc": "2025-07-13T00:00:00+00:00",
+          "train_end_utc": "2026-05-09T00:00:00+00:00",
+          "test_start_utc": "2026-05-09T00:00:00+00:00",
+          "test_end_utc": "2026-06-08T00:00:00+00:00",
+          "purged_train_rows": 19269,
+          "test_rows": 1829,
+          "scoring_seconds": 3.36
+        },
+        {
+          "fold": 4,
+          "train_start_utc": "2025-08-12T00:00:00+00:00",
+          "train_end_utc": "2026-06-08T00:00:00+00:00",
+          "test_start_utc": "2026-06-08T00:00:00+00:00",
+          "test_end_utc": "2026-07-08T00:00:00+00:00",
+          "purged_train_rows": 19297,
+          "test_rows": 1992,
+          "scoring_seconds": 3.07
+        },
+        {
+          "fold": 5,
+          "train_start_utc": "2025-09-11T00:00:00+00:00",
+          "train_end_utc": "2026-07-08T00:00:00+00:00",
+          "test_start_utc": "2026-07-08T00:00:00+00:00",
+          "test_end_utc": "2026-08-07T00:00:00+00:00",
+          "purged_train_rows": 19144,
+          "test_rows": 2024,
+          "scoring_seconds": 2.77
+        },
+        {
+          "fold": 6,
+          "train_start_utc": "2025-10-11T00:00:00+00:00",
+          "train_end_utc": "2026-08-07T00:00:00+00:00",
+          "test_start_utc": "2026-08-07T00:00:00+00:00",
+          "test_end_utc": "2026-08-08T00:00:00+00:00",
+          "purged_train_rows": 19144,
+          "test_rows": 92,
+          "scoring_seconds": 3.09
+        }
+      ],
+      "variants": {
+        "current": {
+          "summary": {
+            "n_trades": 88,
+            "win_rate_pct": 43.18,
+            "profit_factor": 0.6738,
+            "total_pnl": -1008.16,
+            "avg_pnl": -11.4564,
+            "max_drawdown": -1224.88,
+            "r_metrics": {
+              "n": 88,
+              "mean_r": -0.1909,
+              "std_r": 0.9904,
+              "skew_r": 0.395,
+              "kurtosis_excess_r": -1.7818,
+              "avg_win_r": 0.9135,
+              "avg_loss_r": 1.0303,
+              "breakeven_wr_pct": 53.0,
+              "actual_wr_pct": 43.2,
+              "net_expectancy_r": -0.1909,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "breakeven": {
+                  "n": 11,
+                  "share_pct": 12.5,
+                  "mean_r": 0.4485,
+                  "r_contribution_pct": -29.4
+                },
+                "stop": {
+                  "n": 50,
+                  "share_pct": 56.8,
+                  "mean_r": -1.0303,
+                  "r_contribution_pct": 306.6
+                },
+                "tp3_runner": {
+                  "n": 27,
+                  "share_pct": 30.7,
+                  "mean_r": 1.103,
+                  "r_contribution_pct": -177.2
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 87,
+                "win_rate_pct": 42.53,
+                "profit_factor": 0.668,
+                "total_pnl": -1026.34,
+                "avg_pnl": -11.797
+              },
+              "2026-Q2": {
+                "n_trades": 1,
+                "win_rate_pct": 100.0,
+                "profit_factor": 999.0,
+                "total_pnl": 18.18,
+                "avg_pnl": 18.18
+              }
+            },
+            "exit_reasons": {
+              "stop": 50,
+              "tp3_runner": 27,
+              "breakeven": 11
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 87,
+              "total_pnl": -1026.34,
+              "win_rate_pct": 42.53,
+              "profit_factor": 0.668
+            },
+            {
+              "fold": 1,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 2,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 3,
+              "n_trades": 1,
+              "total_pnl": 18.18,
+              "win_rate_pct": 100.0,
+              "profit_factor": 999.0
+            },
+            {
+              "fold": 4,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 5,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_3.5": {
+          "summary": {
+            "n_trades": 89,
+            "win_rate_pct": 26.97,
+            "profit_factor": 1.22,
+            "total_pnl": 598.02,
+            "avg_pnl": 6.7193,
+            "max_drawdown": -669.12,
+            "r_metrics": {
+              "n": 89,
+              "mean_r": 0.168,
+              "std_r": 2.0083,
+              "skew_r": 1.0559,
+              "kurtosis_excess_r": -0.9059,
+              "avg_win_r": 3.4545,
+              "avg_loss_r": 1.0455,
+              "breakeven_wr_pct": 23.2,
+              "actual_wr_pct": 27.0,
+              "net_expectancy_r": 0.168,
+              "top5_concentration_pct": 92.4,
+              "top1_concentration_pct": 23.1,
+              "buckets": {
+                "stop": {
+                  "n": 65,
+                  "share_pct": 73.0,
+                  "mean_r": -1.0455,
+                  "r_contribution_pct": -454.6
+                },
+                "tp3_runner": {
+                  "n": 24,
+                  "share_pct": 27.0,
+                  "mean_r": 3.4545,
+                  "r_contribution_pct": 554.6
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 88,
+                "win_rate_pct": 27.27,
+                "profit_factor": 1.2391,
+                "total_pnl": 639.84,
+                "avg_pnl": 7.2709
+              },
+              "2026-Q2": {
+                "n_trades": 1,
+                "win_rate_pct": 0.0,
+                "profit_factor": 0.0,
+                "total_pnl": -41.82,
+                "avg_pnl": -41.82
+              }
+            },
+            "exit_reasons": {
+              "stop": 65,
+              "tp3_runner": 24
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 88,
+              "total_pnl": 639.84,
+              "win_rate_pct": 27.27,
+              "profit_factor": 1.2391
+            },
+            {
+              "fold": 1,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 2,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 3,
+              "n_trades": 1,
+              "total_pnl": -41.82,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 4,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 5,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_0.85": {
+          "summary": {
+            "n_trades": 94,
+            "win_rate_pct": 39.36,
+            "profit_factor": 0.4995,
+            "total_pnl": -1193.08,
+            "avg_pnl": -12.6923,
+            "max_drawdown": -1321.8,
+            "r_metrics": {
+              "n": 94,
+              "mean_r": -0.3173,
+              "std_r": 0.9087,
+              "skew_r": 0.4426,
+              "kurtosis_excess_r": -1.8438,
+              "avg_win_r": 0.8045,
+              "avg_loss_r": 1.0455,
+              "breakeven_wr_pct": 56.5,
+              "actual_wr_pct": 39.4,
+              "net_expectancy_r": -0.3173,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "stop": {
+                  "n": 57,
+                  "share_pct": 60.6,
+                  "mean_r": -1.0455,
+                  "r_contribution_pct": 199.8
+                },
+                "tp3_runner": {
+                  "n": 37,
+                  "share_pct": 39.4,
+                  "mean_r": 0.8045,
+                  "r_contribution_pct": -99.8
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 93,
+                "win_rate_pct": 38.71,
+                "profit_factor": 0.486,
+                "total_pnl": -1225.26,
+                "avg_pnl": -13.1748
+              },
+              "2026-Q2": {
+                "n_trades": 1,
+                "win_rate_pct": 100.0,
+                "profit_factor": 999.0,
+                "total_pnl": 32.18,
+                "avg_pnl": 32.18
+              }
+            },
+            "exit_reasons": {
+              "stop": 57,
+              "tp3_runner": 37
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 93,
+              "total_pnl": -1225.26,
+              "win_rate_pct": 38.71,
+              "profit_factor": 0.486
+            },
+            {
+              "fold": 1,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 2,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 3,
+              "n_trades": 1,
+              "total_pnl": 32.18,
+              "win_rate_pct": 100.0,
+              "profit_factor": 999.0
+            },
+            {
+              "fold": 4,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 5,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        }
+      }
+    },
+    "XAGUSD": {
+      "status": "completed",
+      "enabled_in_config": false,
+      "timeframe": "M15",
+      "raw_rows": 31180,
+      "featured_rows": 31180,
+      "data_start_utc": "2025-04-14T01:00:00+00:00",
+      "data_end_exclusive_utc": "2026-08-08T00:00:00+00:00",
+      "folds": [
+        {
+          "fold": 0,
+          "train_start_utc": "2025-04-14T00:00:00+00:00",
+          "train_end_utc": "2026-02-08T00:00:00+00:00",
+          "test_start_utc": "2026-02-08T00:00:00+00:00",
+          "test_end_utc": "2026-03-10T00:00:00+00:00",
+          "purged_train_rows": 19327,
+          "test_rows": 1921,
+          "scoring_seconds": 3.47
+        },
+        {
+          "fold": 1,
+          "train_start_utc": "2025-05-14T00:00:00+00:00",
+          "train_end_utc": "2026-03-10T00:00:00+00:00",
+          "test_start_utc": "2026-03-10T00:00:00+00:00",
+          "test_end_utc": "2026-04-09T00:00:00+00:00",
+          "purged_train_rows": 19263,
+          "test_rows": 1932,
+          "scoring_seconds": 4.59
+        },
+        {
+          "fold": 2,
+          "train_start_utc": "2025-06-13T00:00:00+00:00",
+          "train_end_utc": "2026-04-09T00:00:00+00:00",
+          "test_start_utc": "2026-04-09T00:00:00+00:00",
+          "test_end_utc": "2026-05-09T00:00:00+00:00",
+          "purged_train_rows": 19143,
+          "test_rows": 2024,
+          "scoring_seconds": 5.0
+        },
+        {
+          "fold": 3,
+          "train_start_utc": "2025-07-13T00:00:00+00:00",
+          "train_end_utc": "2026-05-09T00:00:00+00:00",
+          "test_start_utc": "2026-05-09T00:00:00+00:00",
+          "test_end_utc": "2026-06-08T00:00:00+00:00",
+          "purged_train_rows": 19267,
+          "test_rows": 1829,
+          "scoring_seconds": 3.42
+        },
+        {
+          "fold": 4,
+          "train_start_utc": "2025-08-12T00:00:00+00:00",
+          "train_end_utc": "2026-06-08T00:00:00+00:00",
+          "test_start_utc": "2026-06-08T00:00:00+00:00",
+          "test_end_utc": "2026-07-08T00:00:00+00:00",
+          "purged_train_rows": 19295,
+          "test_rows": 1992,
+          "scoring_seconds": 2.85
+        },
+        {
+          "fold": 5,
+          "train_start_utc": "2025-09-11T00:00:00+00:00",
+          "train_end_utc": "2026-07-08T00:00:00+00:00",
+          "test_start_utc": "2026-07-08T00:00:00+00:00",
+          "test_end_utc": "2026-08-07T00:00:00+00:00",
+          "purged_train_rows": 19142,
+          "test_rows": 2024,
+          "scoring_seconds": 3.29
+        },
+        {
+          "fold": 6,
+          "train_start_utc": "2025-10-11T00:00:00+00:00",
+          "train_end_utc": "2026-08-07T00:00:00+00:00",
+          "test_start_utc": "2026-08-07T00:00:00+00:00",
+          "test_end_utc": "2026-08-08T00:00:00+00:00",
+          "purged_train_rows": 19143,
+          "test_rows": 92,
+          "scoring_seconds": 2.92
+        }
+      ],
+      "variants": {
+        "current": {
+          "summary": {
+            "n_trades": 1001,
+            "win_rate_pct": 46.25,
+            "profit_factor": 0.3679,
+            "total_pnl": -32329.07,
+            "avg_pnl": -32.2968,
+            "max_drawdown": -32561.44,
+            "r_metrics": {
+              "n": 1001,
+              "mean_r": -0.4037,
+              "std_r": 0.8605,
+              "skew_r": 0.2381,
+              "kurtosis_excess_r": -1.8597,
+              "avg_win_r": 0.5081,
+              "avg_loss_r": 1.1884,
+              "breakeven_wr_pct": 70.1,
+              "actual_wr_pct": 46.3,
+              "net_expectancy_r": -0.4037,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "breakeven": {
+                  "n": 160,
+                  "share_pct": 16.0,
+                  "mean_r": 0.2172,
+                  "r_contribution_pct": -8.6
+                },
+                "stop": {
+                  "n": 538,
+                  "share_pct": 53.7,
+                  "mean_r": -1.1884,
+                  "r_contribution_pct": 158.2
+                },
+                "tp3_runner": {
+                  "n": 303,
+                  "share_pct": 30.3,
+                  "mean_r": 0.6616,
+                  "r_contribution_pct": -49.6
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 40,
+                "win_rate_pct": 57.5,
+                "profit_factor": 0.7532,
+                "total_pnl": -398.8,
+                "avg_pnl": -9.97
+              },
+              "2026-Q2": {
+                "n_trades": 581,
+                "win_rate_pct": 45.09,
+                "profit_factor": 0.3678,
+                "total_pnl": -19171.67,
+                "avg_pnl": -32.9977
+              },
+              "2026-Q3": {
+                "n_trades": 380,
+                "win_rate_pct": 46.84,
+                "profit_factor": 0.3356,
+                "total_pnl": -12758.6,
+                "avg_pnl": -33.5753
+              }
+            },
+            "exit_reasons": {
+              "stop": 538,
+              "tp3_runner": 303,
+              "breakeven": 160
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 1,
+              "n_trades": 48,
+              "total_pnl": -567.36,
+              "win_rate_pct": 56.25,
+              "profit_factor": 0.7158
+            },
+            {
+              "fold": 2,
+              "n_trades": 493,
+              "total_pnl": -17205.51,
+              "win_rate_pct": 43.81,
+              "profit_factor": 0.3467
+            },
+            {
+              "fold": 3,
+              "n_trades": 40,
+              "total_pnl": -714.8,
+              "win_rate_pct": 55.0,
+              "profit_factor": 0.5823
+            },
+            {
+              "fold": 4,
+              "n_trades": 49,
+              "total_pnl": -1294.43,
+              "win_rate_pct": 51.02,
+              "profit_factor": 0.4327
+            },
+            {
+              "fold": 5,
+              "n_trades": 365,
+              "total_pnl": -12620.55,
+              "win_rate_pct": 46.03,
+              "profit_factor": 0.3261
+            },
+            {
+              "fold": 6,
+              "n_trades": 6,
+              "total_pnl": 73.58,
+              "win_rate_pct": 83.33,
+              "profit_factor": 1.774
+            }
+          ]
+        },
+        "rr_3.5": {
+          "summary": {
+            "n_trades": 1029,
+            "win_rate_pct": 25.36,
+            "profit_factor": 0.771,
+            "total_pnl": -9687.03,
+            "avg_pnl": -9.414,
+            "max_drawdown": -10908.32,
+            "r_metrics": {
+              "n": 1029,
+              "mean_r": -0.2354,
+              "std_r": 1.9589,
+              "skew_r": 1.1341,
+              "kurtosis_excess_r": -0.7153,
+              "avg_win_r": 3.1233,
+              "avg_loss_r": 1.3768,
+              "breakeven_wr_pct": 30.6,
+              "actual_wr_pct": 25.4,
+              "net_expectancy_r": -0.2354,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "stop": {
+                  "n": 768,
+                  "share_pct": 74.6,
+                  "mean_r": -1.3768,
+                  "r_contribution_pct": 436.6
+                },
+                "tp3_runner": {
+                  "n": 261,
+                  "share_pct": 25.4,
+                  "mean_r": 3.1233,
+                  "r_contribution_pct": -336.6
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 40,
+                "win_rate_pct": 42.5,
+                "profit_factor": 1.6768,
+                "total_pnl": 857.2,
+                "avg_pnl": 21.43
+              },
+              "2026-Q2": {
+                "n_trades": 588,
+                "win_rate_pct": 26.87,
+                "profit_factor": 0.8336,
+                "total_pnl": -3941.16,
+                "avg_pnl": -6.7027
+              },
+              "2026-Q3": {
+                "n_trades": 401,
+                "win_rate_pct": 21.45,
+                "profit_factor": 0.6194,
+                "total_pnl": -6603.07,
+                "avg_pnl": -16.4665
+              }
+            },
+            "exit_reasons": {
+              "stop": 768,
+              "tp3_runner": 261
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 1,
+              "n_trades": 49,
+              "total_pnl": 1081.57,
+              "win_rate_pct": 42.86,
+              "profit_factor": 1.7014
+            },
+            {
+              "fold": 2,
+              "n_trades": 497,
+              "total_pnl": -4329.79,
+              "win_rate_pct": 25.75,
+              "profit_factor": 0.7869
+            },
+            {
+              "fold": 3,
+              "n_trades": 40,
+              "total_pnl": -42.8,
+              "win_rate_pct": 30.0,
+              "profit_factor": 0.9722
+            },
+            {
+              "fold": 4,
+              "n_trades": 50,
+              "total_pnl": 126.5,
+              "win_rate_pct": 32.0,
+              "profit_factor": 1.0676
+            },
+            {
+              "fold": 5,
+              "n_trades": 386,
+              "total_pnl": -6317.02,
+              "win_rate_pct": 21.5,
+              "profit_factor": 0.6214
+            },
+            {
+              "fold": 6,
+              "n_trades": 7,
+              "total_pnl": -205.49,
+              "win_rate_pct": 14.29,
+              "profit_factor": 0.3781
+            }
+          ]
+        },
+        "rr_0.85": {
+          "summary": {
+            "n_trades": 1187,
+            "win_rate_pct": 34.37,
+            "profit_factor": 0.18,
+            "total_pnl": -35176.09,
+            "avg_pnl": -29.6344,
+            "max_drawdown": -35195.02,
+            "r_metrics": {
+              "n": 1187,
+              "mean_r": -0.7409,
+              "std_r": 0.879,
+              "skew_r": 0.6589,
+              "kurtosis_excess_r": -1.5685,
+              "avg_win_r": 0.4732,
+              "avg_loss_r": 1.3768,
+              "breakeven_wr_pct": 74.4,
+              "actual_wr_pct": 34.4,
+              "net_expectancy_r": -0.7409,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "stop": {
+                  "n": 779,
+                  "share_pct": 65.6,
+                  "mean_r": -1.3768,
+                  "r_contribution_pct": 122.0
+                },
+                "tp3_runner": {
+                  "n": 408,
+                  "share_pct": 34.4,
+                  "mean_r": 0.4732,
+                  "r_contribution_pct": -22.0
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 41,
+                "win_rate_pct": 43.9,
+                "profit_factor": 0.269,
+                "total_pnl": -925.87,
+                "avg_pnl": -22.5822
+              },
+              "2026-Q2": {
+                "n_trades": 646,
+                "win_rate_pct": 33.9,
+                "profit_factor": 0.1763,
+                "total_pnl": -19369.22,
+                "avg_pnl": -29.9833
+              },
+              "2026-Q3": {
+                "n_trades": 500,
+                "win_rate_pct": 34.2,
+                "profit_factor": 0.1787,
+                "total_pnl": -14881.0,
+                "avg_pnl": -29.762
+              }
+            },
+            "exit_reasons": {
+              "stop": 779,
+              "tp3_runner": 408
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 1,
+              "n_trades": 50,
+              "total_pnl": -1125.5,
+              "win_rate_pct": 44.0,
+              "profit_factor": 0.2701
+            },
+            {
+              "fold": 2,
+              "n_trades": 552,
+              "total_pnl": -16930.64,
+              "win_rate_pct": 32.97,
+              "profit_factor": 0.1691
+            },
+            {
+              "fold": 3,
+              "n_trades": 42,
+              "total_pnl": -1128.94,
+              "win_rate_pct": 38.1,
+              "profit_factor": 0.2115
+            },
+            {
+              "fold": 4,
+              "n_trades": 52,
+              "total_pnl": -1309.64,
+              "win_rate_pct": 40.38,
+              "profit_factor": 0.2329
+            },
+            {
+              "fold": 5,
+              "n_trades": 482,
+              "total_pnl": -14407.74,
+              "win_rate_pct": 34.02,
+              "profit_factor": 0.1773
+            },
+            {
+              "fold": 6,
+              "n_trades": 9,
+              "total_pnl": -273.63,
+              "win_rate_pct": 33.33,
+              "profit_factor": 0.1719
+            }
+          ]
+        }
+      }
+    },
+    "EURUSD": {
+      "status": "completed",
+      "enabled_in_config": true,
+      "timeframe": "H1",
+      "raw_rows": 8214,
+      "featured_rows": 8214,
+      "data_start_utc": "2025-04-14T00:00:00+00:00",
+      "data_end_exclusive_utc": "2026-08-08T00:00:00+00:00",
+      "folds": [
+        {
+          "fold": 0,
+          "train_start_utc": "2025-04-14T00:00:00+00:00",
+          "train_end_utc": "2026-02-08T00:00:00+00:00",
+          "test_start_utc": "2026-02-08T00:00:00+00:00",
+          "test_end_utc": "2026-03-10T00:00:00+00:00",
+          "purged_train_rows": 4977,
+          "test_rows": 504,
+          "scoring_seconds": 1.09
+        },
+        {
+          "fold": 1,
+          "train_start_utc": "2025-05-14T00:00:00+00:00",
+          "train_end_utc": "2026-03-10T00:00:00+00:00",
+          "test_start_utc": "2026-03-10T00:00:00+00:00",
+          "test_end_utc": "2026-04-09T00:00:00+00:00",
+          "purged_train_rows": 4974,
+          "test_rows": 525,
+          "scoring_seconds": 1.45
+        },
+        {
+          "fold": 2,
+          "train_start_utc": "2025-06-13T00:00:00+00:00",
+          "train_end_utc": "2026-04-09T00:00:00+00:00",
+          "test_start_utc": "2026-04-09T00:00:00+00:00",
+          "test_end_utc": "2026-05-09T00:00:00+00:00",
+          "purged_train_rows": 4971,
+          "test_rows": 528,
+          "scoring_seconds": 1.43
+        },
+        {
+          "fold": 3,
+          "train_start_utc": "2025-07-13T00:00:00+00:00",
+          "train_end_utc": "2026-05-09T00:00:00+00:00",
+          "test_start_utc": "2026-05-09T00:00:00+00:00",
+          "test_end_utc": "2026-06-08T00:00:00+00:00",
+          "purged_train_rows": 4974,
+          "test_rows": 480,
+          "scoring_seconds": 1.93
+        },
+        {
+          "fold": 4,
+          "train_start_utc": "2025-08-12T00:00:00+00:00",
+          "train_end_utc": "2026-06-08T00:00:00+00:00",
+          "test_start_utc": "2026-06-08T00:00:00+00:00",
+          "test_end_utc": "2026-07-08T00:00:00+00:00",
+          "purged_train_rows": 4971,
+          "test_rows": 528,
+          "scoring_seconds": 1.31
+        },
+        {
+          "fold": 5,
+          "train_start_utc": "2025-09-11T00:00:00+00:00",
+          "train_end_utc": "2026-07-08T00:00:00+00:00",
+          "test_start_utc": "2026-07-08T00:00:00+00:00",
+          "test_end_utc": "2026-08-07T00:00:00+00:00",
+          "purged_train_rows": 4971,
+          "test_rows": 528,
+          "scoring_seconds": 1.23
+        },
+        {
+          "fold": 6,
+          "train_start_utc": "2025-10-11T00:00:00+00:00",
+          "train_end_utc": "2026-08-07T00:00:00+00:00",
+          "test_start_utc": "2026-08-07T00:00:00+00:00",
+          "test_end_utc": "2026-08-08T00:00:00+00:00",
+          "purged_train_rows": 4971,
+          "test_rows": 24,
+          "scoring_seconds": 1.2
+        }
+      ],
+      "variants": {
+        "current": {
+          "summary": {
+            "n_trades": 101,
+            "win_rate_pct": 46.53,
+            "profit_factor": 0.5113,
+            "total_pnl": -396.8313,
+            "avg_pnl": -3.929,
+            "max_drawdown": -469.4944,
+            "r_metrics": {
+              "n": 101,
+              "mean_r": -0.1808,
+              "std_r": 0.681,
+              "skew_r": -0.297,
+              "kurtosis_excess_r": -1.2461,
+              "avg_win_r": 0.3977,
+              "avg_loss_r": 0.6844,
+              "breakeven_wr_pct": 63.2,
+              "actual_wr_pct": 46.5,
+              "net_expectancy_r": -0.1808,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "breakeven": {
+                  "n": 49,
+                  "share_pct": 48.5,
+                  "mean_r": 0.0473,
+                  "r_contribution_pct": -12.7
+                },
+                "stop": {
+                  "n": 30,
+                  "share_pct": 29.7,
+                  "mean_r": -1.1225,
+                  "r_contribution_pct": 184.4
+                },
+                "timeout": {
+                  "n": 3,
+                  "share_pct": 3.0,
+                  "mean_r": -0.2474,
+                  "r_contribution_pct": 4.1
+                },
+                "tp3_runner": {
+                  "n": 19,
+                  "share_pct": 18.8,
+                  "mean_r": 0.7283,
+                  "r_contribution_pct": -75.8
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 29,
+                "win_rate_pct": 62.07,
+                "profit_factor": 1.6776,
+                "total_pnl": 72.6631,
+                "avg_pnl": 2.5056
+              },
+              "2026-Q2": {
+                "n_trades": 37,
+                "win_rate_pct": 35.14,
+                "profit_factor": 0.3255,
+                "total_pnl": -252.2057,
+                "avg_pnl": -6.8164
+              },
+              "2026-Q3": {
+                "n_trades": 35,
+                "win_rate_pct": 45.71,
+                "profit_factor": 0.3432,
+                "total_pnl": -217.2887,
+                "avg_pnl": -6.2082
+              }
+            },
+            "exit_reasons": {
+              "breakeven": 49,
+              "stop": 30,
+              "tp3_runner": 19,
+              "timeout": 3
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 26,
+              "total_pnl": 33.8731,
+              "win_rate_pct": 57.69,
+              "profit_factor": 1.3159
+            },
+            {
+              "fold": 1,
+              "n_trades": 3,
+              "total_pnl": 38.79,
+              "win_rate_pct": 100.0,
+              "profit_factor": 999.0
+            },
+            {
+              "fold": 2,
+              "n_trades": 16,
+              "total_pnl": -170.6331,
+              "win_rate_pct": 31.25,
+              "profit_factor": 0.1737
+            },
+            {
+              "fold": 3,
+              "n_trades": 7,
+              "total_pnl": 2.8703,
+              "win_rate_pct": 57.14,
+              "profit_factor": 1.0594
+            },
+            {
+              "fold": 4,
+              "n_trades": 17,
+              "total_pnl": -106.4529,
+              "win_rate_pct": 29.41,
+              "profit_factor": 0.263
+            },
+            {
+              "fold": 5,
+              "n_trades": 31,
+              "total_pnl": -172.6087,
+              "win_rate_pct": 48.39,
+              "profit_factor": 0.3897
+            },
+            {
+              "fold": 6,
+              "n_trades": 1,
+              "total_pnl": -22.67,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_3.5": {
+          "summary": {
+            "n_trades": 90,
+            "win_rate_pct": 20.0,
+            "profit_factor": 0.6212,
+            "total_pnl": -373.5326,
+            "avg_pnl": -4.1504,
+            "max_drawdown": -429.7817,
+            "r_metrics": {
+              "n": 90,
+              "mean_r": -0.3669,
+              "std_r": 1.7384,
+              "skew_r": 1.5632,
+              "kurtosis_excess_r": 0.5292,
+              "avg_win_r": 3.0514,
+              "avg_loss_r": 1.2214,
+              "breakeven_wr_pct": 28.6,
+              "actual_wr_pct": 20.0,
+              "net_expectancy_r": -0.3669,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "stop": {
+                  "n": 70,
+                  "share_pct": 77.8,
+                  "mean_r": -1.2396,
+                  "r_contribution_pct": 262.8
+                },
+                "timeout": {
+                  "n": 5,
+                  "share_pct": 5.6,
+                  "mean_r": 0.9722,
+                  "r_contribution_pct": -14.7
+                },
+                "tp3_runner": {
+                  "n": 15,
+                  "share_pct": 16.7,
+                  "mean_r": 3.2597,
+                  "r_contribution_pct": -148.1
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 24,
+                "win_rate_pct": 33.33,
+                "profit_factor": 1.2653,
+                "total_pnl": 56.2491,
+                "avg_pnl": 2.3437
+              },
+              "2026-Q2": {
+                "n_trades": 34,
+                "win_rate_pct": 14.71,
+                "profit_factor": 0.4378,
+                "total_pnl": -228.9375,
+                "avg_pnl": -6.7335
+              },
+              "2026-Q3": {
+                "n_trades": 32,
+                "win_rate_pct": 15.62,
+                "profit_factor": 0.4523,
+                "total_pnl": -200.8442,
+                "avg_pnl": -6.2764
+              }
+            },
+            "exit_reasons": {
+              "stop": 70,
+              "tp3_runner": 15,
+              "timeout": 5
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 21,
+              "total_pnl": -7.7409,
+              "win_rate_pct": 28.57,
+              "profit_factor": 0.9608
+            },
+            {
+              "fold": 1,
+              "n_trades": 3,
+              "total_pnl": 63.99,
+              "win_rate_pct": 66.67,
+              "profit_factor": 5.362
+            },
+            {
+              "fold": 2,
+              "n_trades": 11,
+              "total_pnl": -156.534,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 3,
+              "n_trades": 7,
+              "total_pnl": -42.1034,
+              "win_rate_pct": 14.29,
+              "profit_factor": 0.4538
+            },
+            {
+              "fold": 4,
+              "n_trades": 20,
+              "total_pnl": -82.9802,
+              "win_rate_pct": 20.0,
+              "profit_factor": 0.6333
+            },
+            {
+              "fold": 5,
+              "n_trades": 26,
+              "total_pnl": -122.5703,
+              "win_rate_pct": 19.23,
+              "profit_factor": 0.575
+            },
+            {
+              "fold": 6,
+              "n_trades": 2,
+              "total_pnl": -25.5939,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_0.85": {
+          "summary": {
+            "n_trades": 153,
+            "win_rate_pct": 39.22,
+            "profit_factor": 0.3217,
+            "total_pnl": -857.191,
+            "avg_pnl": -5.6026,
+            "max_drawdown": -843.098,
+            "r_metrics": {
+              "n": 153,
+              "mean_r": -0.5096,
+              "std_r": 0.9058,
+              "skew_r": 0.4265,
+              "kurtosis_excess_r": -1.8336,
+              "avg_win_r": 0.6081,
+              "avg_loss_r": 1.2308,
+              "breakeven_wr_pct": 66.9,
+              "actual_wr_pct": 39.2,
+              "net_expectancy_r": -0.5096,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "stop": {
+                  "n": 92,
+                  "share_pct": 60.1,
+                  "mean_r": -1.2432,
+                  "r_contribution_pct": 146.7
+                },
+                "timeout": {
+                  "n": 1,
+                  "share_pct": 0.7,
+                  "mean_r": -0.0892,
+                  "r_contribution_pct": 0.1
+                },
+                "tp3_runner": {
+                  "n": 60,
+                  "share_pct": 39.2,
+                  "mean_r": 0.6081,
+                  "r_contribution_pct": -46.8
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 41,
+                "win_rate_pct": 46.34,
+                "profit_factor": 0.4402,
+                "total_pnl": -165.3201,
+                "avg_pnl": -4.0322
+              },
+              "2026-Q2": {
+                "n_trades": 54,
+                "win_rate_pct": 38.89,
+                "profit_factor": 0.3072,
+                "total_pnl": -317.1046,
+                "avg_pnl": -5.8723
+              },
+              "2026-Q3": {
+                "n_trades": 58,
+                "win_rate_pct": 34.48,
+                "profit_factor": 0.2662,
+                "total_pnl": -374.7663,
+                "avg_pnl": -6.4615
+              }
+            },
+            "exit_reasons": {
+              "stop": 92,
+              "tp3_runner": 60,
+              "timeout": 1
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 38,
+              "total_pnl": -165.7101,
+              "win_rate_pct": 44.74,
+              "profit_factor": 0.4095
+            },
+            {
+              "fold": 1,
+              "n_trades": 3,
+              "total_pnl": 0.39,
+              "win_rate_pct": 66.67,
+              "profit_factor": 1.0266
+            },
+            {
+              "fold": 2,
+              "n_trades": 21,
+              "total_pnl": -128.2242,
+              "win_rate_pct": 38.1,
+              "profit_factor": 0.2995
+            },
+            {
+              "fold": 3,
+              "n_trades": 12,
+              "total_pnl": -37.0776,
+              "win_rate_pct": 50.0,
+              "profit_factor": 0.5146
+            },
+            {
+              "fold": 4,
+              "n_trades": 25,
+              "total_pnl": -182.2827,
+              "win_rate_pct": 32.0,
+              "profit_factor": 0.2286
+            },
+            {
+              "fold": 5,
+              "n_trades": 52,
+              "total_pnl": -318.6924,
+              "win_rate_pct": 36.54,
+              "profit_factor": 0.2873
+            },
+            {
+              "fold": 6,
+              "n_trades": 2,
+              "total_pnl": -25.5939,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        }
+      }
+    },
+    "GBPUSD": {
+      "status": "completed",
+      "enabled_in_config": false,
+      "timeframe": "H1",
+      "raw_rows": 8214,
+      "featured_rows": 8214,
+      "data_start_utc": "2025-04-14T00:00:00+00:00",
+      "data_end_exclusive_utc": "2026-08-08T00:00:00+00:00",
+      "folds": [
+        {
+          "fold": 0,
+          "train_start_utc": "2025-04-14T00:00:00+00:00",
+          "train_end_utc": "2026-02-08T00:00:00+00:00",
+          "test_start_utc": "2026-02-08T00:00:00+00:00",
+          "test_end_utc": "2026-03-10T00:00:00+00:00",
+          "purged_train_rows": 4986,
+          "test_rows": 504,
+          "scoring_seconds": 1.15
+        },
+        {
+          "fold": 1,
+          "train_start_utc": "2025-05-14T00:00:00+00:00",
+          "train_end_utc": "2026-03-10T00:00:00+00:00",
+          "test_start_utc": "2026-03-10T00:00:00+00:00",
+          "test_end_utc": "2026-04-09T00:00:00+00:00",
+          "purged_train_rows": 4986,
+          "test_rows": 525,
+          "scoring_seconds": 2.15
+        },
+        {
+          "fold": 2,
+          "train_start_utc": "2025-06-13T00:00:00+00:00",
+          "train_end_utc": "2026-04-09T00:00:00+00:00",
+          "test_start_utc": "2026-04-09T00:00:00+00:00",
+          "test_end_utc": "2026-05-09T00:00:00+00:00",
+          "purged_train_rows": 4983,
+          "test_rows": 528,
+          "scoring_seconds": 1.66
+        },
+        {
+          "fold": 3,
+          "train_start_utc": "2025-07-13T00:00:00+00:00",
+          "train_end_utc": "2026-05-09T00:00:00+00:00",
+          "test_start_utc": "2026-05-09T00:00:00+00:00",
+          "test_end_utc": "2026-06-08T00:00:00+00:00",
+          "purged_train_rows": 4974,
+          "test_rows": 480,
+          "scoring_seconds": 1.35
+        },
+        {
+          "fold": 4,
+          "train_start_utc": "2025-08-12T00:00:00+00:00",
+          "train_end_utc": "2026-06-08T00:00:00+00:00",
+          "test_start_utc": "2026-06-08T00:00:00+00:00",
+          "test_end_utc": "2026-07-08T00:00:00+00:00",
+          "purged_train_rows": 4983,
+          "test_rows": 528,
+          "scoring_seconds": 1.5
+        },
+        {
+          "fold": 5,
+          "train_start_utc": "2025-09-11T00:00:00+00:00",
+          "train_end_utc": "2026-07-08T00:00:00+00:00",
+          "test_start_utc": "2026-07-08T00:00:00+00:00",
+          "test_end_utc": "2026-08-07T00:00:00+00:00",
+          "purged_train_rows": 4983,
+          "test_rows": 528,
+          "scoring_seconds": 2.11
+        },
+        {
+          "fold": 6,
+          "train_start_utc": "2025-10-11T00:00:00+00:00",
+          "train_end_utc": "2026-08-07T00:00:00+00:00",
+          "test_start_utc": "2026-08-07T00:00:00+00:00",
+          "test_end_utc": "2026-08-08T00:00:00+00:00",
+          "purged_train_rows": 4974,
+          "test_rows": 24,
+          "scoring_seconds": 1.37
+        }
+      ],
+      "variants": {
+        "current": {
+          "summary": {
+            "n_trades": 143,
+            "win_rate_pct": 62.24,
+            "profit_factor": 0.6994,
+            "total_pnl": -496.6601,
+            "avg_pnl": -3.4731,
+            "max_drawdown": -739.8317,
+            "r_metrics": {
+              "n": 143,
+              "mean_r": -0.086,
+              "std_r": 0.6037,
+              "skew_r": -0.5903,
+              "kurtosis_excess_r": -0.8398,
+              "avg_win_r": 0.2963,
+              "avg_loss_r": 0.716,
+              "breakeven_wr_pct": 70.7,
+              "actual_wr_pct": 62.2,
+              "net_expectancy_r": -0.086,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "breakeven": {
+                  "n": 68,
+                  "share_pct": 47.6,
+                  "mean_r": 0.0457,
+                  "r_contribution_pct": -25.3
+                },
+                "stop": {
+                  "n": 32,
+                  "share_pct": 22.4,
+                  "mean_r": -1.074,
+                  "r_contribution_pct": 279.5
+                },
+                "timeout": {
+                  "n": 12,
+                  "share_pct": 8.4,
+                  "mean_r": -0.0813,
+                  "r_contribution_pct": 7.9
+                },
+                "tp3_runner": {
+                  "n": 31,
+                  "share_pct": 21.7,
+                  "mean_r": 0.6433,
+                  "r_contribution_pct": -162.2
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 43,
+                "win_rate_pct": 60.47,
+                "profit_factor": 0.8693,
+                "total_pnl": -63.4484,
+                "avg_pnl": -1.4755
+              },
+              "2026-Q2": {
+                "n_trades": 60,
+                "win_rate_pct": 68.33,
+                "profit_factor": 0.7912,
+                "total_pnl": -135.1732,
+                "avg_pnl": -2.2529
+              },
+              "2026-Q3": {
+                "n_trades": 40,
+                "win_rate_pct": 55.0,
+                "profit_factor": 0.4261,
+                "total_pnl": -298.0385,
+                "avg_pnl": -7.451
+              }
+            },
+            "exit_reasons": {
+              "breakeven": 68,
+              "stop": 32,
+              "tp3_runner": 31,
+              "timeout": 12
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 40,
+              "total_pnl": 29.0116,
+              "win_rate_pct": 65.0,
+              "profit_factor": 1.0738
+            },
+            {
+              "fold": 1,
+              "n_trades": 4,
+              "total_pnl": -92.33,
+              "win_rate_pct": 25.0,
+              "profit_factor": 0.0014
+            },
+            {
+              "fold": 2,
+              "n_trades": 33,
+              "total_pnl": -69.1042,
+              "win_rate_pct": 63.64,
+              "profit_factor": 0.816
+            },
+            {
+              "fold": 3,
+              "n_trades": 10,
+              "total_pnl": -36.355,
+              "win_rate_pct": 80.0,
+              "profit_factor": 0.691
+            },
+            {
+              "fold": 4,
+              "n_trades": 19,
+              "total_pnl": -87.3549,
+              "win_rate_pct": 57.89,
+              "profit_factor": 0.5872
+            },
+            {
+              "fold": 5,
+              "n_trades": 37,
+              "total_pnl": -240.5277,
+              "win_rate_pct": 59.46,
+              "profit_factor": 0.4791
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_3.5": {
+          "summary": {
+            "n_trades": 107,
+            "win_rate_pct": 42.99,
+            "profit_factor": 0.7741,
+            "total_pnl": -472.6199,
+            "avg_pnl": -4.417,
+            "max_drawdown": -760.7649,
+            "r_metrics": {
+              "n": 107,
+              "mean_r": -0.1167,
+              "std_r": 0.9192,
+              "skew_r": 0.3657,
+              "kurtosis_excess_r": -1.1825,
+              "avg_win_r": 0.8151,
+              "avg_loss_r": 0.8194,
+              "breakeven_wr_pct": 50.1,
+              "actual_wr_pct": 43.0,
+              "net_expectancy_r": -0.1167,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "breakeven": {
+                  "n": 13,
+                  "share_pct": 12.1,
+                  "mean_r": 0.0501,
+                  "r_contribution_pct": -5.2
+                },
+                "stop": {
+                  "n": 42,
+                  "share_pct": 39.3,
+                  "mean_r": -1.0772,
+                  "r_contribution_pct": 362.3
+                },
+                "timeout": {
+                  "n": 24,
+                  "share_pct": 22.4,
+                  "mean_r": 0.1245,
+                  "r_contribution_pct": -23.9
+                },
+                "tp3_runner": {
+                  "n": 28,
+                  "share_pct": 26.2,
+                  "mean_r": 1.0399,
+                  "r_contribution_pct": -233.2
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 33,
+                "win_rate_pct": 48.48,
+                "profit_factor": 1.0397,
+                "total_pnl": 21.6274,
+                "avg_pnl": 0.6554
+              },
+              "2026-Q2": {
+                "n_trades": 48,
+                "win_rate_pct": 43.75,
+                "profit_factor": 0.7897,
+                "total_pnl": -198.1026,
+                "avg_pnl": -4.1271
+              },
+              "2026-Q3": {
+                "n_trades": 26,
+                "win_rate_pct": 34.62,
+                "profit_factor": 0.5103,
+                "total_pnl": -296.1446,
+                "avg_pnl": -11.3902
+              }
+            },
+            "exit_reasons": {
+              "stop": 42,
+              "tp3_runner": 28,
+              "timeout": 24,
+              "breakeven": 13
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 30,
+              "total_pnl": 142.0874,
+              "win_rate_pct": 53.33,
+              "profit_factor": 1.3344
+            },
+            {
+              "fold": 1,
+              "n_trades": 4,
+              "total_pnl": -120.33,
+              "win_rate_pct": 25.0,
+              "profit_factor": 0.0011
+            },
+            {
+              "fold": 2,
+              "n_trades": 25,
+              "total_pnl": -178.3987,
+              "win_rate_pct": 36.0,
+              "profit_factor": 0.6682
+            },
+            {
+              "fold": 3,
+              "n_trades": 8,
+              "total_pnl": 6.04,
+              "win_rate_pct": 62.5,
+              "profit_factor": 1.0434
+            },
+            {
+              "fold": 4,
+              "n_trades": 16,
+              "total_pnl": -80.5647,
+              "win_rate_pct": 37.5,
+              "profit_factor": 0.7483
+            },
+            {
+              "fold": 5,
+              "n_trades": 24,
+              "total_pnl": -241.4538,
+              "win_rate_pct": 37.5,
+              "profit_factor": 0.561
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_0.85": {
+          "summary": {
+            "n_trades": 155,
+            "win_rate_pct": 67.1,
+            "profit_factor": 0.6488,
+            "total_pnl": -602.8395,
+            "avg_pnl": -3.8893,
+            "max_drawdown": -855.8891,
+            "r_metrics": {
+              "n": 155,
+              "mean_r": -0.0951,
+              "std_r": 0.5707,
+              "skew_r": -0.8128,
+              "kurtosis_excess_r": -0.6902,
+              "avg_win_r": 0.2434,
+              "avg_loss_r": 0.7852,
+              "breakeven_wr_pct": 76.3,
+              "actual_wr_pct": 67.1,
+              "net_expectancy_r": -0.0951,
+              "top5_concentration_pct": 0.0,
+              "top1_concentration_pct": 0.0,
+              "buckets": {
+                "breakeven": {
+                  "n": 60,
+                  "share_pct": 38.7,
+                  "mean_r": 0.0199,
+                  "r_contribution_pct": -8.1
+                },
+                "stop": {
+                  "n": 34,
+                  "share_pct": 21.9,
+                  "mean_r": -1.0739,
+                  "r_contribution_pct": 247.7
+                },
+                "timeout": {
+                  "n": 11,
+                  "share_pct": 7.1,
+                  "mean_r": -0.0681,
+                  "r_contribution_pct": 5.1
+                },
+                "tp3_runner": {
+                  "n": 50,
+                  "share_pct": 32.3,
+                  "mean_r": 0.4266,
+                  "r_contribution_pct": -144.7
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 45,
+                "win_rate_pct": 64.44,
+                "profit_factor": 0.8752,
+                "total_pnl": -60.2204,
+                "avg_pnl": -1.3382
+              },
+              "2026-Q2": {
+                "n_trades": 64,
+                "win_rate_pct": 73.44,
+                "profit_factor": 0.6659,
+                "total_pnl": -226.3653,
+                "avg_pnl": -3.537
+              },
+              "2026-Q3": {
+                "n_trades": 46,
+                "win_rate_pct": 60.87,
+                "profit_factor": 0.4317,
+                "total_pnl": -316.2537,
+                "avg_pnl": -6.8751
+              }
+            },
+            "exit_reasons": {
+              "breakeven": 60,
+              "tp3_runner": 50,
+              "stop": 34,
+              "timeout": 11
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 42,
+              "total_pnl": 32.2396,
+              "win_rate_pct": 69.05,
+              "profit_factor": 1.0826
+            },
+            {
+              "fold": 1,
+              "n_trades": 4,
+              "total_pnl": -92.33,
+              "win_rate_pct": 25.0,
+              "profit_factor": 0.0014
+            },
+            {
+              "fold": 2,
+              "n_trades": 35,
+              "total_pnl": -95.6062,
+              "win_rate_pct": 71.43,
+              "profit_factor": 0.7644
+            },
+            {
+              "fold": 3,
+              "n_trades": 10,
+              "total_pnl": -51.265,
+              "win_rate_pct": 80.0,
+              "profit_factor": 0.5642
+            },
+            {
+              "fold": 4,
+              "n_trades": 21,
+              "total_pnl": -137.1349,
+              "win_rate_pct": 61.9,
+              "profit_factor": 0.3519
+            },
+            {
+              "fold": 5,
+              "n_trades": 43,
+              "total_pnl": -258.7429,
+              "win_rate_pct": 65.12,
+              "profit_factor": 0.4815
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        }
+      }
+    },
+    "BTCUSD": {
+      "status": "completed",
+      "enabled_in_config": true,
+      "timeframe": "M5",
+      "raw_rows": 138216,
+      "featured_rows": 138216,
+      "data_start_utc": "2025-04-14T00:00:00+00:00",
+      "data_end_exclusive_utc": "2026-08-08T00:00:00+00:00",
+      "folds": [
+        {
+          "fold": 0,
+          "train_start_utc": "2025-04-14T00:00:00+00:00",
+          "train_end_utc": "2026-02-08T00:00:00+00:00",
+          "test_start_utc": "2026-02-08T00:00:00+00:00",
+          "test_end_utc": "2026-03-10T00:00:00+00:00",
+          "purged_train_rows": 86001,
+          "test_rows": 8640,
+          "scoring_seconds": 10.7
+        },
+        {
+          "fold": 1,
+          "train_start_utc": "2025-05-14T00:00:00+00:00",
+          "train_end_utc": "2026-03-10T00:00:00+00:00",
+          "test_start_utc": "2026-03-10T00:00:00+00:00",
+          "test_end_utc": "2026-04-09T00:00:00+00:00",
+          "purged_train_rows": 86005,
+          "test_rows": 8603,
+          "scoring_seconds": 9.89
+        },
+        {
+          "fold": 2,
+          "train_start_utc": "2025-06-13T00:00:00+00:00",
+          "train_end_utc": "2026-04-09T00:00:00+00:00",
+          "test_start_utc": "2026-04-09T00:00:00+00:00",
+          "test_end_utc": "2026-05-09T00:00:00+00:00",
+          "purged_train_rows": 85968,
+          "test_rows": 8639,
+          "scoring_seconds": 10.2
+        },
+        {
+          "fold": 3,
+          "train_start_utc": "2025-07-13T00:00:00+00:00",
+          "train_end_utc": "2026-05-09T00:00:00+00:00",
+          "test_start_utc": "2026-05-09T00:00:00+00:00",
+          "test_end_utc": "2026-06-08T00:00:00+00:00",
+          "purged_train_rows": 85967,
+          "test_rows": 8639,
+          "scoring_seconds": 10.64
+        },
+        {
+          "fold": 4,
+          "train_start_utc": "2025-08-12T00:00:00+00:00",
+          "train_end_utc": "2026-06-08T00:00:00+00:00",
+          "test_start_utc": "2026-06-08T00:00:00+00:00",
+          "test_end_utc": "2026-07-08T00:00:00+00:00",
+          "purged_train_rows": 85966,
+          "test_rows": 8632,
+          "scoring_seconds": 9.75
+        },
+        {
+          "fold": 5,
+          "train_start_utc": "2025-09-11T00:00:00+00:00",
+          "train_end_utc": "2026-07-08T00:00:00+00:00",
+          "test_start_utc": "2026-07-08T00:00:00+00:00",
+          "test_end_utc": "2026-08-07T00:00:00+00:00",
+          "purged_train_rows": 85961,
+          "test_rows": 8639,
+          "scoring_seconds": 9.38
+        },
+        {
+          "fold": 6,
+          "train_start_utc": "2025-10-11T00:00:00+00:00",
+          "train_end_utc": "2026-08-07T00:00:00+00:00",
+          "test_start_utc": "2026-08-07T00:00:00+00:00",
+          "test_end_utc": "2026-08-08T00:00:00+00:00",
+          "purged_train_rows": 85960,
+          "test_rows": 288,
+          "scoring_seconds": 9.67
+        }
+      ],
+      "variants": {
+        "current": {
+          "summary": {
+            "n_trades": 600,
+            "win_rate_pct": 62.33,
+            "profit_factor": 1.095,
+            "total_pnl": 757.6255,
+            "avg_pnl": 1.2627,
+            "max_drawdown": -666.4551,
+            "r_metrics": {
+              "n": 600,
+              "mean_r": 0.0252,
+              "std_r": 0.6425,
+              "skew_r": -0.5332,
+              "kurtosis_excess_r": -1.0479,
+              "avg_win_r": 0.4633,
+              "avg_loss_r": 0.6998,
+              "breakeven_wr_pct": 60.2,
+              "actual_wr_pct": 62.3,
+              "net_expectancy_r": 0.0252,
+              "top5_concentration_pct": 167.7,
+              "top1_concentration_pct": 33.6,
+              "buckets": {
+                "breakeven": {
+                  "n": 147,
+                  "share_pct": 24.5,
+                  "mean_r": 0.2945,
+                  "r_contribution_pct": 286.1
+                },
+                "stop": {
+                  "n": 131,
+                  "share_pct": 21.8,
+                  "mean_r": -1.0045,
+                  "r_contribution_pct": -869.7
+                },
+                "timeout": {
+                  "n": 247,
+                  "share_pct": 41.2,
+                  "mean_r": 0.162,
+                  "r_contribution_pct": 264.4
+                },
+                "tp3_runner": {
+                  "n": 75,
+                  "share_pct": 12.5,
+                  "mean_r": 0.8455,
+                  "r_contribution_pct": 419.1
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 203,
+                "win_rate_pct": 67.0,
+                "profit_factor": 1.1973,
+                "total_pnl": 542.0792,
+                "avg_pnl": 2.6703
+              },
+              "2026-Q2": {
+                "n_trades": 271,
+                "win_rate_pct": 60.89,
+                "profit_factor": 1.0438,
+                "total_pnl": 169.0135,
+                "avg_pnl": 0.6237
+              },
+              "2026-Q3": {
+                "n_trades": 126,
+                "win_rate_pct": 57.94,
+                "profit_factor": 1.034,
+                "total_pnl": 46.5327,
+                "avg_pnl": 0.3693
+              }
+            },
+            "exit_reasons": {
+              "timeout": 247,
+              "breakeven": 147,
+              "stop": 131,
+              "tp3_runner": 75
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 46,
+              "total_pnl": 456.1797,
+              "win_rate_pct": 76.09,
+              "profit_factor": 2.138
+            },
+            {
+              "fold": 1,
+              "n_trades": 214,
+              "total_pnl": 344.8676,
+              "win_rate_pct": 64.95,
+              "profit_factor": 1.1122
+            },
+            {
+              "fold": 2,
+              "n_trades": 159,
+              "total_pnl": -213.4749,
+              "win_rate_pct": 58.49,
+              "profit_factor": 0.9155
+            },
+            {
+              "fold": 3,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 4,
+              "n_trades": 68,
+              "total_pnl": -44.9962,
+              "win_rate_pct": 58.82,
+              "profit_factor": 0.9513
+            },
+            {
+              "fold": 5,
+              "n_trades": 113,
+              "total_pnl": 215.0492,
+              "win_rate_pct": 59.29,
+              "profit_factor": 1.2039
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_3.5": {
+          "summary": {
+            "n_trades": 669,
+            "win_rate_pct": 38.71,
+            "profit_factor": 1.1026,
+            "total_pnl": 976.7203,
+            "avg_pnl": 1.46,
+            "max_drawdown": -1141.4474,
+            "r_metrics": {
+              "n": 669,
+              "mean_r": 0.0532,
+              "std_r": 1.4546,
+              "skew_r": 1.2315,
+              "kurtosis_excess_r": 0.3225,
+              "avg_win_r": 1.5967,
+              "avg_loss_r": 0.9218,
+              "breakeven_wr_pct": 36.6,
+              "actual_wr_pct": 38.7,
+              "net_expectancy_r": 0.0532,
+              "top5_concentration_pct": 323.6,
+              "top1_concentration_pct": 58.9,
+              "buckets": {
+                "stop": {
+                  "n": 360,
+                  "share_pct": 53.8,
+                  "mean_r": -1.0089,
+                  "r_contribution_pct": -1020.3
+                },
+                "timeout": {
+                  "n": 251,
+                  "share_pct": 37.5,
+                  "mean_r": 0.7822,
+                  "r_contribution_pct": 551.5
+                },
+                "tp3_runner": {
+                  "n": 58,
+                  "share_pct": 8.7,
+                  "mean_r": 3.4912,
+                  "r_contribution_pct": 568.8
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 229,
+                "win_rate_pct": 37.99,
+                "profit_factor": 1.3579,
+                "total_pnl": 1260.7641,
+                "avg_pnl": 5.5055
+              },
+              "2026-Q2": {
+                "n_trades": 307,
+                "win_rate_pct": 37.46,
+                "profit_factor": 0.9757,
+                "total_pnl": -109.3948,
+                "avg_pnl": -0.3563
+              },
+              "2026-Q3": {
+                "n_trades": 133,
+                "win_rate_pct": 42.86,
+                "profit_factor": 0.8827,
+                "total_pnl": -174.649,
+                "avg_pnl": -1.3132
+              }
+            },
+            "exit_reasons": {
+              "stop": 360,
+              "timeout": 251,
+              "tp3_runner": 58
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 49,
+              "total_pnl": 393.6759,
+              "win_rate_pct": 40.82,
+              "profit_factor": 1.5445
+            },
+            {
+              "fold": 1,
+              "n_trades": 236,
+              "total_pnl": 1243.3207,
+              "win_rate_pct": 38.98,
+              "profit_factor": 1.3559
+            },
+            {
+              "fold": 2,
+              "n_trades": 194,
+              "total_pnl": -703.8304,
+              "win_rate_pct": 31.44,
+              "profit_factor": 0.7797
+            },
+            {
+              "fold": 3,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 4,
+              "n_trades": 69,
+              "total_pnl": 146.987,
+              "win_rate_pct": 47.83,
+              "profit_factor": 1.1792
+            },
+            {
+              "fold": 5,
+              "n_trades": 121,
+              "total_pnl": -103.433,
+              "win_rate_pct": 43.8,
+              "profit_factor": 0.9196
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        },
+        "rr_0.85": {
+          "summary": {
+            "n_trades": 880,
+            "win_rate_pct": 54.89,
+            "profit_factor": 1.0463,
+            "total_pnl": 435.5798,
+            "avg_pnl": 0.495,
+            "max_drawdown": -771.943,
+            "r_metrics": {
+              "n": 880,
+              "mean_r": 0.0197,
+              "std_r": 0.8882,
+              "skew_r": -0.2293,
+              "kurtosis_excess_r": -1.8883,
+              "avg_win_r": 0.8083,
+              "avg_loss_r": 0.9397,
+              "breakeven_wr_pct": 53.8,
+              "actual_wr_pct": 54.9,
+              "net_expectancy_r": 0.0197,
+              "top5_concentration_pct": 213.4,
+              "top1_concentration_pct": 38.9,
+              "buckets": {
+                "stop": {
+                  "n": 358,
+                  "share_pct": 40.7,
+                  "mean_r": -1.0089,
+                  "r_contribution_pct": -2081.5
+                },
+                "timeout": {
+                  "n": 70,
+                  "share_pct": 8.0,
+                  "mean_r": -0.023,
+                  "r_contribution_pct": -9.3
+                },
+                "tp3_runner": {
+                  "n": 452,
+                  "share_pct": 51.4,
+                  "mean_r": 0.8411,
+                  "r_contribution_pct": 2190.7
+                }
+              }
+            },
+            "quarters": {
+              "2026-Q1": {
+                "n_trades": 315,
+                "win_rate_pct": 55.87,
+                "profit_factor": 1.0648,
+                "total_pnl": 225.9569,
+                "avg_pnl": 0.7173
+              },
+              "2026-Q2": {
+                "n_trades": 401,
+                "win_rate_pct": 54.11,
+                "profit_factor": 1.0086,
+                "total_pnl": 37.9458,
+                "avg_pnl": 0.0946
+              },
+              "2026-Q3": {
+                "n_trades": 164,
+                "win_rate_pct": 54.88,
+                "profit_factor": 1.1134,
+                "total_pnl": 171.677,
+                "avg_pnl": 1.0468
+              }
+            },
+            "exit_reasons": {
+              "tp3_runner": 452,
+              "stop": 358,
+              "timeout": 70
+            }
+          },
+          "folds": [
+            {
+              "fold": 0,
+              "n_trades": 56,
+              "total_pnl": 169.2864,
+              "win_rate_pct": 60.71,
+              "profit_factor": 1.3101
+            },
+            {
+              "fold": 1,
+              "n_trades": 348,
+              "total_pnl": 454.45,
+              "win_rate_pct": 56.9,
+              "profit_factor": 1.1226
+            },
+            {
+              "fold": 2,
+              "n_trades": 244,
+              "total_pnl": -504.0417,
+              "win_rate_pct": 49.59,
+              "profit_factor": 0.8335
+            },
+            {
+              "fold": 3,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            },
+            {
+              "fold": 4,
+              "n_trades": 83,
+              "total_pnl": 77.567,
+              "win_rate_pct": 56.63,
+              "profit_factor": 1.0946
+            },
+            {
+              "fold": 5,
+              "n_trades": 149,
+              "total_pnl": 238.318,
+              "win_rate_pct": 55.7,
+              "profit_factor": 1.1817
+            },
+            {
+              "fold": 6,
+              "n_trades": 0,
+              "total_pnl": 0.0,
+              "win_rate_pct": 0.0,
+              "profit_factor": 0.0
+            }
+          ]
+        }
+      }
+    }
+  },
+  "progress": {
+    "phase": "xauusd_m5_candidate"
+  },
+  "xauusd_m5_candidate": {
+    "path": "output\\models\\xauusd_m5_candidate.joblib",
+    "loaded": true,
+    "seconds": 252.4,
+    "feature_count": 49,
+    "artifact_timeframe": "M5",
+    "effective_config_sha256": "a1440464d4a9afa9c8e74bfed99c546e1a816d6b0bb719c93ddbffff0b57acf3",
+    "production_switched": false,
+    "log": "logs\\halfyear_fx\\xauusd_m5_training.log"
+  },
+  "finished_at_utc": "2026-08-24T15:22:46.695850+00:00",
+  "result_path": "data\\backtest\\forex_halfyear_results.json"
+}
