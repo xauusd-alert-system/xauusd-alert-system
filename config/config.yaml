@@ -594,16 +594,14 @@ risk_throttle:
   max_trades_per_day: 30          # global daily trade cap (resets at UTC midnight)
   loss_streak_threshold: 2       # consecutive losses before cooldown activates
   cooldown_minutes: 45           # pause duration after loss_streak_threshold
-  hard_stop_streak: 3            # full halt for the day after this many consecutive losses
+  hard_stop_streak: 99           # DISABLED 2026-08-24 per owner request (was 3)
   risk_step_down_map:
     1: 1.0                       # 1 loss: full risk
     2: 0.5                       # 2 losses: half risk
     3: 0.25                      # 3+ losses: quarter risk
-  max_daily_loss_pct: 3.0        # equity-based circuit breaker (% from start-of-day)
-  # AUDIT 2026-08-23 B: %-based breaker on the $10M demo = -$300k and can
-  # never fire (worst real day was -$1,298). Absolute USD limit checked FIRST:
-  # $1,500 sits just past the worst observed day — a hard safety net.
-  max_daily_loss_usd: 1500
+  max_daily_loss_pct: 99         # DISABLED 2026-08-24
+  # AUDIT 2026-08-23 B: disabled per owner request 2026-08-24
+  max_daily_loss_usd: 999999
   reset_on_utc_midnight: true    # reset counters at UTC midnight
 
 
