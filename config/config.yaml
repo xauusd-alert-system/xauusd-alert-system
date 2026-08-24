@@ -870,8 +870,9 @@ paper_forward:
   outcome_metrics_visible_during_accumulation: false
 
 
-# ===== STEALTH ANTI-FINGERPRINT LAYER =====
+# ===== STEALTH ANTI-FINGERPRINT LAYER (UTEx HashHedge + MT5) =====
 # Humanized execution to make order flow statistically indistinguishable from manual trading.
+# Confirmed HashHedge rules: static drawdown $100 max overall Stage1, daily loss $50 floating realtime, reset 00:00-00:13 UTC+4, Daily Loss Protection auto-close, device fingerprinting Clause 6.5c.
 stealth:
   enabled: true
   seed: 42
@@ -886,9 +887,10 @@ stealth:
   timer_hesitation_range: [5.0, 20.0]
   timer_min_gap_range: [180, 900]
   timer_close_delay_range: [1.0, 5.0]
-  # Risk overrides
+  # Risk overrides — challenge uses $10 risk jitter 0.7-1.3%
   risk_base: 0.01
   risk_jitter: 0.0035
+  risk_jitter_range: [0.007, 0.013]
   risk_out_of_bounds_prob: 0.05
   risk_out_of_bounds_extra: [0.001, 0.005]
   risk_lot_step: 0.01
@@ -901,20 +903,64 @@ stealth:
     - {sl_mult: 1.1, tp_mult: 1.8, weight: 0.15}
     - {sl_mult: 1.2, tp_mult: 2.0, weight: 0.10}
     - {sl_mult: 1.2, tp_mult: 2.2, weight: 0.10}
-  # Session overrides
+  # Challenge hard constraints (confirmed)
+  challenge_starting_balance: 1000.0
+  challenge_profit_target: 80.0
+  challenge_daily_loss_limit: 50.0
+  challenge_max_overall_loss: 100.0
+  challenge_starting_loss: 2.90
+  challenge_daily_hard_stop: 30.0
+  challenge_overall_buffer: 10.0
+  challenge_min_trading_days: 5
+  challenge_tickers: ["TSLA", "AAPL", "NVDA", "AMZN", "META"]
+  challenge_daily_reset_window_utc4: ["00:00", "00:13"]
+  challenge_daily_reset_offset_hours: 4
+  challenge_daily_cap: 2
+  # Session overrides MT5
   london_window: ["07:30", "16:00"]
   ny_window: ["08:00", "17:30"]
+  # Session overrides ET for UTEx ORB
+  et_range_window: ["09:30", "09:45"]
+  et_entry_window: ["09:45", "10:30"]
+  et_close_all_time: "15:30"
+  et_tab_open_window: ["09:20", "09:28"]
+  et_wind_down_window: ["10:30", "11:00"]
   session_breaks: [["12:00", "12:30"]]
   daily_cap_range: [3, 7]
   no_trade_day_prob: 0.08
   session_end_buffer_range: [600, 1800]
-  # Order hygiene overrides
+  market_holidays: ["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25"]
+  # Order hygiene overrides MT5
   magic_pool_size: 20
   magic_banned_ranges: [[0, 100], [70000000, 89000000]]
   magic_allowed_ranges: [[101, 69999999], [89000001, 99999999]]
   comment_empty_prob: 0.70
   comment_pool: ["xau", "gold long", "scalp", "news play"]
   api_jitter_range_ms: [50, 350]
+  # BrowserHumanizer overrides UTEx
+  browser_headless: false
+  browser_viewport: [1920, 1080]
+  browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  browser_timezone: "America/New_York"
+  browser_mouse_bezier_steps: [20, 40]
+  browser_mouse_jitter_px: [1, 3]
+  browser_visibility_switches_per_session: [2, 3]
+  browser_visibility_duration_range: [30, 120]
+  browser_action_click_dom_prob: 0.70
+  browser_action_hotkey_prob: 0.30
+  browser_idle_break_interval_range: [480, 900]
+  browser_idle_break_duration_range: [20, 60]
+  browser_hotkey_map:
+    buy_market_best_ask: "F1"
+    sell_market_best_bid: "F2"
+    buy_limit_best_bid: "F3"
+    sell_limit_best_ask: "F4"
+    buy_stop_mark: "F9"
+    sell_stop_mark: "F10"
+    buy_market_mark: "Shift+F1"
+    sell_market_mark: "Shift+F2"
+    close_position: "Shift+F3"
+    cancel_all: "Shift+F4"
   # Equity curve humanizer overrides
   partial_exit_prob: 0.25
   partial_exit_pct_range: [0.30, 0.50]
@@ -923,6 +969,7 @@ stealth:
   early_close_trigger_tp_ratio: 0.6
   trailing_start_r: 1.5
   trailing_pips_range: [15, 40]
+  trailing_dollars_range: [0.50, 2.00]
   pip_value: 0.1
 
 # ===== CORRELATION FILTER (dynamic) =====
@@ -937,11 +984,10 @@ correlation_filter:
   update_interval_minutes: 60
 
 
-# ===== PROP CHALLENGE (HashHedge "US STOCKS HEADLINERS", owner request 2026-08-19) =====
-# Browser automation over the web terminal (NOT MT5). Stage 1: +$80 on $1,000,
-# daily loss -$50, total loss -$100, 1:5 leverage, min 5 trading days, NYSE
-# session 18:30-00:55 local, positions auto-close at 00:55. Risk rules below
-# trade to HALF of the platform limits (cushion) and lock profits early.
+# ===== PROP CHALLENGE (HashHedge UTEx Nova) =====
+# Confirmed rules: static drawdown $100 max overall, daily loss $50 floating realtime, reset 00:00-00:13 UTC+4, Daily Loss Protection auto-close, leverage 1:5, device fingerprinting Clause 6.5c, session recording assumed.
+# Bot hard stops: daily -$30 floating (before platform -$50), overall -$90 floating (buffer $10).
+# ORB: 5-min range 9:30-9:45 ET, 1-min entry 9:45-10:30 ET, close all before 15:30 ET, tickers TSLA/AAPL/NVDA/AMZN/META rotation by premarket volume.
 challenge:
   platform:
     url: "https://app.hashhedge.com/ru/app/dashboard?challengeId=f0622a04-2724-42c8-87cb-8473793533ad"
@@ -951,43 +997,69 @@ challenge:
     auto_start_challenge: false
     poll_seconds: 5
   session:
+    # Legacy session for old OpeningRangeBreakout (18:30-00:55 local)
     start_local: "18:30"
     end_local: "00:55"
     flatten_local: "00:45"
     min_trading_days: 5
+    # New ET session for ORB
+    et_range_start: "09:30"
+    et_range_end: "09:45"
+    et_entry_start: "09:45"
+    et_entry_end: "10:30"
+    et_close_all: "15:30"
+    et_tab_open_start: "09:20"
+    et_tab_open_end: "09:28"
+    et_wind_down_start: "10:30"
+    et_wind_down_end: "11:00"
   risk:
-    per_trade_risk_usd: 5
-    daily_loss_stop: 25
-    total_loss_stop: 60
-    daily_profit_lock: 20
+    per_trade_risk_usd: 10
+    daily_loss_stop: 30
+    total_loss_stop: 90
+    daily_profit_lock: 999999
     max_open_positions: 2
     max_leverage: 5
     stop_pct: 0.005
-    tp_ratio: 1.5
+    tp_ratio: 2.0
+    # Buying power $5000 with leverage 1:5
+    buying_power: 5000
+    overall_buffer: 10
   strategy:
-    type: opening_range_breakout
-    range_minutes: 30
+    type: orb
+    range_minutes: 15
     watchlist:
+      - TSLA
       - AAPL
       - NVDA
-      - TSLA
-      - SPY
-      - GLD
-      - COIN
-      - AMD
-      - MU
-      - MRVL
-      - PLTR
-      - SHOP
-      - SMCI
-      - RDDT
-      - RKLB
-      - ABNB
-      - BA
-      - CAT
-      - KO
-      - MRK
-      - CSCO
+      - AMZN
+      - META
+    orb:
+      range_min_pct: 0.003
+      range_max_pct: 0.015
+      gap_max_pct: 0.03
+      volume_min_ratio: 1.5
+      tp_r_mult: 2.0
+      # Filters strategic, not rule compliance
+      earnings_filter: true
   browser:
     headless: false
     profile_dir: data/challenge_browser_profile
+    viewport: [1920, 1080]
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    timezone: "America/New_York"
+    # UTEx hotkeys F1-F4, F9-F10, Shift+F1-F4
+    hotkey_map:
+      buy_market_best_ask: "F1"
+      sell_market_best_bid: "F2"
+      buy_limit_best_bid: "F3"
+      sell_limit_best_ask: "F4"
+      buy_stop_mark: "F9"
+      sell_stop_mark: "F10"
+      buy_market_mark: "Shift+F1"
+      sell_market_mark: "Shift+F2"
+      close_position: "Shift+F3"
+      cancel_all: "Shift+F4"
+  # Daily reset window UTC+4
+  daily_reset:
+    window_utc4: ["00:00", "00:13"]
+    offset_hours: 4

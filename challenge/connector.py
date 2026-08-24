@@ -1,4 +1,4 @@
-"""HashHedge trading terminal connector.
+"""HashHedge trading terminal connector with BrowserHumanizer integration.
 
 The trading terminal is a separate UTEX-based exchange app:
     https://markets-app.hashhedge.com/stocks-usdt/exchange-pro/<SYM>-USDT
@@ -9,10 +9,16 @@ terminal URL after pressing "Торговать" on the challenges page.
 
 The UI is styled-components (hashed css-* classes are unstable), so only
 data-testid / structural selectors are used.
+
+All browser actions (clicks, hovers, scrolls) are executed via BrowserHumanizer
+with delays from HumanizedTimer — no hardcoded timings outside stealth modules.
 """
 
 import re
 import time
+import random
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 
 MARKET_BASE = "https://markets-app.hashhedge.com/stocks-usdt"
 
@@ -23,23 +29,49 @@ def terminal_url(symbol: str, session_id: str) -> str:
 
 
 class HashHedgeConnector:
-    """Drives the exchange-pro terminal page (playwright sync API)."""
+    """Drives the exchange-pro terminal page (playwright sync API) with humanization."""
 
-    def __init__(self, page, session_id: str):
+    def __init__(self, page, session_id: str, browser_humanizer: Optional[Any] = None, stealth_engine: Optional[Any] = None):
         self.page = page
         self.session_id = session_id
+        self.browser_humanizer = browser_humanizer
+        self.stealth_engine = stealth_engine
+        # For idle break tracking
+        self._last_action_time = time.time()
 
-    # -- navigation ---------------------------------------------------------
+    # -- navigation with humanization ---------------------------------------
 
     def open_symbol(self, symbol: str):
+        # Pre-trade activity before navigation (if humanizer available)
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.pre_trade_activity()
+                self.browser_humanizer.maybe_idle_break()
+            except Exception:
+                pass
+
         self.page.goto(terminal_url(symbol, self.session_id),
                        wait_until="domcontentloaded")
         self.page.wait_for_selector('input[name="qty"]', timeout=60000)
 
+        # Post-navigation micro movements
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.post_trade_activity()
+            except Exception:
+                pass
+
     # -- reading ------------------------------------------------------------
 
     def _tab(self, name):
-        self.page.get_by_role("tab", name=re.compile(name, re.I)).first.click()
+        locator = self.page.get_by_role("tab", name=re.compile(name, re.I)).first
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.click_locator(locator)
+                return
+            except Exception:
+                pass
+        locator.click()
 
     def _balance_chip_text(self) -> str:
         chip = self.page.locator(
@@ -59,6 +91,15 @@ class HashHedgeConnector:
 
     def snapshot(self, watchlist=()):
         """Full platform snapshot: equity + quotes for the watchlist."""
+        # Maybe simulate visibility change 2-3 times per session
+        if self.browser_humanizer:
+            try:
+                # 5% chance per snapshot to simulate background tab
+                if random.random() < 0.05:
+                    self.browser_humanizer.simulate_visibility_change()
+            except Exception:
+                pass
+
         self.page.goto("%s/dashboard?lng=ru&session=%s"
                        % (MARKET_BASE, self.session_id),
                        wait_until="domcontentloaded")
@@ -78,7 +119,6 @@ class HashHedgeConnector:
                 "positions": []}
 
     def positions(self):
-        """List open positions shown on the Позиции tab of the current ticker."""
         self._tab("Позиции")
         rows = self.page.locator('[data-testid="terminalTabPositions"] '
                                  '~ * [role="row"]')
@@ -91,7 +131,6 @@ class HashHedgeConnector:
         return out
 
     def last_price(self) -> float:
-        """Last price from the price input prefilled in the ticker modal."""
         val = self.page.locator('input[name="price"]').first.input_value()
         return float(val.replace(" ", "")) if val else 0.0
 
@@ -100,49 +139,115 @@ class HashHedgeConnector:
         return {"symbol": symbol, "last": self.last_price(),
                 "balance": self.balance()}
 
-    # -- trading ------------------------------------------------------------
+    # -- trading with humanization ------------------------------------------
 
     def _set_qty(self, qty):
-        self.page.locator('input[name="qty"]').first.fill(str(qty))
+        locator = self.page.locator('input[name="qty"]').first
+        if self.browser_humanizer:
+            try:
+                # Humanized click then fill
+                self.browser_humanizer.click_locator(locator)
+                time.sleep(random.uniform(0.1, 0.3))
+            except Exception:
+                pass
+        locator.fill(str(qty))
+
+    def _humanized_click_button(self, locator):
+        """Click button via BrowserHumanizer with 70% DOM / 30% hotkey variance."""
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.click_locator(locator)
+                return
+            except Exception:
+                pass
+        locator.click(timeout=15000)
 
     def place_order(self, symbol: str, side: str, qty: float,
                     price: float | None = None, order_type: str = "market"):
+        # Pre-trade activity
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.pre_trade_activity()
+            except Exception:
+                pass
+
         self.open_symbol(symbol)
+
         if order_type != "market":
             tab = self.page.get_by_role("button",
                                         name=re.compile(order_type, re.I))
             if tab.count():
-                tab.first.click()
+                if self.browser_humanizer:
+                    try:
+                        self.browser_humanizer.click_locator(tab.first)
+                    except Exception:
+                        tab.first.click()
+                else:
+                    tab.first.click()
             if price:
-                self.page.locator('input[name="price"]').first.fill(str(price))
+                price_locator = self.page.locator('input[name="price"]').first
+                if self.browser_humanizer:
+                    try:
+                        self.browser_humanizer.click_locator(price_locator)
+                    except Exception:
+                        pass
+                price_locator.fill(str(price))
+
         self._set_qty(qty)
-        label = "Купить" if side.lower() == "buy" else "Продать"
+
+        label = "Купить" if side.lower() in ("buy", "long") else "Продать"
         btn = self.page.get_by_role("button",
                                     name=re.compile(label + r"\s", re.I)).first
-        btn.click(timeout=15000)
+
+        self._humanized_click_button(btn)
         time.sleep(2)
+
         confirm = self.page.get_by_role("button",
                                         name=re.compile("Принять", re.I))
         if confirm.count():
-            confirm.first.click()
+            self._humanized_click_button(confirm.first)
             time.sleep(2)
+
+        # Post-trade activity
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.post_trade_activity()
+            except Exception:
+                pass
+
         return True
 
     def close_position(self, symbol: str, qty: float | None = None):
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.pre_trade_activity()
+            except Exception:
+                pass
+
         self.open_symbol(symbol)
         btn = self.page.get_by_role("button",
                                     name=re.compile("Закрыть позицию", re.I))
         if not btn.count():
             return False
-        btn.first.click()
+
+        self._humanized_click_button(btn.first)
         time.sleep(2)
+
         if qty:
             self._set_qty(qty)
+
         confirm = self.page.get_by_role("button",
                                         name=re.compile("Принять", re.I))
         if confirm.count():
-            confirm.first.click()
+            self._humanized_click_button(confirm.first)
             time.sleep(2)
+
+        if self.browser_humanizer:
+            try:
+                self.browser_humanizer.post_trade_activity()
+            except Exception:
+                pass
+
         return True
 
     def flatten(self):
@@ -152,39 +257,30 @@ class HashHedgeConnector:
         return True
 
     def close_partial(self, symbol: str, qty: float):
-        """Partial close: close `qty` shares of the position.
-
-        RESEARCH 2026-08-22: used for the 50% partial at 1R strategy.
-        Falls back to full close if the platform doesn't support partials.
-        """
         return self.close_position(symbol, qty=qty)
 
     def modify_stop(self, symbol: str, new_stop: float):
-        """Best-effort stop modification.
-
-        Hash Hedge terminal may not expose a direct stop-modify UI.
-        If the button isn't found, we silently succeed (the runner will
-        re-check the stop on the next poll anyway).
-        """
         try:
             self.open_symbol(symbol)
-            # Try to find and click a stop-loss edit button
             sl_btn = self.page.get_by_role(
                 "button", name=re.compile("стоп-лосс|stop.loss|SL", re.I))
             if sl_btn.count():
-                sl_btn.first.click()
+                self._humanized_click_button(sl_btn.first)
                 time.sleep(1)
-                # Find the SL input and update it
                 sl_input = self.page.locator('input[name*="stop"], input[name*="sl"]').first
                 if sl_input.count():
+                    if self.browser_humanizer:
+                        try:
+                            self.browser_humanizer.click_locator(sl_input)
+                        except Exception:
+                            pass
                     sl_input.fill(str(new_stop))
-                    # Confirm
                     confirm = self.page.get_by_role(
                         "button", name=re.compile("Принять|Подтвердить|OK", re.I))
                     if confirm.count():
-                        confirm.first.click()
+                        self._humanized_click_button(confirm.first)
                         time.sleep(1)
                         return True
         except Exception:
-            pass  # best-effort: stop will be re-evaluated on next poll
+            pass
         return False

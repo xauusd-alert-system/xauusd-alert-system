@@ -1,10 +1,10 @@
-"""HumanizedTimer — randomized execution delays with news-awareness and fatigue."""
+"""HumanizedTimer — randomized execution delays with news-awareness, fatigue, earnings."""
 
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional
+from datetime import datetime, timezone, timedelta, date
+from typing import List, Dict, Optional, Set
 
 
 class HumanizedTimer:
@@ -12,6 +12,7 @@ class HumanizedTimer:
 
     All constants live inside the class (no hardcode outside stealth modules).
     Accepts optional seed for reproducibility.
+    Supports news_calendar and earnings_calendar.
     """
 
     # Base reaction 2.5-8s + jitter execution
@@ -45,17 +46,20 @@ class HumanizedTimer:
     def __init__(
         self,
         news_calendar: Optional[List[Dict]] = None,
+        earnings_calendar: Optional[List[Dict]] = None,
         seed: Optional[int] = None,
         config: Optional[object] = None,
     ):
         """
         Args:
             news_calendar: list of dicts {'time': datetime, 'impact': 'high'}
+            earnings_calendar: list of dicts {'ticker': str, 'date': date}
             seed: optional seed for reproducibility
             config: optional StealthConfig to override constants
         """
         self._rng = random.Random(seed)
         self.news_calendar: List[Dict] = news_calendar or []
+        self.earnings_calendar: List[Dict] = earnings_calendar or []
 
         # Apply config overrides if provided
         if config is not None:
@@ -77,6 +81,49 @@ class HumanizedTimer:
         self._last_order_time: Optional[datetime] = None
         self._fatigue_drift: float = 0.0
 
+        # Pre-parse earnings dates for quick lookup
+        self._earnings_by_ticker: Dict[str, Set[date]] = {}
+        self._rebuild_earnings()
+
+    def _rebuild_earnings(self):
+        self._earnings_by_ticker.clear()
+        for ev in self.earnings_calendar:
+            ticker = str(ev.get("ticker", "")).upper()
+            d = ev.get("date")
+            if not ticker:
+                continue
+            # d can be date, datetime, or string
+            parsed_date: Optional[date] = None
+            if isinstance(d, date) and not isinstance(d, datetime):
+                parsed_date = d
+            elif isinstance(d, datetime):
+                parsed_date = d.date()
+            elif isinstance(d, str):
+                try:
+                    # Try ISO format
+                    parsed_date = datetime.fromisoformat(d).date()
+                except Exception:
+                    continue
+            if parsed_date:
+                self._earnings_by_ticker.setdefault(ticker, set()).add(parsed_date)
+
+    def update_earnings_calendar(self, earnings_calendar: List[Dict]):
+        self.earnings_calendar = earnings_calendar or []
+        self._rebuild_earnings()
+
+    def update_news_calendar(self, news_calendar: List[Dict]):
+        self.news_calendar = news_calendar or []
+
+    def is_earnings_day(self, ticker: str, check_date: date) -> bool:
+        """Check if ticker has earnings on check_date."""
+        if not ticker:
+            return False
+        ticker = ticker.upper()
+        dates = self._earnings_by_ticker.get(ticker)
+        if not dates:
+            return False
+        return check_date in dates
+
     def _ensure_day(self, now_utc: datetime):
         """Reset daily state on new day."""
         day = now_utc.date() if isinstance(now_utc, datetime) else now_utc
@@ -85,9 +132,6 @@ class HumanizedTimer:
             self._orders_today = 0
             self._fatigue_drift = 0.0
             self._current_min_gap_sec = self._rng.randint(self.MIN_GAP_MIN_SEC, self.MIN_GAP_MAX_SEC)
-            # Note: _last_order_time is NOT reset on new day? Keep it for gap across midnight
-            # but for simplicity reset gap check on new day by allowing first order.
-            # We'll keep last_order_time but is_min_gap_ok will allow if new day.
 
     def _is_news_window(self, now_utc: datetime) -> bool:
         """Check if now is within ±NEWS_WINDOW_SEC of high-impact news."""
@@ -100,7 +144,6 @@ class HumanizedTimer:
                 continue
             if not isinstance(ev_time, datetime):
                 continue
-            # Ensure timezone aware
             if ev_time.tzinfo is None:
                 ev_time = ev_time.replace(tzinfo=timezone.utc)
             if now_utc.tzinfo is None:
@@ -118,19 +161,16 @@ class HumanizedTimer:
         jitter = self._rng.uniform(self.EXECUTION_JITTER_MIN, self.EXECUTION_JITTER_MAX)
         delay = base + jitter
 
-        # Fatigue drift accumulates with orders today
         fatigue = min(
             self._orders_today * self.FATIGUE_DRIFT_PER_ORDER,
             self.FATIGUE_DRIFT_MAX,
         )
         delay += fatigue
 
-        # News-aware extra
         if self._is_news_window(now_utc):
             news_extra = self._rng.uniform(self.NEWS_EXTRA_MIN, self.NEWS_EXTRA_MAX)
             delay += news_extra
 
-        # Hesitation 8% chance
         if self._rng.random() < self.HESITATION_PROB:
             hesitation = self._rng.uniform(self.HESITATION_MIN, self.HESITATION_MAX)
             delay += hesitation
@@ -142,7 +182,6 @@ class HumanizedTimer:
         if now_utc is not None:
             self._ensure_day(now_utc)
         base = self._rng.uniform(self.CLOSE_DELAY_MIN, self.CLOSE_DELAY_MAX)
-        # Add small fatigue component
         fatigue = min(
             self._orders_today * 0.1,
             2.0,
@@ -154,18 +193,15 @@ class HumanizedTimer:
         self._ensure_day(now_utc)
         if self._last_order_time is None:
             return True
-        # If new day, allow (reset)
         if self._last_order_time.date() != now_utc.date():
             return True
         elapsed = (now_utc - self._last_order_time).total_seconds()
         return elapsed >= self._current_min_gap_sec
 
     def get_current_min_gap(self) -> int:
-        """Return current min gap in seconds (for logging/testing)."""
         return self._current_min_gap_sec
 
     def record_order(self, now_utc: datetime):
-        """Record that an order was placed at now_utc."""
         self._ensure_day(now_utc)
         self._last_order_time = now_utc
         self._orders_today += 1
@@ -175,13 +211,11 @@ class HumanizedTimer:
         )
 
     def reset(self):
-        """Reset all state (for tests)."""
         self._orders_today = 0
         self._current_day = None
         self._last_order_time = None
         self._fatigue_drift = 0.0
         self._current_min_gap_sec = self._rng.randint(self.MIN_GAP_MIN_SEC, self.MIN_GAP_MAX_SEC)
 
-    # For testing distribution
     def sample_delays(self, n: int, now_utc: datetime) -> List[float]:
         return [self.get_entry_delay(now_utc) for _ in range(n)]

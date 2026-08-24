@@ -1,17 +1,22 @@
-"""EquityCurveHumanizer — partial exits, early closes, manual trailing."""
+"""EquityCurveHumanizer — partial exits, early closes, manual trailing for both MT5 and UTEx."""
 
 from __future__ import annotations
 
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 
 class EquityCurveHumanizer:
     """Human-like position management.
 
+    MT5:
     - 25% chance partial exit 30-50% at +1R
     - 12% chance early close at 0.6×TP
     - Manual trailing 15-40 pips at +1.5R (XAUUSD)
+
+    UTEx challenge (stocks):
+    - Same probs but shares rounding to whole shares
+    - Trailing $0.50-$2.00 depending on asset price at +1.5R
     """
 
     PARTIAL_EXIT_PROB = 0.25
@@ -26,6 +31,9 @@ class EquityCurveHumanizer:
     TRAILING_MIN_PIPS = 15
     TRAILING_MAX_PIPS = 40
     PIP_VALUE = 0.1  # XAUUSD
+
+    TRAILING_MIN_DOLLARS = 0.50
+    TRAILING_MAX_DOLLARS = 2.00
 
     def __init__(
         self,
@@ -44,21 +52,14 @@ class EquityCurveHumanizer:
             self.EARLY_CLOSE_TRIGGER_TP_RATIO = config.early_close_trigger_tp_ratio
             self.TRAILING_START_R = config.trailing_start_r
             self.TRAILING_MIN_PIPS, self.TRAILING_MAX_PIPS = config.trailing_pips_range
+            self.TRAILING_MIN_DOLLARS, self.TRAILING_MAX_DOLLARS = config.trailing_dollars_range
             self.pip_value = config.pip_value
             self.PIP_VALUE = config.pip_value
 
-        # Track which positions already had partial exit to avoid repeat
         self._partial_done: set = set()
         self._trailing_active: set = set()
 
     def _calc_r(self, position: Dict) -> float:
-        """Calculate current R multiple from position dict.
-
-        Expected position keys:
-          entry_price, current_price, stop_price, side ('long'/'short')
-        R = (current - entry) / (entry - stop) for long, etc.
-        Returns 0 if invalid.
-        """
         try:
             entry = float(position.get("entry_price", 0))
             current = float(position.get("current_price", 0))
@@ -80,7 +81,6 @@ class EquityCurveHumanizer:
             return 0.0
 
     def should_partial_exit(self, position: Dict) -> bool:
-        """25% chance partial exit at +1R, once per position."""
         pos_id = position.get("id") or position.get("ticket") or id(position)
         if pos_id in self._partial_done:
             return False
@@ -93,15 +93,18 @@ class EquityCurveHumanizer:
         return False
 
     def get_partial_exit_pct(self) -> float:
-        """30-50% partial exit."""
         return round(self._rng.uniform(self.PARTIAL_EXIT_MIN_PCT, self.PARTIAL_EXIT_MAX_PCT), 3)
 
-    def should_early_close(self, position: Dict) -> bool:
-        """12% chance early close at 0.6×TP.
+    def get_partial_exit_shares(self, total_shares: int) -> int:
+        """For stocks: 30-50% rounded to whole shares, at least 1."""
+        pct = self.get_partial_exit_pct()
+        shares = max(1, int(total_shares * pct))
+        # Ensure not all shares (leave at least 1)
+        if shares >= total_shares:
+            shares = max(1, total_shares - 1)
+        return shares
 
-        We approximate TP progress via R: if TP is at e.g. 2R, then 0.6×TP ~1.2R.
-        For simplicity, use trigger based on current price vs TP.
-        """
+    def should_early_close(self, position: Dict) -> bool:
         try:
             entry = float(position.get("entry_price", 0))
             current = float(position.get("current_price", 0))
@@ -126,45 +129,61 @@ class EquityCurveHumanizer:
             return False
 
     def should_trail(self, position: Dict) -> bool:
-        """Check if trailing should activate at +1.5R."""
         r = self._calc_r(position)
         return r >= self.TRAILING_START_R
 
     def get_trailing_distance_price(self) -> float:
-        """15-40 pips trailing distance in price units."""
         pips = self._rng.randint(self.TRAILING_MIN_PIPS, self.TRAILING_MAX_PIPS)
         return round(pips * self.PIP_VALUE, 4)
 
     def get_trailing_distance_pips(self) -> int:
         return self._rng.randint(self.TRAILING_MIN_PIPS, self.TRAILING_MAX_PIPS)
 
+    def get_trailing_distance_dollars(self, asset_price: Optional[float] = None) -> float:
+        """For UTEx challenge: $0.50-$2.00 depending on asset price."""
+        if asset_price is None:
+            return round(self._rng.uniform(self.TRAILING_MIN_DOLLARS, self.TRAILING_MAX_DOLLARS), 2)
+
+        # Scale with price: cheap stocks (<50) => 0.5-1.0, mid 50-200 => 0.75-1.5, expensive >200 => 1.0-2.0
+        if asset_price < 50:
+            low, high = 0.50, 1.00
+        elif asset_price < 200:
+            low, high = 0.75, 1.50
+        else:
+            low, high = 1.00, 2.00
+
+        # Allow config override to still clamp to overall min/max
+        low = max(low, self.TRAILING_MIN_DOLLARS)
+        high = min(high, self.TRAILING_MAX_DOLLARS)
+        return round(self._rng.uniform(low, high), 2)
+
     def manage_position(self, position: Dict) -> List[Dict]:
-        """Main entry: return list of action dicts for given position.
-
-        Position dict expected:
-          {
-            'id' or 'ticket': unique,
-            'entry_price': float,
-            'current_price': float,
-            'stop_price': float,
-            'tp_price': float,
-            'side': 'long'|'short',
-            'volume': float,
-          }
-
-        Returns list of actions:
-          {'type': 'partial_exit', 'pct': 0.35, 'delay_sec': ...}
-          {'type': 'early_close', 'delay_sec': ...}
-          {'type': 'trailing', 'distance_price': ..., 'distance_pips': ..., 'delay_sec': ...}
-        """
         actions: List[Dict] = []
 
         if self.should_partial_exit(position):
-            actions.append({
-                "type": "partial_exit",
-                "pct": self.get_partial_exit_pct(),
-                "trigger_r": self.PARTIAL_EXIT_TRIGGER_R,
-            })
+            total_shares = position.get("qty") or position.get("volume") or position.get("shares")
+            if total_shares is not None and isinstance(total_shares, (int, float)) and total_shares > 1:
+                # For shares, return share count
+                try:
+                    shares = self.get_partial_exit_shares(int(total_shares))
+                    actions.append({
+                        "type": "partial_exit",
+                        "pct": round(shares / int(total_shares), 3),
+                        "shares": shares,
+                        "trigger_r": self.PARTIAL_EXIT_TRIGGER_R,
+                    })
+                except Exception:
+                    actions.append({
+                        "type": "partial_exit",
+                        "pct": self.get_partial_exit_pct(),
+                        "trigger_r": self.PARTIAL_EXIT_TRIGGER_R,
+                    })
+            else:
+                actions.append({
+                    "type": "partial_exit",
+                    "pct": self.get_partial_exit_pct(),
+                    "trigger_r": self.PARTIAL_EXIT_TRIGGER_R,
+                })
 
         if self.should_early_close(position):
             actions.append({
@@ -174,13 +193,13 @@ class EquityCurveHumanizer:
 
         if self.should_trail(position):
             pos_id = position.get("id") or position.get("ticket") or id(position)
-            # Only activate trailing once per position, but keep updating distance?
-            # For simplicity, allow repeated trailing actions but mark active.
             self._trailing_active.add(pos_id)
+            asset_price = position.get("current_price") or position.get("entry_price")
             actions.append({
                 "type": "trailing",
                 "distance_price": self.get_trailing_distance_price(),
                 "distance_pips": self.get_trailing_distance_pips(),
+                "distance_dollars": self.get_trailing_distance_dollars(asset_price),
                 "trigger_r": self.TRAILING_START_R,
             })
 
