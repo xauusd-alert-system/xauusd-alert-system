@@ -272,7 +272,14 @@ def format_setup(res, setup_type: str = "impulse") -> str:
     }
     label = type_labels.get(setup_type, setup_type.upper())
     qscore = getattr(res, 'quality_score', 0)
-    header = f"🔔 {label} {res.bias.upper()} {res.symbol} — класс {res.grade} Q={qscore} (сигнал {st} UTC)"
+    # Quality-tier emoji: fire (>=80), lightning (>=65), bell (<65)
+    if qscore >= 80:
+        emoji = "🔥"
+    elif qscore >= 65:
+        emoji = "⚡"
+    else:
+        emoji = "🔔"
+    header = f"{emoji} {label} {res.bias.upper()} {res.symbol} — класс {res.grade} Q={qscore} (сигнал {st} UTC)"
     footer = ""
     if setup_type == "gap_fade":
         footer = f"\nГэп-фейд: цель = закрытие предыдущего дня, стоп за экстремумом гэпа."
