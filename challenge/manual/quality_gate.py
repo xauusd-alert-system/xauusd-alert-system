@@ -81,11 +81,35 @@ def compute_quality_for_setup(
 
 # Quality thresholds per setup type (calibrated on 386 setups, 2026-08-24)
 # Thresholds chosen to maximize avgR while keeping >= 14 trades per type.
-QUALITY_THRESHOLDS = {
+# Can be overridden by challenge/manual/quality_thresholds.json
+_DEFAULT_THRESHOLDS = {
     "impulse": 70,        # avgR +0.264 (up from +0.086), 14 trades
     "gap_fade": 45,       # avgR +1.476 (up from +0.402), 24 trades  
     "opening_drive": 60,  # avgR +0.800 (up from +0.213), 35 trades
 }
+
+import json, os
+_THRESHOLDS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "quality_thresholds.json")
+
+def _load_thresholds() -> dict:
+    """Load thresholds from JSON file, falling back to hardcoded defaults."""
+    try:
+        if os.path.exists(_THRESHOLDS_FILE):
+            with open(_THRESHOLDS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            # Extract only numeric threshold keys
+            thresholds = {}
+            for stype in ("impulse", "gap_fade", "opening_drive"):
+                if stype in data:
+                    thresholds[stype] = int(data[stype])
+            if thresholds:
+                return thresholds
+    except Exception:
+        pass
+    return dict(_DEFAULT_THRESHOLDS)
+
+QUALITY_THRESHOLDS = _load_thresholds()
 
 
 def passes_quality_filter(setup_type: str, quality_score: int) -> bool:

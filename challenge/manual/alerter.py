@@ -28,14 +28,13 @@ ROOT = r"C:\Users\botbo\Desktop\xauusd-alert-system"
 sys.path.insert(0, ROOT)
 
 # Audit G 2026-08-23: under pythonw (scheduled task) stdout/stderr are None
-# and every print() would silently vanish. Route them to a log file instead.
+# and every print() would silently vanish. Also when launched via Popen with
+# DEVNULL, stderr exists but all output is discarded. Always redirect to file.
 os.makedirs(os.path.join(ROOT, "logs", "challenge"), exist_ok=True)
-if sys.stderr is None:
-    sys.stderr = open(os.path.join(ROOT, "logs", "challenge", "alerter_stderr.log"),
-                      "a", encoding="utf-8")
-if sys.stdout is None:
-    sys.stdout = open(os.path.join(ROOT, "logs", "challenge", "alerter_stdout.log"),
-                      "a", encoding="utf-8")
+sys.stderr = open(os.path.join(ROOT, "logs", "challenge", "alerter_stderr.log"),
+                  "a", encoding="utf-8")
+sys.stdout = open(os.path.join(ROOT, "logs", "challenge", "alerter_stdout.log"),
+                  "a", encoding="utf-8")
 
 # Audit G: single-instance guard — a second copy would double-scan and race
 # the sent-file dedupe. Same pattern as watchdog.lock.
@@ -434,6 +433,7 @@ def main() -> int:
     print(f"Алертер запущен: poll {POLL_SECONDS}s, сессия {SESSION_START}-{SESSION_END} UTC, "
           f"watchlist {len(CFG.get('watchlist', []))}", file=sys.stderr)
     last_summary_date = ""
+    last_autocal_week = ""  # Sunday recalibration
     # Audit A: token-death monitor — if the UTEX refresh token rots, the loop
     # used to fail silently every cycle forever. Now: 5 failures in a row ->
     # one Telegram scream, then a reminder every 10 min until it recovers.
@@ -496,6 +496,27 @@ def main() -> int:
                         tg_send(outcomes_mod.format_stats_summary(stats))
                     except Exception as e:
                         print(f"{now:%H:%M:%S} UTC: tg stats msg failed: {e}", file=sys.stderr)
+
+                # Weekly auto-calibration: каждый понедельник 00:00-01:00 UTC
+                # (после закрытия воскресной сессии). Пересчитываем пороги качества.
+                if now.weekday() == 0:  # Monday UTC = after Sunday session
+                    week_id = now.strftime("%Y-W%W")
+                    if week_id != last_autocal_week:
+                        last_autocal_week = week_id
+                        try:
+                            print(f"{now:%H:%M:%S} UTC: running weekly quality autocal...",
+                                  file=sys.stderr)
+                            from challenge.manual import quality_autocal
+                            new_thresh = quality_autocal.recalibrate()
+                            quality_autocal.save_and_reload(new_thresh)
+                            # Report to Telegram
+                            lines = ["Weekly Quality Auto-Calibration:"]
+                            for stype in ("impulse", "gap_fade", "opening_drive"):
+                                lines.append(f"  {stype}: threshold={new_thresh.get(stype, '?')}")
+                            tg_send("\n".join(lines))
+                        except Exception as ae:
+                            print(f"{now:%H:%M:%S} UTC: autocal failed: {ae}",
+                                  file=sys.stderr)
             time.sleep(POLL_SECONDS)
             continue
 
