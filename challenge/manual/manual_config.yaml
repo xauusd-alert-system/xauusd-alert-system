@@ -56,6 +56,18 @@ target_rr: 3.5
 # $2 buffer covered ±700% of CAN's price and blocked every setup there.
 sr_proximity_buffer_pct: 0.3
 
+# GAP FADE setup (2026-08-24): fade the opening gap, orthogonal edge.
+# Gap must exceed min_pct from previous-day close.
+# Stop beyond the gap extreme, target = previous close.
+gap_fade_min_pct: 0.005
+gap_fade_stop_pct: 0.005
+
+# OPENING DRIVE setup (2026-08-24): first N minutes direction drive.
+# Body ratio must exceed min_body * range for a clean drive signal.
+# Independent of trend/pullback — simpler gates, more signals.
+opening_drive_minutes: 5
+opening_drive_min_body: 0.5
+
 # Анти-корреляционные кластеры: максимум ОДНА позиция из кластера в день
 # (12 из 18 тикеров ходят за биткоином — без капа «3 сделки» превращаются
 # в одну тройную ставку).

@@ -512,3 +512,134 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
             setup.bias = "none"
             setup.no_go.append("degenerate levels")
     return setup
+
+
+# ==================================================================
+# Setup type 2: GAP FADE (fade the gap to previous close)
+# ==================================================================
+def scan_gap_fade(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UTC,
+                  cfg=None) -> Setup:
+    """Fade the opening gap: if the stock gaps beyond min_gap_pct from
+    yesterday's close, enter in the opposite direction targeting prev close.
+    Stop beyond the gap extreme. One signal per symbol at session open.
+    Does NOT depend on trend/impulse/pullback — orthogonal edge."""
+    cfg = cfg or {}
+    day = bars_of_day(candles_1m, date)
+    if len(day) < 5:
+        return Setup(symbol, str(date), "none", "none", no_go=["insufficient data"])
+    # Previous-day close: last candle before today
+    prev = [c for c in candles_1m
+            if c["time"] < dt.datetime(date.year, date.month, date.day,
+                                        tzinfo=dt.timezone.utc).timestamp()]
+    if not prev:
+        return Setup(symbol, str(date), "none", "none", no_go=["no prior close"])
+    prev_close = sorted(prev, key=lambda x: x["time"])[-1]["close"]
+    if prev_close <= 0:
+        return Setup(symbol, str(date), "none", "none", no_go=["zero prev close"])
+    session_open = day[0]["open"]
+    if session_open <= 0:
+        return Setup(symbol, str(date), "none", "none", no_go=["zero open"])
+    gap_pct = (session_open - prev_close) / prev_close
+    min_gap = float(cfg.get("gap_fade_min_pct", 0.005))
+    if abs(gap_pct) < min_gap:
+        return Setup(symbol, str(date), "none", "none",
+                     no_go=[f"gap {gap_pct:+.2%} < {min_gap:.1%}"])
+    # Fade: gap up -> short, gap down -> long
+    bias = "short" if gap_pct > 0 else "long"
+    stop_pct = float(cfg.get("gap_fade_stop_pct", 0.005))
+    if bias == "short":
+        entry = session_open
+        stop = session_open * (1 + stop_pct)  # beyond the gap-up extreme
+        target = prev_close
+    else:
+        entry = session_open
+        stop = session_open * (1 - stop_pct)
+        target = prev_close
+    sane = (stop > entry) if bias == "short" else (stop < entry)
+    if not sane:
+        return Setup(symbol, str(date), "none", "none", no_go=["degenerate levels"])
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return Setup(symbol, str(date), "none", "none", no_go=["zero risk"])
+    rr = abs(target - entry) / risk
+    setup = Setup(symbol, str(date), bias, "B",
+                  entry=round(entry, 4), stop=round(stop, 4),
+                  target=round(target, 4), rr=round(rr, 2))
+    # Earnings blackout still applies
+    ecal = _load_earnings(cfg)
+    if ecal:
+        blocked, src = earnings_blackout(symbol, date, ecal,
+                                         int(cfg.get("earnings_block_days", 2)))
+        if blocked:
+            setup.no_go.append(f"earnings blackout (отчёт {src})")
+    return setup
+
+
+# ==================================================================
+# Setup type 3: OPENING DRIVE (first N minutes determine direction)
+# ==================================================================
+def scan_opening_drive(symbol: str, date, candles_1m,
+                       session_start_utc=SESSION_START_UTC, cfg=None) -> Setup:
+    """First `drive_minutes` bars: if they form a strong directional move
+    (body > min_body_ratio * range), enter on the close of the last drive
+    bar. Stop beyond the opposite extreme. Target = target_rr * risk.
+    No trend/pullback filter — minimal gates, more signals."""
+    cfg = cfg or {}
+    day = bars_of_day(candles_1m, date)
+    if len(day) < 15:
+        return Setup(symbol, str(date), "none", "none", no_go=["insufficient data"])
+    drive_n = int(cfg.get("opening_drive_minutes", 5))
+    if len(day) < drive_n + 5:
+        return Setup(symbol, str(date), "none", "none",
+                     no_go=[f"not enough bars for {drive_n}-min drive"])
+    drive_bars = day[:drive_n]
+    drive_open = drive_bars[0]["open"]
+    drive_close = drive_bars[-1]["close"]
+    drive_high = max(b["high"] for b in drive_bars)
+    drive_low = min(b["low"] for b in drive_bars)
+    drive_range = drive_high - drive_low
+    drive_body = abs(drive_close - drive_open)
+    if drive_range <= 0:
+        return Setup(symbol, str(date), "none", "none", no_go=["zero drive range"])
+    body_ratio = float(cfg.get("opening_drive_min_body", 0.5))
+    if drive_body < body_ratio * drive_range:
+        return Setup(symbol, str(date), "none", "none",
+                     no_go=[f"weak drive body {drive_body/drive_range:.0%} < {body_ratio:.0%}"])
+    # Direction from the drive
+    bias = "long" if drive_close > drive_open else "short"
+    if bias == "long":
+        entry = drive_close
+        stop = drive_low
+    else:
+        entry = drive_close
+        stop = drive_high
+    sane = (stop < entry) if bias == "long" else (entry < stop)
+    if not sane:
+        return Setup(symbol, str(date), "none", "none", no_go=["degenerate levels"])
+    # ATR-based stop refinement (keep the original stop if ATR is unavailable)
+    atr5 = atr(day, 14)
+    if atr5 > 0 and bias == "long":
+        candidate = entry - 1.5 * atr5
+        if candidate > stop:  # wider is safer — use the wider stop
+            stop = candidate
+    elif atr5 > 0 and bias == "short":
+        candidate = entry + 1.5 * atr5
+        if candidate < stop:
+            stop = candidate
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return Setup(symbol, str(date), "none", "none", no_go=["zero risk"])
+    target_rr = float(cfg.get("target_rr", 2.0))
+    target = round(entry + (1 if bias == "long" else -1) * target_rr * risk, 4)
+    rr = round(abs(target - entry) / risk, 2) if risk > 0 else 0.0
+    setup = Setup(symbol, str(date), bias, "B",
+                  entry=round(entry, 4), stop=round(stop, 4),
+                  target=target, rr=rr,
+                  signal_bar=drive_bars[-1])
+    ecal = _load_earnings(cfg)
+    if ecal:
+        blocked, src = earnings_blackout(symbol, date, ecal,
+                                         int(cfg.get("earnings_block_days", 2)))
+        if blocked:
+            setup.no_go.append(f"earnings blackout (отчёт {src})")
+    return setup

@@ -258,20 +258,33 @@ def day_line() -> str:
             f"статус: {s.status}")
 
 
-def format_setup(res) -> str:
+def format_setup(res, setup_type: str = "impulse") -> str:
     risk_usd = risk_mod.PROFILES[PROFILE]["risk_usd"]
     stop_dist = abs(res.entry - res.stop)
     qty = risk_usd / stop_dist if stop_dist > 0 else 0.0
     sb = res.signal_bar or res.impulse_bar or {}
     st = f"{dt.datetime.fromtimestamp(sb['time'], dt.timezone.utc):%H:%M}" if sb else "?"
     end = SESSION_END.strftime("%H:%M")
+    type_labels = {
+        "impulse": "ИМПУЛЬС+ОТКАТ",
+        "gap_fade": "ГЭП-ФЕЙД",
+        "opening_drive": "OPENING DRIVE",
+    }
+    label = type_labels.get(setup_type, setup_type.upper())
+    header = f"🔔 {label} {res.bias.upper()} {res.symbol} — класс {res.grade} (сигнал {st} UTC)"
+    footer = ""
+    if setup_type == "gap_fade":
+        footer = f"\nГэп-фейд: цель = закрытие предыдущего дня, стоп за экстремумом гэпа."
+    elif setup_type == "opening_drive":
+        footer = f"\nOpening drive: первые {CFG.get('opening_drive_minutes', 5)} мин. " \
+                 f"Стоп за минимумом/максимумом драйва, тейк {res.rr:.1f}R."
     return (
-        f"СЕТАП {res.bias.upper()} {res.symbol} — класс {res.grade} (сигнал {st} UTC)\n"
+        f"{header}\n"
         f"Вход {res.entry:.2f} | Стоп {res.stop:.2f} | Тейк {res.target:.2f} ({res.rr:.1f}R)\n"
         f"Размер ~{qty:.2f} шт (риск {risk_usd:.2f}$)\n"
         f"План выхода: вся позиция, стоп −1R, тейк +{res.rr:.1f}R, иначе закрыть до {end} UTC\n"
-        f"{day_line()}\n"
-        f"Проверь: тренд 15m={res.trend15}, 30m={res.trend30}; решай по правилам ТЗ."
+        f"{day_line()}"
+        f"{footer}"
     )
 
 
@@ -287,7 +300,11 @@ def resolve_open_setups(access) -> int:
         if key in resolved or not isinstance(rec, dict):
             continue
         try:
-            date_str, sym = key.split(":", 1)
+            parts = key.split(":", 2)
+            if len(parts) == 3:
+                date_str, setup_type, sym = parts
+            else:
+                date_str, sym = parts[0], parts[1]
         except ValueError:
             continue
         bias = rec.get("bias")
@@ -330,7 +347,8 @@ def resolve_open_setups(access) -> int:
     return changed
 
 
-def scan_watchlist(access, only_sym=None) -> list:
+def scan_watchlist(access, only_sym=None) -> list[dict]:
+    """Returns list of {setup, setup_type} dicts."""
     today = dt.datetime.now(dt.timezone.utc).date()
     tasks = []
     for sym, sid in SYMBOLS.items():
@@ -348,10 +366,20 @@ def scan_watchlist(access, only_sym=None) -> list:
         except Exception as e:
             print(f"{sym}: candle fetch failed: {type(e).__name__}: {e}", file=sys.stderr)
             return None
-        result = scanner_mod.scan_setup(sym, today, candles, SESSION_START, CFG)
-        if not result.tradable:
-            print(f"{sym}: no tradable setup ({'; '.join(result.no_go) or 'filtered'})", file=sys.stderr)
-        return result
+        # Run all 3 setup scanners on the same candles in parallel
+        results = []
+        for stype, fn in (("impulse", scanner_mod.scan_setup),
+                          ("gap_fade", scanner_mod.scan_gap_fade),
+                          ("opening_drive", scanner_mod.scan_opening_drive)):
+            result = fn(sym, today, candles, SESSION_START, CFG)
+            if result is not None and result.tradable:
+                results.append({"setup": result, "setup_type": stype})
+                print(f"{sym}: {stype} TRADABLE grade={result.grade} bias={result.bias}",
+                      file=sys.stderr)
+            elif result is not None:
+                reasons = '; '.join(result.no_go) or 'filtered'
+                print(f"{sym}: {stype} no ({reasons})", file=sys.stderr)
+        return results
 
     results = []
     if not tasks:
@@ -360,9 +388,9 @@ def scan_watchlist(access, only_sym=None) -> list:
     with ThreadPoolExecutor(max_workers=min(12, len(tasks))) as ex:
         futures = [ex.submit(_one, t) for t in tasks]
         for fut in as_completed(futures):
-            res = fut.result()
-            if res is not None and res.tradable:
-                results.append(res)
+            per_symbol = fut.result()
+            if per_symbol:
+                results.extend(per_symbol)
     return results
 
 
@@ -469,24 +497,29 @@ def main() -> int:
             sent = load_sent()
             today = now.date().isoformat()
             hits = scan_watchlist(access)
-            for res in hits:
-                key = f"{today}:{res.symbol}"
+            for hit in hits:
+                res = hit["setup"]
+                setup_type = hit.get("setup_type", "impulse")
+                key = f"{today}:{setup_type}:{res.symbol}"
                 if sent.get(key):
                     continue
-                msg = format_setup(res)
-                # Anti-correlation cap visibility: warn when a same-cluster
-                # symbol already alerted today (max 1 position per cluster).
+                # Anti-correlation cap: block same-day same-cluster signals.
+                # Different setup types on the same symbol are allowed
+                # (gap fade is an independent edge, not a duplicate).
                 cluster = symbol_cluster(res.symbol)
                 same_cluster = []
                 if cluster:
                     for k in sent:
                         try:
-                            k_date, k_sym = k.split(":", 1)
+                            parts = k.split(":", 2)
+                            k_date = parts[0]
+                            k_sym = parts[-1] if len(parts) >= 2 else ""
                         except ValueError:
                             continue
                         if k_date == today and k_sym != res.symbol \
                                 and symbol_cluster(k_sym) == cluster:
                             same_cluster.append(k_sym)
+                msg = format_setup(res, setup_type)
                 if cluster and same_cluster:
                     msg += (f"\n⚠️ Кластер «{cluster}»: сегодня уже алертились "
                             f"{', '.join(sorted(set(same_cluster)))}. Кап: "
@@ -499,9 +532,11 @@ def main() -> int:
                                  "entry": res.entry, "stop": res.stop,
                                  "target": res.target, "bias": res.bias,
                                  "signal_time": sb.get("time") if sb else None,
-                                 "rr": res.rr, "cluster": cluster}
+                                 "rr": res.rr, "cluster": cluster,
+                                 "setup_type": setup_type}
                     save_sent(sent)
-                    print(f"{now:%H:%M:%S} UTC: alert sent for {res.symbol}", file=sys.stderr)
+                    print(f"{now:%H:%M:%S} UTC: alert [{setup_type}] sent for {res.symbol}",
+                          file=sys.stderr)
             # После скана — разрешение открытых сетапов.
             try:
                 resolve_open_setups(access)
