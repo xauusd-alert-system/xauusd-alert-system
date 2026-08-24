@@ -1,0 +1,136 @@
+# UTEx DOM selectors — to be filled after live inspection via dom_inspector.py
+# Run: python -m challenge.tools.dom_inspector --symbol TSLA
+# Then update this file with real selectors found in logs/utex_dom_dump/
+
+# Ticket form
+ticket_form:
+  # Qty input — current guess, verify live
+  qty_input:
+    selectors:
+      - 'input[name="qty"]'
+      - 'input[name="quantity"]'
+      - '[data-testid*="qty"]'
+      - '[data-testid*="quantity"]'
+      - 'input[placeholder*="Qty" i]'
+      - 'input[placeholder*="кол" i]'
+    description: "Quantity / количество акций"
+
+  price_input:
+    selectors:
+      - 'input[name="price"]'
+      - '[data-testid*="price"]'
+      - 'input[name*="цена" i]'
+    description: "Price for limit/stop orders"
+
+  # Buy/Sell buttons — UTEx uses Russian labels Купить/Продать, but check data-testid
+  buy_button:
+    selectors:
+      - 'button:has-text("Купить")'
+      - '[data-testid*="buy"]'
+      - '[data-testid*="long"]'
+      - 'button:has-text("Buy")'
+    text_patterns: ["Купить", "Buy", "Long"]
+    description: "Buy / Long button"
+
+  sell_button:
+    selectors:
+      - 'button:has-text("Продать")'
+      - '[data-testid*="sell"]'
+      - '[data-testid*="short"]'
+      - 'button:has-text("Sell")'
+    text_patterns: ["Продать", "Sell", "Short"]
+    description: "Sell / Short button"
+
+  confirm_button:
+    selectors:
+      - 'button:has-text("Принять")'
+      - '[data-testid*="confirm"]'
+      - 'button:has-text("Confirm")'
+      - 'button:has-text("Подтвердить")'
+    text_patterns: ["Принять", "Confirm", "Подтвердить", "OK"]
+    description: "Confirm order button"
+
+  close_position_button:
+    selectors:
+      - 'button:has-text("Закрыть позицию")'
+      - '[data-testid*="close"]'
+      - 'button:has-text("Close position")'
+    text_patterns: ["Закрыть позицию", "Close position", "Close"]
+    description: "Close position button"
+
+  # Tabs
+  positions_tab:
+    selectors:
+      - '[data-testid="terminalTabPositions"]'
+      - 'button:has-text("Позиции")'
+      - '[role="tab"]:has-text("Позиции")'
+    text_patterns: ["Позиции", "Positions"]
+
+  orders_tab:
+    selectors:
+      - '[data-testid*="orders"]'
+      - 'button:has-text("Ордера")'
+    text_patterns: ["Ордера", "Orders"]
+
+# Balance / equity chip
+balance:
+  chip:
+    selectors:
+      - 'button:has(span:has-text("прибыль"))'
+      - '[data-testid*="balance"]'
+      - '[data-testid*="equity"]'
+      - '[data-testid*="pnl"]'
+    description: "Balance chip showing equity + floating PnL"
+
+# Chart
+chart:
+  container:
+    selectors:
+      - '[data-testid*="chart"]'
+      - 'canvas'
+      - '.chart-container'
+    description: "Chart container for scroll/hover pre-trade activity"
+  # For pre-trade activity: scroll chart, hover levels
+  scroll_area:
+    selectors:
+      - '[data-testid*="chart"]'
+      - '.tradingview'
+      - 'canvas'
+
+# Order book / DOM (if available)
+orderbook:
+  container:
+    selectors:
+      - '[data-testid*="orderbook"]'
+      - '[data-testid*="dom"]'
+      - '.orderbook'
+
+# Hotkeys — UTEx Nova supports F1-F4, F9-F10, Shift+F1-F4 customizable via Tools → Hotkey settings
+# Check real bindings on live account, they may differ from defaults
+hotkeys:
+  # Default bindings from config, verify live
+  buy_market_best_ask: "F1"
+  sell_market_best_bid: "F2"
+  buy_limit_best_bid: "F3"
+  sell_limit_best_ask: "F4"
+  buy_stop_mark: "F9"
+  sell_stop_mark: "F10"
+  buy_market_mark: "Shift+F1"
+  sell_market_mark: "Shift+F2"
+  close_position: "Shift+F3"
+  cancel_all: "Shift+F4"
+  notes: "Verify in UTEx via Tools → Hotkey settings, update if different"
+
+# Notes for manual verification
+verification_checklist:
+  - "Open UTEx via Hash Hedge dashboard → press Торговать → check URL contains session_id"
+  - "In DevTools, search for input[name=qty] — does it exist? If not, what is real qty selector?"
+  - "Check data-testid attributes — UTEx uses styled-components but data-testid should be stable"
+  - "Buy/Sell buttons: text Купить/Продать or data-testid buy/sell?"
+  - "Confirm button: Принять or Confirm?"
+  - "Positions tab: data-testid terminalTabPositions exists?"
+  - "Balance chip: button with прибыль text?"
+  - "Chart: canvas or div with data-testid chart?"
+  - "Hotkeys: open Tools → Hotkey settings, screenshot current bindings, compare with hotkeys map above"
+  - "Premarket volume: where does UTEx show it? Check dashboard or ticker modal"
+  - "Take screenshots of each area and save to logs/utex_dom_dump/"
