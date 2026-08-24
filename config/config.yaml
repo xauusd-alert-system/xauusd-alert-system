@@ -23,6 +23,9 @@ ensemble:
   ml_confidence_floor: 0.62
   crypto_night_min_probability: 0.58
   min_regime_confidence: 0.60
+  bifurcation_filter:
+    enabled: true
+    quorum_max: 0.7
   use_news_guard: true
   news_buffer_before_min: 30
   news_buffer_after_min: 30
