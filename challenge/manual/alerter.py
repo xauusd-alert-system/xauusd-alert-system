@@ -72,6 +72,7 @@ from config.loader import get_env  # loads .env via dotenv
 from challenge.manual import scanner as scanner_mod
 from challenge.manual import risk as risk_mod
 from challenge.manual import outcomes as outcomes_mod
+from challenge.manual import quality_gate as quality_mod
 
 REFRESH_URL = "https://api.utex.io/rest/grpc/com.unitedtraders.luna.sessionservice.api.sso.SsoService.refreshAuthorization"
 GRPC_BASE = "https://demoususdt-api-margin.utex.io/rest/grpc/com.unitedtraders.luna.utex.protocol.mobile."
@@ -271,7 +272,8 @@ def format_setup(res, setup_type: str = "impulse") -> str:
         "opening_drive": "OPENING DRIVE",
     }
     label = type_labels.get(setup_type, setup_type.upper())
-    header = f"🔔 {label} {res.bias.upper()} {res.symbol} — класс {res.grade} (сигнал {st} UTC)"
+    qscore = getattr(res, 'quality_score', 0)
+    header = f"🔔 {label} {res.bias.upper()} {res.symbol} — класс {res.grade} Q={qscore} (сигнал {st} UTC)"
     footer = ""
     if setup_type == "gap_fade":
         footer = f"\nГэп-фейд: цель = закрытие предыдущего дня, стоп за экстремумом гэпа."
@@ -373,8 +375,13 @@ def scan_watchlist(access, only_sym=None) -> list[dict]:
                           ("opening_drive", scanner_mod.scan_opening_drive)):
             result = fn(sym, today, candles, SESSION_START, CFG)
             if result is not None and result.tradable:
+                # Quality filter (2026-08-24 calibration): reject low-quality setups
+                if not quality_mod.passes_quality_filter(stype, result.quality_score):
+                    print(f"{sym}: {stype} REJECTED quality={result.quality_score}",
+                          file=sys.stderr)
+                    continue
                 results.append({"setup": result, "setup_type": stype})
-                print(f"{sym}: {stype} TRADABLE grade={result.grade} bias={result.bias}",
+                print(f"{sym}: {stype} TRADABLE grade={result.grade} bias={result.bias} Q={result.quality_score}",
                       file=sys.stderr)
             elif result is not None:
                 reasons = '; '.join(result.no_go) or 'filtered'
@@ -533,7 +540,8 @@ def main() -> int:
                                  "target": res.target, "bias": res.bias,
                                  "signal_time": sb.get("time") if sb else None,
                                  "rr": res.rr, "cluster": cluster,
-                                 "setup_type": setup_type}
+                                 "setup_type": setup_type,
+                                 "quality_score": getattr(res, 'quality_score', 0)}
                     save_sent(sent)
                     print(f"{now:%H:%M:%S} UTC: alert [{setup_type}] sent for {res.symbol}",
                           file=sys.stderr)

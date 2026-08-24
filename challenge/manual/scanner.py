@@ -158,6 +158,7 @@ class Setup:
     target: float = 0.0
     rr: float = 0.0
     no_go: list = field(default_factory=list)
+    quality_score: int = 0             # 0-100 quality score (2026-08-24 calibration)
 
     @property
     def tradable(self) -> bool:
@@ -457,6 +458,7 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     setup.signal_bar = signal_bar
     setup.grade = grade
     setup.no_go = no_go
+    setup.quality_score = 0  # computed below once bias is set
 
     # Direction & levels (ТЗ §4.6): stop behind the pullback extreme + 0.5*ATR5,
     # target = entry +/- target_rr*risk. target_rr defaults to 2.0 (ТЗ); the live
@@ -491,6 +493,12 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
                 setup.target = round(entry - target_rr * risk, 4)
             setup.rr = round(abs(setup.target - entry) / risk, 2)
             setup.bias = bias
+
+            # Update quality score with actual bias now that it's determined
+            from challenge.manual.quality_gate import compute_quality_for_setup
+            setup.quality_score = compute_quality_for_setup(
+                candles_1m, date, setup.signal_bar, setup.impulse_bar,
+                trend15=setup.trend15, bias=bias, setup_type="impulse")
 
             # RESEARCH 2026-08-22: S/R proximity filter (us_stocks audit §5.2)
             # Reject signals too close to key support/resistance zones.
@@ -565,6 +573,14 @@ def scan_gap_fade(symbol: str, date, candles_1m, session_start_utc=SESSION_START
     setup = Setup(symbol, str(date), bias, "B",
                   entry=round(entry, 4), stop=round(stop, 4),
                   target=round(target, 4), rr=round(rr, 2))
+    # Compute quality score
+    from challenge.manual.quality_gate import compute_quality_for_setup
+    day_start = dt.datetime.combine(date, SESSION_START_UTC, tzinfo=dt.timezone.utc).timestamp()
+    open_bar = day[0] if day else None
+    setup.quality_score = compute_quality_for_setup(
+        candles_1m, date, open_bar, None,
+        trend15="", bias=bias, setup_type="gap_fade",
+        entry=entry, target=target)
     # Earnings blackout still applies
     ecal = _load_earnings(cfg)
     if ecal:
@@ -636,6 +652,11 @@ def scan_opening_drive(symbol: str, date, candles_1m,
                   entry=round(entry, 4), stop=round(stop, 4),
                   target=target, rr=rr,
                   signal_bar=drive_bars[-1])
+    # Compute quality score
+    from challenge.manual.quality_gate import compute_quality_for_setup
+    setup.quality_score = compute_quality_for_setup(
+        candles_1m, date, drive_bars[-1], None,
+        trend15="", bias=bias, setup_type="opening_drive")
     ecal = _load_earnings(cfg)
     if ecal:
         blocked, src = earnings_blackout(symbol, date, ecal,
