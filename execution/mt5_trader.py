@@ -26,6 +26,7 @@ from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
 from execution.risk_manager import InstitutionalRiskManager
 from execution.trade_throttle import TradeThrottle
+from execution.stealth import StealthExecutionEngine, StealthConfig
 # Wave-0 contracts (MQL5 observer plan): SignalIntent is persisted BEFORE
 # order_send; ExecutionEvent facts are enqueued into the durable outbox for
 # delivery to the server ledger. Both are best-effort: a failure here must
@@ -300,6 +301,19 @@ class MultiAssetMT5Trader:
         self.corr_update_interval = self.corr_filter_cfg.get("update_interval_minutes", 60)
         self.corr_matrix = {}
         self.corr_last_update = 0
+
+        # Stealth anti-fingerprint layer (prop-firm evasion)
+        stealth_cfg_dict = self.cfg.get("stealth", {}) or {}
+        self.stealth_config = StealthConfig.from_dict(stealth_cfg_dict)
+        # Seed from config or model seed for reproducibility
+        if self.stealth_config.seed is None:
+            # fallback to model random_seed if available
+            try:
+                self.stealth_config.seed = int(self.cfg.get("model", {}).get("random_seed", 42))
+            except Exception:
+                self.stealth_config.seed = 42
+        self.stealth_engine = StealthExecutionEngine(config=self.stealth_config)
+        logger.info(f"Stealth engine initialized: enabled={self.stealth_config.enabled}, seed={self.stealth_config.seed}")
 
     # ------------------------------------------------------------------ W10
     def _save_management_state(self):
@@ -599,7 +613,8 @@ class MultiAssetMT5Trader:
     def check_and_move_breakeven(self):
         if not mt5.initialize():
             return
-        positions = positions_get_by_magic(magic=self.magic_number)
+        # Use own positions including stealth magic pool
+        positions = self._get_own_positions() if hasattr(self, '_get_own_positions') else positions_get_by_magic(magic=self.magic_number)
         current_tickets = set()
 
         # CRITICAL: mt5.positions_get() returns None ONLY on an API error, and an
@@ -653,6 +668,78 @@ class MultiAssetMT5Trader:
                 continue
             digits = info.digits
             current_price = tick.bid if pos.type == 0 else tick.ask
+
+            # === STEALTH: humanized position management (partial, early close, trailing) ===
+            if getattr(self, 'stealth_engine', None) is not None and self.stealth_engine.enabled:
+                try:
+                    now_utc = datetime.now(timezone.utc)
+                    # Build position dict for humanizer
+                    # Need to find asset_key from trade_data or symbol
+                    asset_key_for_pos = trade_data.get('symbol', symbol)
+                    # Try to resolve side
+                    side = 'long' if pos.type == 0 else 'short'
+                    # Estimate R: use trade_data entry and current
+                    pos_dict = {
+                        'id': ticket,
+                        'ticket': ticket,
+                        'entry_price': float(getattr(pos, 'price_open', trade_data.get('entry_price', 0))),
+                        'current_price': float(current_price),
+                        'stop_price': float(getattr(pos, 'sl', 0) or trade_data.get('entry_price', 0)),
+                        'tp_price': float(getattr(pos, 'tp', 0) or 0),
+                        'side': side,
+                        'volume': float(getattr(pos, 'volume', 0)),
+                        'symbol': symbol,
+                        'asset_key': asset_key_for_pos,
+                    }
+                    # If SL is 0, try to get from trade_data? Use original entry minus some
+                    if pos_dict['stop_price'] == 0:
+                        # Fallback: entry +/- 5 price units
+                        pos_dict['stop_price'] = pos_dict['entry_price'] - (5 if side == 'long' else -5)
+                    actions = self.stealth_engine.manage_position(pos_dict, now_utc)
+                    for act in actions:
+                        act_type = act.get('type')
+                        delay = act.get('delay_sec', 0)
+                        jitter = act.get('api_jitter_sec', 0)
+                        try:
+                            time.sleep(delay)
+                            time.sleep(jitter)
+                        except Exception:
+                            pass
+                        if act_type == 'partial_exit':
+                            pct = act.get('pct', 0.3)
+                            close_vol = self._scaleout_volume(symbol, info, pos.volume, pct)
+                            if close_vol > 0:
+                                label = f"stealth-partial-{int(pct*100)}%"
+                                if self._close_partial_position(pos, current_price, close_vol, label):
+                                    logger.info(f"[STEALTH] Partial exit {pct*100:.0f}% for #{ticket} at R~1.0")
+                                    # Update trade_data volume? Keep original but log
+                        elif act_type == 'early_close':
+                            # Close full position early at 0.6*TP
+                            label = "stealth-early-close"
+                            if self._close_partial_position(pos, current_price, pos.volume, label):
+                                logger.info(f"[STEALTH] Early close at 0.6*TP for #{ticket}")
+                                # Break loop for this pos? It will be detected as closed next tick
+                                continue
+                        elif act_type == 'trailing':
+                            # Manual trailing 15-40 pips at +1.5R
+                            dist_price = act.get('distance_price')
+                            if dist_price is None:
+                                continue
+                            # Compute new SL: for long, current - dist, for short current + dist
+                            if side == 'long':
+                                new_sl = round(current_price - dist_price, digits)
+                                # Only tighten
+                                if new_sl > pos.sl:
+                                    self._modify_sl_tp(pos, new_sl, pos.tp)
+                                    logger.info(f"[STEALTH] Trailing SL for #{ticket} LONG to {new_sl} (dist {dist_price})")
+                            else:
+                                new_sl = round(current_price + dist_price, digits)
+                                if new_sl < pos.sl:
+                                    self._modify_sl_tp(pos, new_sl, pos.tp)
+                                    logger.info(f"[STEALTH] Trailing SL for #{ticket} SHORT to {new_sl} (dist {dist_price})")
+                except Exception as e:
+                    logger.debug(f"Stealth manage_position error for #{ticket}: {e}")
+
             trade_data = self.active_trades[ticket]
             original_volume = trade_data.get("original_volume", pos.volume)
             tp1 = trade_data.get("tp1"); tp2 = trade_data.get("tp2"); tp3 = trade_data.get("tp3")
@@ -1388,12 +1475,38 @@ class MultiAssetMT5Trader:
         logger.error(f"❌ Partial close failed {label} for #{pos.ticket}: {res.comment} ({res.retcode})")
         return False
 
+    def _get_own_positions(self, symbol: str = None):
+        """Return own positions including stealth magic pool."""
+        try:
+            if symbol is not None:
+                positions = mt5.positions_get(symbol=symbol)
+            else:
+                positions = mt5.positions_get()
+        except Exception as e:
+            logger.error(f"positions_get failed: {e}")
+            return None
+        if not positions:
+            return positions
+        # Own magics: fixed magic + stealth pool if enabled
+        own_magics = {self.magic_number}
+        if getattr(self, "stealth_engine", None) is not None and self.stealth_engine.enabled:
+            try:
+                own_magics.update(self.stealth_engine.hygiene.get_magic_pool())
+            except Exception:
+                pass
+        # If magic filter originally was specific, we filter to own magics
+        # If we have symbol filter, we already have symbol filtered
+        filtered = [p for p in positions if getattr(p, "magic", None) in own_magics]
+        # Fallback: if no positions match own magics but we have positions with old magic 777111 (legacy),
+        # keep old behavior: also include positions where magic == self.magic_number (already in set)
+        # If filtered empty but positions exist with other magics (foreign), return empty
+        return filtered
+
+
     def execute_signal(self, asset_key: str, signal: dict):
         bias = signal["bias"]
         if bias == "no_trade":
             return
-        # Blackout guard (owner request 2026-08-19): never open positions
-        # during market inactivity even if a signal slipped through.
         now_utc = datetime.fromtimestamp(time.time(), tz=timezone.utc)
         halted, halt_reason, _ = self._blackout_status(now_utc)
         if halted or self._in_daily_break(now_utc):
@@ -1422,17 +1535,12 @@ class MultiAssetMT5Trader:
             logger.info(f"[{asset_key}] Signal suppressed by dynamic threshold: conf={signal['confidence']:.3f} < {min_conf:.3f}")
             return
 
-        # Корреляционный фильтр
         if self._has_correlated_position(asset_key, bias):
             logger.info(f"[{asset_key}] Blocked by correlation filter.")
             return
 
-        # Risk budget counted per GROUP (audit 2026-08-19, owner request): a
-        # 3-leg group consumes ONE slot, so the 6-slot budget covers 6 ASSETS
-        # instead of 2 (previously legs 2+3 of the second asset hit
-        # "Max concurrent positions limit reached (6/6)" and blocked
-        # high-confidence signals on the next asset).
-        positions_now = positions_get_by_magic(magic=self.magic_number)
+        # Own positions including stealth pool
+        positions_now = self._get_own_positions()
         if positions_now is None:
             positions_now = []
         groups_by_asset, singles_by_asset = self._group_position_counts(positions_now)
@@ -1442,7 +1550,6 @@ class MultiAssetMT5Trader:
             logger.warning(f"Trade suppressed for {asset_key} by Risk Manager: {reason}")
             return
 
-        # TradeThrottle: daily limit, cooldown, hard stop, daily loss
         try:
             acct = mt5.account_info()
             equity = acct.equity if acct else 0.0
@@ -1453,13 +1560,42 @@ class MultiAssetMT5Trader:
             logger.warning(f"TradeThrottle blocked {asset_key}: {throttle_reason}")
             return
 
+        # === STEALTH LAYER: 6-gate check (session → buffer → gap → delay → risk → hygiene) ===
+        stealth_plan = None
+        if getattr(self, "stealth_engine", None) is not None and self.stealth_engine.enabled:
+            try:
+                stealth_plan = self.stealth_engine.process_signal(signal, now_utc, equity)
+            except Exception as e:
+                logger.warning(f"[{asset_key}] Stealth engine error, failing open: {e}")
+                stealth_plan = None
+            if stealth_plan is None:
+                logger.debug(f"[{asset_key}] Signal skipped by stealth engine (gate)")
+                return
+            # Preserve plan in signal copy for later use
+            signal = dict(signal)
+            signal["_stealth_plan"] = stealth_plan
+            logger.info(f"[{asset_key}] Stealth plan: delay={stealth_plan['delay_sec']}s, "
+                        f"risk={stealth_plan['risk_pct']:.4f}, lot={stealth_plan['lot']}, "
+                        f"magic={stealth_plan['magic']}, comment='{stealth_plan['comment']}', "
+                        f"profile SL:{stealth_plan['sl_mult']} TP:{stealth_plan['tp_mult']}, "
+                        f"jitter={stealth_plan['api_jitter_ms']}ms")
+            # Humanized entry delay (gate 4)
+            try:
+                time.sleep(stealth_plan["delay_sec"])
+            except Exception:
+                pass
+            # API jitter (part of gate 6) — applied before OrderSend
+            # We will sleep again just before each OrderSend below
+
         mt5_symbol = self.cfg["assets"][asset_key]["mt5_symbol"]
         if not mt5.initialize():
             return
         validate_symbol(mt5_symbol)
 
-        positions = positions_get_by_magic(symbol=mt5_symbol, magic=self.magic_number)
+        # Use own positions with stealth pool for per-symbol check
+        positions = self._get_own_positions(symbol=mt5_symbol)
         if positions:
+            # Already have position for this symbol (any own magic)
             return
 
         tick = mt5.symbol_info_tick(mt5_symbol)
@@ -1470,9 +1606,6 @@ class MultiAssetMT5Trader:
         order_type = mt5.ORDER_TYPE_BUY if bias == "long" else mt5.ORDER_TYPE_SELL
         price = tick.ask if bias == "long" else tick.bid
 
-        # Recenter the frozen signal-bar grid on the actual requested entry.
-        # Using absolute levels built around the previous close makes live gap
-        # entries differ from the next-open backtest and paper accumulator.
         direction = 1 if bias == "long" else -1
         step = float(signal.get("step") or 0.0)
         if step <= 0:
@@ -1480,12 +1613,34 @@ class MultiAssetMT5Trader:
             return
         regime_name = str(signal.get("regime", ""))
         grid = get_signal_grid(self.cfg, self.cfg["assets"][asset_key], regime=regime_name)
-        targets = [
-            price + direction * step * float(grid.get(key, default))
-            for key, default in (("tp1_mult", 1.0), ("tp2_mult", 2.0), ("tp3_mult", 3.0))
-        ]
-        invalidation = price - direction * step * float(grid.get("stop_mult", 2.0))
-        raw_tp = float(targets[2])
+
+        # === STEALTH: adjust SL/TP multipliers if plan present ===
+        if stealth_plan is not None:
+            # Use stealth profile for SL/TP, but keep original grid ratios for TP1/TP2 proportionally
+            # Original grid: tp1_mult, tp2_mult, tp3_mult, stop_mult
+            # Stealth profile: sl_mult, tp_mult (e.g., 1.0:1.5)
+            # We interpret stealth tp_mult as the TP3 distance, and sl_mult as SL distance
+            # TP1/TP2 are scaled proportionally to original ratios
+            base_tp3 = float(grid.get("tp3_mult", 3.0))
+            base_stop = float(grid.get("stop_mult", 2.0))
+            # Avoid division by zero
+            tp_scale = float(stealth_plan["tp_mult"]) / base_tp3 if base_tp3 else 1.0
+            sl_scale = float(stealth_plan["sl_mult"]) / base_stop if base_stop else 1.0
+            targets = [
+                price + direction * step * float(grid.get(key, default)) * (tp_scale if key.startswith("tp") else sl_scale if key == "stop_mult" else 1.0)
+                for key, default in (("tp1_mult", 1.0), ("tp2_mult", 2.0), ("tp3_mult", 3.0))
+            ]
+            # For invalidation, use stealth SL
+            invalidation = price - direction * step * float(stealth_plan["sl_mult"])
+            # For TP3, use stealth TP
+            raw_tp = price + direction * step * float(stealth_plan["tp_mult"])
+        else:
+            targets = [
+                price + direction * step * float(grid.get(key, default))
+                for key, default in (("tp1_mult", 1.0), ("tp2_mult", 2.0), ("tp3_mult", 3.0))
+            ]
+            invalidation = price - direction * step * float(grid.get("stop_mult", 2.0))
+            raw_tp = float(targets[2])
 
         try:
             sl_price, tp_price = self._normalize_stops(mt5_symbol, bias, price, invalidation, raw_tp)
@@ -1503,24 +1658,26 @@ class MultiAssetMT5Trader:
             "targets": targets,
         })
 
-        # 3-LEG OPEN (hedging accounts): the signal's total volume is split
-        # EQUALLY into three market orders (leg3 carries the lot-step
-        # remainder), each with its own TP (TP1/TP2/TP3) and the shared SL.
-        # The broker closes each leg at its own TP; the bot only moves the
-        # remaining legs' SL to entry once the TP1 leg closes (see
-        # check_and_move_breakeven).
         leg_tps = [
             self._normalize_tp_level(mt5_symbol, bias, targets[0]),
             self._normalize_tp_level(mt5_symbol, bias, targets[1]),
             self._normalize_tp_level(mt5_symbol, bias, targets[2]),
         ]
 
-        # TradeThrottle risk step-down: apply multiplier to volume
         risk_mult = self.trade_throttle.risk_multiplier()
         original_volume = self.volume
         if risk_mult < 1.0:
             self.volume = round(self.volume * risk_mult, 6)
             logger.info(f"TradeThrottle: risk step-down {risk_mult}x -> volume {self.volume} (was {original_volume})")
+
+        # === STEALTH: override volume with humanized lot ===
+        if stealth_plan is not None and stealth_plan.get("lot"):
+            # Apply stealth lot, but still respect risk step-down
+            stealth_lot = float(stealth_plan["lot"])
+            if risk_mult < 1.0:
+                stealth_lot = round(stealth_lot * risk_mult, 6)
+            self.volume = stealth_lot
+            logger.info(f"Stealth lot override: {stealth_lot} (was {original_volume})")
 
         if self.dry_run:
             for leg_volume, (_, leg_no) in zip(self._leg_volumes(info), self.SCALEOUT_RATIOS):
@@ -1534,10 +1691,14 @@ class MultiAssetMT5Trader:
                 self.volume = original_volume
             return
 
-        # Wave-0 contract (MQL5 observer plan): persist the immutable
-        # SignalIntent BEFORE order_send, then carry a correlation-safe short id
-        # in the order comment so the MQL5 observer can join broker deal facts
-        # back to this intent. Failures here are logged, never blocking.
+        # Determine magic and comment from stealth plan if present
+        effective_magic = self.magic_number
+        comment_suffix = ""
+        if stealth_plan is not None:
+            effective_magic = int(stealth_plan.get("magic", self.magic_number))
+            comment_suffix = stealth_plan.get("comment", "")
+            # API jitter already handled via sleep before each send, but keep for logging
+
         intent = build_signal_intent(
             asset_key=asset_key,
             broker_symbol=mt5_symbol,
@@ -1550,7 +1711,7 @@ class MultiAssetMT5Trader:
             feature_manifest_hash=signal.get("feature_manifest_hash"),
             config_hash=signal.get("config_hash") or self.strategy_identity["config_hash"],
             mode=self.deployment_mode.value,
-            magic_number=self.magic_number,
+            magic_number=effective_magic,
             signal_id=signal_id,
             created_at_utc_ms=now_ms(),
         )
@@ -1573,11 +1734,6 @@ class MultiAssetMT5Trader:
             leg_tp = leg_tps[leg_no - 1]
             leg_signal = dict(signal)
             leg_signal["leg"] = leg_no
-            # Market orders fill at the CURRENT price; between leg fills the
-            # market can move past the signal-time levels and the broker then
-            # rejects SL/TP with Retcode 10016 ("Invalid stops"). Recenter each
-            # leg's SL/TP on the live price, preserving the exact entry->SL and
-            # entry->TP distances of the signal-time geometry.
             leg_sl = sl_price
             try:
                 live_tick = mt5.symbol_info_tick(mt5_symbol)
@@ -1589,6 +1745,21 @@ class MultiAssetMT5Trader:
             except Exception as exc:
                 logger.warning(
                     "[%s] Live tick unavailable (%s); using signal-time levels", asset_key, exc)
+
+            # === STEALTH: API jitter before each OrderSend ===
+            if stealth_plan is not None:
+                try:
+                    time.sleep(stealth_plan.get("api_jitter_sec", 0.0))
+                except Exception:
+                    pass
+                # Use stealth comment if provided, else fallback to human-readable
+                if comment_suffix:
+                    order_comment = f"{comment_suffix} L{leg_no}" if comment_suffix else f"{asset_key} ML Scalp L{leg_no} {intent.intent_id[:8]}"
+                else:
+                    order_comment = f"{asset_key} ML Scalp L{leg_no} {intent.intent_id[:8]}"
+            else:
+                order_comment = f"{asset_key} ML Scalp L{leg_no} {intent.intent_id[:8]}"
+
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": mt5_symbol,
@@ -1598,8 +1769,8 @@ class MultiAssetMT5Trader:
                 "sl": leg_sl,
                 "tp": leg_tp,
                 "deviation": 20,
-                "magic": self.magic_number,
-                "comment": f"{asset_key} ML Scalp L{leg_no} {intent.intent_id[:8]}",
+                "magic": effective_magic,
+                "comment": order_comment,
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -1611,6 +1782,8 @@ class MultiAssetMT5Trader:
                     "volume": leg_volume, "sl": sl_price, "tp": leg_tp,
                     "deployment_mode": self.deployment_mode.value,
                     "intent_id": intent.intent_id, "leg": leg_no,
+                    "stealth_magic": effective_magic,
+                    "stealth_comment": order_comment,
                 },
             )
             requested_at = now_ms()
@@ -1644,19 +1817,12 @@ class MultiAssetMT5Trader:
                 )
                 continue
 
-            # HIGH 22: in real MT5 the order ticket (result.order) differs from the
-            # position ticket. Resolve the genuine position ticket via positions_get so
-            # active_trades and the executed_trades DB log (CRIT 5) are keyed the same
-            # way check_and_move_breakeven() sees them (pos.ticket). The pre-check above
-            # guarantees no pre-existing open position, so the single/last returned one
-            # is the one just opened. The virtual shim returns result.order == pos.ticket
-            # on open, so this stays correct (and backward compatible) in both worlds.
             pos_ticket = int(result.order)
             try:
-                opened = positions_get_by_magic(symbol=mt5_symbol, magic=self.magic_number)
+                opened = self._get_own_positions(symbol=mt5_symbol)
                 if opened:
                     pos_ticket = int(opened[-1].ticket)
-            except Exception as e:  # pragma: no cover - defensive fallback
+            except Exception as e:
                 logger.warning(f"[{asset_key}] Could not resolve position ticket, using order ticket {pos_ticket}: {e}")
 
             self._append_trade_event(
@@ -1683,7 +1849,7 @@ class MultiAssetMT5Trader:
             logger.info(
                 f"🔥 [{asset_key}] LEG {leg_no}/3 EXECUTED IN MT5! Ticket: #{pos_ticket}, "
                 f"Type: {bias.upper()}, Volume: {leg_volume}, Price: {price}, "
-                f"SL: {leg_sl}, TP{leg_no}: {leg_tp}"
+                f"SL: {leg_sl}, TP{leg_no}: {leg_tp} (magic={effective_magic}, comment='{order_comment}')"
             )
             opened_any = True
 
@@ -1721,8 +1887,6 @@ class MultiAssetMT5Trader:
                 },
             }
 
-            # CRIT 5: persist the entry so check_and_move_breakeven() can log the close
-            # against the same row, feeding scripts/retrain_with_real_trades.py.
             self.signal_features[pos_ticket] = {
                 "symbol": asset_key,
                 "type": bias,
@@ -1743,22 +1907,21 @@ class MultiAssetMT5Trader:
             except Exception as e:
                 logger.error(f"Trade entry logging failed for #{pos_ticket}: {e}")
 
-            # Persist the entry context (bias/confidence/regime/reasoning) keyed by
-            # position ticket so the Telegram /status and /why commands can explain
-            # the trade later. Read-only side channel; failures must never break
-            # the trading path.
             try:
                 record_position_context(pos_ticket, asset_key, leg_signal)
             except Exception as e:
                 logger.error(f"Position context logging failed for #{pos_ticket}: {e}")
 
         if opened_any:
-            # W10: persist the new legs' management state immediately so a
-            # restart before the next BE check still knows their TP targets.
             self._save_management_state()
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)
-        # Restore volume after risk step-down
+            # === STEALTH: record order for gap/fatigue tracking ===
+            if getattr(self, "stealth_engine", None) is not None and self.stealth_engine.enabled:
+                try:
+                    self.stealth_engine.record_order_executed(now_utc)
+                except Exception as e:
+                    logger.debug(f"Stealth record_order failed: {e}")
         if risk_mult < 1.0:
             self.volume = original_volume
 
