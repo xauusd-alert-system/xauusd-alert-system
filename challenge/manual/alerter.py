@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import uuid
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -66,8 +67,6 @@ def acquire_single_instance() -> bool:
         f.write(str(os.getpid()))
     return True
 
-
-import subprocess  # noqa: E402  (used by the instance guard above)
 
 from config.loader import get_env  # loads .env via dotenv
 from challenge.manual import scanner as scanner_mod
@@ -171,6 +170,22 @@ def refresh_access():
             raise e
 
 
+def _decode_candles(data, symbol_id):
+    """Normalize UTEX candle payload into scanner candles."""
+    out = []
+    for c in (data or {}).get("candles", []):
+        def number(key):
+            value = c[key]
+            return float(value) / 1e8 if isinstance(value, int) else float(value)
+        out.append({"time": int(c["time"]), "open": number("open"),
+                    "high": number("high"), "low": number("low"),
+                    "close": number("close"), "volume": float(c.get("volume", 0))})
+    out.sort(key=lambda x: x["time"])
+    if not out:
+        raise RuntimeError(f"getCandles {symbol_id}: empty candle response")
+    return out
+
+
 def fetch_candles(access, symbol_id, candles_count=720):
     payload = {"to": int(time.time()), "symbolId": symbol_id,
                "candlesCount": candles_count, "interval": "Min1"}
@@ -188,13 +203,7 @@ def fetch_candles(access, symbol_id, candles_count=720):
                           json=payload, headers=headers, timeout=60)
         if r.status_code != 200:
             raise RuntimeError(f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
-        out = []
-        for c in r.json().get("candles", []):
-            out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
-                        "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
-                        "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
-        out.sort(key=lambda x: x["time"])
-        return out
+        return _decode_candles(r.json(), symbol_id)
     except Exception as e:
         msg = str(e)
         is_network = (
@@ -222,13 +231,7 @@ def fetch_candles(access, symbol_id, candles_count=720):
                 raise RuntimeError(f"playwright getCandles {symbol_id}: {resp.status}: {resp.text()[:200]}")
             data = resp.json()
             browser.close()
-            out = []
-            for c in data.get("candles", []):
-                out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
-                            "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
-                            "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
-            out.sort(key=lambda x: x["time"])
-            return out
+            return _decode_candles(data, symbol_id)
 
 
 def load_sent() -> dict:
@@ -341,12 +344,19 @@ def scan_watchlist(access, only_sym=None) -> list:
         sym, sid = item
         try:
             candles = fetch_candles(access, sid, candles_count=SCAN_CANDLES)
+            print(f"{sym}: fetched {len(candles)} candles", file=sys.stderr)
         except Exception as e:
-            print(f"{sym}: {e}", file=sys.stderr)
+            print(f"{sym}: candle fetch failed: {type(e).__name__}: {e}", file=sys.stderr)
             return None
-        return scanner_mod.scan_setup(sym, today, candles, SESSION_START, CFG)
+        result = scanner_mod.scan_setup(sym, today, candles, SESSION_START, CFG)
+        if not result.tradable:
+            print(f"{sym}: no tradable setup ({'; '.join(result.no_go) or 'filtered'})", file=sys.stderr)
+        return result
 
     results = []
+    if not tasks:
+        print(f"{today} UTC: watchlist has no matching symbols", file=sys.stderr)
+        return results
     with ThreadPoolExecutor(max_workers=min(12, len(tasks))) as ex:
         futures = [ex.submit(_one, t) for t in tasks]
         for fut in as_completed(futures):
