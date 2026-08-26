@@ -16,7 +16,8 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
-from data.mt5_provider import fetch_candles_range, shutdown_mt5
+from data.mt5_provider import fetch_candles_range, shutdown_mt5, resolve_server_offset
+from data.session_tagger import tag_session_with_weekend
 from data.storage import init_schema, upsert_candles
 
 logging.basicConfig(
@@ -40,20 +41,7 @@ def _utc_bounds(start_date: str, end_date: str) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _session_label(timestamp: pd.Timestamp) -> str:
-    weekday = timestamp.weekday()
-    if weekday >= 5:
-        return "weekend"
-    hour = timestamp.hour
-    if 0 <= hour < 8:
-        return "asia"
-    if 8 <= hour < 13:
-        return "london"
-    # Issue #50: canonical name must match config sessions key (newyork).
-    return "newyork"
-
-
-def _to_storage_frame(df: pd.DataFrame) -> pd.DataFrame:
+def _to_storage_frame(df: pd.DataFrame, sessions_config: dict) -> pd.DataFrame:
     frame = df.copy()
 
     timestamp_column = next(
@@ -83,7 +71,9 @@ def _to_storage_frame(df: pd.DataFrame) -> pd.DataFrame:
         else:
             frame["volume"] = 0.0
 
-    frame["session"] = timestamps.map(_session_label)
+    # Canonical storage label: weekend excluded, otherwise config windows
+    # (off_session outside asia/london/newyork) — matches data.session_tagger.
+    frame["session"] = timestamps.map(lambda t: tag_session_with_weekend(t, sessions_config))
 
     required = [
         "timestamp_utc",
@@ -172,14 +162,18 @@ def main() -> None:
                 args.end,
             )
 
+            # N10: broker-server timestamps (FxPro = UTC+3 EEST, UTC+2 in winter;
+            # auto-detected when config says "auto") -> true UTC.
+            server_offset = resolve_server_offset(market_data)
             raw = fetch_candles_range(
                 symbol=mt5_symbol,
                 timeframe=timeframe,
                 start_utc=start_utc,
                 end_utc=end_utc,
+                server_offset_hours=server_offset,
             )
 
-            stored = _to_storage_frame(raw)
+            stored = _to_storage_frame(raw, cfg.get("sessions", {}))
             if stored.empty:
                 raise RuntimeError(f"{asset_key}: MT5 returned no candles.")
 

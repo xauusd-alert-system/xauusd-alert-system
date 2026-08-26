@@ -198,6 +198,7 @@ class VirtualAccountInfo:
     leverage: int = 100
     trade_allowed: int = 1
     trade_expert: int = 1
+    trade_mode: int = 0  # ACCOUNT_TRADE_MODE_DEMO
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (

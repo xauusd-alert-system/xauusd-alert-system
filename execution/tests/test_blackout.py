@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from execution import mt5_trader as trader_mod
-from execution.mt5_trader import MultiAssetMT5Trader
+from execution.tests.harness import build_trader
 
 
 def _cfg(**blackout_overrides):
@@ -27,12 +27,8 @@ def _cfg(**blackout_overrides):
 
 
 def _trader(cfg):
-    t = object.__new__(MultiAssetMT5Trader)
-    t.cfg = cfg
-    t.magic_number = 777111
-    t.dry_run = False
+    t = build_trader(cfg=cfg)
     t._init_blackout()
-    t._blackout_flattened = False
     return t
 
 
@@ -95,7 +91,7 @@ def test_flatten_all_positions_closes_every_position(monkeypatch):
         types.SimpleNamespace(bid=2400.0, ask=2400.1)
         if s == "GOLD" else types.SimpleNamespace(bid=1.1000, ask=1.1001)))
     closed = []
-    t._close_partial_position = lambda pos, price, volume, label: (
+    t._close_partial_position = lambda pos, price, volume, label, **kwargs: (
         closed.append((pos.ticket, volume, label)) or True)
     t._flatten_all_positions("weekend blackout")
     assert sorted(c[0] for c in closed) == [1, 2]

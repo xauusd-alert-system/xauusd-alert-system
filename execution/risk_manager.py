@@ -141,17 +141,18 @@ class InstitutionalRiskManager:
         current_equity = account_info.equity
         self._reset_daily_stats_if_needed(current_equity)
 
-        # 1. 🚨 ПРОВЕРКА ДНЕВНОЙ ПРОСАДКИ (Circuit Breaker)
-        max_allowed_loss = self.starting_equity_today * (self.max_daily_loss_pct / 100.0)
-        current_daily_pnl = current_equity - self.starting_equity_today
-
-        if current_daily_pnl <= -max_allowed_loss:
-            self.circuit_breaker_tripped = True
-            self._save_state()
-            return False, f"🚨 CIRCUIT BREAKER TRIPPED! Daily loss (-${abs(current_daily_pnl):.2f}) exceeded limit (-${max_allowed_loss:.2f}). Trading halted for today."
-
-        if self.circuit_breaker_tripped:
-            return False, "Trading halted today by Circuit Breaker."
+        # Daily-loss circuit breaker is disabled when configured <= 0. The
+        # demo policy intentionally leaves only concurrency and daily-count
+        # gates active; position volume is handled independently by the trader.
+        if self.max_daily_loss_pct > 0:
+            max_allowed_loss = self.starting_equity_today * (self.max_daily_loss_pct / 100.0)
+            current_daily_pnl = current_equity - self.starting_equity_today
+            if current_daily_pnl <= -max_allowed_loss:
+                self.circuit_breaker_tripped = True
+                self._save_state()
+                return False, f"🚨 CIRCUIT BREAKER TRIPPED! Daily loss (-${abs(current_daily_pnl):.2f}) exceeded limit (-${max_allowed_loss:.2f}). Trading halted for today."
+            if self.circuit_breaker_tripped:
+                return False, "Trading halted today by Circuit Breaker."
 
         # 2. 🚨 ПРОВЕРКА МАКСИМУМА ОДНОВРЕМЕННЫХ ГРУПП/ПОЗИЦИЙ
         # W9: only this system's positions (filtered by magic) count.

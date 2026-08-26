@@ -1,0 +1,97 @@
+# UTEx / HashHedge Terminal — DOM Selector Configuration
+# =======================================================
+# All selectors are tried in order (fallback chain).
+# Verify against live terminal before first real run.
+# See challenge/tools/VERIFICATION_CHECKLIST.md for manual checks.
+#
+# Last verified: NEVER (initial creation — verify before running)
+
+# --- Order ticket form ---
+ticket_form:
+  # Primary: data-testid, Fallback: structural, Last: role
+  qty_input:
+    - 'input[name="qty"]'
+    - '[data-testid="ticketQty"]'
+    - 'input[type="number"][placeholder*="кол"]'
+  price_input:
+    - 'input[name="price"]'
+    - '[data-testid="ticketPrice"]'
+    - 'input[type="number"][placeholder*="цен"]'
+  order_type_selector:
+    - '[data-testid="orderTypeSelector"]'
+    - 'button:has-text("Рыночный")'
+    - 'button:has-text("Лимитный")'
+
+# --- Buy / Sell buttons ---
+actions:
+  buy_button:
+    - 'button:has-text("Купить")'
+    - '[data-testid="buyButton"]'
+    - 'button:has-text("Buy")'
+  sell_button:
+    - 'button:has-text("Продать")'
+    - '[data-testid="sellButton"]'
+    - 'button:has-text("Sell")'
+  confirm_button:
+    - 'button:has-text("Принять")'
+    - 'button:has-text("Подтвердить")'
+    - '[data-testid="confirmButton"]'
+    - 'button:has-text("OK")'
+  close_position_button:
+    - 'button:has-text("Закрыть позицию")'
+    - '[data-testid="closePositionButton"]'
+    - 'button:has-text("Close")'
+  modify_button:
+    - 'button:has-text("стоп-лосс")'
+    - 'button:has-text("stop.loss")'
+    - '[data-testid="modifyOrderButton"]'
+
+# --- Navigation / tabs ---
+navigation:
+  dashboard_tab:
+    - 'text=Мои позиции'
+    - '[data-testid="dashboardTab"]'
+  positions_tab:
+    - 'button[role="tab"]:has-text("Позиции")'
+    - '[data-testid="terminalTabPositions"]'
+  balance_chip:
+    - 'button:has(span:has-text("прибыль"))'
+    - '[data-testid="balanceChip"]'
+
+# --- Chart area (for hover/scroll humanization) ---
+chart:
+  chart_area:
+    - '[data-testid="chartContainer"]'
+    - '.tv-lightweight-charts'
+    - 'canvas'
+
+# --- Balance / equity display ---
+equity:
+  equity_display:
+    - '[data-testid="equityValue"]'
+  free_margin:
+    - '[data-testid="freeMargin"]'
+
+# --- Hotkey settings (verify via Tools → Hotkey settings) ---
+hotkeys:
+  # These are keyboard shortcuts, not DOM selectors
+  # Verify by opening Tools → Hotkey settings in the terminal
+  buy_market: "F1"
+  sell_market: "F2"
+  buy_limit: "F3"
+  sell_limit: "F4"
+  cancel_all: "F9"
+  close_all: "F10"
+  qty_up: "Shift+F1"
+  qty_down: "Shift+F2"
+  price_up: "Shift+F3"
+  price_down: "Shift+F4"
+
+# --- Verification checklist ---
+# Before first run, verify each selector chain against the live terminal:
+# 1. Open terminal → DOM Inspector (challenge/tools/dom_inspector.py)
+# 2. Check Tools → Hotkey settings → update hotkeys above
+# 3. Test each action (buy/sell/modify/close) manually
+# 4. Verify premarket volume display location
+# 5. Run dry-run (challenge/tools/dry_run_recorder.py)
+# 6. Check reset window behavior (challenge/tools/reset_window_sim.py)

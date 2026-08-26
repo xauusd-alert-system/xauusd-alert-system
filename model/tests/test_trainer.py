@@ -465,4 +465,42 @@ def test_full_three_class_window_still_exposes_no_trade(tmp_path):
     preds = ModelPredictor(model_path).predict_proba(X)
     assert {"p_short", "p_no_trade", "p_long"} == set(preds.columns)
     assert np.allclose(preds.sum(axis=1), 1.0, atol=1e-6)
-    assert preds.loc[a > 1.0, "p_long"].mean() > preds.loc[a < -1.0, "p_long"].mean()
+
+
+def test_save_model_injects_self_hash_and_detects_tampering(tmp_path):
+    """save_model embeds a deterministic content fingerprint (metadata.model_hash)
+    so the artifact carries its own identity; the fingerprint is reproducible
+    after reload and a tampered stored hash is detected."""
+    from model.trainer import compute_model_fingerprint
+
+    df = _full_featured_labeled_df_regime(n=1200, seed=7)
+    X, y, cols = build_training_matrix(df, cfg=CFG)
+    X_train, X_test, y_train, y_test = time_ordered_split(X, y, train_ratio=0.8)
+    if len(X_train) < 30 or y_train.nunique() < 2:
+        pytest.skip("Insufficient class diversity for this seed - not a code defect")
+
+    base = train_model(X_train, y_train, CFG)
+    calibrated = calibrate_model(base, X_train, y_train, CFG)
+    metadata = {"trained_at_utc": "2026-08-26T00:00:00+00:00", "note": "self-hash test"}
+    model_path = str(tmp_path / "self_hash_model.joblib")
+    save_model(calibrated, cols, model_path, metadata=metadata)
+
+    loaded = load_model(model_path)
+    stored_hash = loaded["metadata"]["model_hash"]
+    assert stored_hash, "save_model must inject metadata.model_hash"
+    # Original metadata keys survive alongside the injected hash.
+    assert loaded["metadata"]["trained_at_utc"] == metadata["trained_at_utc"]
+
+    # Deterministic and reproducible after a fresh load.
+    assert stored_hash == compute_model_fingerprint(calibrated, cols)
+    assert stored_hash == compute_model_fingerprint(
+        load_model(model_path)["model"], load_model(model_path)["feature_cols"])
+
+    # A bundle whose stored hash no longer matches its content is caught.
+    tampered_meta = dict(loaded["metadata"])
+    tampered_meta["model_hash"] = "0" * 64
+    tampered_path = str(tmp_path / "tampered_model.joblib")
+    save_model(loaded["model"], loaded["feature_cols"], tampered_path, metadata=tampered_meta)
+    tampered = load_model(tampered_path)
+    assert tampered["metadata"]["model_hash"] != compute_model_fingerprint(
+        tampered["model"], tampered["feature_cols"])

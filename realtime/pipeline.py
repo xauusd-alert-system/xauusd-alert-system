@@ -31,6 +31,12 @@ from config.strategy_contract import strategy_identity
 
 logger = logging.getLogger("realtime_pipeline")
 
+# One-shot process-level log of the resolved broker-server offset (see
+# _log_startup_offset_once). The pipeline is constructed PER REQUEST by the
+# dashboard (/api/matrix builds 5 instances), so logging on every __init__
+# would spam MT5 calls; the trader has its own startup line for its process.
+_STARTUP_OFFSET_LOGGED = False
+
 
 def resolve_signal_step(atr_val: float, grid_cfg: dict) -> float:
     """
@@ -86,12 +92,58 @@ class RealtimePipeline:
         self.effective_cfg = effective_asset_config(self.cfg, asset_key)
         model_metadata = self._predictor.metadata if self._predictor is not None else {}
         self.strategy_identity = strategy_identity(self.effective_cfg, model_metadata)
-        if self.model_path and os.path.isfile(self.model_path):
+        stored_hash = model_metadata.get("model_hash")
+        if stored_hash and self._predictor is not None:
+            # The artifact carries its own deterministic content fingerprint
+            # (model/trainer.save_model). Recompute it from the loaded objects
+            # and fail SOFT with a warning on mismatch — a model whose content
+            # changed after save must not be silently trusted.
+            from model.trainer import compute_model_fingerprint
+            recomputed = compute_model_fingerprint(
+                self._predictor.model, self._predictor.feature_cols)
+            if recomputed != stored_hash:
+                logger.warning(
+                    "[%s] metadata.model_hash mismatch: stored %s != recomputed %s "
+                    "(file may have been modified after save)",
+                    asset_key, stored_hash, recomputed,
+                )
+            self.strategy_identity["model_hash"] = recomputed
+        elif self.model_path and os.path.isfile(self.model_path):
+            # Legacy bundle without a self-hash: fall back to the file's sha256.
             digest = hashlib.sha256()
             with open(self.model_path, "rb") as model_file:
                 for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
                     digest.update(chunk)
             self.strategy_identity["model_hash"] = digest.hexdigest()
+
+        self._log_startup_offset_once()
+
+    def _log_startup_offset_once(self) -> None:
+        """Log the resolved server-time offset once per process.
+
+        Mirrors the trader's startup line (execution/mt5_trader.py) so log
+        forensics show which offset was active at startup. The actual fetch
+        path (_fetch_data_frame) keeps re-resolving per fetch — that is the
+        DST self-heal — so this line is informational, not a cache.
+        Guarded to ``data_mode == "live"``: tests run in ``mock`` mode and
+        must not touch the MT5 terminal.
+        """
+        global _STARTUP_OFFSET_LOGGED
+        if _STARTUP_OFFSET_LOGGED or self.data_mode != "live":
+            return
+        _STARTUP_OFFSET_LOGGED = True
+        try:
+            from data.mt5_provider import resolve_server_offset
+            md = self.cfg.get("market_data", {})
+            offset = resolve_server_offset(md)
+            logger.info(
+                "server_time_offset_hours: config=%r resolved=%s "
+                "(startup, pipeline; re-measured per fetch - source detail "
+                "logged by data.mt5_provider)",
+                md.get("server_time_offset_hours"), offset,
+            )
+        except Exception as exc:
+            logger.warning("server-offset startup log failed: %s", exc)
 
     def get_frame(self, n_candles: int = 100, build_features: bool = False) -> pd.DataFrame:
         """Return a raw (or feature-built) DataFrame of the asset's real candles.
@@ -110,8 +162,16 @@ class RealtimePipeline:
     def _fetch_data_frame(self, timeframe: str, n_candles: int) -> pd.DataFrame:
         """Fetches and prepares DataFrame directly from MT5 (live) or Mock generator."""
         if self.data_mode == "live":
-            from data.mt5_provider import fetch_closed_candles
-            raw = fetch_closed_candles(symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles)
+            from data.mt5_provider import fetch_closed_candles, resolve_server_offset
+            # N10: MT5 bar timestamps are BROKER-SERVER time (FxPro = UTC+3 EEST,
+            # UTC+2 in winter). Shift to true UTC so session tagging / news guard /
+            # labels use real wall-clock time (config market_data.server_time_offset_hours
+            # supports "auto" detection from a live tick).
+            server_offset = resolve_server_offset(self.cfg.get("market_data", {}))
+            raw = fetch_closed_candles(
+                symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles,
+                server_offset_hours=server_offset,
+            )
             
             # Приводим метку времени к единому формату UTC epoch seconds.
             # Resolution-independent (pandas 3.x stores datetimes at µs, so the

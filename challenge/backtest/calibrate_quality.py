@@ -21,14 +21,15 @@ from challenge.manual.quality_score import compute_quality_score
 CANDLE_DIR = Path(ROOT) / "data" / "backtest" / "candles"
 OUT_PATH = Path(ROOT) / "data" / "backtest" / "quality_calibration.json"
 
-# Session model
-SESSION_START = dt.time(13, 30)
-SESSION_END = dt.time(19, 55)
-
 # Config from manual_config.yaml
 import yaml
 with open(Path(ROOT) / "challenge" / "manual" / "manual_config.yaml", encoding="utf-8") as f:
     CFG = yaml.safe_load(f) or {}
+
+# Session model — from manual_config.yaml (same source as the alerter), not
+# hardcoded: a config change propagates here automatically.
+SESSION_START = dt.time(*map(int, CFG.get("session_start_utc", "13:30").split(":")))
+SESSION_END = dt.time(*map(int, CFG.get("session_end_utc", "19:55").split(":")))
 
 TARGET_RR = float(CFG.get("target_rr", 3.5))
 

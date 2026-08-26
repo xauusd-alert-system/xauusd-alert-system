@@ -57,8 +57,18 @@ fix_ingestion.py
 
 # Prop challenge: auth-sensitive / volatile artifacts stay local only
 data/challenge_browser_profile/
+data/challenge_browser_profile_*/
+data/challenge_state.json
+data/challenge_trades.csv
 data/challenge_tokens.json
-logs/challenge/
+data/manual/
+data/book_bars/
+data/usstocks.sqlite
+logs/
+.freebuff/
+# Machine-generated data-provenance manifests (hashes of the LOCAL database)
+config/provenance/
+
 
 # UI node_modules and runtime log
 UI 3.7 flsah updated v3/node_modules/

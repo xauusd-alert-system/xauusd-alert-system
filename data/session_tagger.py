@@ -36,6 +36,26 @@ def tag_session(utc_timestamp, sessions_config: dict) -> str:
     return "_".join(sorted(active))
 
 
+def tag_session_with_weekend(utc_timestamp, sessions_config: dict) -> str:
+    """Config-window session tag with explicit weekend exclusion.
+
+    Saturdays/Sundays (UTC) are labeled ``weekend`` — never asia/london/newyork
+    — and every other bar gets the config-window label (``off_session`` outside
+    all windows). This is the canonical storage label used by backfills, so the
+    ``session`` column in ohlcv_* matches both the config windows and the live
+    tagger's ``off_session`` for hours outside 0-22 UTC.
+    """
+    if isinstance(utc_timestamp, (int, float)):
+        ts = pd.to_datetime(utc_timestamp, unit="s", utc=True)
+    else:
+        ts = pd.Timestamp(utc_timestamp)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+    if ts.weekday() >= 5:
+        return "weekend"
+    return tag_session(ts, sessions_config)
+
+
 def tag_dataframe(df: pd.DataFrame, sessions_config: dict, ts_col: str = "timestamp_utc") -> pd.DataFrame:
     """Vectorized-ish session tagging applied row-wise (fine for daily ingestion batch sizes)."""
     df = df.copy()

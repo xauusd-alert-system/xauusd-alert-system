@@ -30,7 +30,7 @@ import time
 DEFAULT_DAY_END = "19:55"
 CSV_FIELDS = ["date", "symbol", "grade", "bias", "signal_utc",
               "entry", "stop", "target", "rr", "outcome", "r",
-              "minutes", "resolved_utc"]
+              "minutes", "resolved_utc", "setup_type", "quality_score"]
 
 # outcome key -> human label
 OUTCOME_LABELS = {
@@ -143,7 +143,7 @@ def read_journal(path) -> list:
 
 
 def compute_stats(rows: list) -> dict:
-    """Cumulative per-grade aggregates. Rows without a numeric `r` are skipped."""
+    """Cumulative per-grade + per-symbol aggregates. Rows without a numeric `r` are skipped."""
     out = {"as_of": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
     for label, grade in (("A", "A"), ("B", "B"), ("total", None)):
         rs = rows if grade is None else [r for r in rows if r.get("grade") == grade]
@@ -163,6 +163,29 @@ def compute_stats(rows: list) -> dict:
         out[label] = {
             "n": n, "wins": wins, "losses": losses, "flat": n - wins - losses,
             "sum_r": round(sum(vals), 3), "avg_r": round(sum(vals) / n, 3),
+            "win_rate_pct": round(100 * wins / n, 1),
+        }
+    # Per-symbol aggregates
+    symbols = {}
+    for row in rows:
+        sym = row.get("symbol", "")
+        if not sym:
+            continue
+        try:
+            r_val = float(row["r"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        symbols.setdefault(sym, []).append(r_val)
+    out["by_symbol"] = {}
+    for sym, vals in sorted(symbols.items()):
+        n = len(vals)
+        wins = sum(1 for v in vals if v > 0)
+        losses = sum(1 for v in vals if v < 0)
+        out["by_symbol"][sym] = {
+            "n": n, "wins": wins, "losses": losses,
+            "flat": n - wins - losses,
+            "sum_r": round(sum(vals), 3),
+            "avg_r": round(sum(vals) / n, 3),
             "win_rate_pct": round(100 * wins / n, 1),
         }
     return out
@@ -227,3 +250,22 @@ def format_stats_summary(stats: dict) -> str:
         f"B: {line(stats.get('B'))}\n"
         f"Всего: {line(stats.get('total'))}"
     )
+
+
+def format_symbol_stats(stats: dict) -> str:
+    """Format per-symbol profitability breakdown for Telegram."""
+    by_sym = stats.get("by_symbol", {})
+    if not by_sym:
+        return "Нет данных по символам"
+    as_of = (stats.get("as_of") or "")[:16]
+    lines = [f"📊 Статистика по символам (по {as_of} UTC)"]
+    # Sort by sum_r descending
+    sorted_syms = sorted(by_sym.items(), key=lambda x: x[1].get("sum_r", 0), reverse=True)
+    for sym, d in sorted_syms:
+        n = d["n"]
+        wr = d["win_rate_pct"]
+        sr = d["sum_r"]
+        ar = d["avg_r"]
+        marker = "✅" if sr > 0 else "❌" if sr < 0 else "➖"
+        lines.append(f"{marker} {sym}: {n}сд WR{wr:.0f}% avgR{ar:+.2f} sumR{sr:+.2f}")
+    return "\n".join(lines)

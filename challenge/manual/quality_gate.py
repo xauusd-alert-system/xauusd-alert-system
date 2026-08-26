@@ -76,7 +76,11 @@ def compute_quality_for_setup(
                 score["total"] = min(100, score["total"] + 10)
     # impulse: no adjustment needed, the default scorer already handles regime/time/volume
 
-    return score["total"]
+    # Store component breakdown for live calibration
+    score["volume_ratio"] = vol_ratio
+    # Store component breakdown for live calibration
+    score["volume_ratio"] = vol_ratio
+    return score  # return full dict (total, volume, time_of_day, regime, volume_ratio) if False else score  # return full dict for live cal
 
 
 # Quality thresholds per setup type (calibrated on 386 setups, 2026-08-24)

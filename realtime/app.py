@@ -11,6 +11,7 @@ import logging
 import re
 import threading
 import time
+from collections import deque
 from functools import wraps
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -20,11 +21,14 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 import pandas as pd
 import numpy as np
+from fastapi.staticfiles import StaticFiles
 
 from config.loader import load_config, get_env, get_signal_grid
 from config.deployment import deployment_mode
 from realtime.pipeline import RealtimePipeline
 from realtime.dashboard import DASHBOARD_HTML
+from model.ensemble import compute_ensemble_signal
+from regime.classifier import RegimeLabel
 from backtest.monte_carlo import MonteCarloSimulator
 from alerts.chart_renderer import ChartRenderer
 from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
@@ -202,6 +206,13 @@ def get_dashboard():
     return HTMLResponse(content=DASHBOARD_HTML)
 
 
+# Vendored dashboard assets (tailwind/chart.js/font-awesome). Served locally so
+# the UI renders even when public CDNs are unreachable from this network.
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "realtime", "static")
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
 @app.get("/health")
 def health():
     """Basic liveness check."""
@@ -234,13 +245,13 @@ def get_signal(n_candles: int = 300, asset: str = "XAUUSD"):
         raise HTTPException(status_code=500, detail=f"Signal generation failed: {str(e)}")
 
 
-@app.get("/api/status")
-def get_status():
-    """Returns current system and account metrics (real MT5 when available).
+def _build_status_payload() -> dict[str, Any]:
+    """Build the live account/position status payload.
 
-    Honesty contract (web-UI spec §6.3 / §12): when MT5 is unavailable the
-    payload returns ``available=false`` with ``balance/equity/floating_pnl =
-    None`` and ``freshness_status=offline`` — never a fallback balance.
+    Used by both ``GET /api/status`` and the ``/ws/dashboard`` push stream so
+    the two always agree. Honesty contract (web-UI spec §6.3 / §12): when MT5
+    is unavailable the payload returns ``available=false`` with
+    ``balance/equity/floating_pnl = None`` — never a fallback balance.
     """
     account = None
     positions = []
@@ -255,13 +266,14 @@ def get_status():
     balance = float(getattr(account, "balance", 0.0) or 0.0) if available else None
     equity = float(getattr(account, "equity", 0.0) or 0.0) if available else None
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
-    payload = {
+    return {
         "status": "online",
         "data_mode": DATA_MODE,
         "available": available,
         "source": "mt5_account" if available else "unavailable",
         "mode": "live_verified" if available and DATA_MODE == "live" else "implemented_not_live_verified",
         "as_of_utc": datetime.now(timezone.utc).isoformat(),
+        "as_of_utc_ms": now if available else None,
         "balance": balance,
         "equity": equity,
         "floating_pnl": (equity - balance) if available else None,
@@ -271,15 +283,89 @@ def get_status():
         "execution_enabled_assets": CFG.get("execution", {}).get("enabled_assets", []),
         "require_demo_account": bool(CFG.get("execution", {}).get("require_demo_account", False)),
         "deployment_mode": deployment_mode(CFG).value,
+        "positions": [
+            {
+                "symbol": str(getattr(p, "symbol", "?")),
+                "direction": "buy" if int(getattr(p, "type", 0)) == 0 else "sell",
+                "volume": float(getattr(p, "volume", 0.0) or 0.0),
+                "open_price": float(getattr(p, "price_open", 0.0) or 0.0),
+                "profit": float(getattr(p, "profit", 0.0) or 0.0),
+                "sl": float(getattr(p, "sl", 0.0) or 0.0) or None,
+                "tp": float(getattr(p, "tp", 0.0) or 0.0) or None,
+            }
+            for p in positions
+        ],
         **APP_STRATEGY_IDENTITY,
     }
+
+
+@app.get("/api/status")
+def get_status():
+    """Returns current system and account metrics (real MT5 when available)."""
+    payload = _build_status_payload()
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    available = payload["available"]
     return stamp(
         payload,
         last_activity_ms=now if available else None,
-        source="mt5_account" if available else "unavailable",
-        mode="live_verified" if available and DATA_MODE == "live" else "implemented_not_live_verified",
+        source=payload["source"],
+        mode=payload["mode"],
         freshness=None if available else "offline",  # producer unreachable, not "no data yet"
     )
+
+
+# Ring buffer of the last dashboard pushes (survives page reloads; exposed
+# via /api/ws-history so the UI can show what the server pushed recently).
+_DASHBOARD_PUSH_HISTORY: deque = deque(maxlen=20)
+
+
+@app.get("/api/ws-history")
+def get_ws_history():
+    """Last N dashboard push records (most recent first)."""
+    return {"available": True, "pushes": list(_DASHBOARD_PUSH_HISTORY)}
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_ws(websocket: WebSocket):
+    """Push stream of live account/position state for the dashboard.
+
+    Sends an initial snapshot on connect, then polls MT5 every 2s (offloaded
+    to a worker thread) and pushes **only when the state actually changed**
+    (balance / equity / position count / circuit breaker / pause), so the UI
+    updates instantly without constant polling requests. No client commands.
+    """
+    await websocket.accept()
+    last_key: tuple | None = None
+    last_payload: dict[str, Any] | None = None
+    try:
+        while True:
+            payload = await asyncio.to_thread(_build_status_payload)
+            key = (
+                payload["available"],
+                payload.get("balance"),
+                payload.get("equity"),
+                payload.get("open_positions_count"),
+                payload.get("circuit_breaker"),
+                payload.get("trading_paused"),
+            )
+            if key != last_key:
+                changed = [k for k in ("balance", "equity", "open_positions_count",
+                                       "circuit_breaker", "trading_paused")
+                           if last_payload is None or payload.get(k) != last_payload.get(k)]
+                record = {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "balance": payload.get("balance"),
+                    "equity": payload.get("equity"),
+                    "open_positions_count": payload.get("open_positions_count"),
+                    "changed": changed,
+                }
+                _DASHBOARD_PUSH_HISTORY.append(record)
+                await websocket.send_json({"type": "status", "payload": payload, "record": record})
+                last_key = key
+                last_payload = payload
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        logger.info("Dashboard WebSocket client disconnected")
 
 
 @app.get("/api/metrics")
@@ -400,6 +486,102 @@ def get_signal_matrix():
             "mode": DATA_MODE, "as_of_utc": as_of}
 
 
+@app.get("/api/ml-prob")
+@_ttl_cache(20)
+def get_ml_probability(asset: str = "XAUUSD"):
+    """Raw ML P(long)/P(short) for one asset (XAUUSD by default), plus the
+    per-bar probability history for the dashboard sparkline.
+
+    Uses the SAME RealtimePipeline + ModelPredictor as the live trader, so the
+    panel shows exactly what the model outputs per closed bar. The feature
+    frame is built once and the tail is batch-predicted in a single pass (the
+    per-bar values are the model's own output on each bar's causal features).
+
+    Honesty contract (same as /api/matrix): a failure is an explicit
+    ``available=false`` payload with a reason — never fabricated neutral
+    probabilities that look model-computed.
+    """
+    as_of = datetime.now(timezone.utc).isoformat()
+    if DATA_MODE != "live":
+        return {"asset": asset, "available": False, "status": "unavailable",
+                "reason": f"data_mode={DATA_MODE}", "mode": DATA_MODE,
+                "as_of_utc": as_of}
+    if asset not in CFG.get("assets", {}):
+        return {"asset": asset, "available": False, "status": "error",
+                "reason": f"unknown asset {asset}", "mode": DATA_MODE,
+                "as_of_utc": as_of}
+    try:
+        pipe = RealtimePipeline(cfg=CFG, asset_key=asset, data_mode=DATA_MODE)
+        if pipe._predictor is None:
+            return {"asset": asset, "available": False, "status": "unavailable",
+                    "reason": "no model file for asset", "mode": DATA_MODE,
+                    "as_of_utc": as_of}
+        frame = pipe.get_frame(n_candles=300, build_features=True)
+        feat_cols = pipe._predictor.feature_cols
+        tail = frame.tail(120)
+        complete = tail[feat_cols].notna().all(axis=1)
+        tail = tail[complete]
+        if tail.empty:
+            return {"asset": asset, "available": False, "status": "unavailable",
+                    "reason": "no complete-feature bars (warm-up)", "mode": DATA_MODE,
+                    "as_of_utc": as_of}
+        proba = pipe._predictor.predict_proba(tail).reset_index(drop=True)
+        tail = tail.reset_index(drop=True)
+
+        def _regime_name(v):
+            return v.value if isinstance(v, RegimeLabel) else str(v)
+
+        history = []
+        for i in range(len(tail)):
+            row = tail.iloc[i]
+            history.append({
+                "ts": int(row["timestamp_utc"]),
+                "price": float(row["close"]),
+                "p_long": round(float(proba["p_long"].iloc[i]), 4),
+                "p_short": round(float(proba["p_short"].iloc[i]), 4),
+                "regime": _regime_name(row["regime"]),
+                "session": str(row["session"]),
+            })
+
+        latest_row = history[-1]
+        # Ensemble verdict on the latest bar — the same gate the live trader
+        # applies (min_ml_probability / ml_confidence_floor / confidence).
+        signal = compute_ensemble_signal(
+            latest_row["regime"],
+            latest_row["p_long"],
+            latest_row["p_short"],
+            pipe.effective_cfg,
+            session=latest_row["session"],
+            timestamp_utc=latest_row["ts"],
+            asset_key=asset,
+        )
+        ens = pipe.effective_cfg.get("ensemble", {})
+        return {
+            "asset": asset,
+            "available": True,
+            "status": "ok",
+            "timeframe": pipe.timeframe,
+            "history": history,
+            "latest": {
+                **latest_row,
+                "ensemble_bias": signal.bias,
+                "ensemble_confidence": round(float(signal.confidence), 4),
+            },
+            "thresholds": {
+                "min_ml_probability": float(ens.get("min_ml_probability", 0.55)),
+                "ml_confidence_floor": float(ens.get("ml_confidence_floor", 0.62)),
+                "min_confidence_to_alert": float(ens.get("min_confidence_to_alert", 0.60)),
+            },
+            "source": "realtime_pipeline",
+            "mode": DATA_MODE,
+            "as_of_utc": as_of,
+        }
+    except Exception as e:
+        logger.warning("ML-prob generation failed for %s: %s", asset, e)
+        return {"asset": asset, "available": False, "status": "error",
+                "reason": str(e), "mode": DATA_MODE, "as_of_utc": as_of}
+
+
 def _warm_matrix_cache():
     """Precompute the first matrix at startup so the first dashboard load
     does not wait ~40s for five serial pipeline runs."""
@@ -410,7 +592,35 @@ def _warm_matrix_cache():
         logger.warning("Matrix cache warm failed: %s", exc)
 
 
+def _warm_mlprob_cache():
+    """Precompute the first ML-prob payload at startup so the first dashboard
+    load does not wait ~8s for the XAUUSD feature build."""
+    try:
+        get_ml_probability()
+        logger.info("Dashboard ML-prob cache warmed at startup")
+    except Exception as exc:
+        logger.warning("ML-prob cache warm failed: %s", exc)
+
+
+def _warm_pairs_cache():
+    """Keep the pairs model cached so dashboard requests never pay the ~40s
+    multi-pair cointegration recompute. Refreshes just before the 300s TTL
+    expires; the single-flight cache serves a stale copy to any request that
+    lands mid-recompute."""
+    refresh_every = 240  # seconds, < 300s TTL
+    while True:
+        try:
+            get_pairs(timeframe="H1")  # same call form as the /api/pairs endpoint
+            logger.info("Pairs model cache warmed")
+        except Exception as exc:
+            logger.warning("Pairs cache warm failed: %s", exc)
+        time.sleep(refresh_every)
+
+
 threading.Thread(target=_warm_matrix_cache, daemon=True).start()
+threading.Thread(target=_warm_mlprob_cache, daemon=True).start()
+# NOTE: _warm_pairs_cache is started AFTER get_pairs is defined below —
+# the daemon thread must not race module import.
 
 
 @app.get("/api/correlation")
@@ -745,12 +955,13 @@ def get_positions():
 
 
 @app.get("/api/pairs")
-@_ttl_cache(60)
+@_ttl_cache(300)
 def get_pairs(timeframe: str = "H1"):
     """Pairs Model analytics: z-scores, signals, ensemble forecasts for all configured pairs.
 
     Uses the pairs_analysis module (PairAnalyzer + SignalEngine + EnsembleEngine).
-    Cached for 60s — expensive multi-pair computation.
+    Cached for 300s — one recompute (~40s) every 5min is enough for H1 cointegration,
+    and the single-flight cache serves a stale copy to concurrent callers.
     """
     as_of = datetime.now(timezone.utc).isoformat()
     try:
@@ -768,6 +979,9 @@ def get_pairs(timeframe: str = "H1"):
              "as_of_utc": as_of, "reason": str(exc)},
             last_activity_ms=None, source="pairs_analysis", mode="unavailable",
         )
+
+
+threading.Thread(target=_warm_pairs_cache, daemon=True).start()
 
 
 @app.get("/api/pairs/equity")

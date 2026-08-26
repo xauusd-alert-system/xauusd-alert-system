@@ -1,7 +1,7 @@
 {
-  "calibrated_at": "2026-08-24 19:09 UTC",
+  "calibrated_at": "2026-08-24 20:17 UTC",
   "min_samples_per_type": 10,
   "impulse": 70,
   "gap_fade": 45,
-  "opening_drive": 60
+  "opening_drive": 0
 }

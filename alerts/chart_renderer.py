@@ -27,7 +27,11 @@ class ChartRenderer:
         Generates standalone SVG markup of candlesticks with overlay price levels.
         """
         if df.empty or len(df) < 2:
-            return f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" fill="#94a3b8" text-anchor="middle">No chart data</text></svg>'
+            # viewBox is required for responsive scaling: without it a CSS
+            # max-width:100% shrink clips the right side instead of scaling.
+            return (f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+                    f'xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#1e293b"/>'
+                    f'<text x="50%" y="50%" fill="#94a3b8" text-anchor="middle">No chart data</text></svg>')
 
         n = min(len(df), 40)
         slice_df = df.tail(n).reset_index(drop=True)
@@ -57,7 +61,10 @@ class ChartRenderer:
         candle_w = max((width - 80) / n, 4)
 
         svg = [
-            f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" style="background:#0f172a; font-family:monospace;">',
+            # viewBox lets the browser scale the whole chart (CSS max-width:100%)
+            # instead of clipping the right side on narrow viewports.
+            f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+            f'xmlns="http://www.w3.org/2000/svg" style="background:#0f172a; font-family:monospace;">',
             f'<rect width="100%" height="100%" fill="#0f172a"/>',
             f'<text x="20" y="22" fill="#f8fafc" font-size="14" font-weight="bold">{symbol} M5 Setup</text>',
         ]

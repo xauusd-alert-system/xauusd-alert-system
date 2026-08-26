@@ -346,6 +346,36 @@ def verify_provenance_manifest(
             "data_hash": recomputed_hash}
 
 
+def resolve_manifest_path(validation: dict, timeframe: str, asset_key: str) -> str | None:
+    """Resolve the frozen manifest path for one (asset, timeframe).
+
+    * ``validation.provenance_manifest_path`` pointing at a FILE is used as-is
+      (single-asset setups, the original contract);
+    * pointing at a DIRECTORY selects ``<ASSET>_<TF>_fxpro.json`` inside it
+      (the naming produced by scripts/rebuild_provenance_manifests.py); the
+      legacy lowercase ``<asset>_<tf>.json`` form is also accepted. A missing
+      per-asset manifest is a hard error so a run can never silently skip
+      verification.
+    """
+    path = (validation or {}).get("provenance_manifest_path")
+    if not path:
+        return None
+    if os.path.isdir(path):
+        candidates = (
+            f"{asset_key}_{timeframe.upper()}_fxpro.json",
+            f"{asset_key.lower()}_{timeframe.lower()}.json",
+        )
+        for candidate in candidates:
+            full = os.path.join(path, candidate)
+            if os.path.isfile(full):
+                return full
+        raise RuntimeError(
+            f"provenance manifest required for {asset_key} {timeframe.upper()} but "
+            f"not found in {path!r}; expected {candidates[0]}"
+        )
+    return path
+
+
 def provenance_gate(
     cfg: dict,
     db_path: str,
@@ -360,13 +390,14 @@ def provenance_gate(
     validation = (cfg or {}).get("validation", {}) or {}
     if require is None:
         require = bool(validation.get("require_provenance_manifest", False))
-    manifest_path = validation.get("provenance_manifest_path")
     if not require:
         return {"verified": False, "required": False, "reason": "not required"}
+    manifest_path = resolve_manifest_path(validation, timeframe, asset_key)
     if not manifest_path or not os.path.isfile(manifest_path):
         raise RuntimeError(
             f"provenance manifest required by validation config but not found: "
-            f"{manifest_path!r} (set validation.provenance_manifest_path)"
+            f"{manifest_path!r} (set validation.provenance_manifest_path "
+            f"to a file or a directory of <ASSET>_<TF>_fxpro.json manifests)"
         )
     result = verify_provenance_manifest(db_path, timeframe, asset_key, manifest_path)
     result["required"] = True

@@ -70,6 +70,11 @@ DEAL_ENTRY_INOUT: int = 2
 POSITION_TYPE_BUY: int = 0
 POSITION_TYPE_SELL: int = 1
 
+# Account trade modes
+ACCOUNT_TRADE_MODE_DEMO: int = 0
+ACCOUNT_TRADE_MODE_CONTEST: int = 1
+ACCOUNT_TRADE_MODE_REAL: int = 2
+
 
 # ----------------------------------------------------------------------
 # Module-level state (set via _inject()).

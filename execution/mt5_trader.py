@@ -9,6 +9,7 @@ import json
 import time
 import math
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 import MetaTrader5 as mt5
 import pandas as pd
@@ -19,7 +20,10 @@ from config.loader import load_config, get_env, get_signal_grid
 from config.deployment import deployment_mode, order_routing_allowed
 from config.strategy_contract import strategy_identity
 from data.trading_event_ledger import append_trading_event
-from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles, _TIMEFRAMES
+from data.mt5_provider import (
+    initialize_mt5, shutdown_mt5, validate_symbol, fetch_closed_candles,
+    resolve_server_offset, resolve_server_offset_detailed, _TIMEFRAMES,
+)
 from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
 from data.execution_ledger import init_execution_ledger, log_execution_attempt, now_ms
 from realtime.pipeline import RealtimePipeline
@@ -154,6 +158,26 @@ def positions_get_by_magic(symbol: str = None, magic: int = None):
 class MultiAssetMT5Trader:
     def __init__(self):
         self.cfg = load_config()
+        # N10: resolve the broker-server UTC offset ONCE at startup and log it,
+        # so log forensics always show which offset session tagging / new-bar
+        # detection used. Config "auto" = measured from a fresh live tick;
+        # numeric = explicit override; fallback (config fallback value) when the
+        # market is closed or the terminal is unreachable. The provider logs the
+        # detection detail / fallback reason on its own logger just above.
+        md = self.cfg.get("market_data", {})
+        self.server_offset_hours, offset_info = resolve_server_offset_detailed(md)
+        # DST self-heal: the startup value is cached (an MT5 call per poll would
+        # spam the terminal), but a DST flip over a closed weekend must not stay
+        # stale until a restart. Re-resolve at most once per UTC day; the weekend
+        # guard inside detect keeps Sat/Sun on the fallback, and Monday's fresh
+        # tick overrides it. See _maybe_redetect_offset().
+        self._offset_resolved_date = datetime.now(timezone.utc).date()
+        logger.info(
+            "server_time_offset_hours: config=%r resolved=%s mode=%s reason=%s "
+            "(provider detail logged by data.mt5_provider)",
+            md.get("server_time_offset_hours"), self.server_offset_hours,
+            offset_info.get("mode"), offset_info.get("reason"),
+        )
         self.bot = TelegramAlertBot(self.cfg)
         self.deployment_mode = deployment_mode(self.cfg)
         self.strategy_identity = strategy_identity(self.cfg)
@@ -203,19 +227,9 @@ class MultiAssetMT5Trader:
         # unimplementable (round(0.5*0.01,2)=0.01 closed the whole position).
         default_volume = self.cfg.get("backtest", {}).get("volume", 0.10)
         self.volume = float(self.cfg.get("execution", {}).get("volume", default_volume))
-        # N11 (audit 2026-08-10): the scale-out lot validator was only invoked in
-        # the backtester, so a live base lot whose 50/30/20 tranches are below the
-        # MT5 volume_step went unnoticed. Fail fast at startup when the live
-        # volume cannot be partial-closed (raise_on_invalid=True).
-        from execution.portfolio_allocator import validate_scaleout_tranches
-        is_valid, err_msg, _ = validate_scaleout_tranches(
-            self.volume, [0.5, 0.3, 0.2],
-            min_lot=0.01, lot_step=0.01, raise_on_invalid=True,
-        )
-        if not is_valid:
-            raise ValueError(
-                f"Live scale-out configuration invalid for volume={self.volume}: {err_msg}"
-            )
+        # Each hedging leg is an independent 1-lot order. Do not pass the
+        # aggregate volume through the old 50/30/20 risk allocator: the requested
+        # demo policy is exactly 1.0 lot at TP1, TP2 and TP3.
 
         self.pipelines = {}
         assets = self.cfg.get("assets", {})
@@ -236,7 +250,22 @@ class MultiAssetMT5Trader:
                         asset_key=asset_key, cfg=self.cfg, data_mode="live",
                         book_feed=self.book_feed,
                     )
-                    logger.info(f"Loaded pipeline for {asset_key}")
+                    pipeline = self.pipelines[asset_key]
+                    identity = pipeline.strategy_identity
+                    model_meta = (pipeline._predictor.metadata
+                                  if pipeline._predictor is not None else {})
+                    n_features = (len(pipeline._predictor.feature_cols)
+                                  if pipeline._predictor is not None else "n/a")
+                    # Full model_hash is logged so a loaded artifact can be
+                    # verified trivially: sha256sum <model_path> (legacy) or the
+                    # stored metadata.model_hash (new bundles) must match.
+                    logger.info(
+                        "Loaded pipeline for %s: model_path=%s model_hash=%s "
+                        "trained_at_utc=%s features=%s",
+                        asset_key, pipeline.model_path,
+                        identity.get("model_hash") or "none",
+                        model_meta.get("trained_at_utc", "n/a"), n_features,
+                    )
                 except Exception as e:
                     logger.warning(f"Could not load pipeline for {asset_key}: {e}")
 
@@ -391,7 +420,9 @@ class MultiAssetMT5Trader:
         try:
             asset_cfg = self.cfg.get("assets", {}).get(asset_key, {})
             timeframe = asset_cfg.get("timeframe") or self.cfg.get("market_data", {}).get("timeframe", "M5")
-            df = fetch_closed_candles(symbol, timeframe, count)
+            # N10: shift broker-server timestamps (resolved once at startup).
+            df = fetch_closed_candles(symbol, timeframe, count,
+                                      server_offset_hours=self.server_offset_hours)
             ts = pd.to_datetime(df["timestamp"], utc=True)
             return pd.Series(df["close"].astype(float).pct_change().values,
                              index=ts, name=asset_key).dropna()
@@ -1016,24 +1047,25 @@ class MultiAssetMT5Trader:
     SCALEOUT_RATIOS = ((1 / 3, 1), (1 / 3, 2), (1 / 3, 3))  # (ratio, leg_no)
 
     def _leg_volumes(self, info) -> list[float]:
-        """Equal-split 3-leg volumes (leg3 absorbs the lot-step remainder, so
-        the legs always sum exactly to self.volume). Legs below the fillable
-        minimum are reported as 0.0 and skipped by the caller."""
+        """Return one configured lot for each independently managed TP leg.
+
+        The demo policy is explicit: TP1, TP2 and TP3 each receive 1.0 lot;
+        this is not a 1-lot aggregate split into thirds.
+        """
+        requested = float(self.volume)
         step = float(getattr(info, "volume_step", 0.01) or 0.01)
-        min_lot = float(getattr(info, "volume_min", step) or step)
-        each = math.floor(self.volume / 3 / step) * step
-        vols = [
-            round(each, 6),
-            round(each, 6),
-            round(self.volume - 2 * each, 8),
-        ]
-        for i, v in enumerate(vols, 1):
-            if v > 0.0 and v < min_lot - 1e-9:
-                logger.warning(
-                    f"Leg {i} volume {v:.4f} < min fillable {min_lot:.2f} "
-                    f"(step {step:.2f}); skipping this leg."
-                )
-        return vols
+        minimum = float(getattr(info, "volume_min", step) or step)
+        maximum = float(getattr(info, "volume_max", requested) or requested)
+        if requested < minimum - 1e-9 or requested > maximum + 1e-9:
+            logger.error(
+                "Configured per-leg volume %.4f is outside broker range %.4f..%.4f",
+                requested, minimum, maximum,
+            )
+            return []
+        if abs(round(requested / step) * step - requested) > 1e-7:
+            logger.error("Configured per-leg volume %.4f is not aligned to broker step %.4f", requested, step)
+            return []
+        return [round(requested, 8)] * 3
 
     def _normalize_tp_level(self, symbol: str, side: str, raw_tp: float) -> float:
         """Clamp a leg TP to the broker minimum distance (same math as
@@ -1411,8 +1443,16 @@ class MultiAssetMT5Trader:
             logger.warning("[%s] Order routing blocked by execution allowlist", asset_key)
             return
         if int(signal.get("expires_at_utc") or 0) and int(time.time()) > int(signal["expires_at_utc"]):
-            logger.warning("[%s] Signal %s expired before execution", asset_key, signal_id)
-            return
+            # In simulation mode the signal timestamps may be virtual (e.g.
+            # 2023-era bar timestamps) while time.time() is real wall-clock.
+            # Skip TTL enforcement when the signal was created more than 1 day
+            # ago in wall-clock time — it is a simulation artifact, not stale.
+            _sig_ts = int(signal.get("timestamp_utc") or signal.get("published_at_utc") or 0)
+            if _sig_ts and abs(time.time() - _sig_ts) > 86400:
+                logger.debug("[%s] Signal %s TTL skipped (simulation timestamps)", asset_key, signal_id)
+            else:
+                logger.warning("[%s] Signal %s expired before execution", asset_key, signal_id)
+                return
         if signal.get("signal_state") not in {None, "confirmed"}:
             logger.warning("[%s] Signal %s is not confirmed", asset_key, signal_id)
             return
@@ -1515,12 +1555,10 @@ class MultiAssetMT5Trader:
             self._normalize_tp_level(mt5_symbol, bias, targets[2]),
         ]
 
-        # TradeThrottle risk step-down: apply multiplier to volume
-        risk_mult = self.trade_throttle.risk_multiplier()
+        # Per-leg demo policy: keep the configured 1.0 lot unchanged. The
+        # throttle still enforces only the daily trade-count gate.
+        risk_mult = 1.0
         original_volume = self.volume
-        if risk_mult < 1.0:
-            self.volume = round(self.volume * risk_mult, 6)
-            logger.info(f"TradeThrottle: risk step-down {risk_mult}x -> volume {self.volume} (was {original_volume})")
 
         if self.dry_run:
             for leg_volume, (_, leg_no) in zip(self._leg_volumes(info), self.SCALEOUT_RATIOS):
@@ -1530,8 +1568,6 @@ class MultiAssetMT5Trader:
                     f"[DRY RUN] Leg {leg_no} order NOT sent for {asset_key}: "
                     f"volume={leg_volume}, SL={sl_price}, TP={leg_tps[leg_no - 1]}"
                 )
-            if risk_mult < 1.0:
-                self.volume = original_volume
             return
 
         # Wave-0 contract (MQL5 observer plan): persist the immutable
@@ -1758,9 +1794,6 @@ class MultiAssetMT5Trader:
             self._save_management_state()
             self.risk_manager.record_trade_executed(asset_key)
             self.bot.send_alert_if_qualified(signal, asset_key)
-        # Restore volume after risk step-down
-        if risk_mult < 1.0:
-            self.volume = original_volume
 
     def _validate_contract_sizes(self):
         """T8 (audit 2026-08-10): warn when a symbol's live contract size or
@@ -1800,6 +1833,30 @@ class MultiAssetMT5Trader:
                         f"(step {live_step:.2f}); partial close would be skipped."
                     )
 
+    def _maybe_redetect_offset(self) -> None:
+        """Re-resolve the broker-server offset at most once per UTC day.
+
+        The startup value is cached to avoid an MT5 symbol/tick call per poll;
+        without this, a DST flip that happens over a closed weekend would stay
+        at the old offset until the process is restarted. On the first poll of
+        a new UTC day the offset is re-measured (the provider's weekend guard
+        keeps Sat/Sun on the fallback, Monday's fresh tick overrides it) and
+        logged only when the value actually changes.
+        """
+        today = datetime.now(timezone.utc).date()
+        if today == self._offset_resolved_date:
+            return
+        self._offset_resolved_date = today
+        new_offset, offset_info = resolve_server_offset_detailed(
+            self.cfg.get("market_data", {}))
+        if abs(new_offset - self.server_offset_hours) > 1e-9:
+            logger.info(
+                "server_time_offset_hours: %s -> %s mode=%s reason=%s (DST re-detect on %s)",
+                self.server_offset_hours, new_offset,
+                offset_info.get("mode"), offset_info.get("reason"), today,
+            )
+            self.server_offset_hours = new_offset
+
     def run_loop(self):
         initialize_mt5()
         self._validate_contract_sizes()
@@ -1812,8 +1869,17 @@ class MultiAssetMT5Trader:
         last_be_check = 0
         heartbeat = 0
         halted_logged = None
+        # How often the breakeven/close-detector sweep runs. The broker fills
+        # TP1 legs on its own; the bot must pull the remaining legs' SL to
+        # entry as close to that fill as possible, so the sweep runs on the
+        # same ~2s cadence as the bar poll instead of the legacy 30s.
+        # Configurable via execution.be_check_interval_seconds (default 3).
+        be_check_interval = float(
+            self.cfg.get("execution", {}).get("be_check_interval_seconds", 3.0)
+        )
 
         while True:
+            self._maybe_redetect_offset()
             now = time.time()
             now_utc = datetime.fromtimestamp(now, tz=timezone.utc)
             halted, halt_reason, resume_dt = self._blackout_status(now_utc)
@@ -1836,7 +1902,7 @@ class MultiAssetMT5Trader:
             halted_logged = None
             self._blackout_flattened = False
 
-            if now - last_be_check >= 30:
+            if now - last_be_check >= be_check_interval:
                 last_be_check = now
                 try:
                     self.check_and_move_breakeven()
@@ -1852,6 +1918,10 @@ class MultiAssetMT5Trader:
             except Exception as e:
                 logger.error("[fx-probe] scheduler error: %s", e)
 
+            # N10: MT5 bar timestamps are BROKER-SERVER time; shift to true UTC
+            # so new-bar detection aligns with the pipeline's timestamp_utc (and
+            # the book feed's real-clock buckets). Offset resolved at startup.
+            server_offset_sec = int(self.server_offset_hours * 3600)
             current_bar_time = 0
             for asset_key, a_cfg in self.cfg["assets"].items():
                 if not a_cfg.get("enabled", False) or asset_key not in self.execution_assets:
@@ -1863,7 +1933,7 @@ class MultiAssetMT5Trader:
                     tf_enum = self.symbol_timeframe.get(symbol, mt5.TIMEFRAME_M5)
                     rates = mt5.copy_rates_from_pos(symbol, tf_enum, 1, 1)
                     if rates is not None and len(rates) > 0:
-                        t = rates[0]["time"]
+                        t = int(rates[0]["time"]) - server_offset_sec
                         if t > current_bar_time:
                             current_bar_time = t
                 except Exception as e:
@@ -1884,18 +1954,34 @@ class MultiAssetMT5Trader:
                 logger.info(f"New bar detected: {current_bar_time} (last: {last_bar_time})")
                 last_bar_time = current_bar_time
                 logger.info("--- Analyzing newly closed candle across all assets ---")
-                for asset_key, pipeline in self.pipelines.items():
-                    start = time.time()
-                    try:
-                        signal = pipeline.generate_signal(n_candles=300)
-                        elapsed = time.time() - start
-                        if signal["bias"] != "no_trade":
-                            logger.info(f"[{asset_key}] SIGNAL DETECTED: {signal['bias'].upper()} (Conf: {signal['confidence']}%)")
-                            self.execute_signal(asset_key, signal)
-                        else:
-                            logger.info(f"[{asset_key}] no trade ({elapsed:.2f}s)")
-                    except Exception as e:
-                        logger.error(f"Error processing {asset_key}: {e} ({time.time()-start:.2f}s)")
+                # Owner request 2026-08-25: signals are generated in PARALLEL so
+                # every asset's order fires as close to the bar close as possible.
+                # Sequential generation made later assets (e.g. EURUSD after a
+                # slow BTCUSD feature build) enter 20-30s after the bar closed,
+                # so their market entries drifted far from the signal-bar price.
+                # Execution stays serialized in this thread: execute_signal
+                # mutates shared state (risk manager, throttle, active_trades)
+                # and sends MT5 orders, so it must never run concurrently.
+                with ThreadPoolExecutor(
+                    max_workers=max(2, len(self.pipelines))
+                ) as _pool:
+                    futures = {
+                        _pool.submit(pipeline.generate_signal, 300): asset_key
+                        for asset_key, pipeline in self.pipelines.items()
+                    }
+                    for future in as_completed(futures):
+                        asset_key = futures[future]
+                        start = time.time()
+                        try:
+                            signal = future.result()
+                            elapsed = time.time() - start
+                            if signal["bias"] != "no_trade":
+                                logger.info(f"[{asset_key}] SIGNAL DETECTED: {signal['bias'].upper()} (Conf: {signal['confidence']}%)")
+                                self.execute_signal(asset_key, signal)
+                            else:
+                                logger.info(f"[{asset_key}] no trade ({elapsed:.2f}s)")
+                        except Exception as e:
+                            logger.error(f"Error processing {asset_key}: {e} ({time.time()-start:.2f}s)")
 
             if now - heartbeat >= 60:
                 heartbeat = now

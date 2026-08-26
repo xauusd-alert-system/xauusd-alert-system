@@ -13,15 +13,53 @@ Output: list of S/R zones with strength classification.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass
+import yaml
 
 
-# Session boundaries (UTC) — NYSE 13:30-19:55
-SESSION_START_SEC = 13 * 3600 + 30 * 60
-SESSION_END_SEC = 19 * 3600 + 55 * 60
-# Premarket: 09:00-13:30 UTC (14:00-18:30 local)
-PREMARKET_START_SEC = 9 * 3600
-PREMARKET_END_SEC = 13 * 3600 + 30 * 60
+# Manual-system config (UTEx/stock scanner session windows). Defaults below
+# match the original NYSE constants (premarket 09:00-13:30, session 13:30-
+# 19:55 UTC); override at runtime via challenge/manual/manual_config.yaml:
+#   premarket_start_utc / premarket_end_utc / session_start_utc / session_end_utc
+DEFAULT_PREMARKET_START_SEC = 9 * 3600
+DEFAULT_PREMARKET_END_SEC = 13 * 3600 + 30 * 60
+DEFAULT_SESSION_START_SEC = 13 * 3600 + 30 * 60
+DEFAULT_SESSION_END_SEC = 19 * 3600 + 55 * 60
+
+_MANUAL_CFG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "manual_config.yaml")
+
+
+def _hm_to_sec(hm: str) -> int:
+    h, m = (int(x) for x in hm.split(":"))
+    return h * 3600 + m * 60
+
+
+def _load_window_config() -> tuple[int, int, int, int]:
+    """Load session/premarket windows from manual_config.yaml (UTC seconds).
+
+    Falls back to the historical NYSE defaults when the file or a key is
+    missing, so callers/tests that never touch config keep working unchanged.
+    Returns (premarket_start, premarket_end, session_start, session_end).
+    """
+    pm_start, pm_end = DEFAULT_PREMARKET_START_SEC, DEFAULT_PREMARKET_END_SEC
+    sess_start, sess_end = DEFAULT_SESSION_START_SEC, DEFAULT_SESSION_END_SEC
+    try:
+        if os.path.isfile(_MANUAL_CFG_PATH):
+            with open(_MANUAL_CFG_PATH, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            pm_start = _hm_to_sec(str(cfg.get("premarket_start_utc", "09:00")))
+            pm_end = _hm_to_sec(str(cfg.get("premarket_end_utc", "13:30")))
+            sess_start = _hm_to_sec(str(cfg.get("session_start_utc", "13:30")))
+            sess_end = _hm_to_sec(str(cfg.get("session_end_utc", "19:55")))
+    except Exception:  # pragma: no cover - config-dependent; never fat-
+        pass          #                       al: keep defaults on parse errors
+    return pm_start, pm_end, sess_start, sess_end
+
+
+PREMARKET_START_SEC, PREMARKET_END_SEC, SESSION_START_SEC, SESSION_END_SEC = (
+    _load_window_config())
 
 
 @dataclass

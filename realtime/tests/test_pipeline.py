@@ -149,7 +149,18 @@ def test_get_signal_grid_breakeven_trigger():
 
 
 def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
-    """TP2 = exactly 2x the TP1 distance, TP3 and SL = exactly 3x the step."""
+    """Targets/SL are exact multiples of the grid step, driven by the SAME
+    config the pipeline resolves at signal time.
+
+    The pipeline (pipeline.py generate_signal) derives targets and the stop
+    from the per-asset ``signal_grid`` resolved via ``get_signal_grid(cfg,
+    asset_cfg, regime=<regime>)``: TP{n} = entry + step * tp{n}_mult, SL =
+    entry - step * stop_mult. The multipliers live in config (the owner moved
+    XAUUSD's stop_mult 2.0 -> 1.5 on 2026-08-20 to cut premature stop-outs),
+    so the assertion read from config rather than hard-coding a ratio — that
+    keeps the test honest to the real profiles and the equal-step contract
+    intact (TP2==2x, TP3==3x under the shipped tp2_mult/tp3_mult).
+    """
     from model.ensemble import EnsembleSignal
     from realtime import pipeline as pipeline_module
 
@@ -167,6 +178,14 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
 
     monkeypatch.setattr(pipeline_module, "compute_ensemble_signal", fake_ensemble)
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
+
+    # Resolve the same grid the pipeline will use for its asset.
+    grid = get_signal_grid(CFG, CFG["assets"][pipeline.asset_key], regime="trend_up")
+    tp1_mult = float(grid.get("tp1_mult", 1.0))
+    tp2_mult = float(grid.get("tp2_mult", 2.0))
+    tp3_mult = float(grid.get("tp3_mult", 3.0))
+    stop_mult = float(grid.get("stop_mult", 3.0))
+
     result = pipeline.generate_signal(n_candles=300)
 
     assert result["bias"] == "long"
@@ -175,11 +194,12 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
     step = abs(tp1 - entry)
     assert step > 0
     assert result["step"] > 0
-    # rounding to 2 decimals gives ~0.01 tolerance per level
-    # Owner template (2026-08-18): TP1=1, TP2=2, TP3=3, Stop=2.
-    assert abs(abs(tp2 - entry) - 2.0 * step) < 0.05
-    assert abs(abs(tp3 - entry) - 3.0 * step) < 0.05
-    assert abs(abs(result["invalidation"] - entry) - 2.0 * step) < 0.05
+    # Long: targets above entry, SL below. Distances are exact multiples of
+    # step -> 2-decimal rounding gives ~0.05 tolerance per level.
+    assert abs(abs(tp1 - entry) - tp1_mult * step) < 0.05
+    assert abs(abs(tp2 - entry) - tp2_mult * step) < 0.05
+    assert abs(abs(tp3 - entry) - tp3_mult * step) < 0.05
+    assert abs(abs(result["invalidation"] - entry) - stop_mult * step) < 0.05
 
 
 # ---------------------------------------------------------------------------

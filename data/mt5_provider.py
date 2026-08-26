@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Final
 
 import MetaTrader5 as mt5
 import pandas as pd
+
+
+logger = logging.getLogger(__name__)
 
 
 _TIMEFRAMES: Final[dict[str, int]] = {
@@ -20,6 +25,147 @@ _TIMEFRAMES: Final[dict[str, int]] = {
 
 class MT5ProviderError(RuntimeError):
     """Raised when FxPro MT5 data cannot be read safely."""
+
+
+def detect_server_offset_hours(
+    symbol: str = "EURUSD",
+    max_abs_offset_hours: float = 14.0,
+    fallback: float = 0.0,
+) -> float:
+    """Measure the broker-server timezone offset from a live tick (float only).
+
+    See ``detect_server_offset_hours_detailed`` for the full semantics and the
+    reason why a fallback may be returned. This thin wrapper keeps callers
+    that only need the number (and the provider's own log lines) unchanged.
+    """
+    offset, _ = detect_server_offset_hours_detailed(
+        symbol=symbol, max_abs_offset_hours=max_abs_offset_hours, fallback=fallback,
+    )
+    return offset
+
+
+def detect_server_offset_hours_detailed(
+    symbol: str = "EURUSD",
+    max_abs_offset_hours: float = 14.0,
+    fallback: float = 0.0,
+) -> tuple[float, dict]:
+    """Measure the broker-server timezone offset from a live tick.
+
+    MT5 bar/tick timestamps are in SERVER time (FxPro EET/EEST = UTC+2/+3, and
+    the offset floats across EU/US DST transitions). The offset is measured as
+    ``tick.time - time.time()`` rounded to the nearest whole hour — the same
+    measurement that produced ``+3`` on 2026-08-25 (last tick 20:21 server vs
+    17:21 real UTC, delta +180 min).
+
+    The measurement is only trusted while the market is OPEN:
+      * on Sat/Sun (UTC) the market is closed and the last tick is stale, so
+        ``tick.time - now`` is downtime, not the offset — fallback is used;
+      * a delta beyond ``max_abs_offset_hours`` (real timezones span UTC-12..+14)
+        means the tick is days old (weekend/holiday) — fallback is used.
+    In those cases — or when the terminal is unreachable — ``fallback`` is
+    returned with a warning; the caller decides what the fallback should be
+    (e.g. the config's last measured value, so a DST flip that happens during
+    the closed weekend self-heals at the next open).
+
+    Returns ``(offset, info)`` where ``info`` carries the provenance for log
+    forensics: ``mode`` ("detected" | "fallback"), a human ``reason`` and the
+    measured ``delta_hours`` when available.
+    """
+    try:
+        initialize_mt5()
+        if not mt5.symbol_select(symbol, True):
+            raise MT5ProviderError(f"symbol_select failed for {symbol!r}")
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            raise MT5ProviderError(f"no tick available for {symbol!r}")
+    except Exception as exc:  # terminal down / symbol missing
+        logger.warning(
+            "server-offset auto-detect unavailable (%s); using fallback %.1fh",
+            exc, fallback,
+        )
+        return float(fallback), {
+            "mode": "fallback", "reason": f"mt5_unavailable: {exc}",
+            "delta_hours": None,
+        }
+
+    if _is_weekend_utc():
+        logger.warning(
+            "server-offset auto-detect: weekend, market closed; using fallback %.1fh",
+            fallback,
+        )
+        return float(fallback), {
+            "mode": "fallback", "reason": "weekend_market_closed",
+            "delta_hours": None,
+        }
+
+    delta_sec = float(tick.time) - time.time()
+    if abs(delta_sec) > max_abs_offset_hours * 3600:
+        logger.warning(
+            "server-offset auto-detect got implausible delta %.1fh (market closed?); "
+            "using fallback %.1fh", delta_sec / 3600.0, fallback,
+        )
+        return float(fallback), {
+            "mode": "fallback",
+            "reason": f"implausible_delta_hours={delta_sec / 3600.0:.1f}",
+            "delta_hours": delta_sec / 3600.0,
+        }
+
+    offset = float(round(delta_sec / 3600.0))
+    logger.info(
+        "server-offset auto-detect: %s tick delta %.1fs -> UTC%+dh",
+        symbol, delta_sec, int(offset),
+    )
+    return offset, {
+        "mode": "detected",
+        "reason": f"tick_delta_hours={delta_sec / 3600.0:.4f}",
+        "delta_hours": delta_sec / 3600.0,
+    }
+
+
+def _is_weekend_utc() -> bool:
+    """True on Saturday/Sunday (UTC) — the market is closed and a live-tick
+    offset measurement would be downtime, not the server offset."""
+    return datetime.now(timezone.utc).weekday() >= 5
+
+
+def resolve_server_offset(market_data: dict | None) -> float:
+    """Resolve the broker-server UTC offset from config, with auto-detection.
+
+    Thin wrapper over ``resolve_server_offset_detailed`` returning only the
+    number (the provider's own log lines still carry the detail).
+    """
+    offset, _ = resolve_server_offset_detailed(market_data)
+    return offset
+
+
+def resolve_server_offset_detailed(market_data: dict | None) -> tuple[float, dict]:
+    """Resolve the broker-server UTC offset from config, with provenance.
+
+    * numeric ``server_time_offset_hours`` -> used as-is (explicit override,
+      e.g. for historical backfills);
+    * ``"auto"`` -> measured from a fresh live tick at startup, falling back
+      to ``server_time_offset_hours_fallback`` (0.0 if unset) when the market
+      is closed or the terminal is unreachable;
+    * missing / unparseable -> 0.0 (legacy server-as-UTC behaviour).
+
+    Returns ``(offset, info)`` where ``info`` explains how the offset was
+    decided (``mode`` + ``reason``), so startup logs can show the WHY, not
+    just the value.
+    """
+    raw = (market_data or {}).get("server_time_offset_hours", 0.0)
+    if isinstance(raw, (int, float)):
+        return float(raw), {"mode": "explicit", "reason": f"config={raw!r}"}
+    if str(raw).strip().lower() == "auto":
+        fallback = float((market_data or {}).get("server_time_offset_hours_fallback", 0.0))
+        offset, info = detect_server_offset_hours_detailed(fallback=fallback)
+        info["fallback"] = fallback
+        return offset, info
+    try:
+        parsed = float(raw)
+        return parsed, {"mode": "explicit", "reason": f"config={raw!r}"}
+    except (TypeError, ValueError):
+        logger.warning("invalid server_time_offset_hours %r; defaulting to 0.0", raw)
+        return 0.0, {"mode": "invalid", "reason": f"unparseable config={raw!r}"}
 
 
 def initialize_mt5() -> None:

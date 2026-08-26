@@ -21,6 +21,9 @@ from challenge.risk import ChallengeRisk
 from challenge.strategy import OpeningRangeBreakout
 from challenge.windows import in_flatten_window, in_session_window
 from challenge.manual.discipline_report import generate_report, format_report
+from challenge.stealth.runner_bridge import (
+    adapt_signal, build_engine, execute_actions, execute_plan, now_et,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,14 +71,67 @@ def _log_trade(row):
         w.writerow({k: row.get(k, "") for k in header})
 
 
-def _manage_positions(conn, state, quotes, cfg=None):
+def _managed_to_engine_position(info, floating_pnl):
+    """Shape a state['managed'] entry into the engine position dict."""
+    return {
+        "symbol": info.get("symbol", ""),
+        "side": info.get("side", info.get("bias", "")),
+        "qty": int(info.get("qty", 0)),
+        "entry": float(info.get("entry", 0)),
+        "stop": float(info.get("stop", 0)),
+        "tp": float(info.get("tp", 0)),
+        "remaining_shares": int(info.get("remaining_shares", info.get("qty", 0))),
+        "already_partialed": bool(info.get("partial_closed", False)),
+        "current_price": float(info.get("current_price", info.get("entry", 0))),
+        "floating_pnl": float(floating_pnl or 0.0),
+    }
+
+
+def _manage_positions(conn, state, quotes, cfg=None, *, engine=None, now_et=None,
+                      floating_pnl=None):
     """Manage open positions: stop/TP check.
 
-    BE + partial close are DISABLED by default (backtest 2026-08-22 showed
-    they hurt WR and PF on 1-min timeframe). Enable via
-    challenge.risk.manage_positions: true in config.
+    When the stealth engine is active, this routes each open position through
+    ``engine.manage_position`` and applies the resulting actions (trailing SL,
+    partial exits, early closes) via the connector. Otherwise it uses the
+    legacy stop/TP check (BE + partial close disabled by default — backtest
+    2026-08-22 showed they hurt WR/PF on 1-min timeframe; enable via
+    challenge.risk.manage_positions: true).
     """
     managed = state["managed"]
+    # Stealth-managed path: delegate to the equity-curve humanizer.
+    if engine is not None and now_et is not None:
+        for symbol in list(managed):
+            info = managed[symbol]
+            info["symbol"] = symbol  # carry the managed key into the engine dict
+            info["current_price"] = quotes.get(symbol, {}).get("last")
+            position = _managed_to_engine_position(info, floating_pnl)
+            try:
+                actions = engine.manage_position(position, now_et, floating_pnl=floating_pnl or 0.0)
+            except Exception as exc:  # never take the loop down
+                logger.warning("engine.manage_position failed for %s: %s", symbol, exc)
+                continue
+            if not actions:
+                continue
+            execute_actions(conn, position, actions)
+            for action in actions:
+                act = action.get("action")
+                if act == "partial_close":
+                    info["partial_closed"] = True
+                    info["remaining_shares"] = max(
+                        0, int(info.get("qty", 0)) - int(action.get("shares", 0)))
+                elif act == "close_position":
+                    # Full close → drop from managed (the close detector also logs it).
+                    _log_trade({"ts": datetime.now().isoformat(timespec="seconds"),
+                                "symbol": symbol, "side": info.get("side", ""),
+                                "qty": info.get("qty", ""), "entry": info.get("entry", ""),
+                                "stop": info.get("stop", ""), "tp": info.get("tp", ""),
+                                "status": "managed_close", "exit_price": "", "pnl": "",
+                                "session_bucket": info.get("session_bucket", ""),
+                                "volume_ratio": f"{info.get('volume_ratio', 0):.2f}"})
+                    del managed[symbol]
+                    break
+        return
     for symbol in list(managed):
         info = managed[symbol]
         last = quotes.get(symbol, {}).get("last")
@@ -328,8 +384,17 @@ def _pretrade_checklist(sig, risk, state, snap, now, cfg):
     return True, "ok"
 
 
-def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
-    """Process signals through the pre-trade checklist before execution."""
+def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None, *,
+                    engine=None, now_et=None, equity=None, day_start=None,
+                    total_start=None, floating_pnl=None):
+    """Process signals through the pre-trade checklist before execution.
+
+    When the stealth engine is active, each signal that passes the checklist
+    is further routed through ``engine.process_signal``; a rejected signal is
+    silently skipped (debug log), and an accepted one becomes an execution
+    plan whose qty/stop/tp come from the humanized risk profile. Otherwise the
+    legacy checklist + qty sizing path runs unchanged.
+    """
     quotes = snap["quotes"]
     signals = strategy.update(quotes, now)
     for sig in signals:
@@ -339,28 +404,58 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
         if not ok:
             logger.info("BLOCKED %s: %s", sig.symbol, reason)
             continue
-        # Recompute qty (checklist verified N≥1, now get exact int)
-        qty = risk.position_size(sig.entry, snap["equity"])
-        if qty < 1:
-            logger.info("skip %s: qty=%d below 1 share (final check)", sig.symbol, qty)
-            continue
-        ok = conn.place_order(sig.symbol, sig.bias, qty, sig.stop, sig.tp)
-        if not ok:
-            logger.warning("order rejected: %s %s x%d", sig.bias, sig.symbol, qty)
-            continue
+
+        # Stealth gate: run the signal through process_signal (gates + delay +
+        # humanized risk). None → silent skip, exactly as specified.
+        if engine is not None and now_et is not None:
+            orb_sig = adapt_signal(sig)
+            plan = engine.process_signal(
+                orb_sig, now_et,
+                equity=equity or snap.get("equity", 0.0),
+                floating_pnl=floating_pnl or 0.0,
+                daily_pnl=(equity or snap.get("equity", 0.0)) - (day_start or (equity or 0.0)),
+                overall_pnl=(equity or snap.get("equity", 0.0)) - (total_start or (equity or 0.0)),
+            )
+            if plan is None:
+                logger.debug("GATE SKIP %s: engine rejected signal", sig.symbol)
+                continue
+            ok = execute_plan(conn, plan)
+            if not ok:
+                logger.warning("engine order rejected: %s %s", plan.get("bias"), sig.symbol)
+                continue
+            qty = int(plan.get("shares", 0))
+            entry = plan.get("entry", sig.entry)
+            stop = plan.get("stop", sig.stop)
+            tp = plan.get("tp", sig.tp)
+            engine.record_action()
+            engine.session.record_trade()
+        else:
+            # Recompute qty (checklist verified N≥1, now get exact int)
+            qty = risk.position_size(sig.entry, snap["equity"])
+            if qty < 1:
+                logger.info("skip %s: qty=%d below 1 share (final check)", sig.symbol, qty)
+                continue
+            ok = conn.place_order(sig.symbol, sig.bias, qty, sig.stop, sig.tp)
+            if not ok:
+                logger.warning("order rejected: %s %s x%d", sig.bias, sig.symbol, qty)
+                continue
+            entry, stop, tp = sig.entry, sig.stop, sig.tp
+
         state["managed"][sig.symbol] = {
-            "side": sig.bias, "qty": qty, "entry": sig.entry,
-            "stop": sig.stop, "tp": sig.tp,
+            "side": sig.bias, "qty": qty, "entry": entry,
+            "stop": stop, "tp": tp,
             "opened": datetime.now().isoformat(timespec="seconds"),
             "session_bucket": getattr(sig, "session_bucket", "unknown"),
             "volume_ratio": getattr(sig, "volume_ratio", 0.0),
             "regime": getattr(sig, "regime", "unknown"),
+            "remaining_shares": qty,
+            "partial_closed": False,
         }
         if state["day"] != now.date().isoformat():
             state["trading_days"] += 1
         _log_trade({"ts": datetime.now().isoformat(timespec="seconds"),
                     "symbol": sig.symbol, "side": sig.bias, "qty": qty,
-                    "entry": sig.entry, "stop": sig.stop, "tp": sig.tp,
+                    "entry": entry, "stop": stop, "tp": tp,
                     "status": "open", "exit_price": "", "pnl": "",
                     "session_bucket": getattr(sig, "session_bucket", ""),
                     "volume_ratio": f"{getattr(sig, 'volume_ratio', 0):.2f}",
@@ -368,7 +463,7 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None):
         quality = getattr(sig, "_quality", {})
         q_str = f"Q={quality.get('total', '?')}/{quality.get('grade', '?')}" if quality else "Q=?"
         logger.info("OPENED %s %s x%d @ %.2f (stop %.2f / tp %.2f) [%s, vol %.1fx, %s]",
-                    sig.bias, sig.symbol, qty, sig.entry, sig.stop, sig.tp,
+                    sig.bias, sig.symbol, qty, entry, stop, tp,
                     getattr(sig, "session_bucket", "?"), getattr(sig, "volume_ratio", 0), q_str)
 
 
@@ -386,6 +481,12 @@ def main():
         watchlist = cfg.get("strategy", {}).get("watchlist") or []
         risk = ChallengeRisk(cfg)
         strategy = OpeningRangeBreakout(cfg)
+        # Stealth layer (opt-in): routes ORB signals through process_signal and
+        # positions through manage_position. None when challenge.stealth.enabled
+        # is false, so the legacy path is unchanged.
+        engine = build_engine(cfg)
+        if engine is not None:
+            logger.info("StealthExecutionEngine ENABLED: signals gated + positions managed")
         state = _load_state()
         poll = int(cfg.get("platform", {}).get("poll_seconds", 5))
         last_outside_log = 0
@@ -416,6 +517,30 @@ def main():
                     state["day"] = today
                 day_start = state["day_start_equity"]
                 total_start = state["total_start_equity"]
+                # Stealth equity monitor: floating PnL from the platform snapshot.
+                # close positions BEFORE the platform's own auto-close when the
+                # daily/overall floating cushion is breached.
+                floating_pnl = float(snap.get("pnl") or 0.0)
+                daily_pnl = equity - day_start
+                overall_pnl = equity - total_start
+                if engine is not None and state["managed"]:
+                    try:
+                        if engine.should_force_close(floating_pnl, overall_pnl):
+                            for sym in list(state["managed"]):
+                                info = state["managed"][sym]
+                                info["symbol"] = sym
+                                position = _managed_to_engine_position(
+                                    info, floating_pnl)
+                                plan = engine.force_close_plan(position, now_et(now))
+                                if plan:
+                                    execute_actions(conn, position, [plan])
+                            state["managed"] = {}
+                            logger.warning(
+                                "ENGINE FORCE CLOSE: floating daily/overall cushion hit "
+                                "(daily=%+.2f overall=%+.2f)", daily_pnl, overall_pnl)
+                            engine.session.mark_positions_closed()
+                    except Exception as exc:  # non-fatal
+                        logger.warning("force-close check failed: %s", exc)
                 action, reason = risk.evaluate(equity, day_start, total_start)
                 if action == "halt":
                     conn.flatten()
@@ -452,8 +577,13 @@ def main():
                         _save_state(state)
                     time.sleep(30)
                     continue
-                _manage_positions(conn, state, snap["quotes"], cfg)
-                _handle_signals(conn, risk, strategy, state, snap, now, cfg)
+                _manage_positions(conn, state, snap["quotes"], cfg,
+                                  engine=engine, now_et=now_et(now),
+                                  floating_pnl=floating_pnl)
+                _handle_signals(conn, risk, strategy, state, snap, now, cfg,
+                                engine=engine, now_et=now_et(now),
+                                equity=equity, day_start=day_start,
+                                total_start=total_start, floating_pnl=floating_pnl)
                 _save_state(state)
                 time.sleep(poll)
             except NotImplementedError as e:

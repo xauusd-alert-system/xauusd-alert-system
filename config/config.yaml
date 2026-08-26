@@ -105,11 +105,20 @@ market_data:
   closed_candles_only: true
   # N10 (audit 2026-08-10): MT5 bar timestamps are in the BROKER-SERVER timezone,
   # not UTC (FxPro EET/EEST = UTC+2/+3, and the offset floats across EU/US DST
-  # transitions). When non-zero, the provider shifts raw server timestamps to true
-  # UTC and adjusts range bounds accordingly, so session tagging / labeling / the
-  # range tail-cut are not silently shifted. Default 0 preserves legacy behaviour
-  # (server treated as UTC); set it to the measured broker offset once known.
-  server_time_offset_hours: 0
+  # transitions). The provider shifts raw server timestamps to true UTC and
+  # adjusts range bounds accordingly, so session tagging / labeling / the range
+  # tail-cut are not silently shifted.
+  #
+  # "auto" = measured at startup from a fresh live tick (tick.time - time.time(),
+  # rounded to the nearest hour) — no manual edit needed when the broker switches
+  # between EEST (+3, summer) and EET (+2, winter). Measured 2026-08-25: last tick
+  # 20:21 server vs 17:21 real UTC, delta +180 min. When the market is closed
+  # (weekend/holiday) or the terminal is unreachable, the fallback below is used;
+  # detection self-heals at the next open (DST flips happen Sunday 01:00 UTC,
+  # while the market is closed, so the stale value only lives for the weekend).
+  # A numeric value overrides detection entirely (e.g. for historical backfills).
+  server_time_offset_hours: auto
+  server_time_offset_hours_fallback: 3
 
 
 general:
@@ -205,7 +214,7 @@ assets:
       # XAGUSD signals with conf 0.88/0.97 were previously killed by the 6/6
       # position cap, not by this bar; the bar itself is now also lowered.
       # OWNER REQUEST 2026-08-20: partially re-tightened 0.65 -> 0.70.
-      min_confidence_to_alert: 0.70
+      min_confidence_to_alert: 0.90
       suppress_sessions: [asia, off_session]
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.15
@@ -568,7 +577,7 @@ backtest:
   commission_per_trade: 0.07
   swap_per_night: 0.0
   initial_balance: 100.0
-  volume: 0.10
+  volume: 1
   max_daily_loss_pct: 5.0
   risk_per_trade_pct: 2.0
   walk_forward:
@@ -591,17 +600,15 @@ risk_throttle:
   # risk window; with XAGUSD off expect ~15-25 legs/day normally.
   # 30 = never blocks a busy-but-normal day, still stops signal storms
   # (the old 5 blocked ~90% of signals from the first hour).
-  max_trades_per_day: 30          # global daily trade cap (resets at UTC midnight)
-  loss_streak_threshold: 2       # consecutive losses before cooldown activates
-  cooldown_minutes: 45           # pause duration after loss_streak_threshold
-  hard_stop_streak: 99           # DISABLED 2026-08-24 per owner request (was 3)
-  risk_step_down_map:
-    1: 1.0                       # 1 loss: full risk
-    2: 0.5                       # 2 losses: half risk
-    3: 0.25                      # 3+ losses: quarter risk
-  max_daily_loss_pct: 99         # DISABLED 2026-08-24
-  # AUDIT 2026-08-23 B: disabled per owner request 2026-08-24
-  max_daily_loss_usd: 999999
+  # Owner request 2026-08-24: keep only the daily trade cap. Loss-streak,
+  # cooldown, hard-stop, risk step-down and daily-loss gates are disabled.
+  max_trades_per_day: 100        # global daily trade cap (resets at UTC midnight)
+  loss_streak_threshold: 0       # disabled
+  cooldown_minutes: 0             # disabled
+  hard_stop_streak: 0             # disabled
+  risk_step_down_map: {1: 1.0}    # no risk step-down
+  max_daily_loss_pct: 0           # disabled
+  max_daily_loss_usd: null         # disabled
   reset_on_utc_midnight: true    # reset counters at UTC midnight
 
 
@@ -692,11 +699,8 @@ execution:
   # Global GROUP budget: 6 groups covers all 5 enabled assets concurrently
   # (3 legs per asset = 15 live positions worst case).
   max_concurrent_positions_global: 6
-  # Daily cap on NEW trades per asset (circuit-breaker budget). Read by
-  # execution/risk_manager.py (W8) instead of a hard-coded 10.
-  # TRIAL-48H: raised 10 -> 20.
-  # OWNER REQUEST 2026-08-20: partially re-tightened 20 -> 15/day.
-  max_daily_trades_per_asset: 15
+  # Daily cap on NEW trades per asset (separate from fixed-lot sizing).
+  max_daily_trades_per_asset: 100
   # Owner request 2026-08-19: the trader must be OFF while the market is
   # inactive and while unattended. Windows in UTC (local = UTC+5). During a
   # halt window the trader flattens its positions and skips all trading
@@ -723,11 +727,12 @@ execution:
     # the trader completely OFF until a timestamp. Cleared (null) so day trading
     # continues; the night window and weekend window still apply.
     manual_halt_until_utc: null
-  # Live order volume in lots. Read by execution/mt5_trader.py (W2) instead of a
-  # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
-  # it falls back to backtest.volume (default 0.10, which yields fillable
-  # tranches 0.05 / 0.03 / 0.02).
+  # Live order volume in lots for every enabled forex/crypto asset.
   volume: 1
+  # How often (seconds) the breakeven/close-detector sweep runs. The broker
+  # fills TP1 legs on its own; this controls how quickly the bot pulls the
+  # remaining legs' SL to entry after a TP1 fill (legacy was 30s).
+  be_check_interval_seconds: 3
   signal_ranking_metric: confidence   # confidence | ev | probability
 
 
@@ -736,7 +741,9 @@ execution:
 # (priority 3). DEFAULT OFF: enabling changes live order sizes, so it is a
 # separate, audited step (execution/risk_sizer.py implements the math).
 risk:
-  enabled: true
+  # Demo override: fixed 1-lot legs are intentional; risk-based sizing and
+  # drawdown throttling are bypassed by the live execution path.
+  enabled: false
   # TRIAL-48H (2026-08-18): risk budgets raised 4x for the observation window
   # (0.25% -> 1% per trade, cluster 0.4% -> 2%, total 0.75% -> 3% of equity).
   # OWNER REQUEST 2026-08-20: partially re-tightened to 0.5% per trade.
@@ -781,8 +788,16 @@ validation:
   # the run. Build a manifest with:
   #   python -m scripts.build_provenance_manifest --asset XAUUSD --timeframe M15 \
   #       --broker <BROKER> --broker-symbol GOLD --out config/provenance/xauusd_m15.json
-  require_provenance_manifest: false
-  provenance_manifest_path: null
+  # Wave-0 provenance gate: when true, train_mt5 / run_backtest verify the
+  # frozen manifest (data_hash, source window, candle count) against the DB
+  # BEFORE any feature/label work and fail closed on any mismatch.
+  #
+  # provenance_manifest_path may be a single manifest FILE (single-asset
+  # setups) or a DIRECTORY containing one manifest per (asset, timeframe)
+  # named <ASSET>_<TF>_fxpro.json — regenerated by
+  # scripts/rebuild_provenance_manifests.py after any DB rebuild.
+  require_provenance_manifest: true
+  provenance_manifest_path: config/provenance
 
 # ===== TRADE PROFILES (TradeGroupSpec v1, ТЗ §8/§9) =====
 # Versioned deterministic geometry/risk profiles used by the trade-group path
@@ -936,3 +951,58 @@ challenge:
   browser:
     headless: false
     profile_dir: data/challenge_browser_profile
+
+  # --- Stealth layer configuration ---
+  stealth:
+    # Stealth execution layer (StealthExecutionEngine). OFF by default so the
+    # legacy runner path is unchanged; set to true to route ORB signals through
+    # process_signal and positions through manage_position.
+    enabled: false
+    # Risk parameters (override challenge.risk for stealth)
+    risk_base_pct: 0.01          # 1% base risk per trade
+    start_balance: 1000.0
+    daily_hard_stop: -30.0       # shut down at -$30 floating daily
+    overall_buffer: -90.0        # shut down at -$90 floating overall
+    leverage: 5.0
+    profit_target: 80.0
+    # ORB strategy tickers (rotation by premarket volume)
+    tickers: [TSLA, AAPL, NVDA, AMZN, META]
+    # Session windows (ET)
+    orb_range_start: "09:30"
+    orb_range_end: "09:45"
+    orb_entry_start: "09:45"
+    orb_entry_end: "10:30"
+    all_positions_close: "15:30"
+    tab_open_min: "09:20"
+    tab_open_max: "09:28"
+    wind_down_min: "10:30"
+    wind_down_max: "11:00"
+    daily_trade_cap: 2
+    skip_day_chance: 0.08
+    # Daily reset (00:00-00:13 UTC+4)
+    daily_reset_utc4_offset: 4
+    # Browser fingerprint
+    viewport:
+      width: 1920
+      height: 1080
+    timezone: "America/New_York"
+    locale: "en-US"
+    # Equity curve humanizer
+    partial_exit_chance: 0.25
+    early_close_chance: 0.12
+    trail_activation_r: 1.5
+    # News/earnings (connect to real feeds or leave empty)
+    news_calendar: []
+    earnings_calendar_path: challenge/manual/earnings_calendar.yaml
+    # Hotkey map (verify in terminal: Tools → Hotkey settings)
+    browser_hotkey_map:
+      buy_market: "F1"
+      sell_market: "F2"
+      buy_limit: "F3"
+      sell_limit: "F4"
+      cancel_all: "F9"
+      close_all: "F10"
+      qty_up: "Shift+F1"
+      qty_down: "Shift+F2"
+      price_up: "Shift+F3"
+      price_down: "Shift+F4"

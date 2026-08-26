@@ -496,9 +496,14 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
 
             # Update quality score with actual bias now that it's determined
             from challenge.manual.quality_gate import compute_quality_for_setup
-            setup.quality_score = compute_quality_for_setup(
+            qs_result = compute_quality_for_setup(
                 candles_1m, date, setup.signal_bar, setup.impulse_bar,
                 trend15=setup.trend15, bias=bias, setup_type="impulse")
+            if isinstance(qs_result, dict):
+                setup.quality_score = qs_result["total"]
+                setup.quality_components = qs_result
+            else:
+                setup.quality_score = qs_result
 
             # RESEARCH 2026-08-22: S/R proximity filter (us_stocks audit §5.2)
             # Reject signals too close to key support/resistance zones.
@@ -532,6 +537,9 @@ def scan_gap_fade(symbol: str, date, candles_1m, session_start_utc=SESSION_START
     Stop beyond the gap extreme. One signal per symbol at session open.
     Does NOT depend on trend/impulse/pullback — orthogonal edge."""
     cfg = cfg or {}
+    # Check if gap_fade is enabled
+    if not cfg.get("gap_fade_enabled", True):
+        return Setup(symbol, str(date), "none", "none", no_go=["gap_fade disabled in config"])
     day = bars_of_day(candles_1m, date)
     if len(day) < 5:
         return Setup(symbol, str(date), "none", "none", no_go=["insufficient data"])
@@ -577,10 +585,15 @@ def scan_gap_fade(symbol: str, date, candles_1m, session_start_utc=SESSION_START
     from challenge.manual.quality_gate import compute_quality_for_setup
     day_start = dt.datetime.combine(date, SESSION_START_UTC, tzinfo=dt.timezone.utc).timestamp()
     open_bar = day[0] if day else None
-    setup.quality_score = compute_quality_for_setup(
+    qs_result = compute_quality_for_setup(
         candles_1m, date, open_bar, None,
         trend15="", bias=bias, setup_type="gap_fade",
         entry=entry, target=target)
+    if isinstance(qs_result, dict):
+        setup.quality_score = qs_result["total"]
+        setup.quality_components = qs_result
+    else:
+        setup.quality_score = qs_result
     # Earnings blackout still applies
     ecal = _load_earnings(cfg)
     if ecal:
@@ -654,9 +667,14 @@ def scan_opening_drive(symbol: str, date, candles_1m,
                   signal_bar=drive_bars[-1])
     # Compute quality score
     from challenge.manual.quality_gate import compute_quality_for_setup
-    setup.quality_score = compute_quality_for_setup(
+    qs_result = compute_quality_for_setup(
         candles_1m, date, drive_bars[-1], None,
         trend15="", bias=bias, setup_type="opening_drive")
+    if isinstance(qs_result, dict):
+        setup.quality_score = qs_result["total"]
+        setup.quality_components = qs_result
+    else:
+        setup.quality_score = qs_result
     ecal = _load_earnings(cfg)
     if ecal:
         blocked, src = earnings_blackout(symbol, date, ecal,

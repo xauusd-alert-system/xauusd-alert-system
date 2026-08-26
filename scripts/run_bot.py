@@ -70,6 +70,11 @@ def main() -> None:
     driver.start()
 
     # 3. Build the real trader.
+    # Use a SEPARATE management-state file so simulation positions never
+    # leak into the live runner (a sim run wrote tickets 100001-100009 into
+    # logs/live_management_state.json; the next real start "closed" those
+    # phantoms with $0.00 Telegram notifications).
+    os.environ.setdefault("MANAGEMENT_STATE_PATH", "logs/sim_management_state.json")
     from execution.mt5_trader import MultiAssetMT5Trader
     trader = MultiAssetMT5Trader()
 

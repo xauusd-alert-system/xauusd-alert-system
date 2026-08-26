@@ -196,26 +196,29 @@ class TradeThrottle:
         with self._lock:
             self._reset_if_new_day(current_equity)
 
-            # 1. Hard stop (critical loss streak)
-            if self.hard_stopped:
+            # Loss-streak, cooldown and daily-loss protection are disabled by
+            # policy when their configured thresholds are non-positive/explicitly
+            # disabled. The daily trade cap remains the only throttle gate.
+            if self.hard_stop_streak > 0 and self.hard_stopped:
                 return False, f"hard_stop_streak: {self.consecutive_losses} consecutive losses >= {self.hard_stop_streak}; trading halted for today"
 
-            # 2. Cooldown active
             now = time.time()
-            if self.cooldown_until > 0 and now < self.cooldown_until:
+            if self.cooldown_minutes > 0 and self.cooldown_until > 0 and now < self.cooldown_until:
                 remaining = int(self.cooldown_until - now)
                 return False, f"cooldown_active: {self.consecutive_losses} consecutive losses; wait {remaining}s ({self.cooldown_minutes}min window)"
 
-            # 3. Daily trade limit
+            # Daily trade limit
             if self.trades_today >= self.max_trades_per_day:
                 return False, f"daily_limit_reached: {self.trades_today}/{self.max_trades_per_day} trades today"
 
-            # 4. Daily loss limit — absolute USD first (fires on any account
-            # size), then the %-based fallback for small accounts.
-            if self.starting_equity > 0 and current_equity > 0:
+            # 4. Daily loss limit — disabled when max_daily_loss_pct <= 0 or
+            # when configured above the meaningful percentage range.
+            if (self.starting_equity > 0 and current_equity > 0
+                    and 0 < self.max_daily_loss_pct < 1000000000):
                 daily_pnl = current_equity - self.starting_equity
-                if self.max_daily_loss_usd is not None \
-                        and daily_pnl <= -self.max_daily_loss_usd:
+                if (self.max_daily_loss_usd is not None
+                        and self.max_daily_loss_usd > 0
+                        and daily_pnl <= -self.max_daily_loss_usd):
                     self.hard_stopped = True
                     self.halt_reason = (
                         f"daily_loss_limit: ${daily_pnl:,.2f} <= "
@@ -281,7 +284,7 @@ class TradeThrottle:
                 )
 
                 # Hard stop
-                if self.consecutive_losses >= self.hard_stop_streak:
+                if self.hard_stop_streak > 0 and self.consecutive_losses >= self.hard_stop_streak:
                     newly_halted = not self.hard_stopped
                     self.hard_stopped = True
                     self.halt_reason = (
@@ -293,7 +296,7 @@ class TradeThrottle:
                         self._notify_halt()
 
                 # Cooldown (only if not already hard-stopped)
-                elif self.consecutive_losses >= self.loss_streak_threshold:
+                elif self.cooldown_minutes > 0 and self.loss_streak_threshold > 0 and self.consecutive_losses >= self.loss_streak_threshold:
                     self.cooldown_until = time.time() + (self.cooldown_minutes * 60)
                     logger.warning(
                         f"TradeThrottle: cooldown activated — "

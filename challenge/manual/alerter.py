@@ -339,13 +339,30 @@ def resolve_open_setups(access) -> int:
                "entry": rec["entry"], "stop": rec["stop"],
                "target": rec["target"], "rr": rec.get("rr", ""),
                "outcome": outcome, "r": r, "minutes": mins,
-               "resolved_utc": now.isoformat(timespec="seconds")}
+               "resolved_utc": now.isoformat(timespec="seconds"),
+               "setup_type": rec.get("setup_type", ""),
+               "quality_score": rec.get("quality_score", 0)}
         outcomes_mod.append_journal(OUTCOMES_CSV, row)
         resolved[key] = {"outcome": outcome, "r": r,
-                         "resolved_utc": row["resolved_utc"]}
+                         "resolved_utc": row["resolved_utc"],
+                         "setup_type": rec.get("setup_type", ""),
+                         "quality_score": rec.get("quality_score", 0)}
         outcomes_mod.save_resolved(RESOLVED_FILE, resolved)
         stats = outcomes_mod.compute_stats(outcomes_mod.read_journal(OUTCOMES_CSV))
         outcomes_mod.save_stats(STATS_FILE, stats)
+        # Record outcome for live quality calibration
+        try:
+            from challenge.manual import quality_score_live as qsl
+            qc = rec.get("quality_components", {})
+            if qc:
+                qsl.record_outcome(
+                    volume_ratio=qc.get("volume_ratio", 1.0),
+                    tod_score=qc.get("time_of_day", 0),
+                    regime_score=qc.get("regime", 0),
+                    r_outcome=r,
+                )
+        except Exception as qe:
+            print(f"{now:%H:%M:%S} UTC: live quality cal record failed: {qe}", file=sys.stderr)
         changed += 1
         print(f"{now:%H:%M:%S} UTC: исход {key}: {outcome} R{r:+.2f}", file=sys.stderr)
         try:
@@ -386,6 +403,17 @@ def scan_watchlist(access, only_sym=None) -> list[dict]:
                     print(f"{sym}: {stype} REJECTED quality={result.quality_score}",
                           file=sys.stderr)
                     continue
+                # Crypto regime filter: block crypto_beta trades during sell-offs
+                from challenge.manual import crypto_regime
+                cluster = symbol_cluster(sym)
+                regime = crypto_regime.load_regime()
+                if regime:
+                    blocked, block_reason = crypto_regime.should_block_trade(
+                        regime, result.bias, cluster)
+                    if blocked:
+                        print(f"{sym}: {stype} BLOCKED by crypto regime: {block_reason}",
+                              file=sys.stderr)
+                        continue
                 results.append({"setup": result, "setup_type": stype})
                 print(f"{sym}: {stype} TRADABLE grade={result.grade} bias={result.bias} Q={result.quality_score}",
                       file=sys.stderr)
@@ -503,6 +531,11 @@ def main() -> int:
                         tg_send(outcomes_mod.format_stats_summary(stats))
                     except Exception as e:
                         print(f"{now:%H:%M:%S} UTC: tg stats msg failed: {e}", file=sys.stderr)
+                    # Per-symbol profitability report
+                    try:
+                        tg_send(outcomes_mod.format_symbol_stats(stats))
+                    except Exception as e:
+                        print(f"{now:%H:%M:%S} UTC: tg symbol stats msg failed: {e}", file=sys.stderr)
 
                 # Weekly auto-calibration: каждый понедельник 00:00-01:00 UTC
                 # (после закрытия воскресной сессии). Пересчитываем пороги качества.
@@ -529,6 +562,20 @@ def main() -> int:
 
         # --- normal in-session scan ---
         try:
+            # Update crypto regime from BTC data
+            try:
+                from challenge.manual import crypto_regime
+                btc_sid = SYMBOLS.get("COIN")  # Use COIN as BTC proxy
+                if btc_sid:
+                    btc_candles = fetch_candles(access, btc_sid, candles_count=SCAN_CANDLES)
+                    regime = crypto_regime.classify_crypto_regime(btc_candles)
+                    crypto_regime.save_regime(regime)
+                    if regime.score <= 40:
+                        print(f"{now:%H:%M:%S} UTC: CRYPTO REGIME {regime.label} ({regime.score}/100) - {regime.reason}",
+                              file=sys.stderr)
+            except Exception as re:
+                print(f"{now:%H:%M:%S} UTC: crypto regime update failed: {re}", file=sys.stderr)
+
             sent = load_sent()
             today = now.date().isoformat()
             hits = scan_watchlist(access)
@@ -569,7 +616,8 @@ def main() -> int:
                                  "signal_time": sb.get("time") if sb else None,
                                  "rr": res.rr, "cluster": cluster,
                                  "setup_type": setup_type,
-                                 "quality_score": getattr(res, 'quality_score', 0)}
+                                 "quality_score": getattr(res, 'quality_score', 0),
+                                 "quality_components": getattr(res, 'quality_components', {})}
                     save_sent(sent)
                     print(f"{now:%H:%M:%S} UTC: alert [{setup_type}] sent for {res.symbol}",
                           file=sys.stderr)

@@ -22,7 +22,7 @@ import types
 import pytest
 
 from execution import mt5_trader as trader_mod
-from execution.mt5_trader import MultiAssetMT5Trader
+from execution.tests.harness import build_trader
 
 # Broker facts probed on the live FxPro account (2026-08-18):
 # XAGUSD: trade_stops_level = 20 pts ($0.02), XAUUSD: 0.
@@ -49,20 +49,15 @@ def _pos(ticket, symbol, type_, entry, sl, tp=None):
 
 
 def _trader(tmp_path, active):
-    t = object.__new__(MultiAssetMT5Trader)
-    t.magic_number = 777111
-    t.active_trades = dict(active)
-    t.be_state = {}
-    t.be_trigger_by_symbol = {}
-    t.trailing_atr_mult_by_symbol = {}
-    t.streak_losses = {}
-    t.signal_features = {}
-    t.last_close_pnl = {}
-    t.dry_run = False
-    t.bot = _FakeBot()
-    t.management_state_path = str(tmp_path / "mgmt_state.json")
-    t.trade_db_path = str(tmp_path / "trades.sqlite")
-    return t
+    return build_trader(
+        active_trades=dict(active),
+        be_state={},  # per-symbol dict shape used by the BE retry logic
+        be_trigger_by_symbol={},
+        trailing_atr_mult_by_symbol={},
+        bot=_FakeBot(),
+        management_state_path=str(tmp_path / "mgmt_state.json"),
+        trade_db_path=str(tmp_path / "trades.sqlite"),
+    )
 
 
 def _fake_world(monkeypatch, trader, positions, deals_by_ticket=None, symbol_ticks=None):

@@ -20,15 +20,13 @@ from challenge.windows import in_session_window, minutes_of
 logger = logging.getLogger("challenge_strategy")
 
 
-# RESEARCH: session-time quality buckets (local time = platform time).
-# Opening range: 18:30-19:00 (accumulation, no entries).
-# Prime window: 19:00-20:00 (first 30-90 min — strongest trends, highest
-#   volume per SMB Capital ORB research).
-# Normal window: 20:00-00:15 (mid-session, reduced quality).
-# Degraded window: 00:15-00:45 (last 30 min — position squaring, weak moves).
-# Flatten window: 00:45-00:55 (mandatory close).
-PRIME_START_MIN = minutes_of("19:00")   # 30 min after open
-DEGRADED_START_MIN = minutes_of("00:15")  # ~30 min before flatten
+# RESEARCH: session-time quality buckets are DERIVED from the configured
+# session windows (challenge.session in config.yaml), not hardcoded:
+#   opening range : [start, start+range_minutes)      — accumulation, no entries
+#   prime window  : [start+30min, flatten-30min)      — strongest trends/volume
+#   degraded      : [flatten-30min, flatten)          — position squaring
+#   flatten       : [flatten, end)                    — mandatory close
+# (All times local = platform time; windows may wrap midnight.)
 
 
 @dataclass
@@ -60,6 +58,13 @@ class OpeningRangeBreakout:
         # RESEARCH: S/R proximity filter — skip signals within this many
         # dollars of key levels (previous high/low, premarket extremes).
         self.sr_proximity_usd = float(s.get("sr_proximity_buffer_usd", 2.0))
+        # Session window anchors derived from config (local platform time), so a
+        # change to challenge.session propagates into range/bucket logic.
+        sess = cfg.get("session", {})
+        self._range_start_min = minutes_of(sess.get("start_local", "18:30"))
+        self._flatten_min = minutes_of(sess.get("flatten_local", "00:45"))
+        self._prime_start_min = (self._range_start_min + 30) % 1440
+        self._degraded_start_min = (self._flatten_min - 30) % 1440
         self._session_date = None
         self._symbols = {}
         self._avg_volumes = {}  # rolling avg volume per symbol
@@ -73,13 +78,17 @@ class OpeningRangeBreakout:
             self._price_history = {}
 
     def _session_bucket(self, now) -> str:
-        """Classify current time into session quality bucket (research §5.2)."""
+        """Classify current time into session quality bucket (research §5.2).
+
+        Boundaries come from the configured session windows and may wrap
+        midnight (start 18:30 -> prime 19:00 .. degraded 00:15 .. flatten 00:45).
+        """
         t = now.hour * 60 + now.minute
-        if t < DEGRADED_START_MIN:
-            if t >= PRIME_START_MIN:
-                return "prime"
-            return "normal"
-        return "degraded"
+        if self._degraded_start_min <= t < self._flatten_min:
+            return "degraded"
+        if t >= self._prime_start_min or t < self._degraded_start_min:
+            return "prime"
+        return "normal"
 
     def _update_avg_volume(self, symbol: str, vol: float):
         """Simple rolling average of volume per symbol (last 20 observations)."""
@@ -138,7 +147,7 @@ class OpeningRangeBreakout:
         if not in_session_window(self.cfg, now):
             return signals
         t = now.hour * 60 + now.minute
-        range_start = minutes_of("18:30")
+        range_start = self._range_start_min
         in_range = range_start <= t < range_start + self.range_minutes
         bucket = self._session_bucket(now)
         for symbol, q in quotes.items():

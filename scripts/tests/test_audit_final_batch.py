@@ -236,9 +236,11 @@ def test_feature_selection_run(synthetic_gbp_df):
     df = synthetic_gbp_df.copy()
     if "label" not in df.columns:
         df["label"] = generate_labels_from_config(df, cfg)
-    d = run_feature_selection(cfg, "GBPUSD", df,
-                              max_features=5, n_splits=3, n_permute=2)
-    assert d["n_features_total"] == 46
+        d = run_feature_selection(cfg, "GBPUSD", df,
+                                  max_features=5, n_splits=3, n_permute=2)
+        # Production build_full_df includes the bifurcation features
+        # (break_score, break_intensity, agent_long_ratio): 46 base + 3.
+        assert d["n_features_total"] == 49
     assert len(d["mda_rank"]) > 0
     assert len(d["suggested_subset"]) <= 5
     assert len(d["clustered"]) > 0

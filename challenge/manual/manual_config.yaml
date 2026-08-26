@@ -31,6 +31,9 @@ watchlist:
 news_red_zone_utc: []   # e.g. ["13:30", "14:30"] — red-zone events (UTC), +/-30 min buffer
 session_start_utc: "13:30"
 session_end_utc: "19:55"
+# Premarket window (UTC) used by sr_zones for S/R zones (NYSE premarket).
+premarket_start_utc: "09:00"
+premarket_end_utc: "13:30"
 # Фильтр "мёртвого дня" (ТЗ §4.1): размах сегодня vs прошлых сессий за то же
 # прошедшее время. Ниже порога — NO-GO: на 24 неделях бэктеста ~100% убытков
 # стратегии сконцентрированы на днях с atr_ratio < 0.7 (2026-08-21).
@@ -49,6 +52,9 @@ signal_dead_zone: [60, 69]
 # «Без тейка» (+0.332) лучше сыро, но держится на 20 хвостовых сделках (+0.009
 # без них) — 3.5R устойчив к этому (+0.132 без топ-20).
 target_rr: 3.5
+# Live quality calibration (quality_score_live.py): min trades per bucket
+# before a component weight is recalibrated from live outcomes.
+min_trades_per_bucket: 5
 # S/R proximity filter (2026-08-22, us_stocks audit §5.2): reject signals
 # too close to key support/resistance zones. $2 buffer balances quality vs
 # quantity: 71% of weak signals filtered, 96% correctly identified near zones.
@@ -59,6 +65,9 @@ sr_proximity_buffer_pct: 0.3
 # GAP FADE setup (2026-08-24): fade the opening gap, orthogonal edge.
 # Gap must exceed min_pct from previous-day close.
 # Stop beyond the gap extreme, target = previous close.
+# PAUSED 2026-08-25: watchlist mismatch — backtest on big-cap, live on small-cap crypto.
+# Re-enable after backtesting gap_fade on the live watchlist.
+gap_fade_enabled: false
 gap_fade_min_pct: 0.005
 gap_fade_stop_pct: 0.005
 

@@ -12,14 +12,58 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>XAUUSD Multi-Asset ML Trading System</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Apply saved theme BEFORE first paint to avoid a flash of the wrong theme. -->
+    <script>
+        (function () {
+            try { if (localStorage.getItem("dashboard-theme") === "light") document.documentElement.classList.add("theme-light"); } catch (e) {}
+        })();
+    </script>
+    <!-- Vendored locally (realtime/static/) — cdn.tailwindcss.com returns 403
+         from this network, which stripped ALL styling from the page. -->
+    <script src="/static/tailwind.js"></script>
+    <script src="/static/chart.umd.min.js"></script>
+    <link href="/static/fontawesome.min.css" rel="stylesheet">
     <style>
         body { background-color: #0b1120; color: #f8fafc; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
         .glass-card { background: rgba(17, 24, 39, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; }
         .pulse-live { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        /* Responsive: the candlestick SVG has a fixed pixel width; scale it
+           down on narrow viewports instead of overflowing the card. */
+        #chart-container svg { max-width: 100%; height: auto; }
+        /* ------------------------------------------------------------------
+           Light theme override layer (html.theme-light). The markup is dark
+           by design (Tailwind slate/amber utilities), so light mode remaps
+           those color families via attribute selectors. Specificity is
+           (0,2,0) thanks to the html.theme-light prefix, which beats the
+           Tailwind utilities (0,1,0). Semantic accent colors are darkened for
+           contrast on a light background.
+        ------------------------------------------------------------------ */
+        html.theme-light body { background-color: #eef2f7; color: #0f172a; }
+        html.theme-light .glass-card { background: rgba(255, 255, 255, 0.85); border-color: rgba(15, 23, 42, 0.12); }
+        html.theme-light [class*="text-slate-"] { color: #64748b; }
+        html.theme-light [class*="text-slate-200"] { color: #1e293b; }
+        html.theme-light [class*="text-slate-100"] { color: #0f172a; }
+        html.theme-light [class*="bg-slate-"] { background-color: #e2e8f0; }
+        html.theme-light [class*="hover:bg-slate-"] { background-color: #cbd5e1; }
+        html.theme-light [class*="border-slate-"] { border-color: #cbd5e1; }
+        html.theme-light [class*="divide-slate-"] { border-color: #cbd5e1; }
+        html.theme-light [class*="text-amber-"] { color: #b45309; }
+        html.theme-light [class*="bg-amber-"] { background-color: #fef3c7; }
+        html.theme-light [class*="border-amber-"] { border-color: #fcd34d; }
+        html.theme-light [class*="text-emerald-"] { color: #047857; }
+        html.theme-light [class*="text-rose-"] { color: #be123c; }
+        html.theme-light [class*="text-cyan-"] { color: #0e7490; }
+        html.theme-light [class*="text-indigo-"] { color: #4338ca; }
+        html.theme-light [class*="text-violet-"] { color: #6d28d9; }
+        /* Clickable KPI cards: hover affordance + flash highlight of the
+           section they scroll to. */
+        .kpi-card { cursor: pointer; transition: border-color .2s ease, box-shadow .2s ease; }
+        .kpi-card:hover { border-color: rgba(245, 158, 11, 0.55); box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25); }
+        html.theme-light .kpi-card:hover { border-color: rgba(180, 83, 9, 0.5); box-shadow: 0 0 0 1px rgba(180, 83, 9, 0.25); }
+        .kpi-card:focus-visible { outline: 2px solid rgba(245, 158, 11, 0.6); outline-offset: 2px; }
+        .flash-target { animation: flashTarget 1.2s ease-out 1; }
+        @keyframes flashTarget { 0% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.65); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -27,12 +71,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <!-- Header -->
         <header class="flex flex-col md:flex-row justify-between items-start md:items-center glass-card p-6 gap-4 border-l-4 border-l-amber-500">
             <div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center gap-3">
                     <span class="w-3 h-3 rounded-full bg-emerald-500 pulse-live"></span>
                     <h1 class="text-2xl md:text-3xl font-bold bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent">
                         xauusd-alert-system
                     </h1>
                     <span class="text-xs bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full font-mono">v2.1 QUANT PRO</span>
+                    <button id="theme-toggle" onclick="toggleTheme()" title="Сменить тему (тёмная/светлая)" class="ml-auto text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-lg transition flex items-center gap-1.5">
+                        <i id="theme-icon" class="fas fa-moon"></i>
+                    </button>
                 </div>
                 <p class="text-slate-400 text-sm mt-1">Institutional Multi-Asset ML System &bull; Smart Money Concepts &bull; Causal No-Lookahead Architecture</p>
             </div>
@@ -46,9 +93,27 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </header>
 
+        <!-- WebSocket live-stream status + push history -->
+        <div class="glass-card p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div class="flex items-center gap-2 text-sm">
+                    <span id="ws-status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                    <span class="text-slate-400">WebSocket:</span>
+                    <span id="ws-status-text" class="font-mono text-slate-200">подключение...</span>
+                </div>
+                <div class="text-xs text-slate-400 font-mono">
+                    пуши: <span id="ws-push-count" class="text-slate-200">0</span>
+                    &nbsp;·&nbsp; последний: <span id="ws-last-push" class="text-slate-200">—</span>
+                </div>
+            </div>
+            <div id="ws-history" class="max-h-36 overflow-y-auto text-[11px] font-mono space-y-1 text-slate-400 pr-1">
+                <div class="text-slate-500">Ожидание пушей...</div>
+            </div>
+        </div>
+
         <!-- KPI Metrics Grid -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="glass-card p-5">
+            <div class="glass-card p-5 kpi-card" role="button" tabindex="0" onclick="scrollToSection('data-disclosure')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scrollToSection('data-disclosure');}" title="Источник данных">
                 <div class="flex justify-between items-center text-slate-400 text-xs font-semibold uppercase tracking-wider">
                     <span>Режим системы</span>
                     <i class="fas fa-server text-indigo-400 text-base"></i>
@@ -57,7 +122,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="text-xs text-slate-400 mt-1">Фактический источник указан ниже</div>
             </div>
 
-            <div class="glass-card p-5">
+            <div class="glass-card p-5 kpi-card" role="button" tabindex="0" onclick="scrollToSection('metrics-grid')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scrollToSection('metrics-grid');}" title="Статистика закрытых сделок">
                 <div class="flex justify-between items-center text-slate-400 text-xs font-semibold uppercase tracking-wider">
                     <span>Баланс / Эквити</span>
                     <i class="fas fa-wallet text-emerald-400 text-base"></i>
@@ -66,7 +131,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div id="kpi-equity" class="text-xs text-slate-400 mt-1">Эквити: —</div>
             </div>
 
-            <div class="glass-card p-5">
+            <div class="glass-card p-5 kpi-card" role="button" tabindex="0" onclick="scrollToSection('positions-list')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scrollToSection('positions-list');}" title="Открытые позиции MT5">
                 <div class="flex justify-between items-center text-slate-400 text-xs font-semibold uppercase tracking-wider">
                     <span>Открытые позиции</span>
                     <i class="fas fa-layer-group text-amber-400 text-base"></i>
@@ -75,7 +140,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="text-xs text-slate-400 mt-1">Лимит: макс 3 позиции</div>
             </div>
 
-            <div class="glass-card p-5">
+            <div class="glass-card p-5 kpi-card" role="button" tabindex="0" onclick="scrollToSection('mc-section')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scrollToSection('mc-section');}" title="Monte Carlo VaR">
                 <div class="flex justify-between items-center text-slate-400 text-xs font-semibold uppercase tracking-wider">
                     <span>Risk Manager</span>
                     <i class="fas fa-shield-alt text-cyan-400 text-base"></i>
@@ -90,12 +155,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         <!-- 🌟 SMART MONEY & INSTITUTIONAL MICROSTRUCTURE METRICS BLOCK 🌟 -->
         <div class="glass-card p-6 border-l-4 border-l-cyan-500">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center mb-4">
                 <div class="flex items-center gap-2.5">
                     <i class="fas fa-microchip text-cyan-400 text-lg"></i>
                     <h2 class="text-lg font-bold text-slate-100">Метрики по софту на текущий момент (Smart Money Concepts)</h2>
                 </div>
-                <button onclick="copyMetricsText()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                <button onclick="copyMetricsText()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 self-start sm:self-auto">
                     <i class="fas fa-copy"></i> Копировать отчёт
                 </button>
             </div>
@@ -109,12 +174,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- Interactive Visual Chart -->
             <div class="glass-card p-6 lg:col-span-2">
-                <div class="flex justify-between items-center mb-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-3">
                     <div class="flex items-center gap-2">
                         <i class="fas fa-chart-candlestick text-amber-400"></i>
                         <h2 class="text-lg font-bold">Живой график M5 & Уровни входа</h2>
                     </div>
-                    <div class="flex gap-1.5">
+                    <div class="flex flex-wrap gap-1.5">
                         <button onclick="loadChart('XAUUSD')" class="px-2.5 py-1 text-xs font-mono rounded bg-slate-800 hover:bg-slate-700 active-asset">XAUUSD</button>
                         <button onclick="loadChart('XAGUSD')" class="px-2.5 py-1 text-xs font-mono rounded bg-slate-800 hover:bg-slate-700">XAGUSD</button>
                         <button onclick="loadChart('BTCUSD')" class="px-2.5 py-1 text-xs font-mono rounded bg-slate-800 hover:bg-slate-700">BTCUSD</button>
@@ -149,7 +214,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
 
                 <!-- Monte Carlo Stress Test -->
-                <div>
+                <div id="mc-section">
                     <h2 class="text-base font-bold flex items-center gap-2 mb-3">
                         <i class="fas fa-dice-d20 text-indigo-400"></i> Monte Carlo VaR (1000 симуляций)
                     </h2>
@@ -173,17 +238,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         <!-- Real-Time Signal Matrix -->
         <div class="glass-card p-6">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
                 <h2 class="text-lg font-bold flex items-center gap-2">
                     <i class="fas fa-bolt text-amber-400"></i> Мульти-активная матрица сигналов (M5)
                 </h2>
-                <button onclick="refreshData()" class="text-xs text-slate-400 hover:text-slate-200 transition flex items-center gap-1">
-                    <i class="fas fa-sync-alt" id="refresh-icon"></i> Обновить
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="refreshData()" class="text-xs text-slate-400 hover:text-slate-200 transition flex items-center gap-1">
+                        <i class="fas fa-sync-alt" id="refresh-icon"></i> Обновить
+                    </button>
+                    <span id="last-updated" class="text-xs text-slate-500 font-mono"></span>
+                </div>
             </div>
             
             <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm text-slate-300">
+                <table class="w-full min-w-[760px] text-left text-sm text-slate-300">
                     <thead class="text-xs text-slate-400 uppercase bg-slate-800/50 border-b border-slate-700">
                         <tr>
                             <th class="py-3 px-4">Актив</th>
@@ -199,6 +267,57 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <tr><td colspan="7" class="text-center py-6 text-slate-500">Загрузка данных...</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- ML Probability Panel (per-asset) -->
+        <div class="glass-card p-6" id="mlprob-section">
+            <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-dice text-fuchsia-400"></i>
+                    <span id="mlprob-title">XAUUSD</span> · P(long) / P(short)
+                    <span class="text-xs text-slate-500 font-normal">raw ML · по закрытому бару</span>
+                </h2>
+                <div class="flex items-center gap-3">
+                    <label class="text-xs text-slate-400" for="mlprob-asset">Актив</label>
+                    <select id="mlprob-asset" class="bg-slate-800/60 border border-slate-600 rounded px-2 py-1 text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500/70">
+                        <option value="XAUUSD" selected>XAUUSD</option>
+                        <option value="BTCUSD">BTCUSD</option>
+                        <option value="EURUSD">EURUSD</option>
+                    </select>
+                    <span id="mlprob-verdict" class="px-3 py-1 rounded text-xs font-bold border border-slate-600 bg-slate-800/60 text-slate-400">—</span>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="space-y-3">
+                    <div>
+                        <div class="flex justify-between text-xs font-mono mb-1">
+                            <span class="text-emerald-400 font-bold">LONG</span>
+                            <span id="mlprob-plong" class="text-emerald-300">—</span>
+                        </div>
+                        <div class="h-3 rounded bg-slate-800 overflow-hidden">
+                            <div id="mlprob-plong-bar" class="h-full bg-emerald-500/80 transition-all duration-500" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs font-mono mb-1">
+                            <span class="text-rose-400 font-bold">SHORT</span>
+                            <span id="mlprob-pshort" class="text-rose-300">—</span>
+                        </div>
+                        <div class="h-3 rounded bg-slate-800 overflow-hidden">
+                            <div id="mlprob-pshort-bar" class="h-full bg-rose-500/80 transition-all duration-500" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="text-[11px] text-slate-400 font-mono space-y-0.5">
+                        <div>Пороги: lean-short <span id="mlprob-thr-min" class="text-amber-300">0.55</span> · floor <span id="mlprob-thr-floor" class="text-amber-300">0.62</span> · alert <span id="mlprob-thr-alert" class="text-amber-300">0.60</span></div>
+                        <div id="mlprob-status" class="text-slate-500">—</div>
+                        <div id="mlprob-meta" class="text-slate-500"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="text-[11px] text-slate-400 uppercase mb-1">История P(short) · последние бары</div>
+                    <svg id="mlprob-spark" viewBox="0 0 300 80" preserveAspectRatio="none" class="w-full h-20 rounded border border-slate-700/60 bg-slate-900/40"></svg>
+                </div>
             </div>
         </div>
 
@@ -235,12 +354,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         <!-- 📊 PAIRS MODEL — Statistical Pairs Trading Analytics -->
         <div class="glass-card p-6 border-l-4 border-l-violet-500">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4">
                 <div class="flex items-center gap-2.5">
                     <i class="fas fa-code-branch text-violet-400 text-lg"></i>
                     <h2 class="text-lg font-bold text-slate-100">PAIRS MODEL — Statistical Pair Analytics</h2>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                     <select id="pairs-pair-select" onchange="loadPairsPair()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5 font-mono">
                         <option value="">Загрузка...</option>
                     </select>
@@ -250,8 +369,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </select>
                     <select id="pairs-refresh-interval" onchange="setPairsRefreshInterval()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5">
                         <option value="0">OFF</option>
-                        <option value="30">30s</option>
-                        <option value="60" selected>1m</option>
+                        <option value="30" selected>30s</option>
+                        <option value="60">1m</option>
                         <option value="180">3m</option>
                         <option value="300">5m</option>
                     </select>
@@ -314,7 +433,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <!-- Right: Ensemble -->
                 <div class="p-4 bg-slate-800/60 rounded-lg border border-slate-700">
                     <h3 class="text-xs font-bold text-violet-300 uppercase tracking-wider mb-3">Ensemble — 6 Engine Forecasts</h3>
-                    <table class="w-full text-xs font-mono">
+                    <div class="overflow-x-auto">
+                    <table class="w-full min-w-[440px] text-xs font-mono">
                         <thead><tr class="text-slate-400 border-b border-slate-700">
                             <th class="text-left py-1.5">Engine</th>
                             <th class="text-left py-1.5">Dir</th>
@@ -323,6 +443,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </tr></thead>
                         <tbody id="p-ensemble-body"></tbody>
                     </table>
+                    </div>
                     <div id="p-ensemble-summary" class="mt-3 text-center text-sm font-bold">—</div>
                 </div>
             </div>
@@ -355,11 +476,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         <!-- 📈 Real Trade Statistics (owner request 2026-08-11) -->
         <div class="glass-card p-6 border-l-4 border-l-emerald-500">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4">
                 <h2 class="text-lg font-bold flex items-center gap-2">
                     <i class="fas fa-chart-line text-emerald-400"></i> Реальная статистика закрытых сделок
                 </h2>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                     <select id="metrics-period" onchange="loadMetrics()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5">
                         <option value="today">Сегодня</option>
                         <option value="week" selected>7 дней</option>
@@ -426,12 +547,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         let institutionalReportText = "";
 
         async function fetchJSON(url) {
+            // Hard 8s timeout per request so a slow endpoint (e.g. the news feed
+            // behind /api/sentiment) can never stall the refresh cycle forever.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 8000);
             try {
-                const res = await fetch(url);
+                const res = await fetch(url, { signal: controller.signal });
                 return await res.json();
             } catch(e) {
                 console.error("Fetch error for " + url, e);
                 return null;
+            } finally {
+                clearTimeout(timer);
             }
         }
 
@@ -464,26 +591,232 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             } catch(e) {
                 container.innerHTML = '<div class="text-rose-400 text-sm">Ошибка загрузки графика</div>';
             }
+        }        // Live status applied from BOTH sources: the WebSocket push stream
+        // (instant) and the /api/status REST fallback when WS is unavailable.
+        function applyStatus(status) {
+            if (!status) return;
+            document.getElementById("kpi-data-mode").innerText = String(status.data_mode || "unknown").toUpperCase();
+            document.getElementById("kpi-balance").innerText = status.balance == null ? "—" : "$" + status.balance.toLocaleString('en-US', {minimumFractionDigits: 2});
+            document.getElementById("kpi-equity").innerText = status.equity == null ? "Эквити: —" : "Эквити: $" + status.equity.toLocaleString('en-US', {minimumFractionDigits: 2});
+            document.getElementById("data-disclosure").innerText = "Source: " + (status.source || "unknown") + " | Data: " + (status.mode || "unknown") + " | Deployment: " + (status.deployment_mode || "unknown") + " | Strategy: " + (status.strategy_version || "unknown") + " | Config: " + String(status.config_hash || "").slice(0,12) + " | As of: " + (status.as_of_utc || "—");
+            document.getElementById("kpi-positions").innerText = status.open_positions_count;
+            document.getElementById("kpi-risk").innerText = status.circuit_breaker ? "HALTED" : "NORMAL";
+            document.getElementById("kpi-risk").className = status.circuit_breaker ? "text-2xl font-bold mt-2 text-rose-500" : "text-2xl font-bold mt-2 text-emerald-400";
+            if (status.positions) {
+                renderPositions({ available: !!status.available, positions: status.positions });
+            }
         }
 
+        function renderPositions(posData) {
+            const posContainer = document.getElementById("positions-list");
+            if (posData && posData.available && posData.positions && posData.positions.length > 0) {
+                posContainer.innerHTML = "";
+                for (const pos of posData.positions) {
+                    const pnlClass = pos.profit >= 0 ? "text-emerald-400" : "text-rose-400";
+                    posContainer.innerHTML += `
+                        <div class="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 flex justify-between items-center text-xs font-mono">
+                            <div>
+                                <span class="font-bold text-sm text-slate-200">${pos.symbol}</span>
+                                <span class="ml-2 px-1.5 py-0.5 rounded ${pos.direction === 'buy' ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'} uppercase">${pos.direction}</span>
+                                <div class="text-slate-400 mt-1">Объём: ${pos.volume} lot | Вход: ${pos.open_price}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-sm font-bold ${pnlClass}">$${pos.profit.toFixed(2)}</div>
+                                <div class="text-slate-500">SL: ${pos.sl || '-'} | TP: ${pos.tp || '-'}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } else if (posData && posData.available) {
+                posContainer.innerHTML = `<div class="text-center py-8 text-slate-500 text-sm"><i class="fas fa-inbox text-2xl mb-2 block"></i> Нет открытых позиций</div>`;
+            } else {
+                posContainer.innerHTML = `<div class="text-center py-8 text-amber-400 text-sm">MT5 positions недоступны</div>`;
+            }
+        }
+
+        // Fallback REST refresh of the live status when the WS stream is down.
+        async function refreshStatus() {
+            const s = await fetchJSON("/api/status");
+            applyStatus(s);
+            updateFreshness();
+        }
+
+        // ---- WebSocket status indicator + push history ---------------------
+        let ws = null;
+        let wsReconnectDelay = 2000;
+        let wsPushCount = 0;
+
+        function setWSStatus(stateCls, text) {
+            const dot = document.getElementById("ws-status-dot");
+            const txt = document.getElementById("ws-status-text");
+            if (dot) dot.className = "w-2.5 h-2.5 rounded-full " + stateCls;
+            if (txt) txt.innerText = text;
+        }
+
+        function renderWSPush(record) {
+            const hist = document.getElementById("ws-history");
+            if (!hist || !record) return;
+            const ts = record.ts || new Date().toISOString();
+            const time = new Date(ts).toLocaleTimeString("ru-RU");
+            const money = record.balance == null ? "—" : "$" + Number(record.balance).toLocaleString('en-US', {minimumFractionDigits: 2});
+            const changed = (Array.isArray(record.changed) && record.changed.length)
+                ? record.changed.map(c => c.replace("open_positions_count", "позиции")).join(", ")
+                : "—";
+            const line = document.createElement("div");
+            line.className = "flex flex-wrap gap-x-3 gap-y-0.5 justify-between border-b border-slate-800/60 pb-1";
+            line.innerHTML =
+                `<span class="text-slate-500">${time}</span>` +
+                `<span class="text-emerald-400">${money}</span>` +
+                `<span class="text-slate-400">позиции: ${record.open_positions_count ?? "—"}</span>` +
+                `<span class="text-amber-300/90">изм: ${changed}</span>`;
+            hist.prepend(line);
+            while (hist.children.length > 20) hist.removeChild(hist.lastChild);
+        }
+
+        async function loadWSHistory() {
+            const h = await fetchJSON("/api/ws-history");
+            if (!h || !Array.isArray(h.pushes)) return;
+            const hist = document.getElementById("ws-history");
+            if (hist) hist.innerHTML = "";
+            wsPushCount = h.pushes.length;
+            // chronological order + prepend => newest on top
+            for (const r of h.pushes.slice(-20)) renderWSPush(r);
+            const cnt = document.getElementById("ws-push-count");
+            if (cnt) cnt.innerText = wsPushCount;
+        }
+
+        // WebSocket push stream: instant balance/positions updates without
+        // polling. Reconnects with exponential backoff (2s -> 30s max).
+        function connectDashboardWS() {
+            try {
+                if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+            } catch(e) {}
+            const proto = location.protocol === "https:" ? "wss" : "ws";
+            ws = new WebSocket(proto + "://" + location.host + "/ws/dashboard");
+            ws.onopen = () => {
+                wsReconnectDelay = 2000;
+                setWSStatus("bg-emerald-400", "онлайн");
+                updateFreshness();
+            };
+            ws.onmessage = (ev) => {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    if (msg.type === "status" && msg.payload) {
+                        applyStatus(msg.payload);
+                        renderWSPush(msg.record);
+                        wsPushCount++;
+                        const cnt = document.getElementById("ws-push-count");
+                        if (cnt) cnt.innerText = wsPushCount;
+                        const lp = document.getElementById("ws-last-push");
+                        if (lp) lp.innerText = new Date(msg.record?.ts || Date.now()).toLocaleTimeString("ru-RU");
+                        updateFreshness();
+                    }
+                } catch(e) { console.error("WS message parse error", e); }
+            };
+            ws.onclose = () => {
+                setWSStatus("bg-amber-400", "переподключение (" + Math.round(wsReconnectDelay / 1000) + "с)...");
+                const d = wsReconnectDelay;
+                wsReconnectDelay = Math.min(d * 2, 30000);
+                setTimeout(connectDashboardWS, d);
+            };
+            ws.onerror = () => { try { ws.close(); } catch(e) {} };
+        }
+
+        // Signal matrix = ML asset rows + live Pairs Model rows (pulled from
+        // the latest /api/pairs payload so the pairs data is visible in the
+        // main matrix, not only in the dedicated PAIRS panel).
+        function renderMatrix(matrix) {
+            const tbody = document.getElementById("signal-matrix-body");
+            if (!tbody) return;
+            let rows = "";
+            if (matrix && matrix.signals) {
+                for (const item of matrix.signals) {
+                    let biasBadge = item.available
+                        ? '<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">NEUTRAL</span>'
+                        : '<span class="px-2 py-0.5 rounded bg-amber-900/60 text-amber-300">UNAVAILABLE</span>';
+                    if (item.available && item.bias === "long") biasBadge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-bold border border-emerald-700/50">LONG / BUY</span>';
+                    if (item.available && item.bias === "short") biasBadge = '<span class="px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold border border-rose-700/50">SHORT / SELL</span>';
+
+                    const confidence = item.available ? (Number(item.confidence) * 100).toFixed(1) + "%" : "—";
+                    const targets = item.available && item.targets ? item.targets.map(t => t.toFixed(2)).join(" / ") : "-";
+                    const sl = item.available && item.invalidation ? item.invalidation.toFixed(2) : "-";
+
+                    rows += `
+                        <tr class="hover:bg-slate-800/40 transition">
+                            <td class="py-3 px-4 font-bold text-slate-200">${item.asset}</td>
+                            <td class="py-3 px-4">${biasBadge}</td>
+                            <td class="py-3 px-4 text-amber-300 font-semibold">${confidence}</td>
+                            <td class="py-3 px-4 text-slate-300"><span class="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">${item.regime}</span></td>
+                            <td class="py-3 px-4 text-slate-400 uppercase">${item.session}</td>
+                            <td class="py-3 px-4 text-emerald-400 font-mono">${targets}</td>
+                            <td class="py-3 px-4 text-rose-400 font-mono">${sl}</td>
+                        </tr>
+                    `;
+                }
+            }
+            // Pairs Model group — data pulled live from /api/pairs
+            if (pairsData && pairsData.available && pairsData.pairs && pairsData.pairs.length) {
+                const tf = (document.getElementById('pairs-tf-select') || {value:'H1'}).value;
+                rows += '<tr class="bg-slate-800/30"><td colspan="7" class="py-2 px-4 text-[11px] font-bold uppercase tracking-wider text-violet-300">'
+                    + 'Pairs Model (' + pairsData.pairs.length + ' пар · ' + tf + ')</td></tr>';
+                for (const p of pairsData.pairs) {
+                    const dir = p.signal_direction || p.ensemble_direction || "neutral";
+                    let badge = '<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">NEUTRAL</span>';
+                    if (dir === "long") badge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-bold border border-emerald-700/50">LONG / BUY</span>';
+                    if (dir === "short") badge = '<span class="px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold border border-rose-700/50">SHORT / SELL</span>';
+                    const z = (p.z == null) ? NaN : Number(p.z);
+                    const zStr = isNaN(z) ? "—" : z.toFixed(2) + "σ";
+                    const zCls = (!isNaN(z) && Math.abs(z) >= 2) ? "text-amber-300 font-bold" : "text-slate-300";
+                    const hLabel = (p.hurst == null) ? "—" : (p.hurst < 0.5 ? "mean-revert" : p.hurst > 0.5 ? "trending" : "random");
+                    const ensConf = (p.ensemble_confidence != null) ? p.ensemble_confidence.toFixed(0) + "%" : "—";
+                    rows += '<tr class="hover:bg-slate-800/40 transition">' +
+                        '<td class="py-3 px-4 font-bold text-violet-200">' + (p.name || "?") + '</td>' +
+                        '<td class="py-3 px-4">' + badge + '</td>' +
+                        '<td class="py-3 px-4 font-mono ' + zCls + '">' + zStr +
+                        ' <span class="text-slate-500 text-[10px]">(' + ensConf + ')</span></td>' +
+                        '<td class="py-3 px-4"><span class="bg-violet-900/40 text-violet-300 px-2 py-0.5 rounded border border-violet-700/50">' + hLabel + '</span></td>' +
+                        '<td class="py-3 px-4 text-slate-500">pair</td>' +
+                        '<td class="py-3 px-4 text-slate-500">—</td>' +
+                        '<td class="py-3 px-4 text-slate-500">—</td>' +
+                        '</tr>';
+                }
+            }
+            tbody.innerHTML = rows || '<tr><td colspan="7" class="text-center py-6 text-slate-500">Загрузка данных...</td></tr>';
+        }
+
+        let _refreshing = false;
         async function refreshData() {
+            if (_refreshing) return;  // skip if previous cycle still running
+            _refreshing = true;
             const icon = document.getElementById("refresh-icon");
             if(icon) icon.classList.add("fa-spin");
 
-            // Status
-            const status = await fetchJSON("/api/status");
-            if (status) {
-                document.getElementById("kpi-data-mode").innerText = String(status.data_mode || "unknown").toUpperCase();
-                document.getElementById("kpi-balance").innerText = status.balance == null ? "—" : "$" + status.balance.toLocaleString('en-US', {minimumFractionDigits: 2});
-                document.getElementById("kpi-equity").innerText = status.equity == null ? "Эквити: —" : "Эквити: $" + status.equity.toLocaleString('en-US', {minimumFractionDigits: 2});
-                document.getElementById("data-disclosure").innerText = "Source: " + (status.source || "unknown") + " | Data: " + (status.mode || "unknown") + " | Deployment: " + (status.deployment_mode || "unknown") + " | Strategy: " + (status.strategy_version || "unknown") + " | Config: " + String(status.config_hash || "").slice(0,12) + " | As of: " + (status.as_of_utc || "—");
-                document.getElementById("kpi-positions").innerText = status.open_positions_count;
-                document.getElementById("kpi-risk").innerText = status.circuit_breaker ? "HALTED" : "NORMAL";
-                document.getElementById("kpi-risk").className = status.circuit_breaker ? "text-2xl font-bold mt-2 text-rose-500" : "text-2xl font-bold mt-2 text-emerald-400";
-            }
+            // Fire ALL data requests in parallel (each has its own 8s timeout)
+            // so one slow endpoint never freezes the whole cycle and the
+            // dashboard always shows the freshest data available.
+            const _results = await Promise.allSettled([
+                fetchJSON("/api/status"),
+                fetchJSON("/api/institutional-metrics"),
+                fetchJSON("/api/sentiment"),
+                fetchJSON("/api/monte-carlo"),
+                fetchJSON("/api/matrix"),
+                fetchJSON("/api/correlation"),
+                fetchJSON("/api/positions"),
+                fetchJSON("/api/ml-prob"),
+            ]);
+            const _ok = (p) => (p && p.status === "fulfilled") ? p.value : null;
+            const status  = _ok(_results[0]);
+            const inst    = _ok(_results[1]);
+            const sent    = _ok(_results[2]);
+            const mc      = _ok(_results[3]);
+            const matrix  = _ok(_results[4]);
+            const corr    = _ok(_results[5]);
+            const posData = _ok(_results[6]);
+            const mlp     = _ok(_results[7]);
+
+            applyStatus(status);
 
             // Institutional metrics — real candles only.
-            const inst = await fetchJSON("/api/institutional-metrics");
             const instContainer = document.getElementById("institutional-metrics-container");
             if (inst && inst.available && inst.metrics) {
                 institutionalReportText = inst.report_text || "";
@@ -498,7 +831,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
 
             // Sentiment — no sample headlines are presented as live.
-            const sent = await fetchJSON("/api/sentiment");
             const biasEl = document.getElementById("sentiment-bias");
             if (sent && sent.available && sent.bias != null && sent.score != null) {
                 biasEl.innerText = sent.bias.toUpperCase() + " (" + (sent.score > 0 ? "+" : "") + Number(sent.score).toFixed(2) + ")";
@@ -516,7 +848,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
 
             // Monte Carlo — persisted executed trades only.
-            const mc = await fetchJSON("/api/monte-carlo");
             if (mc && mc.available && mc.var_95_usd != null) {
                 document.getElementById("mc-var95").innerText = "$" + Number(mc.var_95_usd).toFixed(2);
                 document.getElementById("mc-prob").innerText = Number(mc.profit_probability_pct).toFixed(1) + "%";
@@ -527,38 +858,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById("mc-ruin").innerText = "—";
             }
 
-            // Matrix
-            const matrix = await fetchJSON("/api/matrix");
-            if (matrix && matrix.signals) {
-                const tbody = document.getElementById("signal-matrix-body");
-                tbody.innerHTML = "";
-                for (const item of matrix.signals) {
-                    let biasBadge = item.available
-                        ? '<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">NEUTRAL</span>'
-                        : '<span class="px-2 py-0.5 rounded bg-amber-900/60 text-amber-300">UNAVAILABLE</span>';
-                    if (item.available && item.bias === "long") biasBadge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-bold border border-emerald-700/50">LONG / BUY</span>';
-                    if (item.available && item.bias === "short") biasBadge = '<span class="px-2 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold border border-rose-700/50">SHORT / SELL</span>';
+            // Matrix — fall back to the last good payload if this fetch timed
+            // out (slow cold start), so asset rows never disappear from the table.
+            if (matrix && matrix.signals) lastMatrix = matrix;
+            renderMatrix(matrix || lastMatrix);
 
-                    const confidence = item.available ? (Number(item.confidence) * 100).toFixed(1) + "%" : "—";
-                    const targets = item.available && item.targets ? item.targets.map(t => t.toFixed(2)).join(" / ") : "-";
-                    const sl = item.available && item.invalidation ? item.invalidation.toFixed(2) : "-";
-
-                    tbody.innerHTML += `
-                        <tr class="hover:bg-slate-800/40 transition">
-                            <td class="py-3 px-4 font-bold text-slate-200">${item.asset}</td>
-                            <td class="py-3 px-4">${biasBadge}</td>
-                            <td class="py-3 px-4 text-amber-300 font-semibold">${confidence}</td>
-                            <td class="py-3 px-4 text-slate-300"><span class="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">${item.regime}</span></td>
-                            <td class="py-3 px-4 text-slate-400 uppercase">${item.session}</td>
-                            <td class="py-3 px-4 text-emerald-400 font-mono">${targets}</td>
-                            <td class="py-3 px-4 text-rose-400 font-mono">${sl}</td>
-                        </tr>
-                    `;
-                }
-            }
+            // XAUUSD raw ML probabilities — same last-good fallback.
+            if (mlp && mlp.available) lastMLProb = mlp;
+            renderMLProb(mlp || lastMLProb);
 
             // Correlation
-            const corr = await fetchJSON("/api/correlation");
             if (corr && corr.available && Array.isArray(corr.matrix) && corr.matrix.length) {
                 const tbody = document.getElementById("corr-matrix-body");
                 tbody.innerHTML = "";
@@ -590,33 +899,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
 
             // Positions
-            const posData = await fetchJSON("/api/positions");
-            const posContainer = document.getElementById("positions-list");
-            if (posData && posData.available && posData.positions && posData.positions.length > 0) {
-                posContainer.innerHTML = "";
-                for (const pos of posData.positions) {
-                    const pnlClass = pos.profit >= 0 ? "text-emerald-400" : "text-rose-400";
-                    posContainer.innerHTML += `
-                        <div class="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 flex justify-between items-center text-xs font-mono">
-                            <div>
-                                <span class="font-bold text-sm text-slate-200">${pos.symbol}</span>
-                                <span class="ml-2 px-1.5 py-0.5 rounded ${pos.direction === 'buy' ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'} uppercase">${pos.direction}</span>
-                                <div class="text-slate-400 mt-1">Объём: ${pos.volume} lot | Вход: ${pos.open_price}</div>
-                            </div>
-                            <div class="text-right">
-                                <div class="text-sm font-bold ${pnlClass}">$${pos.profit.toFixed(2)}</div>
-                                <div class="text-slate-500">SL: ${pos.sl || '-'} | TP: ${pos.tp || '-'}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-            } else if (posData && posData.available) {
-                posContainer.innerHTML = `<div class="text-center py-8 text-slate-500 text-sm"><i class="fas fa-inbox text-2xl mb-2 block"></i> Нет открытых позиций</div>`;
-            } else {
-                posContainer.innerHTML = `<div class="text-center py-8 text-amber-400 text-sm">MT5 positions недоступны</div>`;
-            }
+            renderPositions(posData);
 
             if(icon) setTimeout(() => icon.classList.remove("fa-spin"), 400);
+            _refreshing = false;
+            updateFreshness();
         }
 
         // NOTE: browser mutation controls are disabled server-side by design
@@ -624,16 +911,114 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         // /api/control calls are issued from this page.
 
         // ====================================================================
+        // ML PROBABILITY PANEL (per-asset)
+        // ====================================================================
+        let mlProbAsset = "XAUUSD";      // currently selected asset
+        let lastMLProb = null;           // latest /api/ml-prob payload (raw ML P long/short)
+
+        function selectedMLProbAsset() {
+            const sel = document.getElementById("mlprob-asset");
+            if (sel && sel.value) { mlProbAsset = sel.value; return sel.value; }
+            return mlProbAsset;
+        }
+
+        function renderMLProb(p) {
+            const verdict = document.getElementById("mlprob-verdict");
+            if (!p || p.available === false) {
+                if (verdict) {
+                    verdict.innerText = "недоступно";
+                    verdict.className = "px-3 py-1 rounded text-xs font-bold border border-slate-600 bg-slate-800/60 text-slate-400";
+                }
+                return;
+            }
+            const lat = p.latest || {};
+            const thr = p.thresholds || {};
+            const leanThr = (thr.min_ml_probability != null) ? thr.min_ml_probability : 0.55;
+            const pct = (v) => (v == null) ? "—" : (v * 100).toFixed(1) + "%";
+
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+            const bar = (id, v) => { const el = document.getElementById(id); if (el) el.style.width = (v == null ? 0 : v * 100) + "%"; };
+            set("mlprob-plong", pct(lat.p_long));
+            set("mlprob-pshort", pct(lat.p_short));
+            bar("mlprob-plong-bar", lat.p_long);
+            bar("mlprob-pshort-bar", lat.p_short);
+            set("mlprob-thr-min", (thr.min_ml_probability != null) ? thr.min_ml_probability.toFixed(2) : "0.55");
+            set("mlprob-thr-floor", (thr.ml_confidence_floor != null) ? thr.ml_confidence_floor.toFixed(2) : "0.62");
+            set("mlprob-thr-alert", (thr.min_confidence_to_alert != null) ? thr.min_confidence_to_alert.toFixed(2) : "0.60");
+
+            // Ensemble verdict (the gate the live trader actually applies).
+            const eb = lat.ensemble_bias;
+            const conf = (lat.ensemble_confidence != null) ? (lat.ensemble_confidence * 100).toFixed(0) + "%" : "";
+            if (eb === "short") {
+                verdict.innerText = "SHORT · " + conf;
+                verdict.className = "px-3 py-1 rounded text-xs font-bold border border-rose-500/60 bg-rose-950/40 text-rose-300";
+            } else if (eb === "long") {
+                verdict.innerText = "LONG · " + conf;
+                verdict.className = "px-3 py-1 rounded text-xs font-bold border border-emerald-500/60 bg-emerald-950/40 text-emerald-300";
+            } else {
+                verdict.innerText = "NO TRADE";
+                verdict.className = "px-3 py-1 rounded text-xs font-bold border border-slate-600 bg-slate-800/60 text-slate-400";
+            }
+
+            // "Модель начинает сигналить шорт" — raw ML leaning, before the gate.
+            const statusEl = document.getElementById("mlprob-status");
+            if (statusEl) {
+                if (lat.p_short != null && lat.p_short > leanThr) {
+                    statusEl.innerHTML = '<span class="text-amber-300 font-bold">⚠ модель смещается в шорт</span> (P(short) &gt; ' + leanThr.toFixed(2) + ')';
+                } else {
+                    statusEl.innerText = "Нейтрально: модель не сигналит шорт";
+                }
+            }
+
+            // Meta line: цена · режим · сессия · бар (бар в UTC-шкале данных
+            // MT5 — без конвертации в TZ браузера, чтобы не выглядел "из будущего").
+            const meta = document.getElementById("mlprob-meta");
+            if (meta && lat.ts != null) {
+                const t = new Date(lat.ts * 1000);
+                const barUtc = t.toISOString().slice(0, 16).replace("T", " ");
+                meta.innerText = "Цена " + (lat.price != null ? lat.price.toFixed(2) : "—")
+                    + " · " + (lat.regime || "?") + " · " + (lat.session || "?") + " · бар " + barUtc + " UTC"
+                    + " · обновлено " + (p.as_of_utc ? new Date(p.as_of_utc).toLocaleTimeString("ru-RU") : "—");
+            }
+
+            renderMLProbSpark((p.history || []).map(h => h.p_short), leanThr);
+        }
+
+        function renderMLProbSpark(pts, leanThr) {
+            const svg = document.getElementById("mlprob-spark");
+            if (!svg) return;
+            const W = 300, H = 80;
+            const vals = pts.filter(v => v != null);
+            if (vals.length < 2) {
+                svg.innerHTML = '<text x="10" y="44" fill="#64748b" font-size="11">нет истории (нужно &gt;1 закрытый бар)</text>';
+                return;
+            }
+            const lo = Math.min(0.40, Math.min.apply(null, vals));
+            const hi = Math.max(0.60, Math.max.apply(null, vals));
+            const x = (i) => (vals.length === 1 ? W / 2 : (i / (vals.length - 1)) * W);
+            const y = (v) => H - ((v - lo) / (hi - lo)) * H;
+            const poly = vals.map((v, i) => x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+            const yMid = y(0.5), yThr = y(Math.min(Math.max(leanThr, lo), hi));
+            const lastX = x(vals.length - 1), lastY = y(vals[vals.length - 1]);
+            svg.innerHTML =
+                '<line x1="0" y1="' + yMid.toFixed(1) + '" x2="' + W + '" y2="' + yMid.toFixed(1) + '" stroke="#475569" stroke-width="1" stroke-dasharray="3 3"/>' +
+                '<line x1="0" y1="' + yThr.toFixed(1) + '" x2="' + W + '" y2="' + yThr.toFixed(1) + '" stroke="#f59e0b" stroke-width="1" stroke-dasharray="2 4" opacity="0.7"/>' +
+                '<polyline points="' + poly + '" fill="none" stroke="#f43f5e" stroke-width="1.8"/>' +
+                '<circle cx="' + lastX.toFixed(1) + '" cy="' + lastY.toFixed(1) + '" r="2.6" fill="#f43f5e"/>';
+        }
+
+        // ====================================================================
         // PAIRS MODEL
         // ====================================================================
         let pairsData = null;
+        let lastMatrix = null;   // latest /api/matrix payload (ML assets)
         let pairsZChart = null;
         let pairsRefreshTimer = null;
 
         function setPairsRefreshInterval() {
             if (pairsRefreshTimer) { clearInterval(pairsRefreshTimer); pairsRefreshTimer = null; }
-            const sec = Number((document.getElementById('pairs-refresh-interval') || {value:60}).value);
-            if (sec > 0) pairsRefreshTimer = setInterval(loadPairsData, sec * 1000);
+            const sec = Number((document.getElementById('pairs-refresh-interval') || {value:30}).value);
+            if (sec > 0) pairsRefreshTimer = setInterval(() => { loadPairsData(); loadPairsEquity(); }, sec * 1000);
         }
 
         async function loadPairsData() {
@@ -650,6 +1035,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return;
                 }
                 pairsData = data;
+                // Pull the latest pairs data into the main signal matrix.
+                renderMatrix(lastMatrix);
                 // Populate pair selector
                 const sel = document.getElementById('pairs-pair-select');
                 const prev = sel.value;
@@ -873,13 +1260,73 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             set("m-period-label", m.period_label ? ("Период: " + m.period_label) : "");
         }
 
+        // ---- Clickable KPI cards -> smooth-scroll to the detail section ----
+        function scrollToSection(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            document.querySelectorAll(".flash-target").forEach(e => e.classList.remove("flash-target"));
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+            el.classList.add("flash-target");
+            setTimeout(() => el.classList.remove("flash-target"), 1400);
+        }
+
+        // ---- Theme toggle (persisted in localStorage) ----------------------
+        function toggleTheme() {
+            const root = document.documentElement;
+            const light = root.classList.toggle("theme-light");
+            try { localStorage.setItem("dashboard-theme", light ? "light" : "dark"); } catch(e) {}
+            updateThemeIcon();
+        }
+        function updateThemeIcon() {
+            const light = document.documentElement.classList.contains("theme-light");
+            const icon = document.getElementById("theme-icon");
+            if (icon) icon.className = "fas " + (light ? "fa-sun" : "fa-moon");
+        }
+
+        // Freshness heartbeat: "обновлено HH:MM:SS · Nс назад", green < 15s,
+        // amber < 60s, red if the data went stale.
+        let lastFreshTs = Date.now();
+        function updateFreshness() {
+            lastFreshTs = Date.now();
+            const el = document.getElementById("last-updated");
+            if (el) el.innerText = "Обновлено " + new Date().toLocaleTimeString("ru-RU");
+        }
+        setInterval(() => {
+            const el = document.getElementById("last-updated");
+            if (!el) return;
+            const age = Math.round((Date.now() - lastFreshTs) / 1000);
+            el.innerText = "Обновлено " + new Date().toLocaleTimeString("ru-RU") + " · " + age + "с назад";
+            el.className = "text-xs font-mono " + (age < 15 ? "text-emerald-400" : age < 60 ? "text-amber-400" : "text-rose-400");
+        }, 1000);
+
         // Initialize chart and polling
+        updateThemeIcon();
         loadChart("XAUUSD");
         refreshData();
         loadMetrics();
         loadPairsData().then(() => loadPairsEquity());
-        setInterval(refreshData, 5000);
+        loadWSHistory();
+        // Live balance/positions come over the WebSocket push stream (instant,
+        // no polling). The heavy analytics sections refresh every 30s while
+        // the tab is visible; a 10s REST fallback covers the case where the
+        // WS stream is unreachable.
+        connectDashboardWS();
+        setInterval(() => { if (!document.hidden) refreshData(); }, 30000);
+        setInterval(() => {
+            if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) refreshStatus();
+        }, 10000);
         setPairsRefreshInterval();
+        // Live candlestick chart: auto-reload every 30s while visible.
+        setInterval(() => { if (!document.hidden) loadChart(currentChartAsset); }, 30000);
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) {
+                refreshData();
+                loadChart(currentChartAsset);
+                loadWSHistory();
+                loadPairsData();
+                loadPairsEquity();
+            }
+        });
     </script>
 </body>
 </html>

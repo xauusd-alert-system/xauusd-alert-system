@@ -37,7 +37,7 @@ class _FailingPipeline:
     """RealtimePipeline stand-in that fails for every asset."""
 
     def __init__(self, *args, **kwargs):
-        pass
+        raise RuntimeError("boom: model unavailable")
 
     def generate_signal(self, n_candles=300):
         raise RuntimeError("boom: model unavailable")
@@ -127,6 +127,92 @@ def test_monte_carlo_missing_ledger_is_not_a_fallback(client, monkeypatch, tmp_p
     assert payload["available"] is False
     assert "var_95_usd" not in payload
     assert payload["freshness_status"] in {"waiting", "offline"}
+
+
+# ---------------------------------------------------------------------------
+# /api/ml-prob — raw ML P(long)/P(short) panel (2026-08-25).
+# Same honesty contract as /api/matrix: unavailable/error must be explicit,
+# never fabricated neutral probabilities that look model-computed.
+# ---------------------------------------------------------------------------
+
+class _FakeMLProbPipeline:
+    """RealtimePipeline stand-in producing a small frame + fixed probabilities."""
+
+    timeframe = "M15"
+    effective_cfg = {
+        "ensemble": {
+            "min_ml_probability": 0.55,
+            "ml_confidence_floor": 0.62,
+            "min_confidence_to_alert": 0.66,
+        }
+    }
+
+    def __init__(self, *args, **kwargs):
+        self._predictor = _FakePredictor()
+
+    def get_frame(self, n_candles=300, build_features=True):
+        import pandas as pd
+        n = 130
+        return pd.DataFrame({
+            "timestamp_utc": [1_000_000 + i * 900 for i in range(n)],
+            "close": [4600.0 + i * 0.1 for i in range(n)],
+            "regime": ["range"] * n,
+            "session": ["newyork"] * n,
+            "feat_a": [0.5] * n,
+        })
+
+
+class _FakePredictor:
+    feature_cols = ["feat_a"]
+
+    def predict_proba(self, df):
+        import pandas as pd
+        n = len(df)
+        return pd.DataFrame({
+            "p_long": [0.6] * n,
+            "p_short": [0.4] * n,
+        }, index=df.index)
+
+
+def test_mlprob_non_live_is_explicit_unavailable(client, monkeypatch):
+    monkeypatch.setattr(app_module, "DATA_MODE", "mock")
+    payload = client.get("/api/ml-prob").json()
+    assert payload["available"] is False
+    assert payload["status"] == "unavailable"
+    assert "mock" in payload["reason"]
+    assert "history" not in payload
+    blob = str(payload)
+    assert "0.5" not in blob
+
+
+def test_mlprob_error_is_explicit_not_neutral(client, monkeypatch):
+    monkeypatch.setattr(app_module, "DATA_MODE", "live")
+    monkeypatch.setattr(app_module, "RealtimePipeline", _FailingPipeline)
+    payload = client.get("/api/ml-prob").json()
+    assert payload["available"] is False
+    assert payload["status"] == "error"
+    assert payload["reason"] == "boom: model unavailable"
+    assert "history" not in payload
+    blob = str(payload)
+    assert "0.5" not in blob
+
+
+def test_mlprob_happy_path_returns_history_and_latest(client, monkeypatch):
+    monkeypatch.setattr(app_module, "DATA_MODE", "live")
+    monkeypatch.setattr(app_module, "RealtimePipeline", _FakeMLProbPipeline)
+    payload = client.get("/api/ml-prob").json()
+    assert payload["available"] is True
+    assert payload["status"] == "ok"
+    assert len(payload["history"]) == 120
+    # chronological, per-bar probabilities present
+    h = payload["history"]
+    assert h[0]["ts"] < h[-1]["ts"]
+    assert h[-1]["p_long"] == 0.6 and h[-1]["p_short"] == 0.4
+    assert h[-1]["regime"] == "range" and h[-1]["session"] == "newyork"
+    lat = payload["latest"]
+    assert lat["ts"] == h[-1]["ts"]
+    assert "ensemble_bias" in lat and "ensemble_confidence" in lat
+    assert payload["thresholds"]["min_ml_probability"] == 0.55
 
 
 def test_dashboard_html_marks_diagnostic_and_has_no_controls(client):

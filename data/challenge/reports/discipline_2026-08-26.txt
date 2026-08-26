@@ -1,0 +1,24 @@
+============================================================
+DAILY DISCIPLINE REPORT
+As of: 2026-08-25T19:45:04+00:00
+Trades: 0
+============================================================
+
+JOURNAL ADHERENCE
+  Complete records: 0/0 (0%)
+  By-plan trades:  0%
+
+COMMISSION DRAG
+  Total fees:        $0.00
+  Avg fee/trade:     $0.00
+  Gross wins:        $0.00
+  Commission drag:   0.0% of gross wins
+  Net P&L:           $0.00
+
+STREAK ANALYSIS
+  Max loss streak:   0
+  Max win streak:    0
+  Max drawdown:      0.000R
+  Current streak:    0
+
+============================================================
