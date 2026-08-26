@@ -45,6 +45,7 @@ scanner:
   max_spread_pct: 0.10
   max_watchlist_size: 3
   benchmark_symbols: [SPY, QQQ]
+  poll_seconds: 60
 
 strategy:
   name: vwap_pullback_continuation
@@ -62,7 +63,9 @@ strategy:
   tp1_r: 1.0
   tp2_r: 2.0
 
+# Benchmark mapping (ТЗ §7.3.5): tech names use QQQ, the rest SPY.
 us_stocks:
+  tech_symbols: [AAPL, MSFT, NVDA, AMD, META, AVGO, GOOGL]
   base_universe:
     - AMD
     - NVDA
@@ -76,6 +79,23 @@ us_stocks:
     - NFLX
     - PLTR
     - COIN
+
+session:
+  timezone: America/New_York
+  regular_open: "09:30"
+  regular_close: "16:00"
+  # US market holidays 2026 (NY calendar; DST handled by zoneinfo).
+  holidays:
+    - "2026-01-01"
+    - "2026-01-19"
+    - "2026-02-16"
+    - "2026-04-03"
+    - "2026-05-25"
+    - "2026-06-19"
+    - "2026-07-03"
+    - "2026-09-07"
+    - "2026-11-26"
+    - "2026-12-25"
 
 model:
   enabled: false
