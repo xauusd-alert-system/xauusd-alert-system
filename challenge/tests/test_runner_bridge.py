@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from challenge.stealth import runner_bridge as bridge
 from challenge.strategy import Signal as LegacySignal
+from tests.builder import StubConnector as _StubConnector, build_risk_object
 
 
 class _FakeEngine:
@@ -44,28 +45,7 @@ class _FakeSession:
         pass
 
 
-class _StubConnector:
-    def __init__(self):
-        self.orders = []
-        self.closes = []
-        self.stops = []
-        self.partials = []
-
-    def place_order(self, symbol, side, qty, *args, **kwargs):
-        self.orders.append((symbol, side, qty))
-        return True
-
-    def close_position(self, symbol, qty=None):
-        self.closes.append((symbol, qty))
-        return True
-
-    def close_partial(self, symbol, qty):
-        self.partials.append((symbol, qty))
-        return True
-
-    def modify_stop(self, symbol, new_stop):
-        self.stops.append((symbol, new_stop))
-        return True
+# _StubConnector imported from tests.builder (shared with all test suites)
 
 
 # ---------------------------------------------------------------------------
@@ -241,17 +221,11 @@ def test_handle_signals_legacy_path_when_no_engine(monkeypatch):
     # Legacy path: signal accepted, order placed, positional qty from risk.
     state = _build_state()
     # risk.position_size(strict) returns int shares.
-    class _Risk:
-        max_open_positions = 2
-        daily_loss_stop = 25
-        per_trade_risk_usd = 5.0
 
-        def position_size(self, price, equity):
-            return 5
     snap = {"quotes": {"TSLA": {"last": 100.0}}, "equity": 1000.0,
             "pnl": 0.0, "positions": []}
     runner._handle_signals(
-        conn, _Risk(), _StubStrategy([signal]), state, snap,
+        conn, _make_risk(), _StubStrategy([signal]), state, snap,
         datetime(2026, 8, 25, 14, 0),
         {"session": {"start_local": "18:30", "end_local": "00:55",
                      "flatten_local": "00:45"}})
@@ -268,13 +242,9 @@ class _StubStrategy:
         return self._signals
 
 
-class _Risk:
-    max_open_positions = 2
-    daily_loss_stop = 25
-    per_trade_risk_usd = 5.0
-
-    def position_size(self, price, equity):
-        return 5
+def _make_risk():
+    return build_risk_object(max_open_positions=2, daily_loss_stop=25,
+                             per_trade_risk_usd=5.0, position_size_value=5)
 
 
 def test_handle_signals_engine_skips_on_none_plan(monkeypatch):
@@ -292,7 +262,7 @@ def test_handle_signals_engine_skips_on_none_plan(monkeypatch):
     snap = {"quotes": {"TSLA": {"last": 100.0}}, "equity": 1000.0,
             "pnl": 0.0, "positions": []}
     runner._handle_signals(
-        conn, _Risk(), _StubStrategy([signal]), state, snap,
+        conn, _make_risk(), _StubStrategy([signal]), state, snap,
         datetime(2026, 8, 25, 14, 0),
         {"session": {"start_local": "18:30", "end_local": "00:55",
                      "flatten_local": "00:45"}},
@@ -321,7 +291,7 @@ def test_handle_signals_engine_executes_plan(monkeypatch):
     snap = {"quotes": {"TSLA": {"last": 100.0}}, "equity": 1000.0,
             "pnl": 0.0, "positions": []}
     runner._handle_signals(
-        conn, _Risk(), _StubStrategy([signal]), state, snap,
+        conn, _make_risk(), _StubStrategy([signal]), state, snap,
         datetime(2026, 8, 25, 14, 0),
         {"session": {"start_local": "18:30", "end_local": "00:55",
                      "flatten_local": "00:45"}},

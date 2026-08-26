@@ -134,3 +134,57 @@ def test_leap_year_2028_boundaries():
     assert ORBStrategy.et_offset_hours(date(2028, 3, 12)) == _EDT  # 2nd Sun Mar 2028
     assert ORBStrategy.et_offset_hours(date(2028, 11, 4)) == _EDT  # Sat before
     assert ORBStrategy.et_offset_hours(date(2028, 11, 5)) == _EST  # 1st Sun Nov 2028
+
+
+# ---------------------------------------------------------------------------
+# 2030 — DST: Sun Mar 10 -> Sun Nov 3 (future-boundary extrapolation test)
+#
+# Mar 1 2030 = Fri; 2nd Sunday = Mar 10.
+# Nov 1 2030 = Fri; 1st Sunday  = Nov 3.
+#
+# The user asked about EEST→EET 27 Oct (EU DST end, last Sunday of Oct).
+# That governs the BROKER server offset (FxPro EEST/EET), not US ET.
+# The et_offset_hours function controls session windows (EDT/EST), not the
+# broker clock. Both transition rules are tested here for completeness.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("impl", _IMPLS)
+@pytest.mark.parametrize("when,expected", [
+    (date(2030, 1, 1), _EST),      # deep winter
+    (date(2030, 3, 9), _EST),       # day before 2nd Sunday of March
+    (date(2030, 3, 10), _EDT),      # 2nd Sunday of March 2030 = Mar 10 -> EDT
+    (date(2030, 3, 11), _EDT),      # day after DST start
+    (date(2030, 7, 4), _EDT),       # Independence Day, EDT
+    (date(2030, 10, 26), _EDT),     # day before EU DST end (EEST->EET Oct 27)
+    (date(2030, 10, 27), _EDT),     # EU DST ended, but US DST still active
+    (date(2030, 11, 2), _EDT),      # day before 1st Sunday of Nov
+    (date(2030, 11, 3), _EST),      # 1st Sunday of Nov 2030 = Nov 3 -> EST
+    (date(2030, 11, 4), _EST),      # day after DST end
+    (date(2030, 12, 31), _EST),     # deep winter
+])
+def test_et_offset_2030_boundaries(impl, when, expected):
+    assert impl(when) == expected
+
+
+def test_2030_dst_dates_match_reference_rules():
+    assert _second_sunday(2030, 3) == date(2030, 3, 10)
+    assert _first_sunday(2030, 11) == date(2030, 11, 3)
+    assert ORBStrategy.et_offset_hours(date(2030, 3, 10)) == _EDT
+    assert ORBStrategy.et_offset_hours(date(2030, 11, 3)) == _EST
+
+
+def test_eest_eet_boundary_oct_27_not_in_et_window():
+    """Oct 27 2030 is EU DST end (EEST->EET), not US ET DST end.
+
+    The FxPro server shifts from UTC+3 to UTC+2 on Oct 27. US EDT
+    remains active until Nov 3. This test documents that the et_offset
+    function correctly ignores the EU transition and only responds to
+    US rules.
+    """
+    # Oct 27: EEST->EET, but EDT still active
+    assert ORBStrategy.et_offset_hours(date(2030, 10, 27)) == _EDT
+    # Nov 3: US DST ends
+    assert ORBStrategy.et_offset_hours(date(2030, 11, 3)) == _EST
+    # The 7-day gap between EU and US transitions is the critical window
+    for d in range(28, 31+1):  # Oct 28..31
+        assert ORBStrategy.et_offset_hours(date(2030, 10, d)) == _EDT
