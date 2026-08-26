@@ -75,17 +75,10 @@ class SessionSimulator:
         self.provider.bars = bars_by_symbol
         self.journal.ensure_session(self.session_date)
 
-        # Scan once at the "end of session" moment (all bars closed)
-        session_end = self.session.session_close(
-            datetime.fromisoformat(self.session_date)).replace(tzinfo=None)
-
-        # Emulate: scan every 5 minutes during session; but for batch we just
-        # run once at the end with all bars available (same result as if
-        # risk state had been updated intra-day because our state is derived
-        # from manual outcomes which are fed via the journal).
-        now = datetime.combine(
-            datetime.fromisoformat(self.session_date), self.session.session_close({}).time())
-        now = now.replace(tzinfo=self.runner.session.open_at.tzinfo)
+        # Scan at mid-session (11:00 NY) when signals would realistically form
+        session_open = self.session.session_open(
+            datetime.fromisoformat(self.session_date).date())
+        now = session_open + timedelta(hours=2)  # ~11:30 NY
 
         signals = self.runner.scan_once(now)
 
@@ -166,16 +159,27 @@ def run_batch(csv_root: str, session_dates: List[str],
     scfg = {**DEFAULT_CFG, **cfg}
     universe = [s.upper() for s in universe]
 
+    # Always ensure benchmarks are available
+    benchmarks = ["QQQ", "SPY"]
+
     summary = []
     for sd in session_dates:
         logger.info("=== Paper session %s ===", sd)
         bars = {}
+        # Load universe symbols
         for sym in universe:
             path = os.path.join(csv_root, f"{sym}_{sd}.csv")
             if not os.path.exists(path):
                 logger.warning("%s: missing %s — skipping symbol", sd, path)
                 continue
             bars[sym] = load_bars(path, sym)
+        # Always load benchmarks for the session
+        for bench in ["QQQ", "SPY"]:
+            path = os.path.join(csv_root, f"{bench}_{sd}.csv")
+            if os.path.exists(path):
+                bars[bench] = load_bars(path, bench)
+            else:
+                logger.warning("%s: missing benchmark %s — may affect signals", sd, bench)
         if not bars:
             logger.warning("%s: no bars loaded — skip", sd)
             continue

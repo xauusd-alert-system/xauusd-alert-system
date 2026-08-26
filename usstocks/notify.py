@@ -21,23 +21,23 @@ class Notifier(Protocol):
 
 
 def format_signal_message(s: TradeSignal) -> str:
-    """ТЗ §9 template. Manual-execution disclaimer is mandatory."""
+    """TZ §9 template. Manual-execution disclaimer is mandatory. ASCII only."""
     side_ru = "LONG" if s.side == "long" else "SHORT"
-    emoji = "🟢" if s.side == "long" else "🔴"
-    why = "\n".join(f"• {w}" for w in s.why)
+    emoji = "[LONG]" if s.side == "long" else "[SHORT]"
+    why = "\n".join(f"- {w}" for w in s.why)
     return (
-        f"{emoji} US STOCKS — VWAP PULLBACK {side_ru}\n\n"
-        f"Тикер: {s.symbol}\nКачество: {s.grade}\n\n"
-        f"Вход: ${s.entry_low:.2f}–{s.entry_high:.2f}\n"
-        f"Стоп: ${s.stop:.2f}\n"
-        f"Риск на акцию: ${s.risk_per_share:.2f}\n"
-        f"Размер: {s.shares} акций\n"
-        f"Номинал: ~${s.notional_usd:,.0f}\n"
-        f"Максимальный риск: ~${s.planned_risk_usd:.2f}\n\n"
+        f"{emoji} US STOCKS - VWAP PULLBACK {side_ru}\n\n"
+        f"Ticker: {s.symbol}\nGrade: {s.grade}\n\n"
+        f"Entry: ${s.entry_low:.2f}-{s.entry_high:.2f}\n"
+        f"Stop: ${s.stop:.2f}\n"
+        f"Risk/share: ${s.risk_per_share:.2f}\n"
+        f"Size: {s.shares} shares\n"
+        f"Notional: ~${s.notional_usd:,.0f}\n"
+        f"Max risk: ~${s.planned_risk_usd:.2f}\n\n"
         f"TP1: ${s.tp1:.2f} (1R)\nTP2: ${s.tp2:.2f} (2R)\n\n"
-        f"Почему:\n{why}\n\n"
-        f"⚠️ Signal-only: бот не отправляет ордера. "
-        f"Проверь цену, стакан и терминал вручную."
+        f"Why:\n{why}\n\n"
+        "[Signal-only] bot does not send orders. "
+        "Check price, book and terminal manually."
     )
 
 
@@ -76,7 +76,10 @@ class TelegramNotifier:
 
 class PrintNotifier:
     def send_signal(self, signal: TradeSignal) -> None:
-        print(format_signal_message(signal))
+        msg = format_signal_message(signal)
+        # Windows cp1252-safe: replace non-ASCII
+        safe = msg.encode('ascii', 'replace').decode('ascii')
+        print(safe)
 
     def send_watchlist(self, watchlist: List[WatchlistItem]) -> None:
         print(watchlist)

@@ -281,7 +281,7 @@ def test_signal_message_contains_mandatory_fields():
     sig = _signal()
     from usstocks.notify import format_signal_message
     msg = format_signal_message(sig)
-    for token in ("Вход", "Стоп", "Размер", "Номинал",
-                  "Максимальный риск", "TP1", "TP2",
+    for token in ("Entry", "Stop", "Size", "Notional",
+                  "Max risk", "TP1", "TP2",
                   "Signal-only"):
         assert token in msg, f"missing {token} in signal message"
