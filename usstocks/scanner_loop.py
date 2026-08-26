@@ -46,6 +46,7 @@ class SignalOnlyRunner:
                  *, watchlist: List[str], state: Optional[RiskState] = None,
                  risk: Optional[RiskEngine] = None,
                  symbol_ids: Optional[Dict[str, str]] = None,
+                 journal=None,
                  on_event: Optional[Callable] = None):
         self.cfg = cfg
         self.provider = provider
@@ -65,7 +66,9 @@ class SignalOnlyRunner:
             cfg.get("challenge", {}).get("max_notional_usd", 5000.0))
         self.benchmark_cache: Dict[str, List[Bar]] = {}
         self._risk_notified = set()       # (day, symbol, code) -> TG once/day
-        self.on_event = on_event          # journal hook (Stage E)
+        self.journal = journal            # optional usstocks.journal.UsJournal
+        self.signals_enabled = True       # toggled by /us_signals on|off
+        self.on_event = on_event
 
     # -- helpers -----------------------------------------------------------
 
@@ -88,6 +91,13 @@ class SignalOnlyRunner:
                           symbol=symbol)
         logger.info("risk gate %s %s: %s (%s)", symbol, decision.code,
                     decision.allowed, decision.reason)
+        if self.journal:
+            try:
+                self.journal.save_risk_event(
+                    event, session_date=self.state.session_date
+                    or now.date().isoformat())
+            except Exception:
+                logger.exception("journal.save_risk_event failed")
         if self.on_event:
             self.on_event(event)
         if not decision.allowed:
@@ -103,6 +113,9 @@ class SignalOnlyRunner:
 
     def scan_once(self, now) -> List[TradeSignal]:
         """One scan cycle over the watchlist; sends at most one signal."""
+        if not self.signals_enabled:
+            logger.info("signals disabled via /us_signals off — skip cycle")
+            return []
         signals: List[TradeSignal] = []
         for sym in self.watchlist:
             if sym not in self.symbol_ids:
@@ -139,6 +152,13 @@ class SignalOnlyRunner:
             signals.append(signal)
             self.state.active_symbol = sym
             self.notifier.send_signal(signal)
+            if self.journal:
+                try:
+                    day = self.state.session_date or now.date().isoformat()
+                    self.journal.ensure_session(day)
+                    self.journal.save_signal(signal, session_date=day)
+                except Exception:
+                    logger.exception("journal.save_signal failed")
             break
         return signals
 
