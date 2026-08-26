@@ -54,6 +54,9 @@ logger = logging.getLogger("run_bot")
 
 
 def main() -> None:
+    # Signal-only interlock (Stage B): this entry point runs the MT5 trader.
+    from usstocks.guards import assert_auto_trading_allowed
+    assert_auto_trading_allowed("scripts.run_bot (MT5 auto-trader)")
     cfg = build_virtual_cfg()
 
     # 1. Build & warm up the virtual market.

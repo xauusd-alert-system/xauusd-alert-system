@@ -54,6 +54,7 @@ fix_ingestion.py
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite-journal
+*.sqlite.bak*
 
 # Prop challenge: auth-sensitive / volatile artifacts stay local only
 data/challenge_browser_profile/

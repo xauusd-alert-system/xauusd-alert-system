@@ -6,9 +6,54 @@ from dotenv import load_dotenv
 load_dotenv()
 import copy
 import os
+import sys
 import yaml
 
 _CONFIG_CACHE = None
+
+# ---------------------------------------------------------------------------
+# Deployment profiles (docs/MIGRATION_PLAN.md, Stage B).
+#   forex_legacy / crypto_legacy — historical auto-trading behaviour; this is
+#       also the DEFAULT when neither --profile nor PROFILE is given, so all
+#       existing entry points keep working unchanged.
+#   us_stocks_challenge / replay — SIGNAL-ONLY: executable entry points refuse
+#       to start (usstocks.guards) and the only executor is DisabledExecutor.
+# ---------------------------------------------------------------------------
+KNOWN_PROFILES = ("us_stocks_challenge", "replay", "forex_legacy", "crypto_legacy")
+DEFAULT_PROFILE = "forex_legacy"
+SIGNAL_ONLY_PROFILES = ("us_stocks_challenge", "replay")
+
+
+def get_profile() -> str:
+    """Resolve the active profile.
+
+    Priority: ``--profile <name>`` CLI flag > ``PROFILE`` env var >
+    ``DEFAULT_PROFILE``. Unknown names fail fast instead of silently falling
+    back to an auto-trading-capable profile.
+    """
+    raw = None
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg == "--profile" and i + 1 < len(argv):
+            raw = argv[i + 1]
+            break
+        if arg.startswith("--profile="):
+            raw = arg.split("=", 1)[1]
+            break
+    if raw is None:
+        raw = os.environ.get("PROFILE")
+    profile = (raw or DEFAULT_PROFILE).strip()
+    if profile not in KNOWN_PROFILES:
+        raise ValueError(
+            f"Unknown PROFILE {profile!r}; expected one of: "
+            f"{', '.join(KNOWN_PROFILES)}"
+        )
+    return profile
+
+
+def is_signal_only(profile: str = None) -> bool:
+    """True when the (explicitly passed or active) profile forbids execution."""
+    return (profile or get_profile()) in SIGNAL_ONLY_PROFILES
 
 
 def load_config(path: str = None) -> dict:

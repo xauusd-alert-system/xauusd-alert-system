@@ -44,3 +44,6 @@ xgboost==3.3.0
 # the pinned stack install on Linux/macOS (CI, backtests, simulation via the MT5
 # shim) while the live trader still pulls the real package on Windows.
 MetaTrader5==5.0.6070; platform_system == "Windows"
+# UTEX data feed + challenge browser automation (challenge/browser.py,
+# challenge/manual/alerter.py). Declared here: it was an undeclared dependency.
+playwright==1.62.0

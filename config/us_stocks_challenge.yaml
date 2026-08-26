@@ -1,0 +1,99 @@
+# =========================================================================
+# PROFILE: us_stocks_challenge — Hash Hedge "US Stocks Headliners", Stage 1.
+# Signal-only profile (docs/MIGRATION_PLAN.md): scanner + risk engine +
+# Telegram signals + manual confirmation. Auto-execution is technically
+# impossible here:
+#   - executable entry points refuse to start under this profile
+#     (usstocks.guards.assert_auto_trading_allowed);
+#   - execution.mode=disabled selects execution.DisabledExecutor, which logs
+#     and raises on ANY submit attempt;
+#   - ML is advisory-only and can never authorize a trade.
+# Numbers below are the ТЗ §2 contract. Loosening them requires a separate,
+# explicit user action (never automatic).
+# =========================================================================
+
+profile: us_stocks_challenge
+signal_only: true          # consumed by guards/tests; must stay true
+
+challenge:
+  account_size_usd: 1000.0
+  official_daily_loss_limit_usd: 50.0
+  official_total_loss_limit_usd: 100.0
+  target_profit_usd: 80.0
+  max_leverage: 5.0
+  max_notional_usd: 5000.0
+  # Terminal session 18:30-00:55 user-local; positions auto-close by platform.
+  session_local: {start: "18:30", end: "00:55"}
+  min_trading_days: 5
+
+risk:
+  risk_per_trade_usd: 10.0
+  personal_daily_stop_usd: -20.0
+  max_trades_per_day: 2
+  max_consecutive_losses: 2
+  daily_profit_lock_usd: 20.0
+  no_new_entries_minutes_before_close: 25
+  force_flat_alert_minutes_before_close: 30
+  # Only one active signal / position at a time.
+  single_active_signal: true
+
+scanner:
+  min_price: 10.0
+  min_abs_gap_pct: 1.5
+  min_relative_volume: 1.5
+  min_average_daily_dollar_volume: 50000000
+  max_spread_pct: 0.10
+  max_watchlist_size: 3
+  benchmark_symbols: [SPY, QQQ]
+
+strategy:
+  name: vwap_pullback_continuation
+  spec_doc: docs/STRATEGY_VWAP_PULLBACK.md
+  opening_range_minutes: 15
+  confirmation_timeframe: 5m
+  use_1m_entry_trigger: true
+  min_impulse_pct: 0.80
+  min_impulse_bars: 2
+  min_impulse_volume_ratio: 1.5
+  max_pullback_volume_ratio: 0.90
+  vwap_touch_tolerance_pct: 0.10
+  stop_buffer_cents: 0.03
+  min_room_to_level_r: 1.8
+  tp1_r: 1.0
+  tp2_r: 2.0
+
+us_stocks:
+  base_universe:
+    - AMD
+    - NVDA
+    - TSLA
+    - AAPL
+    - META
+    - MSFT
+    - AMZN
+    - GOOGL
+    - AVGO
+    - NFLX
+    - PLTR
+    - COIN
+
+model:
+  enabled: false
+  role: advisory_only      # quality_score only; never authorizes a trade
+  min_quality_score: null
+
+execution:
+  mode: disabled           # hard requirement; see execution/disabled_executor.py
+
+data:
+  provider: utex           # reuse the existing challenge/manual UTEX feed
+  timeframes: [1m, 5m]
+  timezone: America/New_York   # all session math in NY time, aware datetimes
+
+journal:
+  sqlite_path: data/usstocks.sqlite
+  csv_export_dir: data/usstocks_export
+
+telegram:
+  signal_template_version: 1
+  confirm_inline_buttons: true

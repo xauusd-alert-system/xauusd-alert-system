@@ -468,6 +468,9 @@ def _handle_signals(conn, risk, strategy, state, snap, now, cfg=None, *,
 
 
 def main():
+    # Signal-only interlock (Stage B): this runner places browser orders.
+    from usstocks.guards import assert_auto_trading_allowed
+    assert_auto_trading_allowed("challenge.runner (browser auto-trading)")
     cfg = load_config().get("challenge", {})
     if not cfg.get("platform", {}).get("url"):
         logger.error("challenge.platform.url is not configured in config.yaml")

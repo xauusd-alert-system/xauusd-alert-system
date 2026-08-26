@@ -55,7 +55,14 @@ def _timedelta_hours(h: int) -> "timedelta":
 
 
 def build_engine(cfg: dict) -> StealthExecutionEngine | None:
-    """Construct the stealth engine from the challenge config (or None)."""
+    """Construct the stealth engine from the challenge config (or None).
+
+    Stage B interlock: the stealth layer drives browser order actions, so it
+    must never be built under a signal-only profile even if some other code
+    path forgets the startup guard.
+    """
+    from usstocks.guards import assert_auto_trading_allowed
+    assert_auto_trading_allowed("challenge.stealth.runner_bridge.build_engine")
     challenge_cfg = (cfg or {}).get("challenge")
     if not challenge_cfg or not bool(challenge_cfg.get("stealth", {}).get("enabled", False)):
         return None
