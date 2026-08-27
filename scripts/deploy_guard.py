@@ -66,9 +66,19 @@ from model.trainer import (
 )
 from model.predictor import ModelPredictor
 from model.ensemble_backtest import EnsembleBacktester
+from model.registry import ModelRegistry, file_sha256
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("deploy_guard")
+
+
+class RegistryPreflightError(RuntimeError):
+    """Raised when the deploy candidate is unregistered or hash-corrupted
+    (Model Registry pre-flight, ТЗ 8.4). Blocking the deploy is the point."""
+
+    def __init__(self, reason: str, registry_id: str | None = None):
+        super().__init__(reason)
+        self.registry_id = registry_id
 
 # Minimum out-of-sample trades required before a side's primary metric is
 # trusted (configurable via deploy_guard.min_trades).
@@ -436,9 +446,59 @@ def guard_asset(cfg: dict, asset_key: str, deployed_path: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# --check orchestration + CLI
+# Model Registry pre-flight (ТЗ 8.4): never deploy an unregistered or
+# corrupted model. Deploying is a registry-visible event, so the candidate
+# must be cataloged and its file hash must still match the registered one.
 # --------------------------------------------------------------------------- #
-def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak"):
+def registry_preflight_check(cfg: dict, asset_key: str, model_path: str,
+                             registry: ModelRegistry | None = None) -> dict:
+    """Verify the deployable model is registered AND its file hash matches.
+
+    Returns {"ok": bool, "reason": str, "registry_id": str|None}.
+    Fail-closed: any mismatch blocks the deploy with a clear reason.
+
+    Matching strategy: prefer an exact registered model_path (the deploy
+    candidate path is stable across retrains), fall back to a hash match
+    (restored/renamed artifacts). Once matched, the CURRENT file content is
+    compared against the registered hash - so a file corrupted AFTER
+    registration is reported as model_corrupted, not unregistered.
+    """
+    if not os.path.exists(model_path):
+        return {"ok": True, "reason": "no_model_file", "registry_id": None}
+    reg = registry if registry is not None else ModelRegistry()
+    try:
+        sha = file_sha256(model_path)
+    except OSError as e:
+        return {"ok": False, "reason": f"hash_failed:{e}", "registry_id": None}
+
+    entries = reg.list_entries(asset=asset_key)
+    norm = os.path.normcase(os.path.abspath(model_path))
+    match = next(
+        (e for e in entries
+         if os.path.normcase(os.path.abspath(e.model_path)) == norm),
+        None,
+    )
+    if match is None:
+        match = next((e for e in entries if e.file_sha256 == sha), None)
+    if match is None:
+        return {"ok": False,
+                "reason": "model_not_registered: deploy candidate "
+                          f"{model_path} (sha256 {sha[:12]}...) has no "
+                          "registry entry; train via scripts/train_all_assets "
+                          "or register it explicitly",
+                "registry_id": None}
+    if not reg.verify(match.registry_id):
+        return {"ok": False,
+                "reason": f"model_corrupted: deploy candidate {model_path} "
+                          f"no longer matches registered hash of "
+                          f"{match.registry_id}",
+                "registry_id": match.registry_id}
+    return {"ok": True, "reason": "registered_and_verified",
+            "registry_id": match.registry_id}
+
+
+def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak",
+                        registry: "ModelRegistry | None" = None):
     """Compare each asset's newly retrained model vs its nightly backup.
 
     On REJECT (or evaluation error), restore the backed-up (good) model over
@@ -465,7 +525,13 @@ def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak"):
             continue
         rolled_back = False
         try:
+            # Registry pre-flight (ТЗ 8.4): the newly retrained candidate must
+            # be registered and hash-verified BEFORE any deploy decision.
+            pre = registry_preflight_check(cfg, asset, mp, registry=registry)
+            if not pre["ok"]:
+                raise RegistryPreflightError(pre["reason"], pre.get("registry_id"))
             dec = guard_asset(cfg, asset, bak)
+            dec["registry_id"] = pre["registry_id"]
             if not dec.get("deploy", True):
                 failed = True
                 if os.path.exists(bak):
@@ -477,6 +543,27 @@ def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak"):
                     )
             else:
                 logger.info("[%s] deploy OK (%s); keeping new model.", asset, dec.get("reason"))
+        except RegistryPreflightError as e:
+            # Registry pre-flight (ТЗ 8.4): unregistered or corrupted deploy
+            # candidate -> blocked with a verbatim, actionable reason.
+            failed = True
+            if os.path.exists(bak):
+                shutil.copy2(bak, mp)
+                rolled_back = True
+                logger.warning(
+                    "[%s] deploy BLOCKED by registry pre-flight (%s); restored %s from backup.",
+                    asset, e, mp,
+                )
+            else:
+                logger.warning(
+                    "[%s] deploy BLOCKED by registry pre-flight (%s); no backup to restore.",
+                    asset, e,
+                )
+            dec = {"asset": asset, "deploy": False, "metric": None,
+                   "deployed_value": None, "candidate_value": None,
+                   "reason": str(e), "registry_id": e.registry_id,
+                   "tolerance": float(dg.get("tolerance", 0.0)),
+                   "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
         except Exception as e:  # noqa: BLE001 - an error must not deploy blindly
             logger.warning("[%s] deploy guard errored (%s); rolling back.", asset, e)
             failed = True
