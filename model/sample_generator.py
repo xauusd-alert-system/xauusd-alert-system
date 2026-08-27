@@ -80,7 +80,11 @@ def _atr(df: pd.DataFrame, period: int) -> pd.Series:
         (df["high"] - prev_close).abs(),
         (df["low"] - prev_close).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    # min_periods=1 (was = period): the head NaNs poisoned the first
+    # windowed samples on real data (13 non-finite atr_ratio bars -> NaN
+    # training loss with --extended-features). Partial-window EMA is still
+    # strictly causal; synthetic data never surfaced this.
+    return tr.ewm(alpha=1 / period, adjust=False, min_periods=1).mean()
 
 
 FEATURE_COLUMNS_BASE = [
@@ -117,13 +121,20 @@ def build_book_features(df: pd.DataFrame, cfg: dict | None = None) -> pd.DataFra
     if cfg["extended"]:  # T-19
         out["atr_ratio"] = _atr(df, int(cfg["atr_period"])) / close
         # rolling volatility proxy of the session (causal): stdev of the
-        # last `session_vol_window` close-to-close returns
+        # last `session_vol_window` close-to-close returns. Real-data
+        # bugfix: the naive std/mean(|ret|) coefficient of variation
+        # explodes (observed 4.2e6 on dead-flat 32-bar windows of the
+        # 2004-2025 XAUUSD history) and poisons z-scored training. The
+        # denominator is floored by 5% of the same window's std, bounding
+        # the ratio at 20 for vanishing mean moves; still scale-free.
         ret = close.pct_change()
-        out["session_vol_ratio"] = (ret.rolling(int(cfg["session_vol_window"]),
-                                                min_periods=2).std()
-                                    / (ret.rolling(int(cfg["session_vol_window"]),
-                                                  min_periods=2).mean().abs()
-                                       + 1e-12)).fillna(0.0)
+        ret_std = ret.rolling(int(cfg["session_vol_window"]),
+                              min_periods=2).std()
+        ret_mean_abs = ret.rolling(int(cfg["session_vol_window"]),
+                                   min_periods=2).mean().abs()
+        out["session_vol_ratio"] = (ret_std
+                                    / (ret_mean_abs + 0.05 * ret_std
+                                       + 1e-12)).fillna(0.0).clip(upper=20.0)
         if "volume" in df.columns:
             vol_mean = df["volume"].rolling(int(cfg["session_vol_window"]),
                                             min_periods=1).mean()

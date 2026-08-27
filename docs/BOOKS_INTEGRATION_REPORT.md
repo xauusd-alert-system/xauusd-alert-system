@@ -17,6 +17,13 @@ Programming for Traders» — оба анализа в `docs/analysis/`.
 end-to-end: `scripts/publish_book_signals.py` (модели → `ensemble_vote` →
 `SignalIntent` в `ml_signal_bridge.sqlite`).
 
+**Дополнение 2: реальный рынок прогнан через ВСЕ оставшиеся Python-компоненты
+книг** — дрейф-гейт T-23 (`run_book_drift_report.py`: PSI 0.318 → alarm,
+деплой заблокирован), бэктест ансамбля с приёмочным вердиктом T-03/T-08
+(`run_book_ensemble_backtest.py`: 65 сделок, PF 1.24, WR 41.5% → FAIL),
+extended-фичи T-19 (edge не дали, но вскрыли и починили 2 бага фичесета,
+которые синтетика не ловила). подробности — 3.4–3.6.
+
 ---
 
 ## 1. Закрыто полностью (код + тесты зелёные)
@@ -25,7 +32,7 @@ end-to-end: `scripts/publish_book_signals.py` (модели → `ensemble_vote` 
 |---|---|---|
 | **T-01** Подключить NeuroBook | Инвентарь и зеркало исходников книги: `NEUROBOOK_MANIFEST.json` (53 файла CodeBase), `fetch_neurobook.py` для побайтового скачивания, зафиксирован коммит vendor `67efcaf0` | `mql5/NeuroBook/` |
 | **T-02** Генератор выборок XAUUSD | `build_book_features` (RSI/MACD/геометрия), `NormalizationParams` (fit только на train, save/load JSON), `make_windowed_samples`, 60/20/20 по времени, `multi_horizon` [6,12]; CLI-раннер артефактов для EA | `model/sample_generator.py`, `scripts/create_initial_data_xauusd.py` |
-| **T-03** Регламент валидации | `forward_metrics` + `evaluate_model_acceptance` (PF>1.2, WR>55%, ≥30 трейдов, порог ≥0.6, форвард ≥365д, замороженные параметры) + чек-лист | `backtest/validation_protocol.py` |
+| **T-03** Регламент валидации | `forward_metrics` + `evaluate_model_acceptance` (PF>1.2, WR>55%, ≥30 трейдов, порог ≥0.6, форвард ≥365д, замороженные параметры) + чек-лист; первый РЕАЛЬНЫЙ вердикт: FAIL для books-ансамбля (WR 41.5% ≤ 55%, п. 3.6) | `backtest/validation_protocol.py` |
 | **T-04** Базовая FC-модель | FC(60, Swish)+Adam по книге; градиент-чек 2.5e-8; smoke-обучение 0.38→0.0001 | `model/book_nn/`, `scripts/run_book_experiments.py` |
 | **T-08** Тестер-контур | Python-близнец формулы `PF·√trades − w·DD%` (cap 10, 0 трейдов → −inf, equity-DD из кривой) + MQL5 `OnTester` с `FrameAdd("equity")` | `backtest/tester_criterion.py`, `mql5/NeuroTrader/TesterCriterion.mqh` |
 | **T-09** MH Attention | MHA (8 голов, window_out=8, model_dim 32) в общем рантайме; smoke-сравнение fc/lstm/mha на синтетике END-TO-END (MSE 1.078/1.067/1.102 — ожидаемо ≈1 на random walk) | `scripts/run_book_experiments.py` |
@@ -34,9 +41,9 @@ end-to-end: `scripts/publish_book_signals.py` (модели → `ensemble_vote` 
 | **T-15** Новостной фильтр | Live: `NewsGuard.mqh` (календарь, ±30 мин, high-importance USD, merge окон, в тестере fail-open с пояснением). Бэктест: `NewsStore` (WAL, UNIQUE(ts,title,country), `events_between`, `import_csv`, `is_news_blackout`) | `mql5/NeuroTrader/NewsGuard.mqh`, `data/news_sqlite.py` |
 | **T-16** Python-мост | `SignalBridgeWriter`: таблица `ml_signals` + `bridge_meta(schema_version=1)`, WAL, идемпотентная запись (retry не сбрасывает статус EA), TTL 3ч, `expire_stale`; MQL5-читатель с fail-closed по версии схемы; автоторговля Python не используется (10027 — фича). **End-to-end продюсер** `scripts/publish_book_signals.py`: свечи → фичи → нормализация (train-параметры) → ансамбль FC+LSTM+MHA → `ensemble_vote` → `SignalIntent` с ATR-SL/TP и `features_hash`; идемпотентный `intent_id`, fail-closed (flat → ничего не пишется) | `execution/signal_bridge.py`, `mql5/NeuroTrader/SignalBridge.mqh`, `scripts/publish_book_signals.py` |
 | **T-17** Train/Val-расхождение | Мониторинг в цикле обучения: patience/min_train_progress/val_worsen_ratio, алерт с эпохой и обеими кривыми | `model/book_nn/train.py` |
-| **T-19** Расширение фичесета | `atr_ratio`, `session_vol_ratio`, `volume_ratio` — масштабно-свободные, по схеме нормализации T-02 (`--extended-features`) | `model/sample_generator.py` |
+| **T-19** Расширение фичесета | `atr_ratio`, `session_vol_ratio`, `volume_ratio` — масштабно-свободные, по схеме нормализации T-02 (`--extended-features`); реальные данные вскрыли и починили 2 бага (взрыв CV до 4.2e6 на «мёртвых» окнах, head-NaN ATR) — регресс-тесты, п. 3.4 | `model/sample_generator.py` |
 | **T-20** Конфигурация моделей | `BookNetwork` из CLayerDescription-диктов, сериализация `.npz`+`.json` (архитектура как данные), `book_fc/lstm/mha_description` | `model/book_nn/network.py` |
-| **T-23** Walk-forward + дрейф | `psi` (0.10/0.25), `ks_statistic` (scipy+exact fallback), `feature_drift_report`, `normalization_shift` (scale ratio >1.5 или mean shift >1σ → alarm), `walk_forward_drift_gate` (блокирует deploy); сам walk-forward-конвейер уже был в репо (`backtest/walk_forward.py`, `scripts/retrain_real_trades.py`) — интеграция дрейфа добавлена | `model/drift.py` |
+| **T-23** Walk-forward + дрейф | `psi` (0.10/0.25), `ks_statistic` (scipy+exact fallback), `feature_drift_report`, `normalization_shift` (scale ratio >1.5 или mean shift >1σ → alarm), `walk_forward_drift_gate` (блокирует deploy); сам walk-forward-конвейер уже был в репо (`backtest/walk_forward.py`, `scripts/retrain_real_trades.py`) — интеграция дрейфа добавлена; прогнано на РЕАЛЬНЫХ данных: PSI 0.318 → alarm, `deploy_blocked=true` (п. 3.5) | `model/drift.py` |
 | **T-25** Ансамбль | FC+LSTM+MHA голосование: `model_probability` (sigmoid/softmax), `ensemble_vote` (порог 0.6, min_agreement → «flat» при неустойчивости), `signal_stability` | `model/book_nn/ensemble_vote.py` |
 
 ## 2. Сделано (код написан; требуется контрольная сборка в MetaEditor)
@@ -137,6 +144,91 @@ ATR-SL/TP, `features_hash` и идемпотентным `intent_id` (повто
 на том же баре не дублирует строку) — поведение зафиксировано тестами
 (`scripts/tests/test_publish_book_signals.py`, 7 тестов).
 
+### 3.4 Extended-фичи (T-19) и два багфикса от реальных данных
+
+Тот же срез 80 000 баров, `--extended-features` (10 фич вместо 7):
+
+| Модель | test MSE base → ext | dir.acc h=12 base → ext |
+|---|---|---|
+| Наивный (ноль) | 2.006 | 0.500 |
+| FC | 2.081 → 2.182 | 0.503 → 0.502 |
+| LSTM | 2.415 → 2.604 | 0.502 → 0.493 |
+| MHA | 2.832 → 2.400 | 0.491 → **0.517** |
+
+Extended-набор edge не даёт (все MSE ≥ наивного). Отдельно: dir.acc
+MHA на h=12 вышел на 0.517 — это ≈2σ над монеткой на 16k сэмплов, но без
+подтверждения MSE и на одном прогоне это не сигнал, а повод для
+отдельной проверки.
+
+**Первый запуск на реальных данных вернул test MSE = NaN по всем трём
+моделям** — диагностика вскрыла два бага T-19-фичесета, которые
+синтетический smoke не ловил (это главный практический результат
+extended-прогона):
+
+1. `session_vol_ratio` = std/|mean| взрывался до **4.2·10⁶** на
+   «мёртвых» окнах (скользящее среднее возвратов → 0) — z-score и обучение
+   отравлены. Фикс: знаменатель флоорится 5%·std того же окна + clip на
+   20 (scale-free, ограничен сверху).
+2. `_atr(min_periods=period)` оставлял 13 NaN в голове фрейма → NaN-лоссы
+   первых windowed-сэмплов. Фикс: `min_periods=1` (частичное EMA, строго
+   каузально).
+
+Оба фикса закрыты регресс-тестами
+(`scripts/tests/test_book_realdata_scripts.py`: нет NaN в голове,
+ограниченность на плоских окнах). Честная оговорка: после фикса
+`session_vol_ratio` в основном сатурируется у 20 (p99 = 19.5) —
+информативность низкая, кандидат на переопределение (например,
+std₃₂/std₂₅₆) в следующей итерации; семантику менять сейчас не стал
+(ограничение «без радикальных изменений»).
+
+### 3.5 Дрейф-гейт (T-23) на реальных данных
+
+`scripts/run_book_drift_report.py` — train (60%) против test (20%) того же
+среза, теми же фичами, что в обучении:
+
+| Метрика | Значение | Порог | Статус |
+|---|---|---|---|
+| worst PSI | **0.318** | alarm > 0.25 | **alarm** |
+| worst KS | 0.179 | — | — |
+| normalization scale ratio (MACD) | **2.40×** | > 1.5 | alarm |
+| worst mean shift | 0.17σ | > 1σ | ok |
+
+Вердикт гейта: `status = alarm`, **`deploy_blocked = true`**. Т.е.
+автоматика T-23 ровно на тех окнах, где модели не смогли обыграть наивный
+прогноз, сама запрещает деплой — цепочка «сдвиг режима → блокировка»
+работает на реальном рынке (волатильность тест-окна в 2.4 раза выше
+train-овой по MACD-колонкам — тот самый 2025-й из п. 3.2(3)).
+
+### 3.6 Бэктест ансамбля с приёмочным вердиктом (T-25 → T-16 → T-03/T-08)
+
+`scripts/run_book_ensemble_backtest.py` — сигналы генерируются ЦЕПОЧКОЙ
+ПРОДЮСЕРА (TradeLevel 0.6, min_agreement 0.6, ATR-геометрия 1.5×/2:1),
+вход по open следующего бара (без заглядывания вперёд), полный спред
+$0.30 за раунд-трип, при неоднозначном баре первым заполняется SL
+(пессимистично), одна позиция одновременно (зеркало EA). Торговался
+только test-срез (2024-09-18 … 2025-09-30):
+
+| Метрика | Значение |
+|---|---|
+| Сигналов → сделок (178 отклонено: позиция занята) | 243 → **65** |
+| Profit factor | 1.239 |
+| Win rate | **41.5%** |
+| Net PnL (баланс 100) | +76.3 |
+| Max DD | 55.1% |
+| Критерий T-08 (PF·√N − w·DD) | −45.1 |
+| Buy&hold за то же окно | **+49.7%** |
+| **Вердикт T-03** | **FAIL** (WR 0.415 ≤ 0.55) |
+
+Направления: 39 short / 26 long; выходы: 32 time / 24 SL / 9 TP; средняя
+длительность 8.8 бара.
+
+Интерпретация: PF формально выше порога 1.2, но win rate провален, DD
+54%, а +76 пунктов на окне, где buy&hold дал +50% (золото 2600→3850) —
+это выглядит бета-захватом тренда-2025 (спот ~2570→3844), а не альфой; дрейф-гейт из 3.5
+корроборирует. Вердикт всей цепочки: **модель не деплоится** —
+приёмочный контур T-03/T-08 делает свою работу на реальных данных,
+а не только в юнит-тестах.
+
 ## 4. Заблокировано / отложено
 
 | Задача | Причина |
@@ -147,7 +239,7 @@ ATR-SL/TP, `features_hash` и идемпотентным `intent_id` (повто
 
 ## 5. Верификация
 
-**Новые тесты: 91 passed** (`pytest` по книгам-интеграции):
+**Новые тесты: 102 passed** (`pytest` по книгам-интеграции):
 
 ```
 model/tests/test_books_sample_generator.py        9   (T-02/T-19)
@@ -161,12 +253,13 @@ scripts/tests/test_books_artifacts.py             9   (T-25 + скрипты)
 mql5/tests/test_neurotrader_contracts.py          11  (MQL5↔Python контракты)
 config/tests/test_books_config.py                 5   (секция books:)
 scripts/tests/test_publish_book_signals.py        7   (T-16 e2e + импортёр внешних данных)
+scripts/tests/test_book_realdata_scripts.py       11  (T-23 drift-отчёт, T-25+T-03 бэктест, багфиксы T-19)
 ```
 
 Градиентные проверки (`model/book_nn`): FC 2.5e-8, LSTM 6.4e-8, GPT
 4.73e-8, MHA ≤3.66e-5 (6 seed'ов, tol 1e-4), композит MHA+LSTM+FC 1.06e-5.
 
-**Регресс:** полный прогон затронутых пакетов — 805 passed / 10 failed / 1 skipped;
+**Регресс:** полный прогон затронутых пакетов — 816 passed / 10 failed / 1 skipped;
 все 10 падений (`execution/test_close_notification*`, `test_breakeven_legs*`,
 `test_blackout*`, `scripts/test_audit_final_batch*`,
 `scripts/test_diag_r_metrics*`) воспроизводятся на чистом дереве до
@@ -198,6 +291,22 @@ python -m scripts.run_book_experiments --db data/market_data_external.sqlite \
 # продюсер сигналов в мост (T-16 end-to-end: ансамбль -> ml_signals)
 python -m scripts.publish_book_signals --models-dir output/book_experiments_real \
     --db data/market_data_external.sqlite --asset XAUUSD --timeframe M15
+
+# дрейф-гейт T-23 на тех же окнах (PSI/KS + сдвиг нормализации)
+python -m scripts.run_book_drift_report --db data/market_data_external.sqlite \
+    --asset XAUUSD --timeframe M15 --max-bars 80000 \
+    --out output/book_drift_report/report.json
+
+# бэктест ансамбля с приёмочным вердиктом T-03 и критерием T-08
+python -m scripts.run_book_ensemble_backtest \
+    --models-dir output/book_experiments_real \
+    --db data/market_data_external.sqlite --asset XAUUSD --timeframe M15 \
+    --max-bars 80000 --out output/book_ensemble_backtest/report.json
+
+# то же с extended-фичами (T-19)
+python -m scripts.run_book_experiments --db data/market_data_external.sqlite \
+    --asset XAUUSD --timeframe M15 --max-bars 80000 --epochs 25 \
+    --extended-features --out-dir output/book_experiments_real_ext
 
 # экспорт обученной FC для EDGE-режима EA (OpenCL/CPU)
 python -m scripts.export_fc_weights --model output/book_experiments_real/book_fc \

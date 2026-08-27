@@ -85,6 +85,18 @@ def load_candles(asset: str, timeframe: str, db_path: str) -> pd.DataFrame | Non
         con.close()
 
 
+def _directional_accuracy(pred: np.ndarray, y: np.ndarray) -> list[float]:
+    """Fraction of test samples where sign(pred) == sign(y), per output."""
+    p = np.asarray(pred, dtype=float)
+    t = np.asarray(y, dtype=float)
+    if p.ndim == 1:
+        p = p[:, None]
+    if t.ndim == 1:
+        t = t[:, None]
+    return [float((np.sign(p[:, i]) == np.sign(t[:, i])).mean())
+            for i in range(t.shape[1])]
+
+
 def run_experiment(model_name: str, samples, epochs: int, lr: float,
                    batch_size: int, out_dir: str, window: int, input_dim: int,
                    seed: int) -> dict:
@@ -97,7 +109,8 @@ def run_experiment(model_name: str, samples, epochs: int, lr: float,
                seed=seed)
     elapsed = time.time() - started
     from model.book_nn.losses import mse
-    test_loss = mse(net.forward(samples.X_test), samples.y_test)[0]
+    pred_test = net.forward(samples.X_test)
+    test_loss = mse(pred_test, samples.y_test)[0]
     base = os.path.join(out_dir, f"book_{model_name}")
     files = net.save(base)
 
@@ -113,6 +126,10 @@ def run_experiment(model_name: str, samples, epochs: int, lr: float,
         "train_mse_final": rows[-1]["train_loss"],
         "val_mse_final": rows[-1]["val_loss"],
         "test_mse": test_loss,
+        # directional accuracy per output column (0.5 = coin flip): the
+        # market-facing companion of MSE, reported so nobody has to infer
+        # edge from MSE alone
+        "test_dir_acc": _directional_accuracy(pred_test, samples.y_test),
         "best_epoch": hist.best_epoch,
         "divergence_alerts": hist.alerts,
         "model_files": files,
@@ -191,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
         "extended_features": bool(args.extended_features),
         "feature_columns": samples.feature_columns,
         "split": samples.split_sizes(),
+        # naive baseline: predicting zero (the train-normalized target's
+        # mean) on the test split - a model must beat this to claim edge
+        "naive_zero_test_mse": float((np.asarray(samples.y_test) ** 2).mean()),
+        "naive_zero_val_mse": float((np.asarray(samples.y_valid) ** 2).mean()),
         "normalization": params.to_dict(),
         "results": results,
         "notes": [
