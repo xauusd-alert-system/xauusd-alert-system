@@ -53,7 +53,36 @@ logging.basicConfig(
 logger = logging.getLogger("run_bot")
 
 
+def _resolve_db_path() -> str:
+    """Main SQLite path per project convention (config general.db_path)."""
+    try:
+        from config.loader import load_config
+
+        return str(
+            load_config().get("general", {}).get(
+                "db_path", "data/market_data_mt5.sqlite"
+            )
+        )
+    except Exception:
+        return "data/market_data_mt5.sqlite"
+
+
+def _apply_db_migrations() -> None:
+    """Run versioned schema migrations on the main DB before trading (ТЗ 9.3).
+
+    Failures are fatal: trading on an unverified/partially migrated schema is
+    unsafe, so the bot refuses to start.
+    """
+    from data.migrate import apply_migrations
+
+    db_path = _resolve_db_path()
+    applied = apply_migrations(db_path)
+    logger.info("DB migrations applied (%d) to %s", len(applied), db_path)
+
+
 def main() -> None:
+    _apply_db_migrations()
+
     cfg = build_virtual_cfg()
 
     # 1. Build & warm up the virtual market.
