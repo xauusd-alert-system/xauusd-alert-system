@@ -1,8 +1,25 @@
 name: CI
 
-# Runs the test suite on every push to master and on every pull request so that
-# dependency drift or a regression is caught automatically rather than only on a
-# maintainer's machine.
+# TZ 6.8 / 6.9: CI for the refactor — tests, lint, security audit.
+#
+#   * test     — pytest on Python 3.12. MetaTrader5 is guarded by the
+#                `platform_system == "Windows"` marker in requirements.txt, so
+#                the pinned stack installs cleanly on ubuntu-latest and the
+#                suite exercises the MT5 shim (simulation/mt5_shim) — all
+#                tests pass without the real package.
+#   * lint     — ruff check (no strict repo config yet: default ruleset, see
+#                pyproject.toml which currently only holds pytest settings).
+#   * security — TZ 10.2 secret/state audit (python -m scripts.security_audit),
+#                must pass. This doubles as the TZ 6.9 secret-scan gate; no
+#                separate gitleaks job is needed.
+#   * pip-audit — TZ 10.7 dependency vulnerability scan, deliberately
+#                `continue-on-error: true`: known-but-unfixed vulnerabilities
+#                in transitive dependencies must not block the refactoring
+#                branch. Findings still surface in the job log for triage.
+#
+# mypy is intentionally NOT a CI gate (many pre-existing typing errors in the
+# codebase); it is deferred to the final phase (Фаза 7).
+
 on:
   push:
     branches: [master]
@@ -37,3 +54,63 @@ jobs:
 
       - name: Run test suite
         run: pytest -q
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check
+        run: ruff check .
+
+  security:
+    name: security audit (secrets & repo state)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          # Full history so the git ls-files / tracked-secret checks see everything.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run repository security audit
+        run: python -m scripts.security_audit
+
+  pip-audit:
+    name: pip-audit (dependencies, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # transitive CVEs must not block the refactor branch
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      - name: Audit installed environment against requirements
+        run: pip-audit -r requirements.txt --strict
