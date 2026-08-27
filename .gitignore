@@ -27,6 +27,7 @@ output/
 
 # Backup / patch files
 *.bak
+*.bak_*
 
 # Process ID files
 *.pid
@@ -69,3 +70,25 @@ UI 3.7 flsah updated v3/ui_server.log
 
 # Forex trial-window heartbeat
 logs/trial_window_heartbeat.txt
+
+# Scratch diagnostic outputs (screenshots, console logs, one-off scripts in logs/)
+logs/*.txt
+logs/*.png
+logs/*.py
+logs/*.js
+logs/*.joblib
+logs/*.lock
+logs/halfyear_fx/
+
+# Freebuff IDE artifacts
+.freebuff/
+
+# Challenge runtime (browser profiles, state, live trades)
+data/challenge_browser_profile_*/
+data/challenge_state.json
+data/challenge_trades.csv
+
+# Regenerated / volatile data
+*.db
+data/usstocks_export/
+data/book_bars/
