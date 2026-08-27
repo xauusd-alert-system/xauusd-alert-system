@@ -1,0 +1,44 @@
+# TZ 6.7: secrets, local state and heavy artifacts never enter the image.
+# The container runs paper/alerts mode; live trading needs none of this.
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Local databases and their sidecars (mounted as volumes at runtime instead)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.db
+
+# Backups and logs
+backups/
+backup/
+logs/
+
+# Trained models / heavy artifacts (restored from model registry, not baked in)
+models/
+output/
+
+# VCS and caches
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.py[cod]
+.venv
+venv
+.freebuff
+
+# Tooling / docs not needed at runtime
+.github
+docs/
+plans/
+*.md
+!README.md
+Makefile
+docker-compose.yml
+.equity_curve.html
