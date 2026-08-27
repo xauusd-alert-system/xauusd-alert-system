@@ -110,6 +110,26 @@ def _now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
+def _metrics_record(metric: str, value: int = 1, **extra: Any) -> None:
+    """ТЗ 6.1: fail-open metrics hook (execution must never depend on it)."""
+    try:
+        from monitoring.metrics import get_collector
+
+        get_collector().record(metric, value, **extra)
+    except Exception:  # noqa: BLE001 — observability must not break trading
+        pass
+
+
+def _metrics_timing(stage: str, duration_ms: float, **extra: Any) -> None:
+    """ТЗ 6.1: fail-open per-stage timing hook."""
+    try:
+        from monitoring.metrics import get_collector
+
+        get_collector().record_timing(stage, duration_ms, **extra)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class MT5TradeGroupExecutor:
     """Demo MT5 group executor: submit + poll/reconcile lifecycle."""
 
@@ -219,6 +239,7 @@ class MT5TradeGroupExecutor:
             return self._paper.create_group(spec)
         require_transition(GroupState.DRAFT, GroupState.VALIDATED)
         save_group(self.db_path, spec, state=GroupState.VALIDATED)
+        _metrics_record("groups_created", asset_key=spec.asset_key)
         append_trading_event(
             self.ledger_db_path, event_type="signal_validated",
             signal_id=spec.signal_id, asset_key=spec.asset_key,
@@ -325,6 +346,11 @@ class MT5TradeGroupExecutor:
             broker_ids[new_leg_id(group_id, leg)] = result
             status = result.get("status", "rejected")
             filled = float(result.get("filled_volume") or 0.0)
+            # ТЗ 6.1: fills / partials recorded at the broker-confirmed leg level.
+            if status == "filled":
+                _metrics_record("orders_filled")
+            elif status == "partially_filled":
+                _metrics_record("orders_partial")
             if status == "filled":
                 leg_state = "SUBMITTED"
                 self._append_leg_event(spec, "leg_submitted", leg, result, volume)
@@ -380,6 +406,9 @@ class MT5TradeGroupExecutor:
         return GroupState.SUBMITTED
 
     def _reject_group(self, spec: TradeGroupSpec, reason_code: str, detail: str) -> None:
+        # ТЗ 6.1: rejections recorded with the reason code where they are
+        # already logged (group_rejected ledger event) — one hook, no logic change.
+        _metrics_record(f"rejected:{reason_code}", group_id=spec.group_id)
         require_transition(GroupState.VALIDATED, GroupState.REJECTED)
         save_group(self.db_path, spec, state=GroupState.REJECTED, submitted=False)
         append_trading_event(
@@ -432,6 +461,7 @@ class MT5TradeGroupExecutor:
         result/deal/position query.
         """
         events: list[str] = []
+        started = time.perf_counter()
         for group in list_groups(self.db_path):
             spec = group["spec"]
             if spec.mode != "demo":
@@ -441,6 +471,9 @@ class MT5TradeGroupExecutor:
                                   GroupState.CANCELLED, GroupState.FAILED):
                 continue
             events.extend(self._advance_group(group))
+        # ТЗ 6.1: poll duration for latency monitoring (poll_duration_ms).
+        _metrics_record("poll_completed")
+        _metrics_timing("poll_once", (time.perf_counter() - started) * 1000.0)
         return events
 
     def _advance_group(self, group: dict[str, Any]) -> list[str]:

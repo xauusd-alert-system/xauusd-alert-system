@@ -360,6 +360,27 @@ def health():
     }
 
 
+# Process-wide execution metrics collector (ТЗ 6.1). Import-time creation is
+# fail-open: a broken sink path must never keep the API from starting.
+try:
+    from monitoring.metrics import get_collector as _get_metrics_collector
+
+    EXECUTION_METRICS = _get_metrics_collector()
+except Exception as _exc:  # pragma: no cover - defensive
+    logger.warning("execution metrics unavailable: %s", _exc)
+    EXECUTION_METRICS = None
+
+
+@app.get("/api/execution-metrics")
+def execution_metrics():
+    """ТЗ 6.1: execution metrics aggregates (auth-guarded like the rest)."""
+    if EXECUTION_METRICS is None:
+        return {"available": False, "reason": "metrics collector unavailable"}
+    payload = EXECUTION_METRICS.summary()
+    payload["available"] = True
+    return payload
+
+
 @app.get("/api/health")
 def api_health():
     """ТЗ 6.3: enriched health endpoint with per-component checks.
