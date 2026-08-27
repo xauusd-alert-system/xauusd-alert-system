@@ -327,6 +327,12 @@ class TradeGroupSpec(BaseModel):
 
         P1.6 §21: ``geometry_hash`` = ЧТО получилось; ``provenance_hash`` =
         ИЗ ЧЕГО получилось (lineage of parent snapshot ids).
+
+        P0-3: the FULL risk block (including ``estimated_loss_at_sl``) is
+        hashed. Risk is part of the validated geometry contract — silently
+        mutating it must invalidate the hash and fail
+        ExecutionIntentMismatch, otherwise a group could trade with the
+        original TP/SL ladder but different capital at risk.
         """
         payload = json.dumps({
             "group_id": self.group_id,
@@ -336,8 +342,7 @@ class TradeGroupSpec(BaseModel):
             "geometry": self.geometry.model_dump(),
             "targets": [t.model_dump() for t in self.targets],
             "break_even": self.break_even.model_dump(),
-            "risk": {k: v for k, v in self.risk.model_dump().items()
-                     if k not in {"estimated_loss_at_sl"}},
+            "risk": self.risk.model_dump(),
             "profile_id": self.profile_id,
         }, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()

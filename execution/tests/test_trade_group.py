@@ -135,6 +135,30 @@ def test_geometry_hash_stable_across_actual_fill():
     assert filled.canonical_hash() != spec.canonical_hash()
 
 
+def test_geometry_hash_includes_risk():
+    """P0-3: estimated_loss_at_sl is part of the geometry hash, so mutating it
+    produces a different hash and require_geometry_unchanged rejects the drift."""
+    from execution.execution_intent import ExecutionIntent
+
+    spec = make_spec()
+    drifted_risk = spec.risk.model_copy(update={"estimated_loss_at_sl": 99.99})
+    drifted = spec.model_copy(update={"risk": drifted_risk})
+    assert drifted.geometry_hash() != spec.geometry_hash()
+
+    intent = ExecutionIntent.from_spec(spec)
+    with pytest.raises(Exception, match="geometry"):
+        intent.require_geometry_unchanged(drifted)
+
+
+def test_with_actual_fill_does_not_recompute_estimated_loss():
+    """Geometry/risk immutability: attaching an actual fill must never touch
+    the risk block (estimated_loss_at_sl is fixed at validation time)."""
+    spec = make_spec()
+    filled = spec.with_actual_fill(4159.42)
+    assert filled.risk.estimated_loss_at_sl == spec.risk.estimated_loss_at_sl
+    assert filled.risk.model_dump() == spec.risk.model_dump()
+
+
 def test_actual_fill_cannot_be_overwritten():
     spec = make_spec().with_actual_fill(4159.42)
     assert spec.entry.actual_fill == 4159.42
