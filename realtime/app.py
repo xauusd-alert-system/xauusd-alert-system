@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Header
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 import pandas as pd
 import numpy as np
@@ -68,7 +68,6 @@ async def _loopback_only_guard(request: Request, call_next):
     if not _DASHBOARD_ALLOW_REMOTE:
         host = (request.headers.get("host") or "").split(":")[0].strip().lower()
         if host and host not in _DASHBOARD_ALLOWED_HOSTS:
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=403,
                 content={"detail": (
@@ -82,6 +81,132 @@ async def _loopback_only_guard(request: Request, call_next):
 CFG = load_config()
 MODEL_PATH = get_env("MODEL_PATH", default=None)
 DATA_MODE = get_env("DATA_MODE", default="mock")
+
+
+# =====================================================================
+# ТЗ 10.1 — Bearer-token authentication for the API surface.
+#
+# Design (documented decision):
+#   * Token source: env ``API_AUTH_TOKEN`` (config.loader.get_env).
+#   * Mode switch: config ``security.api.require_auth`` with the
+#     ``API_REQUIRE_AUTH`` env override ("1"/"true"/...). Default is FALSE
+#     for backward compatibility with the existing single-operator
+#     loopback deployments (the loopback-only guard above is the primary
+#     network control); production deployments MUST set require_auth=true.
+#   * Fail-closed: require_auth=true without a configured token aborts at
+#     startup — a dashboard that promises auth but serves open is worse
+#     than one that does not start.
+#   * Public (never authenticated): ``/health`` only — load balancers and
+#     monitoring need a tokenless liveness probe. It exposes no secrets.
+#   * Exempt from the GLOBAL bearer check (they enforce their own, often
+#     different, credentials):
+#       - ``/api/ledger/ingest`` — bearer LEDGER_INGEST_TOKEN + mandatory
+#         HMAC signature (fail-closed 503/401/403 without them);
+#       - ``/ws`` — owner-token query parameter (WebSockets cannot set
+#         headers).
+#   * Rate limiting: in-memory per-IP token bucket on the ingest endpoint
+#     (brute-force / flood damping); 429 when exhausted.
+# =====================================================================
+
+API_PUBLIC_PATHS = {"/health"}
+# Endpoints with their own (stricter or header-incompatible) auth.
+API_SELF_AUTH_PATHS = {"/api/ledger/ingest", "/ws"}
+
+
+def resolve_api_auth_settings(cfg: dict) -> tuple[bool, str | None]:
+    """Resolve (require_auth, token) from config + env (env wins when set)."""
+    sec = (cfg or {}).get("security", {}) or {}
+    api_cfg = sec.get("api", {}) or {}
+    require_auth = bool(api_cfg.get("require_auth", False))
+    env_flag = (get_env("API_REQUIRE_AUTH", default="") or "").strip().lower()
+    if env_flag:
+        require_auth = env_flag in ("1", "true", "yes", "on")
+    token = get_env("API_AUTH_TOKEN", default=None) or None
+    return require_auth, token
+
+
+def validate_api_auth_startup(require_auth: bool, token: str | None) -> None:
+    """Fail-closed: require_auth=true without a token must not start."""
+    if require_auth and not token:
+        raise RuntimeError(
+            "security.api.require_auth is enabled but API_AUTH_TOKEN is not "
+            "configured — refusing to start an unauthenticated API"
+        )
+
+
+_API_REQUIRE_AUTH, _API_AUTH_TOKEN = resolve_api_auth_settings(CFG)
+validate_api_auth_startup(_API_REQUIRE_AUTH, _API_AUTH_TOKEN)
+
+
+class IngestRateLimiter:
+    """In-memory per-IP token bucket (ТЗ 10.1 rate limiting).
+
+    ``rate_per_sec`` tokens refill continuously; ``burst`` is the bucket
+    capacity. Intentionally process-local (single-process deployments);
+    a multi-worker deployment should move this to a shared store.
+    """
+
+    def __init__(self, rate_per_sec: float = 10.0, burst: int = 20):
+        if rate_per_sec <= 0 or burst <= 0:
+            raise ValueError("rate_per_sec and burst must be positive")
+        self.rate = float(rate_per_sec)
+        self.burst = float(burst)
+        self._tokens: dict[str, float] = {}
+        self._last: dict[str, float] = {}
+
+    def allow(self, client_ip: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        prev_t = self._last.get(client_ip)
+        if prev_t is None:
+            self._tokens[client_ip] = self.burst
+        else:
+            elapsed = max(0.0, now - prev_t)
+            self._tokens[client_ip] = min(
+                self.burst, self._tokens.get(client_ip, self.burst) + elapsed * self.rate
+            )
+        self._last[client_ip] = now
+        if self._tokens[client_ip] >= 1.0:
+            self._tokens[client_ip] -= 1.0
+            return True
+        return False
+
+
+def _ingest_rate_limiter() -> IngestRateLimiter:
+    """Build the ingest limiter from env (INGEST_RATE_LIMIT_PER_SEC / _BURST)."""
+    try:
+        rate = float(get_env("INGEST_RATE_LIMIT_PER_SEC", default="10"))
+    except (TypeError, ValueError):
+        rate = 10.0
+    try:
+        burst = int(float(get_env("INGEST_RATE_LIMIT_BURST", default="20")))
+    except (TypeError, ValueError):
+        burst = 20
+    if rate <= 0 or burst <= 0:
+        rate, burst = 10.0, 20
+    return IngestRateLimiter(rate_per_sec=rate, burst=burst)
+
+
+_INGEST_LIMITER = _ingest_rate_limiter()
+
+
+@app.middleware("http")
+async def _bearer_auth_guard(request: Request, call_next):
+    """ТЗ 10.1: Bearer-token gate for every endpoint except /health.
+
+    Reads the module-level settings at request time so deployments and
+    tests can toggle auth without re-importing the module.
+    """
+    require_auth, token = resolve_api_auth_settings(CFG)
+    if require_auth and token:
+        path = request.url.path
+        if path not in API_PUBLIC_PATHS and path not in API_SELF_AUTH_PATHS:
+            authorization = request.headers.get("authorization") or ""
+            if authorization != f"Bearer {token}":
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "API bearer authentication required"},
+                )
+    return await call_next(request)
 
 # Provenance API (ТЗ 8.7): single GET + bulk lineage audit (P2-3). Mounted
 # ONLY when the audit store is enabled (provenance.store.enabled, off by
@@ -1013,6 +1138,13 @@ async def ledger_ingest(request: Request, authorization: str | None = Header(def
     There is NO unsigned/opt-out path: bearer alone is never accepted.
     ``signature_valid`` is set to True ONLY after a successful HMAC check.
     """
+    # ТЗ 10.1: per-IP rate limit on the ingest endpoint (flood/brute-force
+    # damping). Runs BEFORE credential checks so invalid-token floods
+    # exhaust the bucket instead of the HMAC layer.
+    client_ip = request.client.host if request.client else "unknown"
+    if not globals().get("_INGEST_LIMITER").allow(client_ip):
+        raise HTTPException(status_code=429, detail="too many ingest requests")
+
     # a. signing policy must be configured (fail-closed)
     secret = get_env("LEDGER_INGEST_SECRET", default=None)
     if not secret:

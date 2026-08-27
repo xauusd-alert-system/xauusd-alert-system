@@ -10,6 +10,15 @@ mt5_adapter:
     # TTL for symbol_info / symbol_info_tick cached reads (milliseconds).
     ttl_ms: 500
 
+# ТЗ 10.1: API security. require_auth=false keeps current single-operator
+# loopback deployments working (loopback-only guard is the network control);
+# production deployments MUST set require_auth: true (or API_REQUIRE_AUTH=1)
+# together with API_AUTH_TOKEN. Fail-closed: with require_auth=true and no
+# token the API refuses to start.
+security:
+  api:
+    require_auth: false
+
 deployment:
   # Formal safety state; DRY_RUN is no longer the deployment authority.
   # TRIAL-48H (2026-08-18): temporarily switched research -> demo_systematic;
