@@ -667,8 +667,9 @@ execution:
   # SAFETY FREEZE (2026-08-16): the causal signal-bar grid contract invalidates
   # every admission gate measured with entry-bar ATR, including BTCUSD. Empty is
   # an explicit deny-all list (mt5_trader distinguishes it from a missing key).
-  # EURUSD/GBPUSD execution-quality probes remain separately guarded below.
-  enabled_assets: [BTCUSD, XAUUSD, XAGUSD, EURUSD, GBPUSD]
+  # 2026-08-27: XAGUSD/GBPUSD removed — their assets.*.enabled=false and
+  # deploy_guard.check_config_sync now fails-closed on any phantom entry.
+  enabled_assets: [BTCUSD, XAUUSD, EURUSD]
   # Refuse model-driven execution on any non-demo terminal. Keep this true until
   # a separate, explicit real-money deployment review.
   require_demo_account: true

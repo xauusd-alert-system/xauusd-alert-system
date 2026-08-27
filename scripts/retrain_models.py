@@ -64,6 +64,8 @@ def main():
         logger.info("Downloading fresh market data...")
         start_date = "2020-01-01"  # здесь можно взять lookback_days, но для простоты используем 2020
         end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # backfill_data --all now resolves per-asset timeframes automatically,
+        # but we still pass --timeframe=None to let it use the config chain.
         download_cmd = [
             sys.executable, "-m", "scripts.backfill_data",
             "--all", "--start", start_date, "--end", end_date
