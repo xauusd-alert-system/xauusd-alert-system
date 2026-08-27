@@ -388,6 +388,9 @@ def test_main_check_ok_returns_zero(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     monkeypatch.setattr(dg, "load_config", staticmethod(lambda: cfg))
     monkeypatch.setattr(dg, "validate_and_deploy", staticmethod(lambda *a, **k: ([], False)))
+    # Patch weekend audit so it doesn't hit real CSVs
+    import scripts.audit_weekend_tags as _awt
+    monkeypatch.setattr(_awt, "audit_weekend_tags", lambda log_dir="logs": [])
     assert dg.main(["--check"]) == 0
 
 

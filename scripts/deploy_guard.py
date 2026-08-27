@@ -210,6 +210,35 @@ def enabled_assets(cfg: dict) -> list:
     return [k for k, v in cfg.get("assets", {}).items() if v.get("enabled", False)]
 
 
+def check_config_sync(cfg: dict) -> list[str]:
+    """Validate that execution.enabled_assets ⊆ assets.*.enabled=true.
+
+    A phantom asset in execution.enabled_assets silently produces trade
+    proposals whose signals resolve to stale or missing models (the
+    XAGUSD/GBPUSD desync case found 2026-08-25).
+
+    Returns a list of violation strings (empty = OK).
+    """
+    errors: list[str] = []
+    exec_assets = set(cfg.get("execution", {}).get("enabled_assets", []))
+    assets_enabled = enabled_assets(cfg)
+    assets_enabled_set = set(assets_enabled)
+    # 1. execution mentions an asset whose model/config is disabled
+    phantom = exec_assets - assets_enabled_set
+    if phantom:
+        errors.append(
+            f"execution.enabled_assets contains disabled asset(s): {sorted(phantom)}"
+            f" (assets.*.enabled=false for these)."
+        )
+    # 2. assets.*.enabled=true but NOT in execution.enabled_assets
+    #    (model is trained but never traded — usually intentional, but
+    #    flag as info so the owner can confirm it's deliberate)
+    missing = assets_enabled_set - exec_assets
+    if missing:
+        print(f"  CONFIG INFO: assets.*.enabled=true but not in execution: {sorted(missing)}")
+    return errors
+
+
 def backup_production_models(cfg: dict, backup_suffix: str = ".deploy_guard.bak") -> list:
     """Copy each enabled asset's current model to `<model_path><backup_suffix>`.
 
@@ -516,6 +545,26 @@ def main(argv=None) -> int:
         return 0
 
     # --check
+    # Pre-flight: configuration consistency (2026-08-27)
+    # execution.enabled_assets must be a strict subset of assets.*.enabled;
+    # a phantom asset in the execution list silently produces trade proposals
+    # whose signals resolve to stale/missing models (the XAGUSD/GBPUSD case).
+    cfg_errors = check_config_sync(cfg)
+    if cfg_errors:
+        for e in cfg_errors:
+            print(f"  CONFIG ERROR: {e}")
+        print("\nDEPLOY GUARD: config sync failed -> exit 1")
+        return 1
+
+    # Pre-flight: weekend session-tag audit (2026-08-27)
+    # FX trades at Sunday 21:00-24:00 UTC must not carry 'weekend' tag.
+    from scripts.audit_weekend_tags import audit_weekend_tags
+    weekend_violations = audit_weekend_tags()
+    if weekend_violations:
+        print(f"  WEEKEND TAG ERROR: {len(weekend_violations)} FX trade(s) tagged 'weekend' at Sunday 21-24 UTC")
+        print("\nDEPLOY GUARD: weekend tag audit failed -> exit 1")
+        return 1
+
     decisions, failed = validate_and_deploy(cfg, backup_suffix)
     print(f"Deploy guard --check over {len(decisions)} enabled asset(s):")
     print_decisions(decisions)
