@@ -7,11 +7,50 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Protocol
+import time
+from typing import Callable, Dict, List, Optional, Protocol
 
 from usstocks.models import RiskEvent, TradeSignal, WatchlistItem
 
 logger = logging.getLogger("usstocks.notify")
+
+
+class TelegramRateLimiter:
+    """Token-bucket & sliding window rate limiter for Telegram API."""
+
+    def __init__(self, max_per_second: float = 20.0, max_per_chat_per_second: float = 1.0,
+                 throttle_window_seconds: float = 300.0, clock: Callable[[], float] = time.time):
+        self.max_per_second = max_per_second
+        self.max_per_chat_per_second = max_per_chat_per_second
+        self.throttle_window_seconds = throttle_window_seconds
+        self.clock = clock
+        self._last_global_ts: float = 0.0
+        self._last_chat_ts: Dict[str, float] = {}
+        self._throttled_events: Dict[str, float] = {}  # key -> last_sent_ts
+
+    def can_send(self, chat_id: str = "default") -> bool:
+        now = self.clock()
+        min_global_interval = 1.0 / self.max_per_second
+        min_chat_interval = 1.0 / self.max_per_chat_per_second
+
+        if now - self._last_global_ts < min_global_interval:
+            return False
+        if now - self._last_chat_ts.get(chat_id, 0.0) < min_chat_interval:
+            return False
+        return True
+
+    def record_send(self, chat_id: str = "default") -> None:
+        now = self.clock()
+        self._last_global_ts = now
+        self._last_chat_ts[chat_id] = now
+
+    def should_throttle_event(self, event_key: str) -> bool:
+        now = self.clock()
+        last = self._throttled_events.get(event_key)
+        if last is not None and (now - last) < self.throttle_window_seconds:
+            return True
+        self._throttled_events[event_key] = now
+        return False
 
 
 class Notifier(Protocol):
@@ -44,25 +83,36 @@ def format_signal_message(s: TradeSignal) -> str:
 class TelegramNotifier:
     """Thin adapter; keeps the honesty contract of the existing bot."""
 
-    def __init__(self, bot=None):
+    def __init__(self, bot=None, rate_limiter: Optional[TelegramRateLimiter] = None):
         # Lazy import: tests and replay never need Telegram installed/config.
         if bot is None:
             from config.loader import load_config
             from alerts.telegram_bot import TelegramAlertBot
             bot = TelegramAlertBot(load_config())
         self._bot = bot
+        self.rate_limiter = rate_limiter or TelegramRateLimiter()
 
-    def _send(self, text: str) -> None:
+    def _send(self, text: str, chat_id: str = "default", event_key: Optional[str] = None) -> None:
+        if event_key and self.rate_limiter.should_throttle_event(event_key):
+            logger.info("Throttling repeated telegram notification: %s", event_key)
+            return
+
+        if not self.rate_limiter.can_send(chat_id):
+            logger.warning("Telegram rate limit exceeded, delaying/dropping message")
+            return
+
         ok = False
         try:
             ok = bool(self._bot.send_text_message(text))
+            if ok:
+                self.rate_limiter.record_send(chat_id)
         except Exception as e:                       # never crash the scanner
             logger.error("telegram send failed: %s", e)
         if not ok:
             logger.warning("telegram not configured/delivered — message dropped")
 
     def send_signal(self, signal: TradeSignal) -> None:
-        self._send(format_signal_message(signal))
+        self._send(format_signal_message(signal), event_key=f"signal:{signal.symbol}")
 
     def send_watchlist(self, watchlist: List[WatchlistItem]) -> None:
         from usstocks.premarket_ranker import format_watchlist_message
@@ -71,7 +121,8 @@ class TelegramNotifier:
     def send_risk_event(self, event: RiskEvent) -> None:
         mark = "✅" if event.allowed else "⛔"
         sym = f" [{event.symbol}]" if event.symbol else ""
-        self._send(f"{mark} risk{sym}: {event.code} — {event.reason}")
+        event_key = f"risk:{event.symbol or 'global'}:{event.code}" if not event.allowed else None
+        self._send(f"{mark} risk{sym}: {event.code} — {event.reason}", event_key=event_key)
 
 
 class PrintNotifier:

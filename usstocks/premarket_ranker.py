@@ -115,7 +115,8 @@ def passes_filters(s: PremarketSnapshot, cfg: ScannerConfig) -> tuple[bool, str]
     if s.avg_daily_dollar_volume < cfg.min_average_daily_dollar_volume:
         return False, (f"adv ${s.avg_daily_dollar_volume/1e6:.0f}M < "
                        f"${cfg.min_average_daily_dollar_volume/1e6:.0f}M")
-    # NOTE: spread unknown from candles -> filter intentionally skipped.
+    if s.spread_pct > 0 and s.spread_pct > cfg.max_spread_pct:
+        return False, f"spread {s.spread_pct:.2f}% > {cfg.max_spread_pct:.2f}%"
     return True, "ok"
 
 

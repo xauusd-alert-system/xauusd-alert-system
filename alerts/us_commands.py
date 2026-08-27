@@ -26,6 +26,7 @@ class PendingAction:
     payload: dict = field(default_factory=dict)
     chat_id: str = ""
     created_ts: float = 0.0
+    nonce: str = ""
 
     def describe(self) -> str:
         if self.kind == "pnl":
@@ -53,6 +54,7 @@ class UsCommandsController:
         self.clock = clock
         self.signals_enabled: bool = True
         self._pending: Dict[str, PendingAction] = {}   # chat_id -> action
+        self._used_nonces: Dict[str, float] = {}       # nonce -> timestamp
 
     # ------------------------------------------------------------------
     # Authorization (fail-closed, same convention as alerts/control_bot.py)
@@ -98,21 +100,58 @@ class UsCommandsController:
             logger.exception("us command failed")
             self.transport.send(chat_id, f"❌ Ошибка обработки: {e}")
 
+    def _cleanup_old_nonces(self) -> None:
+        now = self.clock()
+        cutoff = now - (CONFIRM_TTL_SECONDS * 2)
+        expired = [n for n, ts in self._used_nonces.items() if ts < cutoff]
+        for n in expired:
+            del self._used_nonces[n]
+
     def handle_callback(self, data: str, chat_id: str,
                         callback_id: Optional[str] = None) -> None:
         try:
             if callback_id:
                 self.transport.answer_callback(callback_id)
-            if data == "us:cancel":
-                self._pending.pop(chat_id, None)
+            self._cleanup_old_nonces()
+
+            # Parse action and optional nonce
+            parts = data.split(":")
+            prefix = parts[0] if parts else ""
+            action = parts[1] if len(parts) > 1 else ""
+            nonce = parts[2] if len(parts) > 2 else ""
+
+            if prefix != "us":
+                return
+
+            if nonce and nonce in self._used_nonces:
+                self.transport.send(chat_id, "⚠️ Повторный запрос отклонён (replay guard).")
+                return
+
+            if action == "cancel":
+                act = self._pending.pop(chat_id, None)
+                if nonce:
+                    self._used_nonces[nonce] = self.clock()
                 self.transport.send(chat_id, "↩️ Отменено.")
                 return
-            if data != "us:confirm":
+
+            if action != "confirm":
                 return
-            act = self._pending.pop(chat_id, None)
+
+            act = self._pending.get(chat_id)
             if act is None:
                 self.transport.send(chat_id, "Нет действия на подтверждении.")
                 return
+
+            if nonce and act.nonce and nonce != act.nonce:
+                self.transport.send(chat_id, "⚠️ Недействительный токен действия.")
+                return
+
+            self._pending.pop(chat_id, None)
+            if act.nonce:
+                self._used_nonces[act.nonce] = self.clock()
+            if nonce:
+                self._used_nonces[nonce] = self.clock()
+
             if self.clock() - act.created_ts > CONFIRM_TTL_SECONDS:
                 self.transport.send(chat_id, "⌛ Подтверждение истекло.")
                 return
@@ -125,20 +164,24 @@ class UsCommandsController:
     # Mutation requests (preview + keyboard)
     # ------------------------------------------------------------------
 
-    def _keyboard(self) -> dict:
+    def _keyboard(self, nonce: str = "") -> dict:
+        confirm_data = f"us:confirm:{nonce}" if nonce else "us:confirm"
+        cancel_data = f"us:cancel:{nonce}" if nonce else "us:cancel"
         return {"inline_keyboard": [[
-            {"text": "✅ Принял", "callback_data": "us:confirm"},
-            {"text": "❌ Отклонил", "callback_data": "us:cancel"},
+            {"text": "✅ Принял", "callback_data": confirm_data},
+            {"text": "❌ Отклонил", "callback_data": cancel_data},
         ]]}
 
     def _request(self, chat_id: str, act: PendingAction) -> None:
+        import uuid
+        act.nonce = uuid.uuid4().hex[:12]
         act.created_ts = self.clock()
         self._pending[chat_id] = act
         self.transport.send(
             chat_id,
             f"Подтвердите действие:\n<b>{act.describe()}</b>\n"
             f"Изменение применится только после «✅ Принял».",
-            reply_markup=self._keyboard())
+            reply_markup=self._keyboard(act.nonce))
 
     def _request_pnl(self, chat_id: str, args: tuple,
                      positive: bool = False, negative: bool = False) -> None:
@@ -242,9 +285,13 @@ class UsCommandsController:
         if not date:
             self.transport.send(chat_id, "Использование: /us_export YYYY-MM-DD")
             return
-        path = self.journal.export_day_csv(date, "data/usstocks_export")
-        doc = getattr(self.transport, "send_document", None)
-        if doc:
-            doc(chat_id, path)
-        else:
-            self.transport.send(chat_id, f"📄 Экспорт: {path}")
+        try:
+            path = self.journal.export_day_csv(date, "data/usstocks_export")
+            doc = getattr(self.transport, "send_document", None)
+            if doc:
+                doc(chat_id, path)
+            else:
+                self.transport.send(chat_id, f"📄 Экспорт: {path}")
+        except Exception as e:
+            logger.exception("Export failed for date %s", date)
+            self.transport.send(chat_id, f"❌ Ошибка экспорта CSV ({date}): {e}")

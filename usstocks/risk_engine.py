@@ -12,13 +12,7 @@ from typing import Optional
 
 from usstocks.indicators import minutes_until
 from usstocks.models import RiskState
-
-
-@dataclass
-class RiskDecision:
-    allowed: bool
-    code: str                 # ALLOW | PERSONAL_DAILY_STOP | ...
-    reason: str
+from shared.risk_protocol import RiskDecision, RiskEngineProtocol
 
 
 class RiskEngine:
@@ -56,6 +50,10 @@ class RiskEngine:
         if state.day_stopped:
             return RiskDecision(False, "DAY_STOPPED",
                                 "operator pressed stop-day")
+        if getattr(state, "has_partial_fill", False):
+            return RiskDecision(
+                False, "PARTIAL_FILL_ACTIVE",
+                f"partial fill active on {state.active_symbol or 'position'}, new entries blocked")
         if total_pnl <= self.personal_daily_stop_usd:
             return RiskDecision(
                 False, "PERSONAL_DAILY_STOP",

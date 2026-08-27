@@ -83,7 +83,32 @@ def test_win_requires_confirmation_before_state_changes(env):
     assert env["state"].realized_pnl_usd == 0.0        # nothing applied yet
     chat, text, markup = env["transport"].messages[-1]
     assert "Подтвердите" in text and "+12.50$" in text
-    assert markup["inline_keyboard"][0][0]["callback_data"] == "us:confirm"
+    cb_data = markup["inline_keyboard"][0][0]["callback_data"]
+    assert cb_data.startswith("us:confirm")
+
+
+def test_nonce_and_replay_attack_protection(env):
+    _seed_signal(env)
+    env["ctrl"].handle_command("/us_win", "111", ("10.0",))
+    _, _, markup = env["transport"].messages[-1]
+    cb_data = markup["inline_keyboard"][0][0]["callback_data"]
+
+    # First callback succeeds
+    env["ctrl"].handle_callback(cb_data, "111")
+    assert env["state"].realized_pnl_usd == pytest.approx(10.0)
+
+    # Second callback (replay attack) fails
+    env["ctrl"].handle_callback(cb_data, "111")
+    assert env["state"].realized_pnl_usd == pytest.approx(10.0)
+    assert "replay guard" in env["transport"].last_text() or "Нет действия" in env["transport"].last_text()
+
+
+def test_mismatched_nonce_rejected(env):
+    _seed_signal(env)
+    env["ctrl"].handle_command("/us_win", "111", ("10.0",))
+    env["ctrl"].handle_callback("us:confirm:badnonce123", "111")
+    assert env["state"].realized_pnl_usd == 0.0
+    assert "Недействительный токен" in env["transport"].last_text()
 
 
 def test_confirm_applies_win_and_links_outcome_to_signal(env):

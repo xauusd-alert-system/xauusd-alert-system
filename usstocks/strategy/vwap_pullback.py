@@ -42,7 +42,15 @@ class StrategyConfig:
     min_room_to_level_r: float = 1.8
     tp1_r: float = 1.0
     tp2_r: float = 2.0
-    max_pullback_bars: int = 12            # implementation cap for the scan
+    max_pullback_bars: int = 12            # implementation cap / time stop for the scan
+    time_stop_bars: int = 12               # maximum allowable bars in pullback before invalidation
+    max_spread_pct: float = 0.15           # liquidity check
+    commission_per_share: float = 0.0
+    fixed_commission: float = 0.0
+    min_atr_pct: float = 0.0               # volatility filter: minimum ATR %
+    max_atr_pct: Optional[float] = None    # volatility filter: maximum ATR %
+    max_climax_volume_ratio: Optional[float] = None  # volume spike filter: max single pullback candle vol ratio
+    slippage_cushion_cents: float = 0.0    # adaptive sizing: extra slippage buffer
 
     @classmethod
     def from_cfg(cls, cfg: dict) -> "StrategyConfig":
@@ -58,6 +66,15 @@ class StrategyConfig:
             min_room_to_level_r=float(s.get("min_room_to_level_r", 1.8)),
             tp1_r=float(s.get("tp1_r", 1.0)),
             tp2_r=float(s.get("tp2_r", 2.0)),
+            max_pullback_bars=int(s.get("max_pullback_bars", 12)),
+            time_stop_bars=int(s.get("time_stop_bars", 12)),
+            max_spread_pct=float(s.get("max_spread_pct", 0.15)),
+            commission_per_share=float(s.get("commission_per_share", 0.0)),
+            fixed_commission=float(s.get("fixed_commission", 0.0)),
+            min_atr_pct=float(s.get("min_atr_pct", 0.0)),
+            max_atr_pct=float(s["max_atr_pct"]) if "max_atr_pct" in s and s["max_atr_pct"] is not None else None,
+            max_climax_volume_ratio=float(s["max_climax_volume_ratio"]) if "max_climax_volume_ratio" in s and s["max_climax_volume_ratio"] is not None else None,
+            slippage_cushion_cents=float(s.get("slippage_cushion_cents", 0.0)),
         )
 
 
@@ -126,13 +143,18 @@ def _find_structure(bars: List[Bar], vwap: List[float], cfg: StrategyConfig,
 
             # --- pullback segment ---
             pb = list(range(j + 1, confirm))       # strictly between legs
-            if not pb or len(pb) > cfg.max_pullback_bars:
+            max_allowed_pb = min(cfg.max_pullback_bars, cfg.time_stop_bars)
+            if not pb or len(pb) > max_allowed_pb:
                 continue
             pb_low = min(bars[i].low for i in pb)
             pb_high = max(bars[i].high for i in pb)
             pb_vr = _avg_vol_ratio(bars, pb, pre_avg)
             if pb_vr > cfg.max_pullback_volume_ratio:
                 continue
+            if cfg.max_climax_volume_ratio is not None:
+                single_vrs = [_avg_vol_ratio(bars, [i], pre_avg) for i in pb]
+                if any(svr > cfg.max_climax_volume_ratio for svr in single_vrs):
+                    continue
             # Retrace must move AGAINST the impulse into the pullback.
             net_retrace = sign * (window[-1].close - bars[confirm - 1].close)
             if net_retrace <= 0:
@@ -162,10 +184,12 @@ def _find_structure(bars: List[Bar], vwap: List[float], cfg: StrategyConfig,
 def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
              side: str, in_watchlist: bool, cfg: StrategyConfig,
              asof: datetime,
+             spread_pct: Optional[float] = None,
              prev_day_levels: Optional[Dict[str, float]] = None,
              extra_levels: Optional[List[float]] = None,
              risk_per_trade_usd: float = 10.0,
-             max_notional_usd: float = 5000.0) -> Evaluation:
+             max_notional_usd: float = 5000.0,
+             news_blocked: bool = False) -> Evaluation:
     """Run the full checklist for one direction; never raises on data gaps."""
     passed: List[str] = []
     failed: List[str] = []
@@ -177,11 +201,26 @@ def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
     check("WATCHLIST_MEMBER", in_watchlist,
           "" if in_watchlist else "not in top-3 watchlist")
 
+    if news_blocked:
+        check("NEWS_FILTER", False, "high-impact calendar news event nearby")
+
+    if spread_pct is not None and spread_pct > 0:
+        check("LIQUIDITY_SPREAD", spread_pct <= cfg.max_spread_pct,
+              f"spread {spread_pct:.2f}% > {cfg.max_spread_pct:.2f}%")
+
     bars5 = aggregate_to_5m(drop_unclosed_1m(bars_1m, asof))
     bench5 = aggregate_to_5m(drop_unclosed_1m(bench_1m, asof))
     if not check("DATA_SUFFICIENT", len(bars5) >= 6,
                  f"{len(bars5)} closed 5m bars"):
         return Evaluation(symbol, side, None, passed, failed)
+
+    # Volatility filter (ATR check if configured)
+    if cfg.min_atr_pct > 0 or cfg.max_atr_pct is not None:
+        from usstocks.indicators import calculate_atr
+        atr_val = calculate_atr(bars5, period=min(14, len(bars5) - 1))
+        atr_pct = (atr_val / bars5[-1].close * 100.0) if bars5[-1].close > 0 else 0.0
+        vol_ok = atr_pct >= cfg.min_atr_pct and (cfg.max_atr_pct is None or atr_pct <= cfg.max_atr_pct)
+        check("VOLATILITY_FILTER", vol_ok, f"ATR {atr_pct:.2f}% (min={cfg.min_atr_pct:.2f}%, max={cfg.max_atr_pct})")
 
     vwap = session_vwap_series(bars5)
     bvwap = session_vwap_series(bench5) if bench5 else []
@@ -270,7 +309,9 @@ def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
 
     sizing = size_position(entry_high, stop,
                            risk_per_trade_usd=risk_per_trade_usd,
-                           max_notional_usd=max_notional_usd)
+                           max_notional_usd=max_notional_usd,
+                           commission_per_share=cfg.commission_per_share,
+                           fixed_commission=cfg.fixed_commission)
     check("SIZING", sizing.ok, sizing.reason if not sizing.ok else
           f"{sizing.shares} sh, ${sizing.actual_risk_usd:.2f} risk")
     if failed:

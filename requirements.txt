@@ -13,7 +13,7 @@ idna==3.18
 iniconfig==2.3.0
 joblib==1.5.3
 narwhals==2.24.0
-numpy==2.5.1
+numpy>=2.0.0,<2.5.0
 packaging==26.2
 pandas==3.0.5
 pluggy==1.6.0
@@ -27,7 +27,7 @@ python-telegram-bot==22.8
 PyYAML==6.0.3
 requests==2.34.2
 scikit-learn==1.9.0
-scipy==1.18.0
+scipy>=1.15.0,<1.18.0
 # ADF test for features/fractional_diff.py::min_d_adf (stationarity search)
 statsmodels==0.14.6
 six==1.17.0
@@ -39,7 +39,7 @@ typing_extensions==4.16.0
 tzdata==2026.3
 urllib3==2.7.0
 uvicorn==0.51.0
-xgboost==3.3.0
+xgboost>=3.0.0,<3.3.0
 # MetaTrader5 ships Windows-only wheels. The environment marker lets the rest of
 # the pinned stack install on Linux/macOS (CI, backtests, simulation via the MT5
 # shim) while the live trader still pulls the real package on Windows.

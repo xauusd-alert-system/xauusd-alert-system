@@ -31,17 +31,39 @@ def parse_holidays(raw: Iterable) -> List[date]:
     return out
 
 
+US_MARKET_EARLY_CLOSES_2026 = {
+    "2026-07-02": "13:00",  # Day before Independence Day (observed July 3)
+    "2026-11-27": "13:00",  # Black Friday
+    "2026-12-24": "13:00",  # Christmas Eve
+}
+
+
+def parse_early_closes(raw: Optional[dict | Iterable]) -> dict[date, time]:
+    out: dict[date, time] = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            d = date.fromisoformat(str(k)[:10]) if not isinstance(k, date) else k
+            t = _parse_hm(str(v)) if not isinstance(v, time) else v
+            out[d] = t
+    return out
+
+
 class NySession:
-    """Trading-day calendar for one market (weekend + configured holidays)."""
+    """Trading-day calendar for one market (weekend + configured holidays + early closes)."""
 
     def __init__(self, holidays: Optional[Iterable] = None,
-                 open_at: time = REGULAR_OPEN, close_at: time = REGULAR_CLOSE):
+                 open_at: time = REGULAR_OPEN, close_at: time = REGULAR_CLOSE,
+                 early_closes: Optional[dict | Iterable] = None):
         self.holidays = set(parse_holidays(holidays))
         self.open_at = open_at
         self.close_at = close_at
+        self.early_closes = parse_early_closes(early_closes if early_closes is not None else US_MARKET_EARLY_CLOSES_2026)
 
     def is_trading_day(self, d: date) -> bool:
         return d.weekday() < 5 and d not in self.holidays
+
+    def is_early_close(self, d: date) -> bool:
+        return d in self.early_closes
 
     def next_trading_day(self, d: date, limit: int = 30) -> Optional[date]:
         for i in range(1, limit + 1):
@@ -54,7 +76,8 @@ class NySession:
         return datetime.combine(d, self.open_at, tzinfo=NY)
 
     def session_close(self, d: date) -> datetime:
-        return datetime.combine(d, self.close_at, tzinfo=NY)
+        close_t = self.early_closes.get(d, self.close_at)
+        return datetime.combine(d, close_t, tzinfo=NY)
 
     def minutes_to_close(self, now: datetime) -> float:
         now = ensure_ny(now)
@@ -86,6 +109,7 @@ def session_from_cfg(cfg: dict) -> NySession:
         holidays=sess.get("holidays", US_MARKET_HOLIDAYS_2026),
         open_at=_parse_hm(sess.get("regular_open", "09:30")),
         close_at=_parse_hm(sess.get("regular_close", "16:00")),
+        early_closes=sess.get("early_closes", US_MARKET_EARLY_CLOSES_2026),
     )
 
 

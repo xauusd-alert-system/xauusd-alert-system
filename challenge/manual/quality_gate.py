@@ -78,9 +78,7 @@ def compute_quality_for_setup(
 
     # Store component breakdown for live calibration
     score["volume_ratio"] = vol_ratio
-    # Store component breakdown for live calibration
-    score["volume_ratio"] = vol_ratio
-    return score  # return full dict (total, volume, time_of_day, regime, volume_ratio) if False else score  # return full dict for live cal
+    return score
 
 
 # Quality thresholds per setup type (calibrated on 386 setups, 2026-08-24)

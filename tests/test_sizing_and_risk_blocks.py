@@ -117,6 +117,11 @@ def test_active_position_blocks_new_signal():
     assert not d.allowed and d.code == "ACTIVE_POSITION_EXISTS"
 
 
+def test_risk_engine_blocks_partial_fills():
+    d = _allow(_state(has_partial_fill=True, active_symbol="NVDA"))
+    assert not d.allowed and d.code == "PARTIAL_FILL_ACTIVE"
+
+
 def test_operator_day_stopped_blocks_everything():
     d = _allow(_state(day_stopped=True))
     assert not d.allowed and d.code == "DAY_STOPPED"

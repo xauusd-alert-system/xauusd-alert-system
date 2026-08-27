@@ -21,6 +21,9 @@ from typing import Callable, Dict, List, Optional
 
 import requests
 
+from shared.cache import TTLCache
+from shared.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
+from shared.retry import retry_with_backoff
 from usstocks.models import Bar
 from usstocks.session import NY
 
@@ -83,15 +86,19 @@ def decode_candles(data) -> List[dict]:
 
 
 class UtexClient:
-    """Auth + candle fetching against the UTEX mobile gRPC gateway."""
+    """Auth + candle fetching against the UTEX mobile gRPC gateway with CircuitBreaker and caching."""
 
     def __init__(self, token_file: str = DEFAULT_TOKEN_FILE,
                  refresh_url: str = REFRESH_URL, grpc_base: str = GRPC_BASE,
-                 post: Optional[Callable] = None):
+                 post: Optional[Callable] = None,
+                 token_ttl_seconds: float = 300.0,
+                 circuit_breaker: Optional[CircuitBreaker] = None):
         self.token_file = token_file
         self.refresh_url = refresh_url
         self.grpc_base = grpc_base
         self._post = post or _POST
+        self.circuit_breaker = circuit_breaker or CircuitBreaker(failure_threshold=5, recovery_timeout=60.0)
+        self.token_cache = TTLCache(default_ttl_seconds=token_ttl_seconds)
 
     # -- auth --------------------------------------------------------------
 
@@ -108,26 +115,38 @@ class UtexClient:
         return h
 
     def refresh_access(self) -> str:
+        cached = self.token_cache.get("access_token")
+        if cached:
+            return str(cached)
+
         with open(self.token_file, encoding="utf-8") as f:
             rt = json.load(f)["refresh_token"]
         payload = {"realm": REALM, "clientId": CLIENT_ID, "refreshToken": rt}
         body = json.dumps(payload)
-        try:
-            r = self._post(self.refresh_url, json=payload,
-                           headers=self._headers(), timeout=30)
-            r.raise_for_status()
-            return r.json()["accessToken"]
-        except Exception as e:
-            if not _is_network_error(e):
-                raise
-            logger.warning("refresh via requests failed (%s), trying Playwright",
-                           type(e).__name__)
+
+        def _do_refresh():
             try:
-                data = _playwright_post(self.refresh_url, body, self._headers())
-                return data["accessToken"]
-            except Exception as e2:
-                logger.error("playwright refresh fallback failed: %s", e2)
-                raise e
+                r = self._post(self.refresh_url, json=payload,
+                               headers=self._headers(), timeout=30)
+                r.raise_for_status()
+                token = r.json()["accessToken"]
+                self.token_cache.set("access_token", token)
+                return token
+            except Exception as e:
+                if not _is_network_error(e):
+                    raise
+                logger.warning("refresh via requests failed (%s), trying Playwright",
+                               type(e).__name__)
+                try:
+                    data = _playwright_post(self.refresh_url, body, self._headers())
+                    token = data["accessToken"]
+                    self.token_cache.set("access_token", token)
+                    return token
+                except Exception as e2:
+                    logger.error("playwright refresh fallback failed: %s", e2)
+                    raise e
+
+        return self.circuit_breaker.call(_do_refresh)
 
     # -- candles -----------------------------------------------------------
 
@@ -138,23 +157,27 @@ class UtexClient:
                    "symbolId": symbol_id, "candlesCount": candles_count,
                    "interval": "Min1"}
         url = self.grpc_base + "MobileDataService.getCandlesToDate"
-        try:
-            r = self._post(url, json=payload, headers=self._headers(access),
-                           timeout=60)
-            if r.status_code != 200:
-                raise RuntimeError(
-                    f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
-            out = decode_candles(r.json())
-        except Exception as e:
-            if not _is_network_error(e):
-                raise
-            logger.warning("getCandles %s via requests failed (%s), "
-                           "trying Playwright", symbol_id, type(e).__name__)
-            data = _playwright_post(url, json.dumps(payload), self._headers(access))
-            out = decode_candles(data)
-        if not out:
-            raise RuntimeError(f"getCandles {symbol_id}: empty candle response")
-        return out
+
+        def _do_fetch():
+            try:
+                r = self._post(url, json=payload, headers=self._headers(access),
+                               timeout=60)
+                if r.status_code != 200:
+                    raise RuntimeError(
+                        f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
+                out = decode_candles(r.json())
+            except Exception as e:
+                if not _is_network_error(e):
+                    raise
+                logger.warning("getCandles %s via requests failed (%s), "
+                               "trying Playwright", symbol_id, type(e).__name__)
+                data = _playwright_post(url, json.dumps(payload), self._headers(access))
+                out = decode_candles(data)
+            if not out:
+                raise RuntimeError(f"getCandles {symbol_id}: empty candle response")
+            return out
+
+        return self.circuit_breaker.call(_do_fetch)
 
     def fetch_bars(self, access: str, symbol_id, candles_count: int = 720,
                    to_ts: Optional[int] = None) -> List[Bar]:

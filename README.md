@@ -158,4 +158,6 @@ venv\Scripts\python.exe -m pytest tests/test_vwap_* tests/test_sizing_and_risk_b
 
 - `docs/AUDIT.md` — снапшот существующей системы.
 - `docs/MIGRATION_PLAN.md` — план поэтапной миграции B→F.
+- `docs/UTEX_MIGRATION.md` — централизация и миграция UTEX data-провайдера.
 - `docs/STRATEGY_VWAP_PULLBACK.md` — спека стратегии с зафиксированными интерпретациями (OR-mid фильтр, уровни для 1.8R, роль ML).
+- `docs/US_STOCKS_RUNBOOK.md` — операционный runbook и траблшутинг.
