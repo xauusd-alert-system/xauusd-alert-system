@@ -1,0 +1,30 @@
+{
+  "method": "zscore",
+  "columns": [
+    "rsi",
+    "macd_line",
+    "macd_signal",
+    "macd_hist",
+    "upper_wick",
+    "body",
+    "lower_wick"
+  ],
+  "center": {
+    "rsi": 50.14687122120902,
+    "macd_line": 0.03181363173409103,
+    "macd_signal": 0.0320675809601432,
+    "macd_hist": -0.00025394922605215654,
+    "upper_wick": 0.26944139602753664,
+    "body": 0.0014197793783280932,
+    "lower_wick": 0.27239114071977316
+  },
+  "scale": {
+    "rsi": 11.98868053170969,
+    "macd_line": 1.953939812161744,
+    "macd_signal": 1.843629759067611,
+    "macd_hist": 0.5783562441563459,
+    "upper_wick": 0.21160346417527748,
+    "body": 0.5279573347716913,
+    "lower_wick": 0.21156237183034837
+  }
+}

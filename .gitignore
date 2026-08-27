@@ -96,3 +96,6 @@ data/book_bars/
 # NeuroBook vendored sources (TZ_BOOKS T-01): fetched+verified by
 # mql5/NeuroBook/fetch_neurobook.py against the committed manifest, never committed
 mql5/NeuroBook/vendor/
+
+# Book pipeline: heavy sample arrays are regenerable from the candles store
+data/book_initial/samples.npz

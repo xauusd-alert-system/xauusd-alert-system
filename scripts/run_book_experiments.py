@@ -142,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="T-19: add ATR / session vol / volume features")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out-dir", default="output/book_experiments")
+    ap.add_argument("--max-bars", type=int, default=None,
+                    help="use only the most recent N candles from the store")
     ap.add_argument("--synthetic", action="store_true",
                     help="force synthetic candles (no terminal history needed)")
     args = ap.parse_args(argv)
@@ -157,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
         logger.warning("no %s %s candles in %s - using SYNTHETIC data (results "
                        "are a pipeline smoke test, not market evidence)",
                        args.asset, args.timeframe, args.db)
+    elif args.max_bars and len(df) > args.max_bars:
+        # long external histories (e.g. 480k M15 bars 2004-2025): experiment on
+        # the most recent regime instead of the full archive
+        df = df.tail(int(args.max_bars)).reset_index(drop=True)
+        logger.info("limited to the most recent %d bars (--max-bars)", len(df))
 
     cfg = {"window": args.window, "horizon": args.horizon,
            "extended": bool(args.extended_features),
@@ -179,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "asset": args.asset, "timeframe": args.timeframe,
         "data_source": data_source, "bars": len(df),
+        "max_bars": args.max_bars,
         "window": args.window, "horizon": args.horizon,
         "extended_features": bool(args.extended_features),
         "feature_columns": samples.feature_columns,

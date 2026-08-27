@@ -146,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
                                                           "book_initial"))
     parser.add_argument("--synthetic", action="store_true",
                         help="force the synthetic generator (smoke tests)")
+    parser.add_argument("--max-bars", type=int, default=None,
+                        help="with real candles: use only the most recent N bars")
     parser.add_argument("--bars", type=int, default=20000,
                         help="synthetic bar count (fallback only)")
     parser.add_argument("--window", type=int, default=16)
@@ -173,6 +175,10 @@ def main(argv: list[str] | None = None) -> int:
                            args.asset, args.timeframe, args.db)
         df = synthetic_ohlcv(n=args.bars, seed=args.seed)
         source = f"synthetic(seed={args.seed},n={args.bars})"
+    elif args.max_bars and len(df) > args.max_bars:
+        # long external histories: build artifacts from the most recent regime
+        df = df.tail(int(args.max_bars)).reset_index(drop=True)
+        logger.info("limited to the most recent %d bars (--max-bars)", len(df))
     logger.info("loaded %d bars from %s", len(df), source)
 
     # ---- 2) samples (features, train-only normalization, 60/20/20) ------
@@ -206,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         "timeframe": args.timeframe,
         "source": source,
         "bars": int(len(df)),
+        "max_bars": args.max_bars,
         "synthetic": df is not None and source.startswith("synthetic"),
         "feature_columns": list(samples.feature_columns),
         "normalization": samples.norm_params.to_dict(),

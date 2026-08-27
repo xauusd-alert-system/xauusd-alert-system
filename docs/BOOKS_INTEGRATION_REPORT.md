@@ -10,6 +10,13 @@ Programming for Traders» — оба анализа в `docs/analysis/`.
 Регресс тестов не сломан: все падения, находимые в затронутых пакетах,
 воспроизводятся на чистом дереве до интеграции.**
 
+**Дополнение (2026-08-28, вечер): эксперименты на РЕАЛЬНЫХ данных
+разблокированы** — импортирован публичный датасет XAUUSD M15 2004–2025
+(480 717 баров), полный цикл «датасет → обучение FC/LSTM/MHA → ансамбль →
+сигнал в мост» прогнан на реальном рынке (раздел 3); T-16 доведён до
+end-to-end: `scripts/publish_book_signals.py` (модели → `ensemble_vote` →
+`SignalIntent` в `ml_signal_bridge.sqlite`).
+
 ---
 
 ## 1. Закрыто полностью (код + тесты зелёные)
@@ -25,7 +32,7 @@ Programming for Traders» — оба анализа в `docs/analysis/`.
 | **T-10** Порог + day-of-week | `passes_trade_level` (0.6), `day_of_week_stats`, `blocked_days_from_stats` (блок только при WR<45% **И** PnL<0 **И** ≥30 трейдов; fail-open); MQL5-зеркало `DayFilter.mqh` | `model/day_of_week_filter.py`, `mql5/NeuroTrader/DayFilter.mqh` |
 | **T-11** Gradient check в CI | Автотесты всех стеков (FC/LSTM/MHA/GPT/композит) + тест, что чекер ЛОВИТ сломанный backward (саботаж ×2 — тот самый класс бага /scale) | `model/book_nn/tests/test_gradient_check_ci.py` |
 | **T-15** Новостной фильтр | Live: `NewsGuard.mqh` (календарь, ±30 мин, high-importance USD, merge окон, в тестере fail-open с пояснением). Бэктест: `NewsStore` (WAL, UNIQUE(ts,title,country), `events_between`, `import_csv`, `is_news_blackout`) | `mql5/NeuroTrader/NewsGuard.mqh`, `data/news_sqlite.py` |
-| **T-16** Python-мост | `SignalBridgeWriter`: таблица `ml_signals` + `bridge_meta(schema_version=1)`, WAL, идемпотентная запись (retry не сбрасывает статус EA), TTL 3ч, `expire_stale`; MQL5-читатель с fail-closed по версии схемы; автоторговля Python не используется (10027 — фича) | `execution/signal_bridge.py`, `mql5/NeuroTrader/SignalBridge.mqh` |
+| **T-16** Python-мост | `SignalBridgeWriter`: таблица `ml_signals` + `bridge_meta(schema_version=1)`, WAL, идемпотентная запись (retry не сбрасывает статус EA), TTL 3ч, `expire_stale`; MQL5-читатель с fail-closed по версии схемы; автоторговля Python не используется (10027 — фича). **End-to-end продюсер** `scripts/publish_book_signals.py`: свечи → фичи → нормализация (train-параметры) → ансамбль FC+LSTM+MHA → `ensemble_vote` → `SignalIntent` с ATR-SL/TP и `features_hash`; идемпотентный `intent_id`, fail-closed (flat → ничего не пишется) | `execution/signal_bridge.py`, `mql5/NeuroTrader/SignalBridge.mqh`, `scripts/publish_book_signals.py` |
 | **T-17** Train/Val-расхождение | Мониторинг в цикле обучения: patience/min_train_progress/val_worsen_ratio, алерт с эпохой и обеими кривыми | `model/book_nn/train.py` |
 | **T-19** Расширение фичесета | `atr_ratio`, `session_vol_ratio`, `volume_ratio` — масштабно-свободные, по схеме нормализации T-02 (`--extended-features`) | `model/sample_generator.py` |
 | **T-20** Конфигурация моделей | `BookNetwork` из CLayerDescription-диктов, сериализация `.npz`+`.json` (архитектура как данные), `book_fc/lstm/mha_description` | `model/book_nn/network.py` |
@@ -52,18 +59,95 @@ Programming for Traders» — оба анализа в `docs/analysis/`.
 
 Сборка: открыть `mql5/NeuroTrader/NeuroTrader.mproj` в MetaEditor → F7.
 
-## 3. Заблокировано / отложено
+## 3. Эксперименты на реальных данных (разблокировано)
+
+### 3.1 Источник данных
+
+Прямые провайдеры (Yahoo/stooq/Binance) из песочницы недоступны (TLS
+блокируется; Yahoo `XAUUSD=X` интрадей не отдаёт, v7/download требует
+crumb). Разблокировка — через публичное зеркало Kaggle-датасета на GitHub:
+`github.com/BaseMax/XAUUSD-LSTM`, файл `XAU_15m_data.csv` — MT4-экспорт
+XAUUSD **M15, 2004-06-11 … 2025-09-30, 480 717 баров**.
+
+Импортёр `scripts/import_external_candles.py` (тестами покрыт):
+семиколоночный CSV → `data/market_data_external.sqlite` (таблица `candles`,
+та же схема, что читают лоадеры; `symbol='XAUUSD'`, `timeframe='M15'`),
+OHLC-инварианты проверяются — 0 баров отклонено; провенанс в
+`source_meta` (источник, даты, счётчики); идемпотентный re-import;
+`data/market_data_mt5.sqlite` не трогается (терминальные и внешние данные
+раздельно).
+
+**Оговорка:** таймфрейм — M15, а не M5 из ТЗ: публичного M5-датасета
+XAUUSD нужной глубины не найдено (поиск по GitHub выдаёт только EA, без датасетов).
+Все скрипты таймфрейм-параметризованы (`--timeframe`), пайплайн от этого
+не меняется; при подключении терминала M5-ветка запускается той же
+командой.
+
+### 3.2 Прогон (последние 80 000 баров ≈ 2.3 года, до 2025-09-30)
+
+`python -m scripts.run_book_experiments --db data/market_data_external.sqlite
+--asset XAUUSD --timeframe M15 --max-bars 80000 --epochs 25` (добавлен
+`--max-bars` — хвостовой срез в `run_book_experiments` и
+`create_initial_data_xauusd`). Сплит 60/20/20 по времени: 47 984 /
+15 995 / 15 994 сэмпла; window 16, горизонт [6, 12] баров, 7 базовых фич.
+
+| Модель | test MSE | dir.acc h=6 | dir.acc h=12 |
+|---|---|---|---|
+| Наивный прогноз (ноль) | **2.006** | 0.500 | 0.500 |
+| FC (6 902 парам.) | 2.081 | 0.505 | 0.503 |
+| LSTM (6 242 парам.) | 2.415 | 0.495 | 0.502 |
+| MHA (12 990 парам.) | 2.832 | 0.493 | 0.491 |
+
+Книги должны читаться в этих числах так:
+
+1. **Ни одна архитектура не обыгрывает наивный прогноз** (MSE и
+   direction hit-rate ≈ 50%). Это подтверждение вывода синтетического
+   smoke-теста уже на реальном рынке: на XAUUSD окно прошлых возвратов
+   не даёт предсказательной силы для мультигоризонтного возврата.
+   Пайплайн при этом работает корректно и — важно — **не выдумывает
+   edge**: модели честно не бьют базовую линию.
+2. **Мониторинг train/val-расхождения (T-17) сработал на реальных
+   данных**: предупреждение «train 0.80 ↓ при val 1.20 stuck» после 23
+   «stale»-эпох — механизм книги (p. 256) ловит переобучение в бою.
+3. **Сдвиг режима**: дисперсия тест-выборки [1.87, 2.14] против 1.0 на
+   train (2025-й — резкий рост волатильности золота) — ровно тот случай,
+   для которого нужны дрейф-гейты T-23 (`psi`/`normalization_shift`).
+4. Roundtrip сериализации верифицирован: MSE перезагруженных из `.npz`
+   моделей побитно совпадает с summary (`2.0811/2.4146/2.8321`).
+
+Артефакты: `output/book_experiments_real/` (3 модели + кривые + summary),
+`data/book_initial/` (samples.npz, `book_normalization.json`,
+`book_day_filter.json` — теперь из реальных данных; `dataset_meta.json`:
+`source=sqlite:…external.sqlite, synthetic=false`).
+
+### 3.3 T-16 end-to-end на реальных данных
+
+`python -m scripts.publish_book_signals --models-dir
+output/book_experiments_real --db data/market_data_external.sqlite`:
+
+```
+ensemble flat (p_up=0.559, agreement=0.00) - nothing sent
+votes: fc=+1, lstm=+1, mha=-1
+```
+
+Итог ровно тот, что проектировался: порог TradeLevel 0.6 не взят, члены
+ансамбля не согласны → **flat, в мост ничего не пишется** («no edge, no
+trade»). При взятом пороге продюсер пишет `SignalIntent` с
+ATR-SL/TP, `features_hash` и идемпотентным `intent_id` (повторный запуск
+на том же баре не дублирует строку) — поведение зафиксировано тестами
+(`scripts/tests/test_publish_book_signals.py`, 7 тестов).
+
+## 4. Заблокировано / отложено
 
 | Задача | Причина |
 |---|---|
 | **T-24** GPT-блоки | Отложено **по условию самого ТЗ**: «после стабилизации walk-forward и при наличии GPU». Слой `GPTStyleBlock` написан и проверен градиент-чеком (4.73e-8) — блокировки на уровне библиотеки нет, не запускается только применение. |
 | **Компиляция MQL5** | В Linux-песочнице нет MetaEditor. Синтаксис выверен по документации API (в процессе исправлены несуществующие `DatabaseReadExecute`/`DatabaseChanges`/`StringTrim` — заменены на документированные эквиваленты), баланс скобок проверен. Требуется одна контрольная сборка в терминале. |
-| **Эксперименты на реальных данных** | `data/market_data_mt5.sqlite` в песочнице пуст — реальных свечей XAUUSD M5 нет. Полный прогон `run_book_experiments` выполнен на синтетике 20000 баров (MSE≈1 = честное «нет edge» на random walk). Для реального прогона: заполнить БД и `python -m scripts.run_book_experiments --asset XAUUSD --timeframe M5`. |
 | **Замер ускорения OpenCL** | Нужен терминал с GPU-драйвером; скрипт `BenchmarkOpenCL.mq5` готов и пишет CSV. |
 
-## 4. Верификация
+## 5. Верификация
 
-**Новые тесты: 84 passed** (`pytest` по книгам-интеграции):
+**Новые тесты: 91 passed** (`pytest` по книгам-интеграции):
 
 ```
 model/tests/test_books_sample_generator.py        9   (T-02/T-19)
@@ -76,12 +160,13 @@ execution/tests/test_books_signal_bridge.py       9   (T-16)
 scripts/tests/test_books_artifacts.py             9   (T-25 + скрипты)
 mql5/tests/test_neurotrader_contracts.py          11  (MQL5↔Python контракты)
 config/tests/test_books_config.py                 5   (секция books:)
+scripts/tests/test_publish_book_signals.py        7   (T-16 e2e + импортёр внешних данных)
 ```
 
 Градиентные проверки (`model/book_nn`): FC 2.5e-8, LSTM 6.4e-8, GPT
 4.73e-8, MHA ≤3.66e-5 (6 seed'ов, tol 1e-4), композит MHA+LSTM+FC 1.06e-5.
 
-**Регресс:** полный прогон затронутых пакетов — 798 passed / 10 failed;
+**Регресс:** полный прогон затронутых пакетов — 805 passed / 10 failed / 1 skipped;
 все 10 падений (`execution/test_close_notification*`, `test_breakeven_legs*`,
 `test_blackout*`, `scripts/test_audit_final_batch*`,
 `scripts/test_diag_r_metrics*`) воспроизводятся на чистом дереве до
@@ -94,17 +179,28 @@ config/tests/test_books_config.py                 5   (секция books:)
 моста, join-ключ `features_hash`, формулу критерия, отказ при
 несовпадении schema_version.
 
-## 5. Как это запускать
+## 6. Как это запускать
 
 ```bash
+# импорт внешней истории (MT4-CSV, напр. Kaggle-зеркало XAUUSD M15 2004-2025)
+python -m scripts.import_external_candles --csv XAU_15m_data.csv \
+    --db data/market_data_external.sqlite --symbol XAUUSD --timeframe M15 \
+    --source-url "https://github.com/BaseMax/XAUUSD-LSTM"
+
 # датасет + артефакты для EA (нормализация, day filter, samples.npz)
 python -m scripts.create_initial_data_xauusd --out-dir data/book_initial
 
-# эксперименты FC/LSTM/MHA (реальные данные, когда sqlite заполнен)
-python -m scripts.run_book_experiments --asset XAUUSD --timeframe M5
+# эксперименты FC/LSTM/MHA (реальные данные: external.sqlite, M15)
+python -m scripts.run_book_experiments --db data/market_data_external.sqlite \
+    --asset XAUUSD --timeframe M15 --max-bars 80000 --epochs 25 \
+    --out-dir output/book_experiments_real
+
+# продюсер сигналов в мост (T-16 end-to-end: ансамбль -> ml_signals)
+python -m scripts.publish_book_signals --models-dir output/book_experiments_real \
+    --db data/market_data_external.sqlite --asset XAUUSD --timeframe M15
 
 # экспорт обученной FC для EDGE-режима EA (OpenCL/CPU)
-python -m scripts.export_fc_weights --model output/book_experiments/book_fc \
+python -m scripts.export_fc_weights --model output/book_experiments_real/book_fc \
     --out book_fc_weights.bin
 
 # тесты
@@ -117,7 +213,7 @@ EA: `mql5/NeuroTrader/NeuroTraderEA.mq5`, режимы BRIDGE (Python-сигна
 для `MQL5\Files`: `book_normalization.json`, `book_day_filter.json`,
 `book_fc_weights.bin` — см. `mql5/NeuroTrader/README.md`.
 
-## 6. Конфигурация
+## 7. Конфигурация
 
 Секция `books:` в `config/config.yaml` (samples/trade_level/day_filter/
 news_guard/validation/tester_criterion/bridge/drift) + accessor
