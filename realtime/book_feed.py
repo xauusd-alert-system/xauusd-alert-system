@@ -147,9 +147,10 @@ class BookFeed:
             self._thread.join(timeout=5.0)
 
     def _run(self):
-        import MetaTrader5 as mt5
+        from mt5_adapter.lazy import get_mt5_module
 
-        self._mt5 = mt5
+        # ТЗ 8.6: raw module handle via the adapter.
+        self._mt5 = mt5 = get_mt5_module()
         self._subscribe_all()
         while not self._stop.wait(self.poll_interval_s):
             try:

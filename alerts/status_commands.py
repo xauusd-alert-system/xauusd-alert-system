@@ -54,9 +54,9 @@ def _load_mt5():
     global _mt5, _mt5_import_failed
     if _mt5 is None and not _mt5_import_failed:
         try:
-            import MetaTrader5
+            from mt5_adapter.lazy import get_mt5_module
 
-            _mt5 = MetaTrader5
+            _mt5 = get_mt5_module()
         except Exception:  # ImportError and anything a broken install raises
             _mt5_import_failed = True
             logger.warning("MetaTrader5 package is not importable in this process")

@@ -10,8 +10,13 @@ import time
 import math
 import logging
 from datetime import datetime, timedelta, timezone
-import MetaTrader5 as mt5
+
+from mt5_adapter.lazy import get_mt5_module
+
 import pandas as pd
+
+# ТЗ 8.6: raw module handle via the adapter (no direct `import MetaTrader5`).
+mt5 = get_mt5_module()
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

@@ -15,7 +15,11 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-import MetaTrader5 as mt5
+
+from mt5_adapter.lazy import get_mt5_module
+
+# ТЗ 8.6: raw module handle via the adapter (no direct `import MetaTrader5`).
+mt5 = get_mt5_module()
 
 logger = logging.getLogger("risk_manager")
 

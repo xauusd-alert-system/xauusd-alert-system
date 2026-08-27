@@ -1,4 +1,16 @@
-﻿deployment:
+# ТЗ 8.6: MT5 adapter layer. All direct MetaTrader5 usage must live inside the
+# mt5_adapter/ package (guard test: mt5_adapter/tests/test_no_direct_mt5_calls.py).
+mt5_adapter:
+  rate_limit:
+    # Max MetaTrader5 calls per second (token-bucket, burst = value).
+    # null / 0 = disabled (default: existing behaviour is unchanged).
+    # The MT5_RATE_LIMIT_MAX_CPS env var overrides this value (0 = disabled).
+    max_calls_per_second: null
+  cache:
+    # TTL for symbol_info / symbol_info_tick cached reads (milliseconds).
+    ttl_ms: 500
+
+deployment:
   # Formal safety state; DRY_RUN is no longer the deployment authority.
   # TRIAL-48H (2026-08-18): temporarily switched research -> demo_systematic;
   # auto-revert by `python -m scripts.trial_window watch` after 48h.

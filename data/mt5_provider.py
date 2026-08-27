@@ -3,8 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Final
 
-import MetaTrader5 as mt5
+from mt5_adapter.lazy import get_mt5_module
+
 import pandas as pd
+
+# ТЗ 8.6: the raw module handle is resolved through the adapter (no direct
+# `import MetaTrader5` here). Module-level attribute access in tests
+# (monkeypatch.setattr(mt5_provider.mt5, ...)) keeps working.
+mt5 = get_mt5_module()
 
 
 _TIMEFRAMES: Final[dict[str, int]] = {

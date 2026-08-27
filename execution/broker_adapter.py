@@ -127,11 +127,10 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
     """Adapter bridging to MetaTrader 5 API."""
 
     def __init__(self):
-        try:
-            import MetaTrader5 as mt5
-        except ImportError:
-            from simulation.mt5_shim import MetaTrader5 as mt5
-        self.mt5 = mt5
+        from mt5_adapter.lazy import get_mt5_module
+        # ТЗ 8.6: module resolution (real package, shim, dotted fallback)
+        # consolidated into mt5_adapter.lazy.
+        self.mt5 = get_mt5_module()
         self.connected = False
 
     def connect(self) -> bool:
