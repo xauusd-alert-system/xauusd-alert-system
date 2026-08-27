@@ -48,6 +48,16 @@ def _pos(ticket, symbol, type_, entry, sl, tp=None):
     )
 
 
+class _StubThrottle:
+    """TradeThrottle stand-in: records closes without halting."""
+
+    def __init__(self):
+        self.closed_pnls = []
+
+    def on_trade_closed(self, pnl):
+        self.closed_pnls.append(pnl)
+
+
 def _trader(tmp_path, active):
     t = object.__new__(MultiAssetMT5Trader)
     t.magic_number = 777111
@@ -60,6 +70,11 @@ def _trader(tmp_path, active):
     t.last_close_pnl = {}
     t.dry_run = False
     t.bot = _FakeBot()
+    # Attributes added to the trader after these harnesses were written;
+    # minimal stand-ins keep the unit under test focused on BE logic.
+    t.cfg = {"assets": {}}
+    t.strategy_identity = "test-identity"
+    t.trade_throttle = _StubThrottle()
     t.management_state_path = str(tmp_path / "mgmt_state.json")
     t.trade_db_path = str(tmp_path / "trades.sqlite")
     return t

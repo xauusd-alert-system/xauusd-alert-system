@@ -27,6 +27,16 @@ class _FakeBot:
         return True
 
 
+class _StubThrottle:
+    """TradeThrottle stand-in: records closes without halting."""
+
+    def __init__(self):
+        self.closed_pnls = []
+
+    def on_trade_closed(self, pnl):
+        self.closed_pnls.append(pnl)
+
+
 def _trader(tmp_path, active):
     t = object.__new__(MultiAssetMT5Trader)
     t.magic_number = 777111
@@ -36,6 +46,10 @@ def _trader(tmp_path, active):
     t.signal_features = {}
     t.last_close_pnl = {}
     t.bot = _FakeBot()
+    # Attributes added to the trader after this harness was written.
+    t.cfg = {"assets": {}}
+    t.strategy_identity = "test-identity"
+    t.trade_throttle = _StubThrottle()
     t.management_state_path = str(tmp_path / "mgmt_state.json")
     t.trade_db_path = str(tmp_path / "trades.sqlite")
     return t

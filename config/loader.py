@@ -10,6 +10,40 @@ import yaml
 
 _CONFIG_CACHE = None
 
+# Global default trading timeframe. Used by resolve_asset_timeframe() as the
+# final fallback when neither the explicit override, nor the per-asset entry,
+# nor market_data.timeframe provide a value. Must stay "M5" (see
+# config/tests/test_resolve_asset_timeframe.py::test_missing_market_data_falls_back_to_constant).
+DEFAULT_TIMEFRAME = "M5"
+
+
+def resolve_asset_timeframe(cfg: dict, asset_key: str | None, override: str | None = None) -> str:
+    """Single source of truth for an asset's effective trading timeframe.
+
+    Priority chain (first non-empty wins):
+      1. explicit ``override`` argument,
+      2. ``assets.<asset_key>.timeframe``,
+      3. ``market_data.timeframe``,
+      4. module constant :data:`DEFAULT_TIMEFRAME`.
+
+    Tolerates ``cfg=None``/``{}``, unknown asset keys and falsy overrides —
+    diagnostics scripts historically re-implemented this chain with divergent
+    hardcoded fallbacks, which made research run on a different tier than
+    production for assets without an explicit per-asset timeframe.
+    """
+    cfg = cfg or {}
+    if override:  # falsy ("", None) behaves like "not provided"
+        return override
+    assets = cfg.get("assets") or {}
+    per_asset_cfg = assets.get(asset_key) or {} if asset_key else {}
+    tf = per_asset_cfg.get("timeframe")
+    if tf:
+        return tf
+    tf = (cfg.get("market_data") or {}).get("timeframe")
+    if tf:
+        return tf
+    return DEFAULT_TIMEFRAME
+
 
 def load_config(path: str = None) -> dict:
     """

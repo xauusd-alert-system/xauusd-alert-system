@@ -9,6 +9,11 @@ overrides via indirect parametrize.
 import sys
 import os
 
+# logs/ws_live_test.py is a manual live-trading smoke script (needs MetaTrader5
+# + websockets + an open MT5 session), NOT a test. Exclude it from collection so
+# `pytest -q` at the repo root does not error on the optional websockets import.
+collect_ignore_glob = ["logs/ws_live_test.py"]
+
 import pytest
 
 # Ensure project root is on sys.path for all test suites

@@ -95,7 +95,10 @@ def test_flatten_all_positions_closes_every_position(monkeypatch):
         types.SimpleNamespace(bid=2400.0, ask=2400.1)
         if s == "GOLD" else types.SimpleNamespace(bid=1.1000, ask=1.1001)))
     closed = []
-    t._close_partial_position = lambda pos, price, volume, label: (
+    # _close_partial_position gained keyword args over time (e.g.
+    # quiet_market_closed for blackout passes); accept **kwargs so the
+    # harness tracks the current call signature.
+    t._close_partial_position = lambda pos, price, volume, label, **kwargs: (
         closed.append((pos.ticket, volume, label)) or True)
     t._flatten_all_positions("weekend blackout")
     assert sorted(c[0] for c in closed) == [1, 2]

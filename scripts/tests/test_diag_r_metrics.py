@@ -78,11 +78,13 @@ def test_signal_mask_blocks_low_prob():
 
 def test_run_diagnostics_structure(synthetic_gbp_df):
     from config.loader import load_config
+    from model.trainer import FEATURE_COLUMNS
     cfg = load_config()
     d = run_diagnostics(cfg, "GBPUSD", synthetic_gbp_df, max_folds=4)
     assert d["n_folds"] == 4
     assert d["n_trades"] > 0
-    assert d["n_features"] == 46
+    # Track the production feature contract instead of a hardcoded count.
+    assert d["n_features"] == len(FEATURE_COLUMNS)
     assert d["events_per_feature"] > 0
     r = d["r_metrics"]
     assert r["n"] == d["n_trades"]
