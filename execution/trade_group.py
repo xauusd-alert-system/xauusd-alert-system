@@ -256,7 +256,9 @@ class TradeGroupSpec(BaseModel):
     strategy_version: str
     expires_at_utc_ms: int
     created_at_utc_ms: int
-    # P1.6 §20–§22: lineage from source to approved spec.
+    # P1.6 §20–§22: lineage from source to approved spec. The dict is
+    # untyped at runtime (legacy compatibility), but its expected keys are
+    # documented by TradeGroupProvenanceDict in provenance/spec.py (ТЗ 7.6)
     provenance: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

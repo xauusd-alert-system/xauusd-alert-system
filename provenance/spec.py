@@ -20,7 +20,7 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -38,6 +38,35 @@ REQUIRED_RECORD_FIELDS = (
     "cost_snapshot",
     "record_hash",
 )
+
+
+class TradeGroupProvenanceDict(TypedDict, total=False):
+    """ТЗ 7.6: документация ключей legacy dict-провенанса в
+    ``TradeGroupSpec.provenance`` (execution/trade_group.py).
+
+    Поле spec.provenance остаётся ``dict[str, Any]`` ради обратной
+    совместимости (legacy-тесты/фикстуры), но ожидаемый набор ключей
+    зафиксирован здесь как TypedDict — типизация без изменения рантайма.
+    Полный набор ключей требуется только перед исполнением
+    (``require_execution_provenance``, P1.6 §22/§23).
+    """
+
+    # lineage-ссылки на родительские снапшоты
+    market_snapshot_id: str
+    feature_snapshot_id: str
+    model_inference_id: str
+    model_hash: str
+    profile_id: str
+    broker_snapshot_id: str
+    cost_snapshot_id: str
+    # расширенные снапшоты (опционально)
+    broker_snapshot: dict[str, Any]
+    cost_snapshot: dict[str, Any]
+    # детерминированные хеши (§21): ЧТО / ИЗ ЧЕГО
+    geometry_hash: str
+    provenance_hash: str
+    # источник (P1.6 §37: "unknown" не валиден; §31 paper != mt5)
+    source: str
 
 
 class ProvenanceRecordV2(BaseModel):
