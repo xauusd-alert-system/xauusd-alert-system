@@ -30,7 +30,10 @@ from backtest.monte_carlo import MonteCarloSimulator
 from alerts.chart_renderer import ChartRenderer
 from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
 from alerts import status_commands as sc
-from contracts.execution_contracts import event_envelope_from_dict
+from contracts.execution_contracts import (
+    check_protocol_version,
+    event_envelope_from_dict,
+)
 from data.ledger_bridge import verify_signature
 from data.ledger_events import (
     execution_quality_summary,
@@ -1170,7 +1173,23 @@ async def ledger_ingest(request: Request, authorization: str | None = Header(def
 
     # e. schema validation AFTER signature check
     try:
-        envelope = event_envelope_from_dict(json.loads(body.decode("utf-8")))
+        raw_envelope = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid ledger envelope: {exc}")
+    # ТЗ 10.4: reject incompatible wire protocol versions. A MISSING field
+    # counts as v1 (compatibility with observers deployed before the field).
+    version_ok, version_err, _version = check_protocol_version(raw_envelope)
+    if not version_ok:
+        globals()["_REJECTED_PROTOCOL_VERSIONS"] = (
+            globals().get("_REJECTED_PROTOCOL_VERSIONS", 0) + 1
+        )
+        logger.warning(
+            "ledger ingest rejected: %s (rejected_protocol_versions=%d)",
+            version_err, globals()["_REJECTED_PROTOCOL_VERSIONS"],
+        )
+        raise HTTPException(status_code=422, detail=version_err)
+    try:
+        envelope = event_envelope_from_dict(raw_envelope)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"invalid ledger envelope: {exc}")
 

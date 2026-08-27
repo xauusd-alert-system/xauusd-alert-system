@@ -50,7 +50,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from contracts.execution_contracts import event_envelope_from_dict  # noqa: E402
+from contracts.execution_contracts import (  # noqa: E402
+    check_protocol_version,
+    event_envelope_from_dict,
+)
 
 logger = logging.getLogger("observer_signing_proxy")
 
@@ -110,6 +113,11 @@ def validate_observer_envelope(raw: dict) -> tuple[bool, str]:
     Returns (ok, error). Raises nothing; a rejected envelope must NOT be
     forwarded or signed.
     """
+    # ТЗ 10.4: protocol version gate — unknown versions are never signed or
+    # forwarded; a missing field counts as v1 (legacy observers).
+    version_ok, version_err, _version = check_protocol_version(raw)
+    if not version_ok:
+        return False, version_err
     try:
         envelope = event_envelope_from_dict(raw)
     except Exception as exc:  # pydantic ValidationError and friends
