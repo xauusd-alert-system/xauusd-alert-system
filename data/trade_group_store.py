@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from data.storage import get_connection
+from execution.schema_registry import deserialize_spec
 from execution.trade_group import GroupState, TradeGroupSpec
 
 TABLE = "trade_groups"
@@ -139,7 +140,11 @@ def load_group(db_path: str, group_id: str) -> dict[str, Any] | None:
         data = dict(zip(columns, row))
     finally:
         conn.close()
-    data["spec"] = TradeGroupSpec.model_validate_json(data.pop("spec_json"))
+    # ТЗ 9.1–9.2: deserialize through the versioned schema registry, which
+    # defaults untagged (legacy) rows to trade-group.v1 and rejects unknown
+    # versions instead of silently guessing.
+    spec_payload = json.loads(data.pop("spec_json"))
+    data["spec"] = deserialize_spec(spec_payload)
     data["state"] = GroupState(data["state"])
     data["legs"] = json.loads(data.pop("legs_json") or "[]")
     data["be_state"] = json.loads(data.pop("be_json") or "{}")
