@@ -664,6 +664,18 @@ deploy_guard:
 #   slot, so 6 slots = only 2 assets and high-confidence signals on the 3rd asset were
 #   suppressed by "Max concurrent positions limit reached (6/6)").
 execution:
+  # P0-1: per-timeframe signal TTL (ms). A signal without an explicit
+  # expires_at expires after this many milliseconds from creation. The value
+  # is keyed by the asset's trading timeframe (assets.<key>.timeframe or
+  # market_data.timeframe). Timeframes not listed fall back to
+  # execution.signal_ttl_ms.default (7200000 = 2h; the legacy hardcoded 24h
+  # default let stale M1 signals trade half a day later).
+  signal_ttl_ms:
+    default: 7200000      # 2 hours
+    M1: 1800000           # 30 minutes
+    M5: 7200000           # 2 hours
+    M15: 21600000         # 6 hours
+    H1: 86400000          # 24 hours
   # SAFETY FREEZE (2026-08-16): the causal signal-bar grid contract invalidates
   # every admission gate measured with entry-bar ATR, including BTCUSD. Empty is
   # an explicit deny-all list (mt5_trader distinguishes it from a missing key).

@@ -220,6 +220,75 @@ def test_build_group_from_signal_btc_candidate_blocked():
     assert exc.value.reason_code == PROFILE_NOT_VALIDATED
 
 
+def test_signal_ttl_by_timeframe():
+    """P0-1: a signal without expires_at gets a per-timeframe TTL
+    (M5 -> 2h, H1 -> 24h; unknown TF -> config default 2h), not 24h for all."""
+    from execution.trade_geometry import resolve_signal_ttl_ms
+
+    ttl_cfg = {
+        "execution": {"signal_ttl_ms": {
+            "default": 7200000, "M1": 1800000, "M5": 7200000,
+            "M15": 21600000, "H1": 86400000,
+        }},
+        "market_data": {"timeframe": "M15"},
+        "assets": {
+            "XAUUSD": {"timeframe": "M5"},
+            "EURUSD": {"timeframe": "H1"},
+        },
+        "trade_profiles": CFG["trade_profiles"],
+    }
+    now = 1_700_000_000_000
+
+    # M5 asset -> 2 hours
+    signal = {"bias": "long", "atr": 4.0, "entry_zone": [4159.10, 4159.50]}
+    spec = build_trade_group_from_signal(
+        signal, cfg=ttl_cfg, asset_key="XAUUSD", profile_id="xau_m15_intraday_v1",
+        broker=BROKER_XAU, cost=COST_XAU, mode="paper", now_ms=now,
+    )
+    assert spec.expires_at_utc_ms == now + 7_200_000   # +2h
+
+    # H1 asset -> 24 hours
+    signal_h1 = {"bias": "long", "atr": 4.0, "entry_zone": [1.1000, 1.1002]}
+    spec_h1 = build_trade_group_from_signal(
+        signal_h1, cfg=ttl_cfg_for("EURUSD", "H1", 86_400_000),
+        asset_key="EURUSD", profile_id=None,
+        broker=BROKER_XAU, cost=COST_XAU, mode="paper", now_ms=now,
+    )
+    assert spec_h1.expires_at_utc_ms == now + 86_400_000  # +24h
+
+
+def _ttl_cfg(timeframe: str, ttl_ms: int):
+    """Config helper: one profile + the TTL table for the given timeframe."""
+    return {
+        "execution": {"signal_ttl_ms": {"default": 7200000, timeframe: ttl_ms}},
+        "market_data": {"timeframe": timeframe},
+        "assets": {},
+        "trade_profiles": {"p1": dict(XAU_PROFILE)},
+    }
+
+
+def ttl_cfg_for(asset_key: str, timeframe: str, ttl_ms: int) -> dict:
+    cfg = _ttl_cfg(timeframe, ttl_ms)
+    profile = cfg["trade_profiles"]["p1"]
+    return {
+        **cfg,
+        "assets": {asset_key: {"timeframe": timeframe}},
+        "trade_profiles": {"p1": {**profile, "asset": asset_key}},
+    }
+
+
+def test_signal_ttl_falls_back_to_default():
+    """Timeframe missing from the TTL table -> execution.signal_ttl_ms.default."""
+    from execution.trade_geometry import (
+        DEFAULT_SIGNAL_TTL_MS, resolve_signal_ttl_ms,
+    )
+
+    cfg = _ttl_cfg("M30", 123456)
+    assert resolve_signal_ttl_ms(cfg, "XAUUSD") == 123456      # explicit default
+    empty = {}
+    assert resolve_signal_ttl_ms(empty, "XAUUSD") == DEFAULT_SIGNAL_TTL_MS
+
+
 def test_build_group_from_signal_expired():
     signal = {"bias": "long", "atr": 4.0, "entry_zone": [4159.10, 4159.50],
               "expires_at_utc_ms": 1_500_000_000_000}

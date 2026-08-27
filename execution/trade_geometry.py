@@ -496,6 +496,34 @@ def compute_break_even(
 # Pipeline signal -> TradeGroupSpec bridge (ТЗ §27 realtime/pipeline.py intent)
 # --------------------------------------------------------------------------
 
+# P0-1: fallback when a timeframe has no entry in execution.signal_ttl_ms.
+# 2 hours, NOT the legacy hardcoded 24h (stale M1 signals must not trade
+# half a day later).
+DEFAULT_SIGNAL_TTL_MS = 2 * 3600 * 1000
+
+
+def resolve_signal_ttl_ms(cfg: dict, asset_key: str) -> int:
+    """Per-timeframe signal TTL from execution.signal_ttl_ms (P0-1).
+
+    The timeframe is resolved through the single source of truth
+    (config.resolve_asset_timeframe); missing/invalid config entries fall back
+    to ``default`` (or DEFAULT_SIGNAL_TTL_MS if that is absent too).
+    """
+    try:
+        from config.loader import resolve_asset_timeframe
+
+        tf = resolve_asset_timeframe(cfg, asset_key)
+    except Exception:
+        tf = None
+
+    ttl_cfg = (cfg or {}).get("execution", {}).get("signal_ttl_ms") or {}
+    default_ttl = ttl_cfg.get("default", DEFAULT_SIGNAL_TTL_MS)
+    try:
+        return max(1, int(ttl_cfg.get(tf, default_ttl)))
+    except (TypeError, ValueError):
+        return max(1, int(default_ttl))
+
+
 def build_trade_group_from_signal(
     signal: dict,
     *,
@@ -609,7 +637,9 @@ def build_trade_group_from_signal(
         model_hash=str(signal.get("model_hash") or signal.get("model_path") or "unknown"),
         config_hash=str(signal.get("config_hash") or "unknown"),
         strategy_version=str(signal.get("strategy_version") or "unknown"),
-        expires_at_utc_ms=expires_at or (now + 24 * 3600 * 1000),
+        # P0-1: per-timeframe TTL instead of a hardcoded 24h (a signal without
+        # an explicit expires_at on M1 lives 30 minutes, on M15 six hours etc.)
+        expires_at_utc_ms=expires_at or (now + resolve_signal_ttl_ms(cfg, asset_key)),
         created_at_utc_ms=now,
         # P1.6 §20–§22: lineage ids required for an approved spec.
         provenance={
