@@ -360,6 +360,26 @@ def health():
     }
 
 
+@app.get("/api/health")
+def api_health():
+    """ТЗ 6.3: enriched health endpoint with per-component checks.
+
+    Built on the same check contract as the standalone services
+    (``services.base.run_checks``): a component that fails or raises makes
+    the aggregate status "degraded" — it NEVER produces an HTTP 500, so
+    load-balancer probes keep working. The public liveness ``/health``
+    endpoint above is unchanged.
+
+    The payload contains no secrets: details are static strings produced by
+    ``monitoring/health.py`` (ports, group counts, tick ages), never
+    configuration values such as tokens or connection strings.
+    """
+    from services.base import run_checks
+    from monitoring.health import build_health_checks
+
+    return run_checks(build_health_checks(CFG))
+
+
 @app.get("/signal", response_model=SignalResponse)
 @_ttl_cache(15)
 def get_signal(n_candles: int = 300, asset: str = "XAUUSD"):
