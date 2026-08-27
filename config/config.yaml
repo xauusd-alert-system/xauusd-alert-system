@@ -1020,3 +1020,18 @@ services:
     # than this, otherwise /health reports degraded.
     max_cache_age_hours: 6
     refresh_interval_seconds: 900
+
+# Phase 4, Step 12 (TZ 6.1/6.2): monitoring. Everything here is OFF by
+# default — enabling must not change trading behaviour, only observability.
+monitoring:
+  metrics:
+    # JSONL history sink (logs/metrics.jsonl); METRICS_JSONL_PATH env overrides.
+    jsonl_path: logs/metrics.jsonl
+  alerts:
+    # TZ 6.2: alert manager with rules + cooldowns. Disabled by default:
+    # wiring is added to run_bot only when this is true.
+    enabled: false
+    telegram: true            # deliver via alerts/telegram_bot.py
+    feed_stale_after_s: 30    # FEED_STALE: last tick older than N seconds
+    disk_min_free_mb: 500     # DISK_LOW: free space below threshold (P2-31)
+    mt5_disconnect_threshold: 5  # MT5_DISCONNECT: symbol_info_tick None N times
