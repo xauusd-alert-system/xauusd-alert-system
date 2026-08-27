@@ -170,6 +170,36 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- Pre/Post-Fix Walk-Forward Comparison -->
+        <div class="glass-card p-6 border-l-4 border-l-violet-500">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-code-compare text-violet-400"></i> Pre/Post-Fix Сравнение (Walk-Forward)
+                </h2>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <select id="prepost-asset" onchange="loadPrepost()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5">
+                        <option value="XAUUSD">XAUUSD</option>
+                        <option value="BTCUSD">BTCUSD</option>
+                        <option value="EURUSD">EURUSD</option>
+                        <option value="GBPUSD">GBPUSD</option>
+                        <option value="XAGUSD">XAGUSD</option>
+                    </select>
+                    <select id="prepost-session" onchange="loadPrepost()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5">
+                        <option value="all">Все сессии</option>
+                    </select>
+                    <select id="prepost-direction" onchange="loadPrepost()" class="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded-lg px-2 py-1.5">
+                        <option value="all">Все направления</option>
+                        <option value="long">Long</option>
+                        <option value="short">Short</option>
+                    </select>
+                    <button onclick="exportPrepostCSV()" class="text-xs text-violet-300 hover:text-violet-100 border border-violet-700 rounded-lg px-2 py-1.5 transition flex items-center gap-1" title="Скачать CSV со всеми активами">
+                        <i class="fas fa-download"></i> CSV
+                    </button>
+                </div>
+            </div>
+            <div id="prepost-content" class="text-sm text-slate-400">Загрузка...</div>
+        </div>
+
         <!-- Real-Time Signal Matrix -->
         <div class="glass-card p-6">
             <div class="flex justify-between items-center mb-4">
@@ -529,11 +559,115 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             set("m-period-label", m.period_label ? ("Период: " + m.period_label) : "");
         }
 
+        // Pre/Post-Fix comparison panel
+        async function loadPrepost() {
+            const asset = (document.getElementById("prepost-asset") || {value:"XAUUSD"}).value;
+            const session = (document.getElementById("prepost-session") || {value:"all"}).value;
+            const direction = (document.getElementById("prepost-direction") || {value:"all"}).value;
+            const params = new URLSearchParams({asset, session, direction});
+            const data = await fetchJSON("/api/prepost?" + params.toString());
+            const el = document.getElementById("prepost-content");
+            if (!data || !data.available) {
+                el.innerHTML = '<div class="text-amber-400">Данные pre/post-fix недоступны</div>';
+                return;
+            }
+            // Update session dropdown if new sessions found
+            const sessEl = document.getElementById("prepost-session");
+            const curSess = sessEl.value;
+            const sessions = data.sessions || [];
+            const opts = ['<option value="all">Все сессии</option>']
+                .concat(sessions.map(s => `<option value="${s}"${s===curSess?" selected":"">${s}</option>`));
+            sessEl.innerHTML = opts.join("");
+
+            const m = (v, fmt) => v == null ? "—" : (fmt ? fmt(v) : v);
+            const money = v => "$" + Number(v||0).toLocaleString('en-US', {minimumFractionDigits:2});
+            const rCol = v => v > 0 ? "text-emerald-400" : (v < 0 ? "text-rose-400" : "text-slate-400");
+            const deltaCol = v => v > 0 ? "text-emerald-400" : (v < 0 ? "text-rose-400" : "text-slate-400");
+
+            const ciStr = (ci) => {
+                if (!ci || ci[0] == null || ci[1] == null) return "—";
+                const fmt = v => (v>0?"+":"") + v.toFixed(2);
+                return `${fmt(ci[0])} … ${fmt(ci[1])}`;
+            };
+            const render = (label, d) => `
+                <div class="text-xs font-bold text-slate-300 uppercase mb-1">${label}</div>
+                <div class="grid grid-cols-3 sm:grid-cols-4 gap-3 mb-3">
+                    <div><span class="text-slate-500">N:</span> <span class="text-slate-200 font-mono">${m(d.n)}</span></div>
+                    <div><span class="text-slate-500">WR:</span> <span class="text-slate-200 font-mono">${m(d.wr_pct, v=>v+"%")}</span></div>
+                    <div><span class="text-slate-500">PF:</span> <span class="text-slate-200 font-mono">${m(d.pf)}</span></div>
+                    <div><span class="text-slate-500">Sum R:</span> <span class="font-mono ${rCol(d.sum_r)}">${m(d.sum_r, v=>v>0?"+"+v:String(v))}</span></div>
+                    <div class="col-span-2 sm:col-span-3"><span class="text-slate-500">Sum R 95% CI:</span> <span class="font-mono text-xs ${rCol((d.sum_r_ci||[])[0])}">${ciStr(d.sum_r_ci)}</span></div>
+                    <div><span class="text-slate-500">Mean R:</span> <span class="font-mono ${rCol(d.mean_r)}">${m(d.mean_r, v=>v>0?"+"+v:String(v))}</span></div>
+                    <div><span class="text-slate-500">PnL:</span> <span class="font-mono ${rCol(d.sum_pnl)}">${money(d.sum_pnl)}</span></div>
+                    <div><span class="text-slate-500">L/S:</span> <span class="text-slate-200 font-mono">${d.long_n}/${d.short_n}</span></div>
+                </div>`;
+
+            const d = data.delta || {};
+            el.innerHTML = `
+                <div class="mb-2 text-xs text-slate-500">TF: ${data.tf || 'default'} | Filters: session=${session}, direction=${direction}</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="p-3 bg-slate-800/40 rounded-lg border border-slate-700/50">
+                        ${render("PRE-fix (old timestamps)", data.pre)}
+                    </div>
+                    <div class="p-3 bg-slate-800/40 rounded-lg border border-slate-700/50">
+                        ${render("POST-fix (true UTC)", data.post)}
+                    </div>
+                    <div class="p-3 bg-slate-800/40 rounded-lg border border-slate-700/50">
+                        <div class="text-xs font-bold text-slate-300 uppercase mb-1">Delta (post − pre)</div>
+                        <div class="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                            <div><span class="text-slate-500">N:</span> <span class="font-mono ${deltaCol(d.n)}">${d.n > 0 ? "+" : ""}${d.n ?? "—"}</span></div>
+                            <div><span class="text-slate-500">WR:</span> <span class="font-mono ${deltaCol(d.wr_pct)}">${d.wr_pct != null ? (d.wr_pct > 0 ? "+" : "") + d.wr_pct + "%" : "—"}</span></div>
+                            <div><span class="text-slate-500">PF:</span> <span class="font-mono ${deltaCol(d.pf)}">${d.pf != null ? (d.pf > 0 ? "+" : "") + d.pf : "—"}</span></div>
+                            <div><span class="text-slate-500">Sum R:</span> <span class="font-mono ${deltaCol(d.sum_r)}">${d.sum_r != null ? (d.sum_r > 0 ? "+" : "") + d.sum_r : "—"}</span></div>
+                            <div><span class="text-slate-500">PnL:</span> <span class="font-mono ${deltaCol(d.sum_pnl)}">${money(d.sum_pnl)}</span></div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        // CSV export for all assets
+        let _prepostCache = {};
+        async function exportPrepostCSV() {
+            const assets = ["XAUUSD", "BTCUSD", "EURUSD", "GBPUSD", "XAGUSD"];
+            const session = (document.getElementById("prepost-session") || {value:"all"}).value;
+            const direction = (document.getElementById("prepost-direction") || {value:"all"}).value;
+            const header = ["asset","leg","n","wr_pct","pf","sum_r","sum_r_ci_low","sum_r_ci_high","mean_r","sum_pnl","long_n","short_n"];
+            const rows = [header.join(",")];
+            for (const a of assets) {
+                const params = new URLSearchParams({asset: a, session, direction});
+                const d = await fetchJSON("/api/prepost?" + params.toString());
+                if (!d || !d.available) continue;
+                for (const leg of ["pre", "post"]) {
+                    const m = d[leg] || {};
+                    const ci = m.sum_r_ci || [null, null];
+                    rows.push([
+                        a, leg,
+                        m.n ?? "", m.wr_pct ?? "", m.pf ?? "",
+                        m.sum_r ?? "", ci[0] ?? "", ci[1] ?? "",
+                        m.mean_r ?? "", m.sum_pnl ?? "",
+                        m.long_n ?? "", m.short_n ?? ""
+                    ].join(","));
+                }
+            }
+            const blob = new Blob([rows.join("\n")], {type: "text/csv;charset=utf-8;"});
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            const ts = new Date().toISOString().slice(0,16).replace(/[:-]/g,"");
+            link.download = `prepost_fix_comparison_${ts}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
         // Initialize chart and polling
         loadChart("XAUUSD");
         refreshData();
         loadMetrics();
+        loadPrepost();
         setInterval(refreshData, 5000);
+        setInterval(loadPrepost, 60000);
     </script>
 </body>
 </html>

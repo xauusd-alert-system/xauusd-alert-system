@@ -25,6 +25,7 @@ from config.loader import load_config, get_env, get_signal_grid
 from config.deployment import deployment_mode
 from realtime.pipeline import RealtimePipeline
 from realtime.dashboard import DASHBOARD_HTML
+from realtime.prepost_metrics import collect_prepost, collect_prepost_filtered
 from backtest.monte_carlo import MonteCarloSimulator
 from alerts.chart_renderer import ChartRenderer
 from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
@@ -679,6 +680,38 @@ def get_asset_chart(asset: str = "XAUUSD"):
                  "X-Data-Mode": "live-verified",
                  "X-As-Of-UTC": datetime.now(timezone.utc).isoformat()},
     )
+
+
+@app.get("/api/prepost")
+def get_prepost(
+    asset: str = "XAUUSD",
+    session: str | None = None,
+    direction: str | None = None,
+):
+    """Pre/post-fix walk-forward comparison with session/direction filters.
+
+    Query params:
+      asset     — asset key (XAUUSD, BTCUSD, EURUSD, GBPUSD, XAGUSD)
+      session   — filter by session (london, newyork, asia, weekend, off_session) or 'all'
+      direction — filter by direction (long, short) or 'all'
+    """
+    try:
+        # If a specific asset is requested, return filtered view
+        if asset and asset.upper() != "ALL":
+            result = collect_prepost_filtered(
+                asset.upper(),
+                session=session if session and session != "all" else None,
+                direction=direction if direction and direction != "all" else None,
+            )
+            result["as_of_utc"] = datetime.now(timezone.utc).isoformat()
+            return result
+        # No specific asset: return overview for all assets
+        overview = collect_prepost()
+        overview["as_of_utc"] = datetime.now(timezone.utc).isoformat()
+        return overview
+    except Exception as exc:
+        return {"available": False, "error": str(exc),
+                "as_of_utc": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/institutional-metrics")
