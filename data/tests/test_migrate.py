@@ -148,13 +148,19 @@ def test_migration_records_timestamp(tmp_path):
 
 
 def test_migration_001_noop_on_initialized_db(tmp_path):
-    """Migration 001 passes on a fully initialized store (no-op verification)."""
+    """Migration 001 passes on a fully initialized store (no-op verification).
+
+    Migration 002 (feature_store) also applies on such a database — it creates
+    its own table and does not depend on the store initializers.
+    """
     from data.trade_group_store import init_trade_group_store
 
     db_path = str(tmp_path / "stores.sqlite")
     init_trade_group_store(db_path)
     applied = apply_migrations(db_path)
-    assert [m.version for m in applied] == [1]
+    assert [m.version for m in applied] == [1, 2]
+    assert applied[0].name == "initial"
+    assert applied[1].name == "feature_store"
 
 
 def test_migration_001_rejects_partial_table_family(tmp_path):
