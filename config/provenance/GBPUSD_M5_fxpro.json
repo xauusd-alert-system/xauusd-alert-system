@@ -1,0 +1,227 @@
+{
+  "asset_key": "GBPUSD",
+  "broker": "FxPro",
+  "broker_symbol": "GBPUSD",
+  "candle_count": 501943,
+  "canonical_symbol": "GBPUSD",
+  "data_hash": "04ca6233e2b5149113302f639e66fd93652c2513c289ea6bda792abf2dbbfa42",
+  "db_file_sha256": "c49b3ffaa2e2c36daa2c703e803e48b3a6432884e122845e178e3aa3381882cc",
+  "export_time_utc": "2026-08-25T19:10:26.776412+00:00",
+  "extra": {
+    "broker_symbol_input": "GBPUSD",
+    "command": "python scripts/rebuild_provenance_manifests.py",
+    "note": "Regenerated after true-UTC DB rebuild (server_time_offset_hours=3.0)"
+  },
+  "gap_audit": {
+    "coverage": 0.967246,
+    "gap_count": 17,
+    "gaps": [
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1577307300,
+        "missing_bars": 324,
+        "spans_weekend": false,
+        "start_ts_utc": 1577210400
+      },
+      {
+        "duration_minutes": 355,
+        "end_ts_utc": 1577328900,
+        "missing_bars": 71,
+        "spans_weekend": false,
+        "start_ts_utc": 1577307900
+      },
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1577912100,
+        "missing_bars": 324,
+        "spans_weekend": false,
+        "start_ts_utc": 1577815200
+      },
+      {
+        "duration_minutes": 355,
+        "end_ts_utc": 1577933700,
+        "missing_bars": 71,
+        "spans_weekend": false,
+        "start_ts_utc": 1577912700
+      },
+      {
+        "duration_minutes": 120,
+        "end_ts_utc": 1611244200,
+        "missing_bars": 24,
+        "spans_weekend": false,
+        "start_ts_utc": 1611237300
+      },
+      {
+        "duration_minutes": 10,
+        "end_ts_utc": 1640362800,
+        "missing_bars": 2,
+        "spans_weekend": false,
+        "start_ts_utc": 1640362500
+      },
+      {
+        "duration_minutes": 25,
+        "end_ts_utc": 1651617600,
+        "missing_bars": 5,
+        "spans_weekend": false,
+        "start_ts_utc": 1651616400
+      },
+      {
+        "duration_minutes": 5,
+        "end_ts_utc": 1653600900,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1653600900
+      },
+      {
+        "duration_minutes": 5,
+        "end_ts_utc": 1685607600,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1685607600
+      },
+      {
+        "duration_minutes": 5,
+        "end_ts_utc": 1693386300,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1693386300
+      },
+      {
+        "duration_minutes": 10,
+        "end_ts_utc": 1725859200,
+        "missing_bars": 2,
+        "spans_weekend": false,
+        "start_ts_utc": 1725858900
+      },
+      {
+        "duration_minutes": 2100,
+        "end_ts_utc": 1735188900,
+        "missing_bars": 420,
+        "spans_weekend": false,
+        "start_ts_utc": 1735063200
+      },
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1735764900,
+        "missing_bars": 324,
+        "spans_weekend": false,
+        "start_ts_utc": 1735668000
+      },
+      {
+        "duration_minutes": 5,
+        "end_ts_utc": 1753823400,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1753823400
+      },
+      {
+        "duration_minutes": 5,
+        "end_ts_utc": 1755161100,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1755161100
+      },
+      {
+        "duration_minutes": 2100,
+        "end_ts_utc": 1766724900,
+        "missing_bars": 420,
+        "spans_weekend": false,
+        "start_ts_utc": 1766599200
+      },
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1767300900,
+        "missing_bars": 324,
+        "spans_weekend": false,
+        "start_ts_utc": 1767204000
+      }
+    ],
+    "missing_bars": 16572,
+    "per_session": {
+      "asia": {
+        "coverage": 0.992731,
+        "missing_bars": 1226,
+        "present_bars": 167446
+      },
+      "london": {
+        "coverage": 0.99428,
+        "missing_bars": 603,
+        "present_bars": 104817
+      },
+      "newyork": {
+        "coverage": 0.968364,
+        "missing_bars": 6002,
+        "present_bars": 183716
+      },
+      "off_session": {
+        "coverage": 0.792592,
+        "missing_bars": 8741,
+        "present_bars": 33403
+      }
+    },
+    "per_year": {
+      "2019": {
+        "coverage": 0.903567,
+        "expected_bars": 6336,
+        "missing_bars": 611,
+        "present_bars": 5725
+      },
+      "2020": {
+        "coverage": 0.965026,
+        "expected_bars": 75456,
+        "missing_bars": 2639,
+        "present_bars": 72817
+      },
+      "2021": {
+        "coverage": 0.969482,
+        "expected_bars": 75168,
+        "missing_bars": 2294,
+        "present_bars": 72874
+      },
+      "2022": {
+        "coverage": 0.973958,
+        "expected_bars": 74880,
+        "missing_bars": 1950,
+        "present_bars": 72930
+      },
+      "2023": {
+        "coverage": 0.970166,
+        "expected_bars": 74880,
+        "missing_bars": 2234,
+        "present_bars": 72646
+      },
+      "2024": {
+        "coverage": 0.964668,
+        "expected_bars": 75456,
+        "missing_bars": 2666,
+        "present_bars": 72790
+      },
+      "2025": {
+        "coverage": 0.964533,
+        "expected_bars": 75168,
+        "missing_bars": 2666,
+        "present_bars": 72502
+      },
+      "2026": {
+        "coverage": 0.968895,
+        "expected_bars": 48610,
+        "missing_bars": 1512,
+        "present_bars": 47098
+      }
+    },
+    "present_bars": 489382,
+    "weekend_gaps": 354
+  },
+  "interval_seconds": 300,
+  "manifest_hash": "3ecb9bd1a01c932a62903e94edda42dcbb7b2eabf079a96f21a289dd0527074a",
+  "schema_version": 1,
+  "server_time_offset_hours": 3.0,
+  "source_window_utc": {
+    "end_ts": 1787683500,
+    "start_ts": 1575234000
+  },
+  "terminal_build": null,
+  "terminal_company_hash": null,
+  "terminal_data_path_hash": null,
+  "timeframe": "M5"
+}

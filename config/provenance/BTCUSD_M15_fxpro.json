@@ -1,0 +1,98 @@
+{
+  "asset_key": "BTCUSD",
+  "broker": "FxPro",
+  "broker_symbol": "BITCOIN",
+  "candle_count": 95607,
+  "canonical_symbol": "BTCUSD",
+  "data_hash": "f48e9590a71e5d9154595c4e72c3693f1a8a4a2914567801a70cdacb031ad191",
+  "db_file_sha256": "c49b3ffaa2e2c36daa2c703e803e48b3a6432884e122845e178e3aa3381882cc",
+  "export_time_utc": "2026-08-25T18:55:50.961992+00:00",
+  "extra": {
+    "broker_symbol_input": "BITCOIN",
+    "command": "python scripts/rebuild_provenance_manifests.py",
+    "note": "Regenerated after true-UTC DB rebuild (server_time_offset_hours=3.0)"
+  },
+  "gap_audit": {
+    "coverage": 0.998962,
+    "gap_count": 2,
+    "gaps": [
+      {
+        "duration_minutes": 690,
+        "end_ts_utc": 1767255300,
+        "missing_bars": 46,
+        "spans_weekend": false,
+        "start_ts_utc": 1767214800
+      },
+      {
+        "duration_minutes": 15,
+        "end_ts_utc": 1786138200,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1786138200
+      }
+    ],
+    "missing_bars": 71,
+    "per_session": {
+      "asia": {
+        "coverage": 0.998597,
+        "missing_bars": 32,
+        "present_bars": 22784
+      },
+      "london": {
+        "coverage": 0.99986,
+        "missing_bars": 2,
+        "present_bars": 14258
+      },
+      "newyork": {
+        "coverage": 0.999493,
+        "missing_bars": 13,
+        "present_bars": 25642
+      },
+      "off_session": {
+        "coverage": 0.995787,
+        "missing_bars": 24,
+        "present_bars": 5672
+      }
+    },
+    "per_year": {
+      "2023": {
+        "coverage": 1.0,
+        "expected_bars": 2016,
+        "missing_bars": 0,
+        "present_bars": 2016
+      },
+      "2024": {
+        "coverage": 0.999602,
+        "expected_bars": 25152,
+        "missing_bars": 10,
+        "present_bars": 25142
+      },
+      "2025": {
+        "coverage": 0.998962,
+        "expected_bars": 25056,
+        "missing_bars": 26,
+        "present_bars": 25030
+      },
+      "2026": {
+        "coverage": 0.99784,
+        "expected_bars": 16203,
+        "missing_bars": 35,
+        "present_bars": 16168
+      }
+    },
+    "present_bars": 68356,
+    "weekend_gaps": 2
+  },
+  "interval_seconds": 900,
+  "manifest_hash": "980f707d0fe499fe399a9bd2144c373643f63f0e002abedf4f51a1155438a41c",
+  "schema_version": 1,
+  "server_time_offset_hours": 3.0,
+  "source_window_utc": {
+    "end_ts": 1787682600,
+    "start_ts": 1701388800
+  },
+  "terminal_build": null,
+  "terminal_company_hash": null,
+  "terminal_data_path_hash": null,
+  "timeframe": "M15"
+}

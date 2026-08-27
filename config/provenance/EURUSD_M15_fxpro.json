@@ -1,0 +1,112 @@
+{
+  "asset_key": "EURUSD",
+  "broker": "FxPro",
+  "broker_symbol": "EURUSD",
+  "candle_count": 67671,
+  "canonical_symbol": "EURUSD",
+  "data_hash": "1549eeb8efd8574242174a7541eec880138c8aed191d9f908c5c082e94159dbe",
+  "db_file_sha256": "c49b3ffaa2e2c36daa2c703e803e48b3a6432884e122845e178e3aa3381882cc",
+  "export_time_utc": "2026-08-25T18:56:02.341321+00:00",
+  "extra": {
+    "broker_symbol_input": "EURUSD",
+    "command": "python scripts/rebuild_provenance_manifests.py",
+    "note": "Regenerated after true-UTC DB rebuild (server_time_offset_hours=3.0)"
+  },
+  "gap_audit": {
+    "coverage": 0.964225,
+    "gap_count": 4,
+    "gaps": [
+      {
+        "duration_minutes": 2100,
+        "end_ts_utc": 1735188300,
+        "missing_bars": 140,
+        "spans_weekend": false,
+        "start_ts_utc": 1735063200
+      },
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1735764300,
+        "missing_bars": 108,
+        "spans_weekend": false,
+        "start_ts_utc": 1735668000
+      },
+      {
+        "duration_minutes": 2100,
+        "end_ts_utc": 1766724300,
+        "missing_bars": 140,
+        "spans_weekend": false,
+        "start_ts_utc": 1766599200
+      },
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1767300300,
+        "missing_bars": 108,
+        "spans_weekend": false,
+        "start_ts_utc": 1767204000
+      }
+    ],
+    "missing_bars": 2448,
+    "per_session": {
+      "asia": {
+        "coverage": 0.989306,
+        "missing_bars": 244,
+        "present_bars": 22572
+      },
+      "london": {
+        "coverage": 0.991585,
+        "missing_bars": 120,
+        "present_bars": 14140
+      },
+      "newyork": {
+        "coverage": 0.965543,
+        "missing_bars": 884,
+        "present_bars": 24771
+      },
+      "off_session": {
+        "coverage": 0.789326,
+        "missing_bars": 1200,
+        "present_bars": 4496
+      }
+    },
+    "per_year": {
+      "2023": {
+        "coverage": 0.916667,
+        "expected_bars": 2016,
+        "missing_bars": 168,
+        "present_bars": 1848
+      },
+      "2024": {
+        "coverage": 0.964695,
+        "expected_bars": 25152,
+        "missing_bars": 888,
+        "present_bars": 24264
+      },
+      "2025": {
+        "coverage": 0.964559,
+        "expected_bars": 25056,
+        "missing_bars": 888,
+        "present_bars": 24168
+      },
+      "2026": {
+        "coverage": 0.968895,
+        "expected_bars": 16203,
+        "missing_bars": 504,
+        "present_bars": 15699
+      }
+    },
+    "present_bars": 65979,
+    "weekend_gaps": 145
+  },
+  "interval_seconds": 900,
+  "manifest_hash": "f01ebf4473819ab40b4770e14c8e180d81aaeb613c7df2d1117a8e5420c668bf",
+  "schema_version": 1,
+  "server_time_offset_hours": 3.0,
+  "source_window_utc": {
+    "end_ts": 1787682600,
+    "start_ts": 1701388800
+  },
+  "terminal_build": null,
+  "terminal_company_hash": null,
+  "terminal_data_path_hash": null,
+  "timeframe": "M15"
+}

@@ -1,0 +1,1507 @@
+{
+  "asset_key": "XAUUSD",
+  "broker": "FxPro",
+  "broker_symbol": "GOLD",
+  "candle_count": 477294,
+  "canonical_symbol": "XAUUSD",
+  "data_hash": "9a1c8f08389ca213a04bf618f6de2065a0f20bbd16e0bc2eca129cb11e831576",
+  "db_file_sha256": "c49b3ffaa2e2c36daa2c703e803e48b3a6432884e122845e178e3aa3381882cc",
+  "export_time_utc": "2026-08-25T19:00:28.676605+00:00",
+  "extra": {
+    "broker_symbol_input": "GOLD",
+    "command": "python -m scripts.build_provenance_manifest --asset XAUUSD --timeframe M5 --broker FxPro --broker-symbol GOLD --out config/provenance/XAUUSD_M5_fxpro.json"
+  },
+  "gap_audit": {
+    "coverage": 0.926001,
+    "gap_count": 1414,
+    "gaps": [
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1575323700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1575320700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1575410100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1575407100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1575496500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1575493500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1575582900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1575579900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1575928500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1575925500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576014900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576011900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576101300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576098300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576187700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576184700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576533300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576530300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576619700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576616700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576706100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576703100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1576792500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1576789500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1577138100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1577135100
+      },
+      {
+        "duration_minutes": 1635,
+        "end_ts_utc": 1577307300,
+        "missing_bars": 327,
+        "spans_weekend": false,
+        "start_ts_utc": 1577209500
+      },
+      {
+        "duration_minutes": 355,
+        "end_ts_utc": 1577328900,
+        "missing_bars": 71,
+        "spans_weekend": false,
+        "start_ts_utc": 1577307900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1577397300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1577394300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1577742900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1577739900
+      },
+      {
+        "duration_minutes": 1620,
+        "end_ts_utc": 1577912100,
+        "missing_bars": 324,
+        "spans_weekend": false,
+        "start_ts_utc": 1577815200
+      },
+      {
+        "duration_minutes": 355,
+        "end_ts_utc": 1577933700,
+        "missing_bars": 71,
+        "spans_weekend": false,
+        "start_ts_utc": 1577912700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1578002100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1577999100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1578347700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1578344700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1578434100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1578431100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1578520500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1578517500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1578606900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1578603900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1578952500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1578949500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579038900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579035900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579125300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579122300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579211700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579208700
+      },
+      {
+        "duration_minutes": 240,
+        "end_ts_utc": 1579553700,
+        "missing_bars": 48,
+        "spans_weekend": false,
+        "start_ts_utc": 1579539600
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579557300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579554300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579643700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579640700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579730100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579727100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1579816500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1579813500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580162100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580159100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580248500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580245500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580334900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580331900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580421300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580418300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580766900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580763900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580853300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580850300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1580939700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1580936700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1581026100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1581023100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1581371700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1581368700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1581458100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1581455100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1581544500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1581541500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1581630900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1581627900
+      },
+      {
+        "duration_minutes": 255,
+        "end_ts_utc": 1581972900,
+        "missing_bars": 51,
+        "spans_weekend": false,
+        "start_ts_utc": 1581957900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1581976500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1581973500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582062900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582059900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582149300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582146300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582235700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582232700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582581300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582578300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582667700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582664700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582754100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582751100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1582840500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1582837500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1583186100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1583183100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1583272500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1583269500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1583358900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1583355900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1583445300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1583442300
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1583787300,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1583784000
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1583873700,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1583870400
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1583960100,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1583956800
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1584046500,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1584043200
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1584392100,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1584388800
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1584478500,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1584475200
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1584564900,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1584561600
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1584651300,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1584648000
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1584996900,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1584993600
+      },
+      {
+        "duration_minutes": 5,
+        "end_ts_utc": 1585023000,
+        "missing_bars": 1,
+        "spans_weekend": false,
+        "start_ts_utc": 1585023000
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1585083300,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1585080000
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1585169700,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1585166400
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1585256100,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1585252800
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1585605300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1585602300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1585691700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1585688700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1585778100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1585775100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1585864500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1585861500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1586210100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1586207100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1586296500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1586293500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1586382900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1586379900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1586814900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1586811900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1586901300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1586898300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1586987700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1586984700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1587074100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1587071100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1587419700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1587416700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1587506100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1587503100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1587592500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1587589500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1587678900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1587675900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588024500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588021500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588110900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588107900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588197300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588194300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588283700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588280700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588629300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588626300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588715700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588712700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588802100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588799100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1588888500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1588885500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1589234100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1589231100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1589320500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1589317500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1589406900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1589403900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1589493300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1589490300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1589838900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1589835900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1589925300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1589922300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1590011700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1590008700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1590098100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1590095100
+      },
+      {
+        "duration_minutes": 240,
+        "end_ts_utc": 1590440100,
+        "missing_bars": 48,
+        "spans_weekend": false,
+        "start_ts_utc": 1590426000
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1590443700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1590440700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1590530100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1590527100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1590616500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1590613500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1590702900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1590699900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591048500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591045500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591134900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591131900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591221300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591218300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591307700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591304700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591653300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591650300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591739700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591736700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591826100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591823100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1591912500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1591909500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1592258100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1592255100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1592344500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1592341500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1592430900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1592427900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1592517300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1592514300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1592862900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1592859900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1592949300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1592946300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1593035700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1593032700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1593122100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1593119100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1593467700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1593464700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1593554100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1593551100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1593640500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1593637500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1593726900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1593723900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594072500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594069500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594158900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594155900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594245300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594242300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594331700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594328700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594677300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594674300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594763700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594760700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594850100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594847100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1594936500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1594933500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1595282100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1595279100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1595368500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1595365500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1595454900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1595451900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1595541300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1595538300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1595886900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1595883900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1595973300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1595970300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1596059700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1596056700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1596146100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1596143100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1596491700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1596488700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1596578100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1596575100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1596664500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1596661500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1596750900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1596747900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597096500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597093500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597182900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597179900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597269300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597266300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597355700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597352700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597701300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597698300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597787700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597784700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597874100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597871100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1597960500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1597957500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1598306100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1598303100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1598392500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1598389500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1598478900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1598475900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1598565300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1598562300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1598910900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1598907900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1598997300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1598994300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1599083700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1599080700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1599170100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1599167100
+      },
+      {
+        "duration_minutes": 240,
+        "end_ts_utc": 1599512100,
+        "missing_bars": 48,
+        "spans_weekend": false,
+        "start_ts_utc": 1599498000
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1599515700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1599512700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1599602100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1599599100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1599688500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1599685500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1599774900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1599771900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600120500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600117500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600206900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600203900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600293300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600290300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600379700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600376700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600725300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600722300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600811700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600808700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600898100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600895100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1600984500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1600981500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1601330100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1601327100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1601416500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1601413500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1601502900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1601499900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1601589300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1601586300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1601934900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1601931900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602021300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602018300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602107700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602104700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602194100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602191100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602539700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602536700
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602626100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602623100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602712500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602709500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1602798900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1602795900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1603144500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1603141500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1603230900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1603227900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1603317300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1603314300
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1603403700,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1603400700
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1603745700,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1603742400
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1603832100,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1603828800
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1603918500,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1603915200
+      },
+      {
+        "duration_minutes": 60,
+        "end_ts_utc": 1604004900,
+        "missing_bars": 12,
+        "spans_weekend": false,
+        "start_ts_utc": 1604001600
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1604354100,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1604351100
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1604440500,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1604437500
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1604526900,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1604523900
+      },
+      {
+        "duration_minutes": 55,
+        "end_ts_utc": 1604613300,
+        "missing_bars": 11,
+        "spans_weekend": false,
+        "start_ts_utc": 1604610300
+      }
+    ],
+    "missing_bars": 37440,
+    "per_session": {
+      "asia": {
+        "coverage": 0.987141,
+        "missing_bars": 2169,
+        "present_bars": 166503
+      },
+      "london": {
+        "coverage": 0.988589,
+        "missing_bars": 1203,
+        "present_bars": 104217
+      },
+      "newyork": {
+        "coverage": 0.867535,
+        "missing_bars": 25131,
+        "present_bars": 164587
+      },
+      "off_session": {
+        "coverage": 0.787941,
+        "missing_bars": 8937,
+        "present_bars": 33207
+      }
+    },
+    "per_year": {
+      "2019": {
+        "coverage": 0.877052,
+        "expected_bars": 6336,
+        "missing_bars": 779,
+        "present_bars": 5557
+      },
+      "2020": {
+        "coverage": 0.926474,
+        "expected_bars": 75456,
+        "missing_bars": 5548,
+        "present_bars": 69908
+      },
+      "2021": {
+        "coverage": 0.927549,
+        "expected_bars": 75168,
+        "missing_bars": 5446,
+        "present_bars": 69722
+      },
+      "2022": {
+        "coverage": 0.931838,
+        "expected_bars": 74880,
+        "missing_bars": 5104,
+        "present_bars": 69776
+      },
+      "2023": {
+        "coverage": 0.925748,
+        "expected_bars": 74880,
+        "missing_bars": 5560,
+        "present_bars": 69320
+      },
+      "2024": {
+        "coverage": 0.924473,
+        "expected_bars": 75456,
+        "missing_bars": 5699,
+        "present_bars": 69757
+      },
+      "2025": {
+        "coverage": 0.92409,
+        "expected_bars": 75168,
+        "missing_bars": 5706,
+        "present_bars": 69462
+      },
+      "2026": {
+        "coverage": 0.925982,
+        "expected_bars": 48610,
+        "missing_bars": 3598,
+        "present_bars": 45012
+      }
+    },
+    "present_bars": 468514,
+    "weekend_gaps": 355
+  },
+  "interval_seconds": 300,
+  "manifest_hash": "00940faf8e48ee535a195a43fd81d08964d4ebeaa821c530a278e04e995f14e2",
+  "schema_version": 1,
+  "server_time_offset_hours": 3.0,
+  "source_window_utc": {
+    "end_ts": 1787683500,
+    "start_ts": 1575234000
+  },
+  "terminal_build": null,
+  "terminal_company_hash": null,
+  "terminal_data_path_hash": null,
+  "timeframe": "M5"
+}
