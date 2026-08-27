@@ -65,6 +65,44 @@ def get_env(key: str, default=None, required: bool = False):
     return val
 
 
+# Global fallback timeframe when neither an explicit override, a per-asset
+# `assets.<key>.timeframe`, nor `market_data.timeframe` is present. This is the
+# single constant behind resolve_asset_timeframe() — scripts must not each keep
+# their own divergent fallback ("M15" vs "M5" drift bug this helper fixes).
+DEFAULT_TIMEFRAME = "M5"
+
+
+def resolve_asset_timeframe(cfg: dict | None, asset_key: str | None,
+                            override: str | None = None) -> str:
+    """Single source of truth for an asset's effective trading timeframe.
+
+    Priority chain (first non-empty wins):
+        1. explicit `override` argument (caller-provided, e.g. a CLI flag);
+        2. per-asset `assets.<asset_key>.timeframe`;
+        3. global `market_data.timeframe`;
+        4. DEFAULT_TIMEFRAME constant.
+
+    Strings pass through unvalidated and un-coerced (an override of "m5"
+    stays "m5"); only a *falsy* override ("" / None) is treated as "not
+    provided" and falls through to the config chain. A missing cfg, a
+    missing `market_data` section, an unknown asset key, or asset_key=None
+    are all tolerated and resolve through the remaining chain.
+    """
+    if override:
+        return override
+    cfg = cfg or {}
+    if asset_key:
+        asset_cfg = (cfg.get("assets") or {}).get(asset_key) or {}
+        per_asset = asset_cfg.get("timeframe")
+        if per_asset:
+            return per_asset
+    market_data = cfg.get("market_data") or {}
+    global_tf = market_data.get("timeframe")
+    if global_tf:
+        return global_tf
+    return DEFAULT_TIMEFRAME
+
+
 def resolve_signal_step(atr_value: float, grid: dict) -> float:
     """Resolve the causal grid step from signal-bar ATR and configured clamps."""
     atr_value = float(atr_value)
@@ -158,3 +196,54 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None, regime: str = None) -> di
                 if v is not None and k != "regime_overrides":
                     grid[k] = v
     return grid
+
+# --- books integration (TZ_BOOKS.md) -----------------------------------------
+
+BOOKS_DEFAULTS: dict = {
+    "trade_level": 0.60,
+    "samples": {
+        "asset": "XAUUSD",
+        "timeframe": "M5",
+        "window": 16,
+        "horizon": 12,
+        "normalization": "zscore",
+        "split": [0.6, 0.2, 0.2],
+        "target_mode": "return",
+        "multi_horizons": [6, 12],
+        "extended_features": False,
+    },
+    "day_filter": {"enabled": False, "min_trades": 30, "max_win_rate": 0.45},
+    "news_guard": {"buffer_before_min": 30, "buffer_after_min": 30,
+                   "currencies": ["USD"]},
+    "validation": {"min_profit_factor": 1.2, "min_win_rate": 0.55,
+                   "min_trades": 30, "forward_min_days": 365,
+                   "tick_mode": "real_ticks"},
+    "tester_criterion": {"dd_penalty_weight": 1.0, "pf_cap": 10.0,
+                         "min_trades": 1},
+    "bridge": {"table": "ml_signals", "schema_version": 1,
+               "ttl_seconds": 10800},
+    "drift": {"psi_warn": 0.10, "psi_alarm": 0.25, "scale_ratio_alarm": 1.5,
+              "mean_shift_alarm_sigmas": 1.0},
+}
+
+
+def books_config(cfg: dict | None) -> dict:
+    """Effective `books:` section with defaults (see TZ_BOOKS.md).
+
+    The config file only overrides the keys it declares; every omitted key
+    falls back to the library default so behaviour never depends on the
+    presence of the section. Returns a deep copy - callers may mutate.
+    """
+    import copy
+    section = (cfg or {}).get("books") or {}
+    if not isinstance(section, dict):
+        raise ValueError("config 'books:' section must be a mapping")
+    out = copy.deepcopy(BOOKS_DEFAULTS)
+    for key, value in section.items():
+        if key not in out:
+            raise KeyError(f"unknown books config key {key!r}")
+        if isinstance(out[key], dict) and isinstance(value, dict):
+            out[key].update(value)
+        else:
+            out[key] = value
+    return out

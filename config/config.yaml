@@ -937,3 +937,54 @@ challenge:
   browser:
     headless: false
     profile_dir: data/challenge_browser_profile
+
+# --- Books integration (TZ_BOOKS.md: neural-network + MQL5 book practices) ---
+# Parameters of the book-derived pipeline (model/book_nn, model/sample_generator,
+# execution/signal_bridge, mql5/NeuroTrader). Defaults mirror the library
+# defaults, so an omitted key never changes behaviour.
+books:
+  # T-02/T-19 sample generator (create_initial_data pattern, NN book pp. 222-229)
+  samples:
+    asset: XAUUSD
+    timeframe: M5
+    window: 16
+    horizon: 12
+    normalization: zscore          # train-only fit, params saved for live
+    split: [0.6, 0.2, 0.2]         # time-ordered, no shuffling
+    target_mode: return            # return | multi_horizon
+    multi_horizons: [6, 12]
+    extended_features: false       # T-19: atr_ratio/session_vol_ratio/volume_ratio
+  # T-10 signal threshold + day-of-week filter (NN book pp. 688-689)
+  trade_level: 0.60                # directional probability floor
+  day_filter:
+    enabled: false                 # activates only from OWN trade statistics
+    min_trades: 30                 # under-sampled days are never blocked
+    max_win_rate: 0.45             # weak win rate AND negative PnL required
+  # T-15 news blackout windows (live: economic calendar; backtest: SQLite table)
+  news_guard:
+    buffer_before_min: 30
+    buffer_after_min: 30
+    currencies: [USD]
+  # T-03 acceptance protocol (frozen model, real ticks, forward window)
+  validation:
+    min_profit_factor: 1.2
+    min_win_rate: 0.55
+    min_trades: 30
+    forward_min_days: 365
+    tick_mode: real_ticks
+  # T-08 optimizer criterion: PF*sqrt(trades) - w*DD% (PF capped)
+  tester_criterion:
+    dd_penalty_weight: 1.0
+    pf_cap: 10.0
+    min_trades: 1
+  # T-16 Python->EA signal bridge (SQLite in the terminal's MQL5\Files)
+  bridge:
+    table: ml_signals
+    schema_version: 1              # EA refuses mismatches (fail-closed)
+    ttl_seconds: 10800             # stale intents expire after 3h
+  # T-23 drift monitoring on the walk-forward loop
+  drift:
+    psi_warn: 0.10
+    psi_alarm: 0.25
+    scale_ratio_alarm: 1.5         # >50% normalization-scale shift
+    mean_shift_alarm_sigmas: 1.0

@@ -92,3 +92,7 @@ data/challenge_trades.csv
 *.db
 data/usstocks_export/
 data/book_bars/
+
+# NeuroBook vendored sources (TZ_BOOKS T-01): fetched+verified by
+# mql5/NeuroBook/fetch_neurobook.py against the committed manifest, never committed
+mql5/NeuroBook/vendor/

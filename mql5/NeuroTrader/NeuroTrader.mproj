@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- NeuroTrader MQL5 project (TZ_BOOKS task T-21; MQL5 book 7.8).
+
+     A .mproj turns the folder into a PROJECT in MetaEditor: shared
+                     includes are resolved inside the project tree, the
+     compiler produces one artifact per program, and the whole books-
+     integration EA can be built with a single F7. Open this file in
+                     MetaEditor (File -> Open) and compile.
+
+                     Programs:
+                       - NeuroTraderEA.mq5        the expert advisor
+                       - Indicators/EventTickSpy.mq5   spy indicator (T-13)
+                       - Scripts/BenchmarkOpenCL.mq5   GPU benchmark (T-18)
+                       - Scripts/CreateVolatilitySymbol.mq5  custom symbol (T-26)
+                     Shared library (Include section below) = the .mqh
+                     modules, each mapped to its TZ task number.
+-->
+<Project ProjectVersion="1.0" Platform="MQL5" Version="1.00" Name="NeuroTrader">
+  <Programs>
+    <Program Name="NeuroTraderEA" Type="Expert" Source="NeuroTraderEA.mq5" />
+    <Program Name="EventTickSpy" Type="Indicator" Source="Indicators\EventTickSpy.mq5" />
+    <Program Name="BenchmarkOpenCL" Type="Script" Source="Scripts\BenchmarkOpenCL.mq5" />
+    <Program Name="CreateVolatilitySymbol" Type="Script" Source="Scripts\CreateVolatilitySymbol.mq5" />
+  </Programs>
+  <Include>
+    <File Path="FeatureEngine.mqh" />
+    <File Path="OpenCLInference.mqh" />
+    <File Path="RiskSizer.mqh" />
+    <File Path="TradeExecutor.mqh" />
+    <File Path="AlertDispatcher.mqh" />
+    <File Path="PositionManager.mqh" />
+    <File Path="NewsGuard.mqh" />
+    <File Path="DayFilter.mqh" />
+    <File Path="SignalBridge.mqh" />
+    <File Path="SignalJournal.mqh" />
+    <File Path="TesterCriterion.mqh" />
+  </Include>
+  <Properties>
+    <Property Name="Optimization" Value="disabled" />
+    <Property Name="Debug" Value="true" />
+    <Property Name="Verbose" Value="false" />
+    <Property Name="TesterCache" Value="default" />
+  </Properties>
+  <Settings>
+    <!-- the shared library this project contributes to the terminal's
+                Include namespace is mounted as NeuroTrader\*.mqh -->
+    <Setting Name="IncludePathPrefix" Value="NeuroTrader" />
+  </Settings>
+</Project>
