@@ -41,10 +41,25 @@ def _utc_bounds(start_date: str, end_date: str) -> tuple[datetime, datetime]:
 
 
 def _session_label(timestamp: pd.Timestamp) -> str:
+    """Tag session from a UTC timestamp.
+
+    Saturday is always 'weekend' (FX market closed).
+    Sunday 00:00-20:59 UTC is 'weekend' (market still closed).
+    Sunday 21:00+ UTC is the start of the FX week — tag as the session
+    that hour falls in (typically 'newyork' at 21-22 UTC, then 'asia' at
+    00:00+ next day which is already Monday).  This matches the actual
+    market reopen and prevents phantom 'weekend' trades in walk-forward.
+    Weekdays use standard session windows.
+    """
     weekday = timestamp.weekday()
-    if weekday >= 5:
-        return "weekend"
     hour = timestamp.hour
+    # Saturday: always weekend
+    if weekday == 5:
+        return "weekend"
+    # Sunday: weekend before 21:00, real session after
+    if weekday == 6 and hour < 21:
+        return "weekend"
+    # Sunday 21:00+ and all weekdays: classify by hour
     if 0 <= hour < 8:
         return "asia"
     if 8 <= hour < 13:
@@ -137,8 +152,7 @@ def main() -> None:
     market_data = cfg.get("market_data", {})
     if market_data.get("provider") != "mt5":
         raise SystemExit("config/config.yaml must specify market_data.provider: mt5")
-
-    timeframe = args.timeframe or market_data.get("timeframe", "M15")
+    global_tf = args.timeframe or market_data.get("timeframe", "M5")
     assets = cfg.get("assets", {})
 
     if args.all:
@@ -157,10 +171,17 @@ def main() -> None:
     if not selected:
         raise SystemExit("No enabled assets selected.")
 
-    init_schema(args.db_path, [timeframe])
+    # Resolve per-asset timeframe: asset override -> global -> M5 fallback.
+    # Without this, --all would backfill EURUSD (H1) with M5 candles.
+    def _resolve_tf(asset_cfg: dict) -> str:
+        return asset_cfg.get("timeframe") or global_tf
+
+    tfs_needed = sorted({_resolve_tf(ac) for ac in selected.values()})
+    init_schema(args.db_path, tfs_needed)
 
     try:
         for asset_key, asset_cfg in selected.items():
+            timeframe = _resolve_tf(asset_cfg)
             mt5_symbol = asset_cfg["mt5_symbol"]
 
             logger.info(
