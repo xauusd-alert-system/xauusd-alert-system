@@ -2,6 +2,13 @@
 Phase 7: Neural Network and Hybrid Ensemble Trainer.
 Provides multi-layer perceptron (MLP) classification with purged time-ordered
 calibration and hybrid blending with tree-based models.
+
+Status: @experimental (P2-36, TZ Часть 7 п.7.1).
+NOT called from train_all_assets / run_backtest production pipelines —
+kept as a research prototype with its own unit tests
+(model/tests/test_neural_trainer.py). Do NOT wire into production without
+a dedicated economic A/B and deploy_guard integration. Removal/reintegration
+decision tracked in docs/TODO.md.
 """
 from __future__ import annotations
 import logging

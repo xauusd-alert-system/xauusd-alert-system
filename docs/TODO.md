@@ -32,6 +32,17 @@
 | **LOB Simulation & MT5 Shim** (`simulation/`) | Synthetic matching/shim test environment, не источник подтверждённого alpha | `test_virtual_mt5_shim` | `IMPLEMENTED FOR TESTING` |
 | **Deploy Guard & Overnight Pipeline** (`scripts/`) | Backup/retrain/OOS guard/rollback orchestration | `test_deploy_guard`, `test_retrain_real_trades`, `test_scheduler` | `IMPLEMENTED; live verification environment-dependent` |
 
+### 1.1. Статусы неиспользуемых модулей (TZ Часть 7 п.7.1; P2-48 / P2-36 / P2-11 — аудит 2026-08-27)
+
+| Модуль | Статус | Решение и grep-доказательства |
+|---|---|---|
+| `data/sentiment_analyzer.py` (P2-48) | `ACTIVE-OPT-IN` | **Оставлен.** Не удалять: `model/ensemble.py:318` — динамический импорт `from data.sentiment_analyzer import MacroNewsSentimentAnalyzer` внутри ветки `use_sentiment_guard` (config.yaml:68 `use_sentiment_guard: false` — OPT-IN); `realtime/app.py:46,692` — прямой импорт для scoring новостей дашборда; `model/tests/test_ensemble.py:197`, `data/tests/test_sentiment_analyzer.py` — тесты. Удаляемый по ТЗ кандидат оказался живым через динамический импорт — принцип №6 (не удалять работающее). |
+| `model/neural_trainer.py` (P2-36) | `EXPERIMENTAL` | **Пометен @experimental, НЕ удалять.** grep `neural_trainer`: единственные совпадения — сам модуль и его тест `model/tests/test_neural_trainer.py`. В `train_all_assets` / `run_backtest` вызовов нет. Docstring обновлён со статусом. Удаление/интеграция — отдельное решение с экономическим A/B. |
+| `execution/portfolio_allocator.py` (P2-11) | `ACTIVE (validation)` | **Оставлен в `execution/`, НЕ переносить в backtest/.** grep: `execution/mt5_trader.py:215` — live-трейдер вызывает `validate_scaleout_tranches`; `model/ensemble_backtest.py:79` — бэктест-валидация scaleout; тесты `test_portfolio_allocator`, `test_scaleout_lot_validation`. Так как live-вызов существует, критерий ТЗ «переместить только если не вызывается» не выполнен — перенос сломал бы live-валидацию объёмов. Kelly/HRP-часть — OPT-IN. |
+| `data/news_calendar_cache.json` | `RUNTIME-CACHE (git-tracked seed)` | **Оставлен в git.** Это дисковый кэш `news/calendar_feed.py:111` и health-check-артефакт `services/news_feed/service.py:37` (формат `{"ts": ..., "events": [...]}`). Код восстанавливает кэш сам, но tracked-файл служит seed-ом для offline-стартов и частью health check (файл должен существовать). Перезаписывается рантаймом — изменения в `git status` игнорируются при деплое; полная untrack-политика отложена до ТЗ 6.5 retention. |
+| `features/order_flow.py` | Вне скоупа шага 14 | Уже покрыт статусом в матрице выше (`ГОТОВО [x]`); тиковые данные — отдельная задача P2-37. |
+| `execution/fx_execution_probe.py` | Вне скоупа шага 14 | P2-13 (расписание проб) — отдельная задача, не часть 7.1-кандидатов текущего шага. |
+
 ---
 
 ## 2. Реализованная спецификация шага тейк-профитов и стоп-лосса

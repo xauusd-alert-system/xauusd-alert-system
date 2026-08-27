@@ -5,6 +5,16 @@ Provides institutional risk allocation and position sizing models:
 - Inverse Volatility weighting
 - Hierarchical Risk Parity (HRP) allocation
 - Lot size calculation with pip / point value scaling
+
+Status: ACTIVE but backtest/execution-validation only (P2-11, TZ Часть 7 п.7.1).
+NOT in the live decision path: `mt5_trade_group.py` never imports this module.
+Real call sites:
+- execution/mt5_trader.py::validate_scaleout_tranches (volume validation)
+- model/ensemble_backtest.py (strict_scaleout_validation)
+- execution/tests/test_portfolio_allocator.py,
+  execution/tests/test_scaleout_lot_validation.py
+Kept in execution/ because the live trader calls it for scaleout validation;
+full Kelly/HRP allocation remains OPT-IN (docs/TODO.md).
 """
 from __future__ import annotations
 import numpy as np
