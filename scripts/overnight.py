@@ -64,9 +64,15 @@ Environment knobs (all optional, every stage on by default):
     OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard, Part B Phase 6)
     OVERNIGHT_NO_REAL_TRADES=1     skip stage 4
     OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard)
-    OVERNIGHT_NO_VERIFY=1          skip stage 4c (fingerprint + degeneracy audit)
-    OVERNIGHT_NO_SUMMARY=1         skip stage 5
-    OVERNIGHT_NO_TELEGRAM=1        skip stage 6
+    OVERNIGHT_NO_VERIFY=1        skip stage 4c (fingerprint + degeneracy audit)
+    OVERNIGHT_NO_SUMMARY=1       skip stage 5
+    OVERNIGHT_NO_TELEGRAM=1      skip stage 6
+
+Optional stages (P2-40 / TZ 5.3, config-gated):
+
+    monitoring.drift.enabled=true  enables the "drift_check" stage (PSI feature
+    drift between the train feature matrix and fresh live features). Default
+    false -> the stage is skipped entirely (backwards compatible).
 
 Run:
     python -m scripts.overnight
@@ -326,6 +332,49 @@ def main() -> int:
         status.append(("verify_model_fingerprints", ok))
     else:
         logger.info("Skipping verify_model_fingerprints (OVERNIGHT_NO_VERIFY set).")
+
+    # ---- Stage 4d (optional): PSI feature-drift check (P2-40 / TZ 5.3) ------
+    # Off by default: enabled only when monitoring.drift.enabled=true in the
+    # config. Compares the train feature matrix (monitoring.drift.train_csv)
+    # against a fresh live feature matrix (monitoring.drift.live_csv) — both
+    # optional paths; when either is missing the stage is skipped with a
+    # warning (partial integration, documented). Drifted features produce a
+    # WARNING in the overnight log.
+    drift_cfg = cfg.get("monitoring", {}).get("drift", {})
+    if drift_cfg.get("enabled", False):
+        drift_ok = True
+        try:
+            from scripts.monitor_feature_drift import check_drift, _load_table
+
+            train_csv = drift_cfg.get("train_csv")
+            live_csv = drift_cfg.get("live_csv")
+            if not train_csv or not live_csv:
+                logger.warning(
+                    "drift_check enabled but monitoring.drift.train_csv/live_csv "
+                    "not configured -> skipping stage (partial integration)."
+                )
+            else:
+                threshold = float(drift_cfg.get("drifted_psi_threshold", 0.2))
+                report = check_drift(
+                    _load_table(train_csv), _load_table(live_csv),
+                    drifted_psi_threshold=threshold,
+                )
+                logger.info(
+                    "drift_check: %d feature(s), max_psi=%.4f",
+                    report["n_features_checked"], report["max_psi"],
+                )
+                if report["drifted_features"]:
+                    logger.warning(
+                        "FEATURE DRIFT: %d feature(s) above PSI %.2f: %s",
+                        len(report["drifted_features"]), threshold,
+                        ", ".join(report["drifted_features"]),
+                    )
+        except Exception as e:  # noqa: BLE001 - drift must never kill the night
+            logger.error("drift_check failed (non-fatal): %s", e)
+            drift_ok = False
+        status.append(("drift_check", drift_ok))
+    else:
+        logger.info("Skipping drift_check (monitoring.drift.enabled is false).")
 
     # ---- Stage 5: summary report -------------------------------------------
     summary_text = ""

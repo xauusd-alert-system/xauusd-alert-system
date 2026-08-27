@@ -1051,6 +1051,17 @@ monitoring:
     # backups/ (git-ignored); keep = number of most recent *.bak files kept.
     dir: backups
     keep: 7
+  drift:
+    # P2-40 / TZ 5.3: PSI feature-drift monitoring in the overnight pipeline
+    # (stage drift_check). Disabled by default: enabling adds an observability
+    # stage AFTER retrain that compares the train feature matrix against fresh
+    # live features. train_csv/live_csv point at two csv/parquet matrices with
+    # the same feature columns (see scripts/monitor_feature_drift.py --help
+    # for the standalone CLI).
+    enabled: false
+    train_csv: null
+    live_csv: null
+    drifted_psi_threshold: 0.2
   logging:
     # TZ 6.6 / P2-33: structured logging. format: text (default, unchanged
     # behaviour) | json. RotatingFileHandler limits below.
