@@ -994,3 +994,20 @@ challenge:
   browser:
     headless: false
     profile_dir: data/challenge_browser_profile
+
+# Phase 3, Step 10 (TZ 8.1/8.2/8.8): standalone service processes with shared
+# health endpoints (services/ package). Entry points: python -m services.<name>.
+services:
+  ledger_bridge:
+    health_port: 8791
+    # P2-19: outbox delivery watermark must move within this budget while
+    # pending events exist, otherwise /health reports degraded.
+    watermark_max_age_min: 30
+  telegram_bot:
+    health_port: 8792
+  news_feed:
+    health_port: 8793
+    # Calendar disk cache (data/news_calendar_cache.json) must be younger
+    # than this, otherwise /health reports degraded.
+    max_cache_age_hours: 6
+    refresh_interval_seconds: 900
