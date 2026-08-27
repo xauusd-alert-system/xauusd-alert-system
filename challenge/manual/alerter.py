@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import yaml
 
-ROOT = r"C:\Users\botbo\Desktop\xauusd-alert-system"
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
 # Audit G 2026-08-23: under pythonw (scheduled task) stdout/stderr are None
@@ -72,6 +72,7 @@ from challenge.manual import scanner as scanner_mod
 from challenge.manual import risk as risk_mod
 from challenge.manual import outcomes as outcomes_mod
 from challenge.manual import quality_gate as quality_mod
+from usstocks.data import utex_provider
 
 REFRESH_URL = "https://api.utex.io/rest/grpc/com.unitedtraders.luna.sessionservice.api.sso.SsoService.refreshAuthorization"
 GRPC_BASE = "https://demoususdt-api-margin.utex.io/rest/grpc/com.unitedtraders.luna.utex.protocol.mobile."
@@ -121,117 +122,19 @@ def tg_send(text: str) -> bool:
 
 
 def refresh_access():
-    with open(TOKEN_FILE, encoding="utf-8") as f:
-        rt = json.load(f)["refresh_token"]
-    payload = {"realm": REALM, "clientId": CLIENT_ID, "refreshToken": rt}
-    headers = {"Authorization": "Bearer",
-               "Content-Type": "application/json",
-               "X-UT-GRPC-METADATA": "{}",
-               "Origin": "https://markets-app.hashhedge.com",
-               "Referer": "https://markets-app.hashhedge.com/",
-               "User-Agent": "Mozilla/5.0"}
-    # 1) обычный путь через requests
-    try:
-        r = requests.post(REFRESH_URL, json=payload, headers=headers, timeout=30)
-        r.raise_for_status()
-        return r.json()["accessToken"]
-    except Exception as e:
-        msg = str(e)
-        is_network = (
-            isinstance(e, (requests.exceptions.SSLError,
-                           requests.exceptions.ConnectionError,
-                           requests.exceptions.ReadTimeout,
-                           requests.exceptions.Timeout))
-            or "SSLEOF" in msg or "Read timed out" in msg
-            or "handshake" in msg.lower() or "Max retries" in msg
-            or "Timeout" in type(e).__name__
-        )
-        if not is_network:
-            raise
-        print(f"refresh via requests failed ({type(e).__name__}), "
-              f"пробую через Playwright…", file=sys.stderr)
-        try:
-            import json as _json
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=True,
-                    args=["--disable-blink-features=AutomationControlled"])
-                ctx = browser.new_context()
-                resp = ctx.request.post(REFRESH_URL,
-                    data=_json.dumps(payload),
-                    headers=headers)
-                if not resp.ok:
-                    raise RuntimeError(f"playwright refresh {resp.status}: {resp.text()[:200]}")
-                data = resp.json()
-                browser.close()
-                return data["accessToken"]
-        except Exception as e2:
-            print(f"playwright fallback also failed: {e2}", file=sys.stderr)
-            raise e
+    return utex_provider.refresh_access(TOKEN_FILE)
 
 
-def _decode_candles(data, symbol_id):
+def _decode_candles(data, symbol_id=None):
     """Normalize UTEX candle payload into scanner candles."""
-    out = []
-    for c in (data or {}).get("candles", []):
-        def number(key):
-            value = c[key]
-            return float(value) / 1e8 if isinstance(value, int) else float(value)
-        out.append({"time": int(c["time"]), "open": number("open"),
-                    "high": number("high"), "low": number("low"),
-                    "close": number("close"), "volume": float(c.get("volume", 0))})
-    out.sort(key=lambda x: x["time"])
-    if not out:
+    out = utex_provider.decode_candles(data)
+    if not out and symbol_id is not None:
         raise RuntimeError(f"getCandles {symbol_id}: empty candle response")
     return out
 
 
 def fetch_candles(access, symbol_id, candles_count=720):
-    payload = {"to": int(time.time()), "symbolId": symbol_id,
-               "candlesCount": candles_count, "interval": "Min1"}
-    headers = {"Authorization": "Bearer " + access,
-               "Content-Type": "application/json",
-               "X-UT-GRPC-METADATA": "{}",
-               "X-B3-SpanId": uuid.uuid4().hex[:16],
-               "X-B3-TraceId": uuid.uuid4().hex[:16],
-               "Origin": "https://markets-app.hashhedge.com",
-               "Referer": "https://markets-app.hashhedge.com/",
-               "User-Agent": "Mozilla/5.0"}
-    # 1) requests
-    try:
-        r = requests.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
-                          json=payload, headers=headers, timeout=60)
-        if r.status_code != 200:
-            raise RuntimeError(f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
-        return _decode_candles(r.json(), symbol_id)
-    except Exception as e:
-        msg = str(e)
-        is_network = (
-            isinstance(e, (requests.exceptions.SSLError,
-                           requests.exceptions.ConnectionError,
-                           requests.exceptions.ReadTimeout,
-                           requests.exceptions.Timeout))
-            or "SSLEOF" in msg or "Read timed out" in msg
-            or "handshake" in msg.lower() or "Max retries" in msg
-            or "Timeout" in type(e).__name__
-        )
-        if not is_network:
-            raise
-        print(f"getCandles {symbol_id} via requests failed ({type(e).__name__}), "
-              f"пробую Playwright…", file=sys.stderr)
-        import json as _json
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True,
-                args=["--disable-blink-features=AutomationControlled"])
-            ctx = browser.new_context()
-            resp = ctx.request.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
-                data=_json.dumps(payload), headers=headers)
-            if not resp.ok:
-                raise RuntimeError(f"playwright getCandles {symbol_id}: {resp.status}: {resp.text()[:200]}")
-            data = resp.json()
-            browser.close()
-            return _decode_candles(data, symbol_id)
+    return utex_provider.fetch_candles(access, symbol_id, candles_count=candles_count)
 
 
 def load_sent() -> dict:

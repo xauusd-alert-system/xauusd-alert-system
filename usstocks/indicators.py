@@ -16,6 +16,7 @@ from usstocks.models import Bar
 
 NY = ZoneInfo("America/New_York")
 SESSION_OPEN = time(9, 30)
+SESSION_CLOSE = time(16, 0)
 DEFAULT_RANGE_MINUTES = 15
 
 
@@ -24,6 +25,18 @@ def ensure_ny(ts: datetime) -> datetime:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=NY)
     return ts.astimezone(NY)
+
+
+def is_regular_session(ts_or_bar: datetime | Bar) -> bool:
+    """True if within regular trading hours (09:30 - 16:00 America/New_York)."""
+    ts = ts_or_bar.ts if isinstance(ts_or_bar, Bar) else ts_or_bar
+    nb = ensure_ny(ts)
+    return SESSION_OPEN <= nb.time() < SESSION_CLOSE
+
+
+def filter_regular_session(bars: List[Bar]) -> List[Bar]:
+    """Keep only bars within regular trading hours."""
+    return [b for b in bars if is_regular_session(b)]
 
 
 def session_open_dt(day_ts: datetime) -> datetime:
@@ -74,16 +87,28 @@ def _bucket_ts(key: Tuple) -> datetime:
     return datetime(d.year, d.month, d.day, hh, mm, tzinfo=NY)
 
 
-def session_vwap_series(bars_5m: List[Bar]) -> List[float]:
-    """Cumulative session VWAP per closed 5m bar; resets at 09:30 NY."""
+def session_vwap_series(bars_5m: List[Bar], *, filter_premarket: bool = True) -> List[float]:
+    """Cumulative session VWAP per closed 5m bar; resets at 09:30 NY and ignores premarket."""
     result: List[float] = []
     cum_pv = cum_v = 0.0
     cur_day = None
+    in_session = False
     for b in bars_5m:
         nb = ensure_ny(b.ts)
         if cur_day != nb.date():
             cur_day = nb.date()
             cum_pv = cum_v = 0.0
+            in_session = False
+
+        if filter_premarket and nb.time() < SESSION_OPEN:
+            # Premarket bar does not enter the session VWAP pool
+            result.append(b.close)
+            continue
+
+        if not in_session:
+            in_session = True
+            cum_pv = cum_v = 0.0
+
         cum_pv += b.typical_price * max(b.volume, 0.0)
         cum_v += max(b.volume, 0.0)
         result.append(cum_pv / cum_v if cum_v > 0 else b.close)
@@ -92,15 +117,19 @@ def session_vwap_series(bars_5m: List[Bar]) -> List[float]:
 
 def opening_range(bars_5m: List[Bar],
                   range_minutes: int = DEFAULT_RANGE_MINUTES) -> Optional[Tuple[float, float]]:
-    """(or_high, or_low) from the first N fully-closed 5m bars of the session.
+    """(or_high, or_low) from the first N fully-closed 5m bars of the regular session.
 
     Returns None when the range window is not yet complete (ТЗ §7.2: never use
     unclosed bars)."""
     if not bars_5m:
         return None
     n = max(1, range_minutes // 5)
-    day = ensure_ny(bars_5m[0].ts).date()
-    window = [b for b in bars_5m if ensure_ny(b.ts).date() == day][:n]
+    # Filter bars strictly starting at or after session open 09:30 NY
+    session_bars = [b for b in bars_5m if ensure_ny(b.ts).time() >= SESSION_OPEN]
+    if not session_bars:
+        return None
+    day = ensure_ny(session_bars[0].ts).date()
+    window = [b for b in session_bars if ensure_ny(b.ts).date() == day][:n]
     if len(window) < n:
         return None
     return max(b.high for b in window), min(b.low for b in window)
@@ -130,8 +159,27 @@ def minutes_until(close_at: datetime, now: datetime) -> float:
     return (ensure_ny(close_at) - ensure_ny(now)).total_seconds() / 60.0
 
 
+def calculate_atr(bars: List[Bar], period: int = 14) -> float:
+    """Calculate Average True Range across closed bars."""
+    if len(bars) < 2:
+        return 0.0
+    trs = []
+    for i in range(1, len(bars)):
+        h = bars[i].high
+        l = bars[i].low
+        prev_c = bars[i - 1].close
+        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+        trs.append(tr)
+    
+    calc_period = min(period, len(trs))
+    if calc_period == 0:
+        return 0.0
+    return sum(trs[-calc_period:]) / float(calc_period)
+
+
 __all__ = [
-    "NY", "SESSION_OPEN", "DEFAULT_RANGE_MINUTES", "ensure_ny", "session_open_dt",
+    "NY", "SESSION_OPEN", "SESSION_CLOSE", "DEFAULT_RANGE_MINUTES", "ensure_ny",
+    "is_regular_session", "filter_regular_session", "session_open_dt",
     "drop_unclosed_1m", "aggregate_to_5m", "session_vwap_series", "opening_range",
-    "opening_range_mid", "average_volume", "volume_ratio", "minutes_until",
+    "opening_range_mid", "average_volume", "volume_ratio", "minutes_until", "calculate_atr",
 ]

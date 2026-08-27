@@ -61,16 +61,16 @@ def load_config(path: str = None) -> dict:
     Load and cache the master YAML config with explicit UTF-8 encoding.
     """
     global _CONFIG_CACHE
-    if _CONFIG_CACHE is not None:
+    if path is None:
+        if _CONFIG_CACHE is not None:
+            return _CONFIG_CACHE
+        path = os.path.join(os.path.dirname(__file__), "config.yaml")
+        with open(path, "r", encoding="utf-8") as f:
+            _CONFIG_CACHE = yaml.safe_load(f)
         return _CONFIG_CACHE
 
-    if path is None:
-        path = os.path.join(os.path.dirname(__file__), "config.yaml")
-
-    with open(path, "r", encoding="utf-8") as f:  # <-- Добавлен encoding="utf-8"
-        _CONFIG_CACHE = yaml.safe_load(f)
-
-    return _CONFIG_CACHE
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 def effective_asset_config(cfg: dict, asset_key: str) -> dict:

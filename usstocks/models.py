@@ -7,12 +7,25 @@ execution.DisabledExecutor.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
 STRATEGY_VERSION = "vwap_pullback_continuation-v1"
+
+_SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,10}$")
+
+
+def validate_symbol(symbol: str) -> str:
+    """Validate and normalize ticker symbol (e.g. 'AAPL', 'BRK.B')."""
+    if not isinstance(symbol, str):
+        raise ValueError(f"Symbol must be string, got {type(symbol).__name__}")
+    s = symbol.strip().upper()
+    if not s or not _SYMBOL_RE.match(s):
+        raise ValueError(f"Invalid symbol format: {symbol!r}")
+    return s
 
 
 @dataclass
@@ -25,6 +38,14 @@ class Bar:
     low: float
     close: float
     volume: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.ts is None or not isinstance(self.ts, datetime) or self.ts.tzinfo is None:
+            raise ValueError(f"Bar.ts must be timezone-aware datetime, got {self.ts!r}")
+        if self.open < 0 or self.high < 0 or self.low < 0 or self.close < 0:
+            raise ValueError("Bar prices must be non-negative")
+        if self.volume < 0:
+            raise ValueError("Bar volume must be non-negative")
 
     @property
     def typical_price(self) -> float:
@@ -44,6 +65,9 @@ class PremarketSnapshot:
     spread_pct: float
     fresh_news_catalyst: bool = False
     score: int = 0
+
+    def __post_init__(self) -> None:
+        self.symbol = validate_symbol(self.symbol)
 
 
 @dataclass
@@ -69,6 +93,11 @@ class TradeSignal:
     signal_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     strategy_version: str = STRATEGY_VERSION
 
+    def __post_init__(self) -> None:
+        self.symbol = validate_symbol(self.symbol)
+        if self.side not in ("long", "short"):
+            raise ValueError(f"TradeSignal.side must be 'long' or 'short', got {self.side!r}")
+
 
 @dataclass
 class RiskState:
@@ -81,6 +110,7 @@ class RiskState:
     consecutive_losses: int = 0
     active_symbol: Optional[str] = None     # open position OR pending accepted signal
     day_stopped: bool = False
+    has_partial_fill: bool = False
 
 
 @dataclass

@@ -18,63 +18,89 @@ from usstocks.models import PremarketSnapshot, RiskEvent, TradeSignal
 STRATEGY_VERSION = "vwap_pullback_continuation-v1"
 SOURCE = "utex"
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS us_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_date TEXT UNIQUE NOT NULL,
-    opened_at TEXT NOT NULL,
-    closed_at TEXT
-);
-CREATE TABLE IF NOT EXISTS us_watchlist_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_date TEXT NOT NULL,
-    ts TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    price REAL, prev_close REAL, gap_pct REAL, relative_volume REAL,
-    avg_daily_dollar_volume REAL, spread_pct REAL, score INTEGER,
-    in_watchlist INTEGER NOT NULL DEFAULT 0,
-    strategy_version TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS us_signals (
-    signal_id TEXT PRIMARY KEY,
-    session_date TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    side TEXT NOT NULL,
-    entry_low REAL, entry_high REAL, stop REAL, tp1 REAL, tp2 REAL,
-    risk_per_share REAL, shares INTEGER, notional_usd REAL,
-    planned_risk_usd REAL, grade TEXT,
-    strategy_version TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    metrics_json TEXT, passed_json TEXT, why_json TEXT,
-    decision TEXT NOT NULL DEFAULT 'pending'   -- pending|accepted|rejected|taken
-);
-CREATE TABLE IF NOT EXISTS us_trade_outcomes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    signal_id TEXT REFERENCES us_signals(signal_id),
-    recorded_at TEXT NOT NULL,
-    outcome TEXT NOT NULL,                      -- win|loss|flat|manual
-    pnl_usd REAL NOT NULL,
-    r_multiple REAL,
-    confirmed_by TEXT NOT NULL,                 -- telegram chat id
-    note TEXT
-);
-CREATE TABLE IF NOT EXISTS us_risk_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts TEXT NOT NULL,
-    session_date TEXT NOT NULL,
-    symbol TEXT,
-    code TEXT NOT NULL,
-    allowed INTEGER NOT NULL,
-    reason TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_signals_date ON us_signals(session_date);
-CREATE INDEX IF NOT EXISTS idx_outcomes_signal ON us_trade_outcomes(signal_id);
-"""
+CURRENT_SCHEMA_VERSION = 2
+
+_MIGRATION_DESCRIPTIONS = {
+    1: "Initial tables (sessions, snapshots, signals, outcomes, risk_events)",
+    2: "Performance indexes on signals, outcomes, snapshots, and risk_events",
+}
+
+_MIGRATIONS = {
+    1: """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL,
+        description TEXT
+    );
+    CREATE TABLE IF NOT EXISTS us_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_date TEXT UNIQUE NOT NULL,
+        opened_at TEXT NOT NULL,
+        closed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS us_watchlist_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_date TEXT NOT NULL,
+        ts TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        price REAL, prev_close REAL, gap_pct REAL, relative_volume REAL,
+        avg_daily_dollar_volume REAL, spread_pct REAL, score INTEGER,
+        in_watchlist INTEGER NOT NULL DEFAULT 0,
+        strategy_version TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS us_signals (
+        signal_id TEXT PRIMARY KEY,
+        session_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        side TEXT NOT NULL,
+        entry_low REAL, entry_high REAL, stop REAL, tp1 REAL, tp2 REAL,
+        risk_per_share REAL, shares INTEGER, notional_usd REAL,
+        planned_risk_usd REAL, grade TEXT,
+        strategy_version TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        metrics_json TEXT, passed_json TEXT, why_json TEXT,
+        decision TEXT NOT NULL DEFAULT 'pending'   -- pending|accepted|rejected|taken
+    );
+    CREATE TABLE IF NOT EXISTS us_trade_outcomes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signal_id TEXT REFERENCES us_signals(signal_id),
+        recorded_at TEXT NOT NULL,
+        outcome TEXT NOT NULL,                      -- win|loss|flat|manual
+        pnl_usd REAL NOT NULL,
+        r_multiple REAL,
+        confirmed_by TEXT NOT NULL,                 -- telegram chat id
+        note TEXT
+    );
+    CREATE TABLE IF NOT EXISTS us_risk_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        session_date TEXT NOT NULL,
+        symbol TEXT,
+        code TEXT NOT NULL,
+        allowed INTEGER NOT NULL,
+        reason TEXT
+    );
+    """,
+    2: """
+    CREATE INDEX IF NOT EXISTS idx_signals_date ON us_signals(session_date);
+    CREATE INDEX IF NOT EXISTS idx_signals_decision_created ON us_signals(decision, created_at);
+    CREATE INDEX IF NOT EXISTS idx_signals_symbol_decision ON us_signals(symbol, decision, created_at);
+    CREATE INDEX IF NOT EXISTS idx_outcomes_signal ON us_trade_outcomes(signal_id);
+    CREATE INDEX IF NOT EXISTS idx_outcomes_recorded ON us_trade_outcomes(recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_watchlist_date_symbol ON us_watchlist_snapshots(session_date, symbol);
+    CREATE INDEX IF NOT EXISTS idx_risk_events_date_ts ON us_risk_events(session_date, ts);
+    """,
+}
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class JournalExportError(Exception):
+    """Raised when journal CSV export fails."""
+    pass
 
 
 class UsJournal:
@@ -83,8 +109,30 @@ class UsJournal:
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
+        self._run_migrations()
+
+    def _run_migrations(self) -> None:
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        )
         self._conn.commit()
+
+        applied = {
+            r[0] for r in self._conn.execute("SELECT version FROM schema_migrations").fetchall()
+        }
+        for ver in sorted(_MIGRATIONS):
+            if ver not in applied:
+                self._conn.executescript(_MIGRATIONS[ver])
+                self._conn.execute(
+                    "INSERT INTO schema_migrations(version, applied_at, description) VALUES (?, ?, ?)",
+                    (ver, _now_iso(), _MIGRATION_DESCRIPTIONS.get(ver, "")),
+                )
+                self._conn.commit()
+
+    def get_schema_version(self) -> int:
+        row = self._conn.execute("SELECT MAX(version) AS v FROM schema_migrations").fetchone()
+        return int(row["v"] or 0) if row else 0
 
     # -- sessions ----------------------------------------------------------
 
@@ -188,23 +236,37 @@ class UsJournal:
     # -- export ------------------------------------------------------------
 
     def export_day_csv(self, session_date: str, out_dir: str) -> str:
-        os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, f"us_signals_{session_date}.csv")
-        rows = self._conn.execute(
-            "SELECT g.*, o.outcome, o.pnl_usd, o.r_multiple, o.confirmed_by"
-            " FROM us_signals g LEFT JOIN us_trade_outcomes o"
-            " ON o.signal_id=g.signal_id WHERE g.session_date=?"
-            " ORDER BY g.created_at", (session_date,)).fetchall()
-        if rows:
-            cols = list(rows[0].keys())
-        else:
-            cols = ["signal_id", "session_date"]
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(cols)
-            for r in rows:
-                w.writerow([r[c] for c in cols])
-        return path
+        if not session_date or not isinstance(session_date, str):
+            raise JournalExportError(f"Invalid session_date for export: {session_date!r}")
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            path = os.path.join(out_dir, f"us_signals_{session_date}.csv")
+            tmp_path = path + f".tmp.{os.getpid()}"
+            rows = self._conn.execute(
+                "SELECT g.*, o.outcome, o.pnl_usd, o.r_multiple, o.confirmed_by"
+                " FROM us_signals g LEFT JOIN us_trade_outcomes o"
+                " ON o.signal_id=g.signal_id WHERE g.session_date=?"
+                " ORDER BY g.created_at", (session_date,)).fetchall()
+            if rows:
+                cols = list(rows[0].keys())
+            else:
+                cols = ["signal_id", "session_date"]
+            with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(cols)
+                for r in rows:
+                    w.writerow([r[c] for c in cols])
+            os.replace(tmp_path, path)
+            return path
+        except Exception as e:
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            if isinstance(e, JournalExportError):
+                raise
+            raise JournalExportError(f"Failed to export CSV for {session_date}: {e}") from e
 
     def close(self) -> None:
         self._conn.close()

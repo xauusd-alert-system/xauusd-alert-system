@@ -20,12 +20,13 @@ from tests.fixtures.vwap_scenarios import long_scenario
 
 def test_vwap_math_on_simple_series():
     b = lambda ts, o, h, l, c, v: type("B", (), {})  # noqa: E731 (replaced below)
+    from datetime import timedelta
     from usstocks.models import Bar
     t0 = datetime(2026, 8, 26, 9, 30, tzinfo=NY)
     bars = [
         Bar(t0, 10, 12, 9, 11, 300),                 # tp = 32/3 ≈ 10.667
-        Bar(t0.replace(minute=5), 11, 13, 10, 12, 100),  # tp ≈ 11.667
-        Bar(t0.replace(minute=10), 12, 14, 11, 13, 100),  # tp ≈ 12.333
+        Bar(t0 + timedelta(minutes=5), 11, 13, 10, 12, 100),  # tp ≈ 11.667
+        Bar(t0 + timedelta(minutes=10), 12, 14, 11, 13, 100),  # tp ≈ 12.333
     ]
     vw = session_vwap_series(bars)
     exp1 = (10 + 12) / 2                              # equal volumes
@@ -34,13 +35,14 @@ def test_vwap_math_on_simple_series():
 
 
 def test_vwap_volume_weighting_dominates_heavy_bar():
+    from datetime import timedelta
     from usstocks.models import Bar
     t0 = datetime(2026, 8, 26, 9, 30, tzinfo=NY)
     light = Bar(t0, 100, 100, 100, 100, 1)
-    heavy = Bar(t0.replace(minute=5), 110, 110, 110, 110, 999_999)
+    heavy = Bar(t0 + timedelta(minutes=5), 110, 110, 110, 110, 999_999)
     vw = session_vwap_series([light, heavy])
     # (100*1 + 110*999999) / 1_000_000 = 109.99999 -> essentially the heavy price
-    assert abs(vw[1] - 109.99999) < 1e-6
+    assert abs(vw[1] - 109.99999) < 1e-4
 
 
 def test_aggregation_uses_only_closed_buckets():

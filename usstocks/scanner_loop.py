@@ -69,6 +69,13 @@ class SignalOnlyRunner:
         self.journal = journal            # optional usstocks.journal.UsJournal
         self.signals_enabled = True       # toggled by /us_signals on|off
         self.on_event = on_event
+        self.warn_latency_threshold_s = float(
+            cfg.get("scanner", {}).get("warn_latency_threshold_s", 2.0))
+        self.metrics: Dict[str, float] = {
+            "last_scan_duration_ms": 0.0,
+            "total_scans": 0,
+            "last_scan_timestamp": 0.0,
+        }
 
     # -- helpers -----------------------------------------------------------
 
@@ -116,8 +123,10 @@ class SignalOnlyRunner:
         if not self.signals_enabled:
             logger.info("signals disabled via /us_signals off — skip cycle")
             return []
+        start_t = time.perf_counter()
         signals: List[TradeSignal] = []
         for sym in self.watchlist:
+            sym_start = time.perf_counter()
             if sym not in self.symbol_ids:
                 logger.warning("%s: нет symbolId в symbols.json — пропуск", sym)
                 continue
@@ -138,6 +147,11 @@ class SignalOnlyRunner:
                                 asof=now,
                                 risk_per_trade_usd=self.risk_per_trade_usd,
                                 max_notional_usd=self.max_notional_usd)
+            sym_elapsed = time.perf_counter() - sym_start
+            if sym_elapsed > self.warn_latency_threshold_s:
+                logger.warning("Latency alert: %s evaluation took %.3fs (> %.1fs threshold)",
+                               sym, sym_elapsed, self.warn_latency_threshold_s)
+
             best = max([ev_long, ev_short], key=lambda e: (e.ok, -len(e.failed)))
             logger.info("%s long failed=%s | short failed=%s",
                         sym, ev_long.failed, ev_short.failed)
@@ -160,6 +174,12 @@ class SignalOnlyRunner:
                 except Exception:
                     logger.exception("journal.save_signal failed")
             break
+
+        total_elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+        self.metrics["last_scan_duration_ms"] = round(total_elapsed_ms, 2)
+        self.metrics["total_scans"] += 1
+        self.metrics["last_scan_timestamp"] = time.time()
+        logger.debug("Scan cycle completed in %.2fms", total_elapsed_ms)
         return signals
 
 def run_forever(cfg: dict, runner: SignalOnlyRunner, poll_seconds: float = 60):
