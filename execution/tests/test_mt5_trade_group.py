@@ -429,6 +429,55 @@ def test_actual_fill_persisted(tmp_path):
     assert stored["spec"].entry.actual_fill == 100.25    # ask price at open
 
 
+def test_actual_fill_vwap(tmp_path):
+    """P0-4: actual_fill is the volume-weighted average price across all open
+    positions of the group, not the last seen price. Three legs filled at
+    different prices (equal volumes) -> actual_fill == arithmetic VWAP."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec()
+    executor.create_group(spec)
+    executor.submit_group(spec.group_id)
+    by_leg = _positions_by_leg(mt5, spec.group_id)
+    assert set(by_leg) == {1, 2, 3}
+    # Simulate three partial fills at different prices (volumes stay equal:
+    # 0.01 each) before the executor inspects the broker state.
+    prices = {1: 100.10, 2: 100.20, 3: 100.30}
+    for leg, pos in by_leg.items():
+        pos["price_open"] = prices[leg]
+        pos["price_current"] = prices[leg]
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    assert stored["state"] == GroupState.OPENED
+    expected_vwap = (100.10 * 0.01 + 100.20 * 0.01 + 100.30 * 0.01) / 0.03
+    assert stored["spec"].entry.actual_fill == pytest.approx(expected_vwap)
+    assert stored["spec"].entry.actual_fill == pytest.approx(100.20)
+
+
+def test_actual_fill_vwap_volume_weighted(tmp_path):
+    """P0-4 (volume weighting): with unequal volumes the bigger fill dominates
+    the average — a plain mean would give 102.0 here, VWAP gives 101.0."""
+    mt5 = FakeMT5(account_mode="hedging")
+    executor, _ = make_executor(tmp_path, mt5)
+    spec = make_spec()
+    executor.create_group(spec)
+    executor.submit_group(spec.group_id)
+    by_leg = _positions_by_leg(mt5, spec.group_id)
+    fills = {1: (100.00, 0.02), 2: (103.00, 0.005), 3: (103.00, 0.005)}
+    for leg, (price, volume) in fills.items():
+        pos = by_leg[leg]
+        pos["price_open"] = price
+        pos["price_current"] = price
+        pos["volume"] = volume
+    executor.poll_once()
+    stored = load_group(executor.db_path, spec.group_id)
+    expected_vwap = (100.00 * 0.02 + 103.00 * 0.005 + 103.00 * 0.005) / 0.03
+    assert stored["spec"].entry.actual_fill == pytest.approx(expected_vwap)
+    assert stored["spec"].entry.actual_fill == pytest.approx(101.0)
+    plain_mean = (100.00 + 103.00 + 103.00) / 3
+    assert stored["spec"].entry.actual_fill != pytest.approx(plain_mean)
+
+
 def test_tp1_broker_confirmation(tmp_path):
     mt5 = FakeMT5(account_mode="hedging")
     executor, messages = make_executor(tmp_path, mt5)

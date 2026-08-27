@@ -32,9 +32,17 @@ confirmation (order result / deal / position query).
 """
 from __future__ import annotations
 
+import logging
 import math
 import time
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
+
+# P0-4: |reference - fill| / reference above this logs a WARNING (the fill is
+# still accepted if within the spec's hard deviation gate, but drifted enough
+# that the operator should notice slippage).
+FILL_DRIFT_WARN_RATIO = 0.001
 
 from data.trade_group_store import (
     has_action,
@@ -594,9 +602,20 @@ class MT5TradeGroupExecutor:
         group_id = group["group_id"]
         spec: TradeGroupSpec = group["spec"]
         require_transition(group["state"], GroupState.OPENED)
-        fill_price = None
+        # P0-4: actual fill = volume-weighted average price across every open
+        # position of the group, not "whatever position was seen last". A
+        # group opened as several partial fills would otherwise anchor
+        # break-even to a single (possibly extreme) entry price.
+        notional = 0.0
+        volume_total = 0.0
         for pos in inspection.positions:
-            fill_price = float(pos.get("price_open") or 0.0) or fill_price
+            price = float(pos.get("price_open") or 0.0)
+            vol = float(pos.get("volume") or 0.0)
+            if price <= 0.0 or vol <= 0.0:
+                continue
+            notional += price * vol
+            volume_total += vol
+        fill_price = (notional / volume_total) if volume_total > 0.0 else None
         legs = group.get("legs", [])
         driver = self._resolve_driver(spec)
         volume = dict(group.get("volume") or {})
@@ -627,6 +646,16 @@ class MT5TradeGroupExecutor:
                     float(volume.get("total_filled") or 0.0)
                     - float(volume.get("total_closed") or 0.0), 8)
         if fill_price is not None and spec.entry.actual_fill is None:
+            # P0-4: log noticeable slippage between reference and executed VWAP
+            # (accepted within the hard deviation gate, but worth surfacing).
+            drift = abs(spec.entry.reference - fill_price) / spec.entry.reference
+            if drift > FILL_DRIFT_WARN_RATIO:
+                logger.warning(
+                    "group %s fill drifted %.4f%% from reference: "
+                    "reference=%.6g vwap=%.6g volume=%.6g",
+                    group_id, drift * 100.0, spec.entry.reference,
+                    fill_price, volume_total,
+                )
             spec = spec.with_actual_fill(fill_price)
         update_group_state(self.db_path, group_id, GroupState.OPENED, legs=legs,
                            volume=volume)
