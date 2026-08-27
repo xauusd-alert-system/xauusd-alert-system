@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from execution.trade_group import (
+    DEFAULT_MAX_FILL_DEVIATION,
     GROUP_SCHEMA_VERSION,
     GroupState,
     TERMINAL_STATES,
@@ -12,6 +13,7 @@ from execution.trade_group import (
     allocate_leg_volumes,
     check_group_not_expired,
     check_group_risk,
+    get_max_fill_deviation,
     new_group_id,
     new_intent_id,
     new_leg_id,
@@ -138,6 +140,30 @@ def test_actual_fill_cannot_be_overwritten():
     assert spec.entry.actual_fill == 4159.42
     with pytest.raises(ValueError, match="cannot be overwritten"):
         spec.with_actual_fill(4159.99)
+
+
+def test_actual_fill_deviation_rejected():
+    """P0-7: a fill 10% above the reference is rejected with ValueError."""
+    spec = make_spec()
+    reference = spec.entry.reference            # 4159.30
+    fill_10pct_above = reference * 1.10
+    with pytest.raises(ValueError, match="deviat"):
+        spec.with_actual_fill(fill_10pct_above)
+
+
+def test_actual_fill_small_drift_accepted():
+    """A sub-threshold drift still attaches normally."""
+    spec = make_spec()
+    reference = spec.entry.reference
+    small = reference * (1.0 + DEFAULT_MAX_FILL_DEVIATION * 0.5)  # +2.5%
+    filled = spec.with_actual_fill(small)
+    assert filled.entry.actual_fill == pytest.approx(small)
+
+
+def test_max_fill_deviation_threshold_configurable():
+    """Default threshold is 5%; malformed config values fall back to it."""
+    assert DEFAULT_MAX_FILL_DEVIATION == 0.05
+    assert get_max_fill_deviation() == pytest.approx(DEFAULT_MAX_FILL_DEVIATION)
 
 
 # --------------------------------------------------------------------------

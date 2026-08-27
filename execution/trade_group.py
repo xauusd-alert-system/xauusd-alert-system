@@ -36,6 +36,27 @@ GROUP_SCHEMA_VERSION = "trade-group.v1"
 Mode = Literal["research", "paper", "demo", "live"]
 Side = Literal["long", "short"]
 
+# P0-7: max allowed |actual_fill - entry.reference| / entry.reference.
+# Overridable via execution.max_actual_fill_deviation in config.yaml.
+DEFAULT_MAX_FILL_DEVIATION = 0.05
+
+
+def get_max_fill_deviation() -> float:
+    """Read the fill-deviation threshold from config; fall back to 5%."""
+    try:
+        from config.loader import load_config
+
+        cfg = load_config() or {}
+        value = ((cfg.get("execution") or {}).get("max_actual_fill_deviation"))
+        if value is None:
+            return DEFAULT_MAX_FILL_DEVIATION
+        v = float(value)
+        if not 0.0 < v <= 1.0:
+            return DEFAULT_MAX_FILL_DEVIATION
+        return v
+    except Exception:
+        return DEFAULT_MAX_FILL_DEVIATION
+
 
 # --------------------------------------------------------------------------
 # State machine
@@ -346,12 +367,27 @@ class TradeGroupSpec(BaseModel):
 
         ТЗ §6: ``entry.actualFill`` differs from ``entry.reference`` and is the
         only price used for break-even.
+
+        P0-7: a fill deviating from ``entry.reference`` by more than
+        ``max_deviation`` (fraction of the reference price; default 5%) is
+        rejected — such a drift means the executed geometry no longer matches
+        the validated one and break-even/TP prices would be meaningless.
+        The threshold may be overridden via
+        ``execution.max_actual_fill_deviation`` in config.yaml.
         """
         fill = float(fill_price)
         if fill <= 0.0:
             raise ValueError("actual fill price must be positive")
         if self.entry.actual_fill is not None and abs(self.entry.actual_fill - fill) > 1e-12:
             raise ValueError("actual_fill is already set and cannot be overwritten")
+        max_deviation = get_max_fill_deviation()
+        deviation = abs(fill - self.entry.reference) / self.entry.reference
+        if deviation > max_deviation:
+            raise ValueError(
+                f"actual fill {fill} deviates {deviation:.4%} from reference "
+                f"{self.entry.reference}, exceeding the allowed "
+                f"{max_deviation:.2%}; geometry invalid for execution"
+            )
         return self.model_copy(update={"entry": self.entry.model_copy(update={"actual_fill": fill})})
 
     def leg_price(self, leg: int) -> float:
