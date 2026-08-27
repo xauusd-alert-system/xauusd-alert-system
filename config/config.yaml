@@ -1062,6 +1062,16 @@ monitoring:
     train_csv: null
     live_csv: null
     drifted_psi_threshold: 0.2
+  calibration:
+    # P2-46 / TZ 5.3: calibration monitoring in the overnight pipeline
+    # (stage calibration_check). Disabled by default. Computes Brier score +
+    # ECE on a jsonl/csv of model predictions vs binary outcomes (columns
+    # pred,outcome; see scripts/monitor_calibration.py --help for the
+    # standalone CLI). ECE above ece_threshold (default 0.1) -> WARNING in the
+    # overnight log.
+    enabled: false
+    input_path: null
+    ece_threshold: 0.1
   logging:
     # TZ 6.6 / P2-33: structured logging. format: text (default, unchanged
     # behaviour) | json. RotatingFileHandler limits below.

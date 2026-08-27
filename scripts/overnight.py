@@ -376,6 +376,44 @@ def main() -> int:
     else:
         logger.info("Skipping drift_check (monitoring.drift.enabled is false).")
 
+    # ---- Stage 4e (optional): calibration monitoring (P2-46 / TZ 5.3) -------
+    # Off by default: enabled only when monitoring.calibration.enabled=true.
+    # Computes Brier score + ECE on a jsonl/csv of model predictions vs binary
+    # outcomes (monitoring.calibration.input_path, columns pred,outcome).
+    # ECE > monitoring.calibration.ece_threshold (default 0.1) -> WARNING in
+    # the overnight log. Non-fatal by design.
+    calib_cfg = cfg.get("monitoring", {}).get("calibration", {})
+    if calib_cfg.get("enabled", False):
+        calib_path = calib_cfg.get("input_path")
+        if not calib_path:
+            logger.warning(
+                "calibration_check enabled but monitoring.calibration.input_path "
+                "not configured -> skipping stage (partial integration)."
+            )
+        else:
+            calib_ok = True
+            try:
+                from scripts.monitor_calibration import check_calibration, _load_records
+
+                ece_threshold = float(calib_cfg.get("ece_threshold", 0.1))
+                preds, outs = _load_records(calib_path)
+                report = check_calibration(preds, outs, ece_threshold=ece_threshold)
+                logger.info(
+                    "calibration_check: n=%d, brier=%.4f, ece=%.4f",
+                    report["n_predictions"], report["brier_score"], report["ece"],
+                )
+                if not report["is_calibrated"]:
+                    logger.warning(
+                        "CALIBRATION WARNING: ECE %.4f > threshold %.2f",
+                        report["ece"], ece_threshold,
+                    )
+            except Exception as e:  # noqa: BLE001 - must never kill the night
+                logger.error("calibration_check failed (non-fatal): %s", e)
+                calib_ok = False
+            status.append(("calibration_check", calib_ok))
+    else:
+        logger.info("Skipping calibration_check (monitoring.calibration.enabled is false).")
+
     # ---- Stage 5: summary report -------------------------------------------
     summary_text = ""
     if _env_flag("OVERNIGHT_NO_SUMMARY"):
