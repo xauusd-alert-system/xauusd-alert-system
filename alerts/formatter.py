@@ -23,6 +23,7 @@ Message layout (clean format):
     → TP3: 4242.89
     Стоп: 4268.42
 """
+import warnings
 from typing import Optional
 
 from execution.trade_group import GROUP_SCHEMA_VERSION, TradeGroupSpec
@@ -127,6 +128,14 @@ def format_clean_signal_message(
 
     For ``schema_version == "trade-group.v1"`` (or an embedded ``group_spec``)
     the final geometry is authoritative and NO recomputation happens (ТЗ §19).
+
+    P2-21 (ТЗ Часть 7 п.7.2): the legacy recomputation path below is
+    DEPRECATED. Every new signal must be converted to a TradeGroupSpec via
+    ``build_trade_group_from_signal`` before formatting; a legacy signal that
+    cannot be converted must not be sent (log ``formatter_error`` instead).
+    The legacy branch emits a ``DeprecationWarning`` and exists ONLY for
+    in-flight legacy signals created before the trade-group pipeline; its
+    removal plan is tracked in docs/TODO.md.
     """
     group_payload = signal.get("group_spec") if isinstance(signal, dict) else None
     if group_payload is None and isinstance(signal, dict) and \
@@ -135,6 +144,7 @@ def format_clean_signal_message(
     if group_payload is not None:
         return format_trade_group_message(group_payload)
 
+    _warn_legacy_formatting(signal)
     bias = signal["bias"]
     if bias == "no_trade":
         regime = signal.get("regime", "unknown")
@@ -171,6 +181,18 @@ def format_clean_signal_message(
         )
 
     return message
+
+
+def _warn_legacy_formatting(signal: dict) -> None:
+    """P2-21: the legacy recomputation path is deprecated — every new signal
+    must go through ``build_trade_group_from_signal`` / trade-group.v1."""
+    warnings.warn(
+        "alerts.formatter: legacy signal formatting (level recomputation) is "
+        "deprecated; convert signals to trade-group.v1 via "
+        "build_trade_group_from_signal (P2-21 / TZ 7.2)",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 def format_signal_message(

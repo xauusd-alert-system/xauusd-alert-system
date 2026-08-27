@@ -234,3 +234,43 @@ def test_missing_geometry_field_is_formatter_error(field):
     with pytest.raises(ValueError, match="formatter_error"):
         format_clean_signal_message(broken)
     # and never a fallback: no ATR/step recomputation path is reachable
+
+
+# P2-21 / TZ Часть 7 п.7.2: single formatting path through the trade group
+# builder. The v1 path is PRIMARY (no deprecation); the legacy recomputation
+# path is deprecated and must warn.
+
+def test_formatter_uses_geometry_payload():
+    """P2-21: the trade-group.v1 path reads levels straight from
+    spec.as_geometry_payload() — it is the primary path, must NOT emit a
+    deprecation warning, and its levels must equal the authoritative payload."""
+    import warnings as _warnings
+
+    spec = TradeGroupSpec.model_validate(SPEC_DICT)
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error", DeprecationWarning)
+        msg = format_clean_signal_message(SPEC_DICT)  # v1 dict goes to v1 path
+
+    payload = spec.as_geometry_payload()
+    from alerts.formatter import _fmt_price
+
+    assert f"TP1: {_fmt_price(payload['tp1'])}" in msg
+    assert f"Стоп: {_fmt_price(payload['sl'])}" in msg
+    assert f"Group: {SPEC_DICT['group_id']}" in msg
+
+
+def test_legacy_path_warns():
+    """P2-21: a legacy signal (no group_spec / schema_version) goes through
+    the deprecated recomputation path — it still formats (backwards compat
+    for in-flight legacy signals) but MUST raise a DeprecationWarning."""
+    legacy = {
+        "bias": "long",
+        "entry": 4159.3,
+        "step": 4.3,
+        "targets": [4163.6, 4167.9, 4172.2],
+        "invalidation": 4146.4,
+    }
+    with pytest.warns(DeprecationWarning, match="legacy signal formatting"):
+        msg = format_signal_message(legacy, asset_key="XAUUSD")
+    assert "TP1: 4163.6" in msg      # legacy rendering still works
+    assert "Group:" not in msg       # ...but it is NOT the trade-group path
