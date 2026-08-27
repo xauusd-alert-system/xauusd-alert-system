@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from decimal import Decimal, ROUND_DOWN
 from enum import Enum
 from typing import Any, Literal
 
@@ -438,6 +439,29 @@ class TradeGroupSpec(BaseModel):
 INSUFFICIENT_VOLUME_FOR_THREE_LEGS = "INSUFFICIENT_VOLUME_FOR_THREE_LEGS"
 
 
+def floor_to_step(value: float, step: float) -> float:
+    """P0-6: exact floor-to-step via ``Decimal(str(x))`` (ТЗ, reference impl).
+
+    Float arithmetic ``(value / step)`` produces dust like
+    ``0.03 * (1/3) / 0.01 == 0.9999999999999997`` which int-truncates to the
+    WRONG lot count. Parsing both operands through ``Decimal(str(...))``
+    reproduces the decimal intent: 0.03 / 0.01 == 3 exactly."""
+    if step <= 0.0:
+        return round(float(value), 8)
+    d_val = Decimal(str(value))
+    d_step = Decimal(str(step))
+    lots = (d_val / d_step).to_integral_value(rounding=ROUND_DOWN)
+    return float(lots * d_step)
+
+
+#: P0-6: lot-space tolerance for ALLOCATION intent. The product
+#: ``total * (1/3)`` lands ~1e-16 below the exact lot boundary
+#: (0.03 * (1/3) == 0.009999999999999998); a 1e-9 lot epsilon preserves the
+#: intended split without the gross float rounding of the legacy code.
+#: The public ``floor_to_step`` itself stays epsilon-free (pure ROUND_DOWN).
+_ALLOCATION_LOT_EPS = Decimal("1e-9")
+
+
 def allocate_leg_volumes(
     total_volume: float,
     allocations: tuple[float, float, float] = (1 / 3, 1 / 3, 1 / 3),
@@ -452,7 +476,11 @@ def allocate_leg_volumes(
     broker constraints невозможно создать все три legs — ValueError с кодом
     ``INSUFFICIENT_VOLUME_FOR_THREE_LEGS`` (или ``allow_short_legs=True`` для
     netting fallback с явной записью в ledger).
-    """
+
+    P0-6: all splitting arithmetic is Decimal(str(x)) based — no float
+    division dust. P1-11: a negative leg3 remainder is rejected even when
+    ``allow_short_legs=True`` — the flag permits SHORT legs (leg < volume_min),
+    never NEGATIVE volume."""
     if total_volume <= 0.0:
         raise ValueError("total_volume must be positive")
     step = float(volume_step)
@@ -460,16 +488,27 @@ def allocate_leg_volumes(
     if step <= 0.0 or minimum <= 0.0:
         raise ValueError("volume_step and volume_min must be positive")
 
+    d_total = Decimal(str(total_volume))
+    d_step = Decimal(str(step))
+
     def _floor(value: float) -> float:
-        # 1e-9 epsilon absorbs float dust (0.03 * 0.333333 == 0.00999999...)
-        lots = int(value / step + 1e-9)
-        return round(lots * step, 8)
+        d_val = Decimal(str(value))
+        lots = (d_val / d_step + _ALLOCATION_LOT_EPS) \
+            .to_integral_value(rounding=ROUND_DOWN)
+        return float(lots * d_step)
 
     leg1 = _floor(total_volume * allocations[0])
     leg2 = _floor(total_volume * allocations[1])
-    leg3 = round(total_volume - leg1 - leg2, 8)
+    # remainder in exact decimal (carries any sub-step dust, as before)
+    leg3 = float(d_total - Decimal(str(leg1)) - Decimal(str(leg2)))
 
     volumes = [leg1, leg2, leg3]
+    # P1-11: negative leg3 is invalid in EVERY mode — allow_short_legs only
+    # relaxes the volume_min fillability gate for netting virtual legs.
+    if leg3 < -1e-9:
+        raise ValueError(
+            f"{INSUFFICIENT_VOLUME_FOR_THREE_LEGS}: remainder leg3={leg3} < 0"
+        )
     if not allow_short_legs:
         for i, volume in enumerate(volumes, 1):
             if volume <= 0.0 or volume < minimum - 1e-9:
@@ -478,10 +517,6 @@ def allocate_leg_volumes(
                     f"{volume} is not fillable (volume_min={minimum}, "
                     f"volume_step={step})"
                 )
-        if leg3 < 0.0:
-            raise ValueError(
-                f"{INSUFFICIENT_VOLUME_FOR_THREE_LEGS}: remainder leg3={leg3} < 0"
-            )
     return volumes
 
 

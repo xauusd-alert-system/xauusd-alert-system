@@ -459,6 +459,56 @@ def test_allocation_dust_tolerance():
 
 
 # ==========================================================================
+# P0-6: Decimal(str(x)) ROUND_DOWN floor-to-step / allocation
+# ==========================================================================
+
+def test_floor_to_step_dust():
+    """P0-6: float dust 0.009999999999999998 against a 0.01 step floors to 0.0
+    (the old int(value/step + 1e-9) float math truncated unpredictably)."""
+    from execution.trade_group import floor_to_step
+    assert floor_to_step(0.009999999999999998, 0.01) == 0.0
+
+
+def test_floor_to_step_large():
+    """P0-6: exact decimal values survive: 100.07 / 0.01 == 10007 lots."""
+    from execution.trade_group import floor_to_step
+    assert floor_to_step(100.07, 0.01) == 100.07
+    assert floor_to_step(100.079, 0.01) == 100.07
+
+
+def test_allocate_small_volume_dust():
+    """P0-6: total 0.03 with 1/3 allocation must yield [0.01, 0.01, 0.01] —
+    never [0.0, 0.0, 0.03] (the float-dust failure mode from ТЗ P0-6)."""
+    volumes = allocate_leg_volumes(0.03, (1 / 3, 1 / 3, 1 / 3),
+                                   volume_step=0.01, volume_min=0.01)
+    assert volumes == [0.01, 0.01, 0.01]
+
+
+def test_allocate_negative_leg3_rejected():
+    """P1-11: a negative leg3 remainder raises even with allow_short_legs=True —
+    the flag permits short legs, never negative volume."""
+    # allocations sum to more than 1.0 -> leg1+leg2 alone exceed the total
+    with pytest.raises(ValueError, match="INSUFFICIENT_VOLUME_FOR_THREE_LEGS"):
+        allocate_leg_volumes(0.05, (0.8, 0.8, 0.4),
+                             volume_step=0.01, volume_min=0.01,
+                             allow_short_legs=True)
+
+
+def test_allocate_negative_leg3_rejected_strict_mode():
+    """P1-11: same rejection holds without the netting fallback flag."""
+    with pytest.raises(ValueError, match="INSUFFICIENT_VOLUME_FOR_THREE_LEGS"):
+        allocate_leg_volumes(0.05, (0.8, 0.8, 0.4),
+                             volume_step=0.01, volume_min=0.01)
+
+
+def test_floor_to_step_no_epsilon_inflation():
+    """P0-6: a value genuinely below the step must NOT be inflated up to it —
+    the old +1e-9 epsilon let 0.019999999999 (true value < 0.02) round up."""
+    from execution.trade_group import floor_to_step
+    assert floor_to_step(0.01999999999999999, 0.01) == 0.01
+
+
+# ==========================================================================
 # Follow-up ТЗ §9: group risk math is direction-symmetric (abs distance)
 # ==========================================================================
 

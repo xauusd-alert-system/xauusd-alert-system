@@ -33,7 +33,6 @@ confirmation (order result / deal / position query).
 from __future__ import annotations
 
 import logging
-import math
 import time
 from typing import Any, Callable
 
@@ -80,6 +79,7 @@ from execution.trade_group import (
     TradeGroupSpec,
     check_group_not_expired,
     check_group_risk,
+    floor_to_step,
     new_leg_id,
     require_transition,
 )
@@ -770,9 +770,9 @@ class MT5TradeGroupExecutor:
         return True
 
     def _floor_to_step(self, value: float, step: float) -> float:
-        if step <= 0.0:
-            return round(float(value), 8)
-        return round(math.floor(float(value) / step + 1e-9) * step, 8)
+        # P0-6: delegate to the shared Decimal(str(x)) ROUND_DOWN helper —
+        # float division produced dust like 0.009999999999999998/0.01 -> 0.
+        return floor_to_step(value, step)
 
     def _netting_close_volume(self, group: dict[str, Any], leg: int) -> float:
         """P1.5.1 §12–§15: deterministic close volume from the broker's ACTUAL
@@ -803,7 +803,11 @@ class MT5TradeGroupExecutor:
         desired_cumulative = total_filled * cumulative
         desired_increment = desired_cumulative - already_closed
         close_volume = min(desired_increment, remaining_before)
-        close_volume = self._floor_to_step(close_volume, step)
+        # P0-6: the ledger difference above carries float dust
+        # (0.03 * 1/3 == 0.009999999999999998); a step*1e-9 epsilon preserves
+        # the intended lot count while _floor_to_step itself stays pure
+        # ROUND_DOWN (P0-6 dust test relies on the pure behaviour).
+        close_volume = self._floor_to_step(close_volume + step * 1e-9, step)
         if close_volume > 0.0 and close_volume < volume_min - 1e-9:
             # partial close below broker volume_min is unfillable (a FULL close
             # of the remaining volume is handled by the leg==3 branch)
