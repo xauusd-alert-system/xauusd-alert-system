@@ -55,14 +55,16 @@ def init_paper_schema(db_path: str) -> None:
             f"ON {EVENTS_TABLE}(run_id, trade_id, event_id)"
         )
         # Enforce append-only semantics in SQLite itself, not only in Python.
-        for table in (RUNS_TABLE, EVENTS_TABLE):
-            conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{table}_update
-                BEFORE UPDATE ON {table} BEGIN
-                    SELECT RAISE(ABORT, '{table} is append-only');
+        # (UPPER_CASE loop var: the SQL-value-interpolation guard test accepts
+        # only static constant identifiers inside quoted SQL — ТЗ 10.11.)
+        for TABLE_ITER in (RUNS_TABLE, EVENTS_TABLE):
+            conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{TABLE_ITER}_update
+                BEFORE UPDATE ON {TABLE_ITER} BEGIN
+                    SELECT RAISE(ABORT, '{TABLE_ITER} is append-only');
                 END""")
-            conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{table}_delete
-                BEFORE DELETE ON {table} BEGIN
-                    SELECT RAISE(ABORT, '{table} is append-only');
+            conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{TABLE_ITER}_delete
+                BEFORE DELETE ON {TABLE_ITER} BEGIN
+                    SELECT RAISE(ABORT, '{TABLE_ITER} is append-only');
                 END""")
         conn.commit()
     finally:

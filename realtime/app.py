@@ -1125,6 +1125,11 @@ def _check_bearer(authorization: str | None, expected: str | None) -> bool:
     return bool(expected) and authorization == f"Bearer {expected}"
 
 
+# ТЗ 10.11 hardening: ingest body cap (matches the observer proxy's 1 MB
+# envelope cap; the signed HMAC is computed over whatever passes this gate).
+INGEST_MAX_BODY_BYTES = 1_000_000
+
+
 @app.post("/api/ledger/ingest")
 async def ledger_ingest(request: Request, authorization: str | None = Header(default=None)):
     """Strict signed, owner-only, idempotent fact ingest (Signal Desk contract).
@@ -1162,8 +1167,18 @@ async def ledger_ingest(request: Request, authorization: str | None = Header(def
     if not _check_bearer(authorization, ingest_token):
         raise HTTPException(status_code=401, detail="ledger ingest authorization required")
 
-    # c. raw body BEFORE any trusted parsing
+    # c. raw body BEFORE any trusted parsing, capped (ТЗ 10.4/10.11 hardening:
+    # an oversized ingest body must never be buffered in full — 413 early).
+    max_body = INGEST_MAX_BODY_BYTES
+    try:
+        declared = int(request.headers.get("Content-Length", "0") or 0)
+    except ValueError:
+        declared = 0
+    if declared > max_body:
+        raise HTTPException(status_code=413, detail="ingest body too large")
     body = await request.body()
+    if len(body) > max_body:
+        raise HTTPException(status_code=413, detail="ingest body too large")
 
     # d. mandatory HMAC over the exact raw bytes (constant-time)
     signature = request.headers.get("X-Ledger-Signature")
