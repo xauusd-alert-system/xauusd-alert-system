@@ -9,6 +9,9 @@ venv/
 
 # Environment secrets
 .env
+.env.*
+*.key
+*.pem
 
 # Generated logs and results
 logs/*.csv
