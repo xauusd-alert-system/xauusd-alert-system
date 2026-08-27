@@ -41,6 +41,11 @@ $null
 # One-off local scripts
 diag.py
 
+# TZ 7.3 / P2-29: generated backtest artifacts stay out of git
+artifacts/
+!artifacts/.gitkeep
+pytest_mt5_out.txt
+
 # PDF exports of the codebase
 compact_project_code.pdf
 
