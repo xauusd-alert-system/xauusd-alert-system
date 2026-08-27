@@ -28,6 +28,8 @@ EVENT_TYPES = {
     # every compensation step is an explicit, idempotent ledger fact.
     "partial_submission", "compensation_requested", "compensation_confirmed",
     "compensation_failed", "failed_with_open_risk",
+    # ТЗ 6.4 / P2-6: graceful shutdown marker (final poll done, state persisted).
+    "system_shutdown",
 }
 
 

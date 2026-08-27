@@ -628,6 +628,62 @@ class MT5TradeGroupExecutor:
         return events
 
     # ------------------------------------------------------------------
+    # Graceful shutdown (ТЗ 6.4 / P2-6)
+    # ------------------------------------------------------------------
+
+    def shutdown(self) -> dict[str, Any]:
+        """Idempotent graceful shutdown: final poll_once + state persist +
+        (optional) notifier warning.
+
+        Safe to call multiple times: after the first call only a summary of
+        the first shutdown is returned (``already_shutdown: True``). The
+        final poll reuses poll_once(), whose per-group transitions already
+        persist every state change, so no extra write path is introduced.
+        """
+        if getattr(self, "_shutdown_done", False):
+            return {"already_shutdown": True,
+                    "events": list(getattr(self, "_shutdown_events", []))}
+        self._shutdown_done = True
+        summary: dict[str, Any] = {"already_shutdown": False, "events": [],
+                                   "final_poll_ok": False}
+        logger.info("Graceful shutdown: running final poll")
+        try:
+            events = self.poll_once()
+            summary["events"] = events
+            summary["final_poll_ok"] = True
+            logger.info("Final poll completed: %d events", len(events))
+        except Exception as exc:  # noqa: BLE001 — shutdown must complete
+            logger.error("Final poll failed: %s", exc)
+            summary["final_poll_error"] = str(exc)
+        # State persistence: trade-group state is already persisted per
+        # transition inside poll_once; a final ledger marker keeps the log
+        # auditable (no spec mutation).
+        try:
+            append_trading_event(
+                self.ledger_db_path, event_type="system_shutdown",
+                signal_id="-", asset_key="-", strategy_version="-",
+                config_hash="-", actor="mt5_trade_group_executor",
+                payload={"final_poll_ok": summary["final_poll_ok"],
+                         "events": summary["events"]},
+            )
+            summary["state_persisted"] = True
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Shutdown state persist failed: %s", exc)
+            summary["state_persisted"] = False
+        if self.notifier:
+            try:
+                self.notifier(
+                    "⚠️ SYSTEM SHUTDOWN — positions may be unmanaged until restart"
+                )
+                summary["notified"] = True
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Shutdown notification failed: %s", exc)
+                summary["notified"] = False
+        self._shutdown_events = summary["events"]
+        logger.info("Graceful shutdown complete")
+        return summary
+
+    # ------------------------------------------------------------------
     # Transitions
     # ------------------------------------------------------------------
 

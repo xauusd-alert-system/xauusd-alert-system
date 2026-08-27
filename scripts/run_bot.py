@@ -25,6 +25,7 @@ Telegram commands once running
     /closeall    emergency close all positions
 """
 import os
+import signal
 import sys
 import logging
 
@@ -51,6 +52,31 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger("run_bot")
+
+
+def _install_shutdown_handlers(executor, logger_):  # pragma: no cover - wiring
+    """ТЗ 6.4 / P2-6: SIGTERM/SIGINT -> executor.shutdown() then exit.
+
+    On Windows signal.SIGTERM support is partial; SIGINT/KeyboardInterrupt
+    covers the common console case. Handlers are installed best-effort:
+    a platform without a given signal is skipped, never fatal.
+    """
+    def _handle(signum, frame):
+        logger_.info("Received signal %s — graceful shutdown", signum)
+        try:
+            executor.shutdown()
+        except Exception as exc:
+            logger_.error("executor.shutdown() failed: %s", exc)
+        raise SystemExit(0)
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handle)
+        except (ValueError, OSError) as exc:
+            logger_.warning("could not install %s handler: %s", sig_name, exc)
 
 
 def _resolve_db_path() -> str:
@@ -115,11 +141,22 @@ def main() -> None:
     )
 
     # 5. Run the trading loop in the main thread (blocking).
+    # ТЗ 6.4 / P2-6: SIGTERM/SIGINT -> graceful shutdown of the executor
+    # layer (final poll + state persist). The trader exposes shutdown()
+    # when the trade-group executor layer is active; handlers are installed
+    # best-effort and are a no-op otherwise.
+    if hasattr(trader, "shutdown"):
+        _install_shutdown_handlers(trader, logger)
     try:
         logger.info("Starting MultiAssetMT5Trader.run_loop() ...")
         trader.run_loop()
     except KeyboardInterrupt:
         logger.info("KeyboardInterrupt — shutting down.")
+        if hasattr(trader, "shutdown"):
+            try:
+                trader.shutdown()
+            except Exception as exc:
+                logger.error("trader.shutdown() failed: %s", exc)
     finally:
         control_bot.stop()
         driver.stop()
