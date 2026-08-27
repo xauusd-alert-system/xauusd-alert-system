@@ -1,16 +1,23 @@
-"""ТЗ 6.5: SQLite backup script with retention.
+"""ТЗ 6.5: SQLite backup script with retention; ТЗ 6.10: restore.
 
-Creates a consistent backup of the main SQLite database (via the sqlite3
-online-backup API — safe against concurrent writers, unlike a raw file copy)
-plus the persisted risk-state file into ``backups/``, then prunes old
-backups keeping the N most recent (config ``monitoring.backup.keep``,
+Backup: creates a consistent backup of the main SQLite database (via the
+sqlite3 online-backup API — safe against concurrent writers, unlike a raw
+file copy) plus the persisted risk-state file into ``backups/``, then prunes
+old backups keeping the N most recent (config ``monitoring.backup.keep``,
 default 7).
 
-Usage:
     python -m scripts.backup_db [--db-path PATH] [--backup-dir DIR] [--dry-run]
 
+Restore (ТЗ 6.10 disaster recovery): replaces the live DB with a backup
+after an integrity check. Destructive — requires explicit confirmation:
+``--yes`` (non-interactive, e.g. runbooks) or an interactive prompt when
+stdin is a TTY. Refuses (exit 2) when neither is available, so a stray
+``--restore`` flag in a script can never silently wipe the database.
+
+    python -m scripts.backup_db --restore backups/market_data_mt5.sqlite.bak [--yes]
+
 Backups are local-only artifacts (``backups/`` is git-ignored) and are never
-committed.
+committed. Full procedure: docs/RECOVERY.md.
 """
 from __future__ import annotations
 
@@ -18,6 +25,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sqlite3
 import sys
 
@@ -126,9 +134,73 @@ def validate_backup(backup_path: str) -> bool:
         return False
 
 
+def restore_database(backup_path: str, db_path: str,
+                     risk_state_path: str | None = None) -> str:
+    """ТЗ 6.10: replace the live DB with a backup.
+
+    Fails fast (``FileNotFoundError`` / ``ValueError``) when the backup does
+    not exist or fails ``PRAGMA integrity_check``. The live DB is pre-copied
+    to ``<db>.pre_restore.bak`` (git-ignored) so the restore itself is
+    reversible; stale ``-wal``/``-shm`` sidecars of the replaced DB are
+    removed so SQLite cannot mix pages across versions. Returns the
+    pre-restore safety-copy path ("" when the live DB did not exist).
+    """
+    if not os.path.exists(backup_path):
+        raise FileNotFoundError(f"backup not found: {backup_path}")
+    if not validate_backup(backup_path):
+        raise ValueError(
+            f"backup {backup_path} failed integrity_check — refusing restore")
+
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".", exist_ok=True)
+
+    safety_copy = ""
+    if os.path.exists(db_path):
+        safety_copy = db_path + ".pre_restore.bak"
+        shutil.copy2(db_path, safety_copy)
+        logger.info("pre-restore safety copy: %s -> %s", db_path, safety_copy)
+        for sidecar in (db_path + "-wal", db_path + "-shm",
+                        db_path + "-journal"):
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
+                logger.info("removed stale sidecar %s", sidecar)
+
+    # Replace via a temp sibling + os.replace so readers never see a partial file.
+    tmp_path = db_path + ".restore.tmp"
+    shutil.copy2(backup_path, tmp_path)
+    os.replace(tmp_path, db_path)
+    logger.info("restored %s -> %s", backup_path, db_path)
+
+    if risk_state_path and os.path.exists(risk_state_path + ".bak"):
+        shutil.copy2(risk_state_path + ".bak", risk_state_path)
+        logger.info("restored risk state %s", risk_state_path)
+
+    return safety_copy
+
+
+def _confirm_restore(backup_path: str, db_path: str) -> bool:
+    """Interactive confirmation; refuses when stdin is not a TTY (ТЗ 6.10).
+
+    A non-interactive ``--restore`` without ``--yes`` must fail closed: there
+    is no operator to answer the prompt, so silently proceeding would make
+    the flag destructive-by-accident in scripts/CI.
+    """
+    if not sys.stdin.isatty():
+        logger.error(
+            "refusing restore: no --yes and stdin is not a TTY "
+            "(non-interactive context). Pass --yes to confirm explicitly.")
+        return False
+    answer = input(
+        f"Replace {db_path} with {backup_path}? Type RESTORE to confirm: ")
+    if answer.strip() != "RESTORE":
+        logger.error("confirmation mismatch — restore aborted")
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Back up the main SQLite DB (+risk state) with retention.")
+        description="Back up the main SQLite DB (+risk state) with retention; "
+                    "optionally restore a backup (ТЗ 6.10).")
     parser.add_argument("--db-path", default=None,
                         help="main SQLite DB (default: config general.db_path)")
     parser.add_argument("--backup-dir", default=None,
@@ -138,6 +210,11 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: config monitoring.backup.keep, else 7)")
     parser.add_argument("--dry-run", action="store_true",
                         help="plan only: create nothing, delete nothing")
+    parser.add_argument("--restore", default=None, metavar="BACKUP",
+                        help="ТЗ 6.10: replace the live DB with BACKUP "
+                             "(integrity-checked; destructive)")
+    parser.add_argument("--yes", action="store_true",
+                        help="with --restore: skip the interactive confirmation")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,
@@ -145,6 +222,20 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config()
     db_path = args.db_path or cfg.get("general", {}).get(
         "db_path", "data/market_data_mt5.sqlite")
+
+    if args.restore:
+        if not args.yes and not _confirm_restore(args.restore, db_path):
+            return 2
+        try:
+            restore_database(args.restore, db_path,
+                             risk_state_path=RISK_STATE_PATH)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.error("restore failed: %s", exc)
+            return 1
+        logger.info("restore complete — run 'python -m scripts.migrate_all "
+                    "--dry-run' before restarting (docs/RECOVERY.md)")
+        return 0
+
     backup_dir = args.backup_dir or (
         (cfg.get("monitoring", {}).get("backup", {}) or {}).get("dir")
         or DEFAULT_BACKUP_DIR

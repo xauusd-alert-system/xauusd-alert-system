@@ -7,6 +7,7 @@ Covers:
 """
 from __future__ import annotations
 
+import io
 import os
 import sqlite3
 import time
@@ -111,3 +112,152 @@ def test_dry_run_does_nothing(src_db, tmp_path, caplog):
     assert created == []
     assert os.listdir(backup_dir) == ["old.bak"]
     assert not any(f.endswith(".bak") for f in os.listdir(tmp_path))
+
+
+# --------------------------------------------------- TZ 6.10: restore
+
+def _make_backup(src_db, backup_dir, monkeypatch):
+    """Create a .bak next to src_db via the backup path under test."""
+    created = backup_database(src_db, backup_dir, keep=3, risk_state_path=None)
+    assert created, "fixture failed to produce a backup"
+    return created[0]
+
+
+def test_restore_replaces_db_from_backup(src_db, tmp_path):
+    """ТЗ 6.10: restore swaps the live DB for the backup content."""
+    from scripts.backup_db import restore_database
+
+    backup_path = _make_backup(src_db, str(tmp_path / "backups"), None)
+
+    # "Damage" the live DB: add a row and a second table.
+    conn = sqlite3.connect(src_db)
+    conn.execute("INSERT INTO t (v) VALUES ('corruption')")
+    conn.execute("CREATE TABLE junk (x INTEGER)")
+    conn.commit()
+    conn.close()
+
+    restore_database(backup_path, src_db)
+
+    conn = sqlite3.connect(src_db)
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 10                      # back to backup content
+    assert "junk" not in tables
+    assert integrity == "ok"
+    # Pre-restore safety copy exists for manual rollback.
+    assert os.path.exists(src_db + ".pre_restore.bak")
+
+
+def test_restore_refuses_corrupt_backup(src_db, tmp_path):
+    from scripts.backup_db import restore_database
+
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    bad = backup_dir / "corrupt.sqlite.bak"
+    bad.write_bytes(b"this is not a sqlite database")
+
+    with pytest.raises(ValueError, match="integrity_check"):
+        restore_database(str(bad), src_db)
+    # Live DB untouched.
+    assert os.path.exists(src_db)
+
+
+def test_restore_missing_backup_raises(src_db, tmp_path):
+    from scripts.backup_db import restore_database
+
+    with pytest.raises(FileNotFoundError):
+        restore_database(str(tmp_path / "ghost.bak"), src_db)
+
+
+def test_restore_copies_risk_state_bak(src_db, tmp_path):
+    from scripts.backup_db import restore_database
+
+    backup_path = _make_backup(src_db, str(tmp_path / "backups"), None)
+    state = tmp_path / "risk_state.json"
+    state_bak = tmp_path / "risk_state.json.bak"
+    state.write_text('{"tripped": true}', encoding="utf-8")
+    state_bak.write_text('{"tripped": false}', encoding="utf-8")
+
+    restore_database(backup_path, src_db, risk_state_path=str(state))
+
+    import json as _json
+    assert _json.loads(state.read_text(encoding="utf-8"))["tripped"] is False
+
+
+def test_restore_requires_confirmation(src_db, tmp_path, monkeypatch, caplog):
+    """ТЗ 6.10: non-interactive --restore without --yes must refuse (exit 2)."""
+    from scripts import backup_db as mod
+
+    backup_path = _make_backup(src_db, str(tmp_path / "backups"), None)
+    monkeypatch.setattr("sys.stdin", io.StringIO("RESTORE\n"))  # not a tty
+
+    rc = mod.main(["--restore", backup_path, "--db-path", src_db])
+    assert rc == 2
+    # DB must be untouched.
+    conn = sqlite3.connect(src_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 10
+    finally:
+        conn.close()
+
+
+def test_restore_with_yes_flag_succeeds(src_db, tmp_path, monkeypatch):
+    from scripts import backup_db as mod
+
+    backup_path = _make_backup(src_db, str(tmp_path / "backups"), None)
+    conn = sqlite3.connect(src_db)
+    conn.execute("INSERT INTO t (v) VALUES ('extra')")
+    conn.commit()
+    conn.close()
+
+    rc = mod.main(["--restore", backup_path, "--yes", "--db-path", src_db])
+    assert rc == 0
+    conn = sqlite3.connect(src_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 10
+    finally:
+        conn.close()
+
+
+def test_restore_interactive_confirmation_tty_accepts(src_db, tmp_path, monkeypatch):
+    from scripts import backup_db as mod
+
+    backup_path = _make_backup(src_db, str(tmp_path / "backups"), None)
+    conn = sqlite3.connect(src_db)
+    conn.execute("INSERT INTO t (v) VALUES ('extra')")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(mod.sys, "stdin", io.StringIO("RESTORE\n"))
+    monkeypatch.setattr(mod.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "RESTORE\n".strip())
+
+    rc = mod.main(["--restore", backup_path, "--db-path", src_db])
+    assert rc == 0
+    conn = sqlite3.connect(src_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 10
+    finally:
+        conn.close()
+
+
+def test_restore_interactive_wrong_answer_aborts(src_db, tmp_path, monkeypatch):
+    from scripts import backup_db as mod
+
+    backup_path = _make_backup(src_db, str(tmp_path / "backups"), None)
+    monkeypatch.setattr(mod.sys, "stdin", io.StringIO("no\n"))
+    monkeypatch.setattr(mod.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "no")
+
+    rc = mod.main(["--restore", backup_path, "--db-path", src_db])
+    assert rc == 2
+    conn = sqlite3.connect(src_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 10
+    finally:
+        conn.close()
