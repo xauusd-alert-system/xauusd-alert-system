@@ -232,3 +232,18 @@ GOLD | ЗОЛОТО | XAUUSD
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.
 - [x] **Ночной таймер:** `deploy/overnight/overnight.timer` — **Сконфигурирован**.
+
+## 5. Deferred (ТЗ 9.x — schema versioning, оценка Фазы 7, 2026-08-27)
+
+Сделано (см. docs/MIGRATIONS.md):
+
+- [x] **9.1–9.3** — schema registry (`execution/schema_registry.py`) + БД-миграции (`data/migrate.py`, 001–003) + `scripts/migrate_all.py`.
+- [x] **9.4/9.5 (config_hash)** — `TradeGroupSpec.config_hash` уже существует и хранится в `trade_groups`/`provenance_records`; отдельная миграция не требуется, задокументировано.
+- [x] **9.8 (feature versioning)** — `FEATURES_SCHEMA_VERSION` + `feature_set_version` в снапшотах Feature Store (миграция 002).
+- [x] **P2-41 (labeling schema version)** — `labeling/label_generator.py::LABELING_SCHEMA_VERSION = "labels.v1"` (константа + контракт записи в метадата обучения).
+
+Deferred (не тривиальны, не блокируют эксплуатацию):
+
+- [ ] **9.6–9.7 (intent version chain expansion)** — расширение цепочки версий ExecutionIntent на будущие несовместимые изменения контракта; сейчас v1 = current, chain содержит identity-миграцию. Сделать при первом фактическом изменении контракта.
+- [ ] **9.9–9.10 (per-table schema_version колонки)** — добавление колонки `schema_version` в отдельные legacy-таблицы требует ALTER + миграции данных; отложено до следующего изменения схем этих таблиц (миг. 004+).
+- [ ] **9.12–9.15 (cross-DB transactional migrations, rollback tooling)** — инженерная инфраструктура отката миграций; SQLite-раннер сейчас forward-only по дизайну (идемпотентность + backup_db --restore как средство отката). Пересмотреть при появлении много-схемных изменений.
