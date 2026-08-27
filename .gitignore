@@ -98,5 +98,9 @@ data/challenge_trades.csv
 *.db
 data/usstocks_export/
 data/book_bars/
-backups/ 
-# TZ 6.5: database backups stay local 
+backups/
+# TZ 6.5: database backups stay local
+
+# TZ 6.6: logs/setup.py is real source code (structured logging setup), not a
+# scratch script — the logs/*.py rule above targets one-off diagnostics only.
+!logs/setup.py
