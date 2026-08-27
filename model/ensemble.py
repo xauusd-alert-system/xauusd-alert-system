@@ -113,6 +113,34 @@ def compute_ensemble_signal(
     ml_p_max = max(ml_p_long, ml_p_short)
     ml_edge = abs(ml_p_long - ml_p_short)  # directional edge
 
+    # P2-47 / TZ 5.3: HARD REJECT on absolute model confidence. Unlike the
+    # relative filters below (edge, blended confidence), this gate rejects the
+    # signal when even the best directional probability is below an absolute
+    # floor — the "all models ~0.5, averaging a weak signal" failure mode from
+    # TZ Part 5. Configured via `ensemble.reject_threshold`; null/absent keeps
+    # the exact previous behaviour (feature off by default for backwards
+    # compatibility of the signal path).
+    reject_threshold = ens_cfg.get("reject_threshold", None)
+    if reject_threshold is not None:
+        try:
+            reject_threshold = float(reject_threshold)
+        except (TypeError, ValueError):
+            reject_threshold = None
+    if reject_threshold is not None and ml_p_max < reject_threshold:
+        return EnsembleSignal(
+            bias="no_trade",
+            confidence=0.0,
+            rule_vote=0,
+            ml_p_long=float(ml_p_long),
+            ml_p_short=float(ml_p_short),
+            regime=regime.value if hasattr(regime, "value") else str(regime),
+            suppressed_by_meta_filter=True,
+            reasoning_summary=(
+                f"ALL_MODELS_LOW_CONFIDENCE: p_max={ml_p_max:.3f} < "
+                f"reject_threshold={reject_threshold:.3f}"
+            ),
+        )
+
     # CALIBRATION 2026-08-21: EDGE FILTER — reject low-conviction signals
     # where the model has no strong directional opinion (edge too small).
     # Per-asset min_edge overrides the global default.

@@ -214,3 +214,57 @@ def test_sentiment_veto_blocks_opposing_signal_when_enabled(monkeypatch):
     sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_off,
                                    session="london", timestamp_utc=1000000000)
     assert sig2.bias == "long"
+
+
+# ---------------------------------------------------------------------------
+# P2-47 / TZ 5.3: ensemble hard reject on low confidence (reject_threshold)
+# ---------------------------------------------------------------------------
+
+
+def test_ensemble_rejects_low_confidence():
+    """All models below reject_threshold -> no signal with reason
+    ALL_MODELS_LOW_CONFIDENCE."""
+    cfg = _base_cfg()
+    cfg["ensemble"]["reject_threshold"] = 0.60
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.55, 0.45, cfg, session="london")
+    assert sig.bias == "no_trade"
+    assert sig.confidence == 0.0
+    assert "ALL_MODELS_LOW_CONFIDENCE" in sig.reasoning_summary
+
+
+def test_ensemble_accepts_mixed_confidence():
+    """At least one directional probability >= reject_threshold -> the signal
+    flows exactly as before (threshold does not veto on max(p_long, p_short))."""
+    cfg = _base_cfg()
+    cfg["ensemble"]["reject_threshold"] = 0.60
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.85, 0.15, cfg, session="london")
+    assert sig.bias == "long"
+    assert "ALL_MODELS_LOW_CONFIDENCE" not in sig.reasoning_summary
+
+
+def test_reject_threshold_disabled_by_default():
+    """reject_threshold null/absent -> feature off, behaviour unchanged even
+    for very weak model probabilities."""
+    cfg = _base_cfg()  # no reject_threshold key at all
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.52, 0.48, cfg, session="london")
+    # Without the gate this is the ordinary weak-probability path (no hard
+    # reject reason), NOT the ALL_MODELS_LOW_CONFIDENCE reject.
+    assert "ALL_MODELS_LOW_CONFIDENCE" not in sig.reasoning_summary
+
+    cfg_null = _base_cfg()
+    cfg_null["ensemble"]["reject_threshold"] = None
+    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.52, 0.48, cfg_null, session="london")
+    assert "ALL_MODELS_LOW_CONFIDENCE" not in sig2.reasoning_summary
+
+
+def test_reject_threshold_respected():
+    """A high threshold (0.8) blocks a signal that previously passed."""
+    cfg_off = _base_cfg()
+    sig_before = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.75, 0.25, cfg_off, session="london")
+    assert sig_before.bias == "long"  # passes without the gate
+
+    cfg_on = _base_cfg()
+    cfg_on["ensemble"]["reject_threshold"] = 0.80
+    sig_after = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.75, 0.25, cfg_on, session="london")
+    assert sig_after.bias == "no_trade"
+    assert "ALL_MODELS_LOW_CONFIDENCE" in sig_after.reasoning_summary

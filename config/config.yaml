@@ -118,6 +118,12 @@ ensemble:
   # divergence - the rule side may carry it (requires min_ml_probability upstream).
   # Default false keeps the Phase-0+1 soft-collapse behaviour.
   hard_divergence_veto: false
+  # P2-47 / TZ 5.3: HARD REJECT on absolute model confidence. When the best
+  # directional probability max(p_long, p_short) is below this floor, the
+  # ensemble returns no_trade with reason ALL_MODELS_LOW_CONFIDENCE instead of
+  # averaging a weak signal. null disables the gate entirely (default keeps the
+  # exact Phase-0+1 signal-path behaviour).
+  reject_threshold: null
 
 
 market_data:
@@ -634,6 +640,11 @@ backtest:
 # TradeThrottle: daily trade limit + loss-streak cooldown + risk step-down.
 # Blocks new trades when limits are hit and reduces position size after losses.
 risk_throttle:
+  # TEMPORARY STUB (2026-08-28, owner request — demo testing): disables ALL
+  # loss-based gates (cooldown, hard stop, daily loss limit, risk step-down).
+  # The daily trade-count cap (max_trades_per_day) still applies.
+  # Remove `stub: true` to re-enable real loss protection.
+  stub: true
   # CALIBRATION 2026-08-23 (all-time deal history): the counter increments per
   # closed LEG (on_trade_closed fires per leg). 16 traded days: mean 27.8
   # legs/day, median 14, p90=71; the 58-122 spike days ran on the 4x TRIAL
