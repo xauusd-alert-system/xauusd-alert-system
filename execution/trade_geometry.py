@@ -392,6 +392,26 @@ def calculate_geometry(
             f"{required:.6g}",
         )
 
+    # --- ATR sanity check (P0-2) ---------------------------------------------
+    # atr_pct = atr / price. A tiny atr_pct means the step (built from ATR) will
+    # not clear round-trip costs; a huge one means the quoted price or the ATR
+    # is corrupt (wrong units, bad symbol feed). Both reject with an explicit
+    # reason code instead of producing nonsense geometry. Bounds are per-profile
+    # via trade_profiles.<id>.atr_sanity {min_atr_pct, max_atr_pct}.
+    atr_cfg = profile.get("atr_sanity") or {}
+    min_atr_pct = float(atr_cfg.get("min_atr_pct", 0.0005))
+    max_atr_pct = float(atr_cfg.get("max_atr_pct", 0.03))
+    atr_pct = float(atr) / float(reference_price)
+    if atr_pct < min_atr_pct or atr_pct > max_atr_pct:
+        raise GeometryRejected(
+            TP1_TOO_CLOSE_TO_COST,
+            f"ATR sanity check failed: atr={atr:.6g}, reference={reference_price:.6g} "
+            f"-> atr_pct={atr_pct:.6%} outside allowed bounds "
+            f"[{min_atr_pct:.4%}, {max_atr_pct:.2%}] "
+            f"(trade_profiles.{profile.get('asset', '?')}.atr_sanity); "
+            "step derived from this ATR would produce untradeable geometry",
+        )
+
     # --- volume allocation (ТЗ §15) -----------------------------------------
     volume_cfg = profile.get("volume", {}) or {}
     total_volume = float(volume_cfg.get("total", 0.0))

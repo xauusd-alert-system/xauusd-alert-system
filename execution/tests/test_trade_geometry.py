@@ -85,6 +85,73 @@ def test_validation_gate_blocks_btc_candidate():
     validate_profile_gate(XAU_PROFILE)  # validated profile passes
 
 
+def _atr_sanity_cfg(atr_sanity=None):
+    """XAU profile with optional per-profile atr_sanity override."""
+    profile = dict(XAU_PROFILE)
+    if atr_sanity is not None:
+        profile["atr_sanity"] = atr_sanity
+    return {**CFG, "trade_profiles": {"xau_m15_intraday_v1": profile}}
+
+
+def test_atr_too_small_rejected():
+    """P0-2: atr_pct = 2/4159.3 ~= 0.048% < min 0.05% -> rejected."""
+    cfg = _atr_sanity_cfg({"min_atr_pct": 0.0005, "max_atr_pct": 0.03})
+    with pytest.raises(GeometryRejected) as exc:
+        calculate_geometry(
+            profile=cfg["trade_profiles"]["xau_m15_intraday_v1"], side="long",
+            reference_price=4159.30, atr=2.0,
+            broker=BROKER_XAU, cost=COST_XAU,
+        )
+    assert exc.value.reason_code == TP1_TOO_CLOSE_TO_COST
+    assert "ATR sanity" in exc.value.detail
+
+
+def test_atr_too_large_rejected():
+    """P0-2: atr_pct = 210/4159.3 ~= 5% > max 3% -> rejected (bad units/feed)."""
+    with pytest.raises(GeometryRejected) as exc:
+        calculate_geometry(
+            profile=XAU_PROFILE, side="long",
+            reference_price=4159.30, atr=210.0,
+            broker=BROKER_XAU, cost=COST_XAU,
+        )
+    assert exc.value.reason_code == TP1_TOO_CLOSE_TO_COST
+    assert "outside allowed bounds" in exc.value.detail
+
+
+def test_atr_normal_accepted():
+    """P0-2: the historical XAU ATR of ~4 on a 4159 price (~0.096%) passes."""
+    out = calculate_geometry(
+        profile=XAU_PROFILE, side="long", reference_price=4159.30, atr=4.0,
+        broker=BROKER_XAU, cost=COST_XAU,
+    )
+    assert out.tp1 == 4163.30
+
+
+def test_atr_sanity_per_asset_config():
+    """P0-2: bounds come from trade_profiles.<id>.atr_sanity when present —
+    a tight-min profile rejects what the default tolerates and vice versa."""
+    # Permissive custom bounds accept a 1%-ATR that the default max (3%) would
+    # accept too but proves bounds are actually read from this profile.
+    # (step clamped by min_price_distance=3.0 -> tp1 = 100 + 3 = 103)
+    loose = _atr_sanity_cfg({"min_atr_pct": 0.0005, "max_atr_pct": 0.02})
+    out = calculate_geometry(
+        profile=loose["trade_profiles"]["xau_m15_intraday_v1"], side="long",
+        reference_price=100.0, atr=1.5,
+        broker=BROKER_XAU, cost=COST_XAU,
+    )
+    assert out.tp1 == pytest.approx(103.0)
+
+    # A tight per-asset maximum rejects an ATR the default bounds accept
+    # (1.5% at price 100 passes defaults, fails max_atr_pct=0.5%).
+    tight = _atr_sanity_cfg({"min_atr_pct": 0.0005, "max_atr_pct": 0.005})
+    with pytest.raises(GeometryRejected):
+        calculate_geometry(
+            profile=tight["trade_profiles"]["xau_m15_intraday_v1"], side="long",
+            reference_price=100.0, atr=1.5,
+            broker=BROKER_XAU, cost=COST_XAU,
+        )
+
+
 def test_calculate_step_atr_clamps():
     profile = XAU_PROFILE
     assert calculate_step(profile, 4.0) == 4.0
@@ -247,12 +314,19 @@ def test_signal_ttl_by_timeframe():
     )
     assert spec.expires_at_utc_ms == now + 7_200_000   # +2h
 
-    # H1 asset -> 24 hours
-    signal_h1 = {"bias": "long", "atr": 4.0, "entry_zone": [1.1000, 1.1002]}
+    # H1 asset -> 24 hours (FX price scale: atr 0.004 on 1.10 = 0.36% atr_pct)
+    fx_cost = CostSnapshot(round_trip_cost_price=0.0003, safety_buffer_price=0.0002)
+    fx_broker = BrokerSnapshot(symbol_point=0.00001, tick_size=0.00001, digits=5,
+                               trade_stops_level=0, trade_freeze_level=0,
+                               spread=0.00008, contract_size=100000.0,
+                               volume_min=0.01, volume_max=10.0, volume_step=0.01,
+                               execution_mode="request",
+                               account_margin_mode="netting", balance=10000.0)
+    signal_h1 = {"bias": "long", "atr": 0.004, "entry_zone": [1.10000, 1.10002]}
     spec_h1 = build_trade_group_from_signal(
         signal_h1, cfg=ttl_cfg_for("EURUSD", "H1", 86_400_000),
         asset_key="EURUSD", profile_id=None,
-        broker=BROKER_XAU, cost=COST_XAU, mode="paper", now_ms=now,
+        broker=fx_broker, cost=fx_cost, mode="paper", now_ms=now,
     )
     assert spec_h1.expires_at_utc_ms == now + 86_400_000  # +24h
 
@@ -270,10 +344,22 @@ def _ttl_cfg(timeframe: str, ttl_ms: int):
 def ttl_cfg_for(asset_key: str, timeframe: str, ttl_ms: int) -> dict:
     cfg = _ttl_cfg(timeframe, ttl_ms)
     profile = cfg["trade_profiles"]["p1"]
+    # Smaller contract/loss so the group risk cap does not reject the build:
+    # the test exercises TTL resolution, not risk sizing.
+    # NOTE: total=0.03 would floor leg1 to 0 due to the float dust bug fixed
+    # later by P0-6 (Decimal allocation); use 0.06 (2 lots/leg) until then.
+    # Step bounds are rescaled to FX price units (the XAU 3..9 pt clamp would
+    # dwarf a 1.10-priced instrument).
+    fx_profile = {**profile, "asset": asset_key,
+                  "volume": {"total": 0.06},
+                  "risk": {"currency": "USD", "max_pct": 1.0, "max_cash": 50.0},
+                  "step": {"source": "atr", "atr_mult": 1.0,
+                           "min_price_distance": 0.0005,
+                           "max_price_distance": 0.002}}
     return {
         **cfg,
         "assets": {asset_key: {"timeframe": timeframe}},
-        "trade_profiles": {"p1": {**profile, "asset": asset_key}},
+        "trade_profiles": {"p1": fx_profile},
     }
 
 

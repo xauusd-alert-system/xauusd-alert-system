@@ -479,10 +479,15 @@ def test_estimated_loss_same_for_long_and_short():
                             spread=0.25, contract_size=100.0,
                             volume_min=0.01, volume_step=0.01, balance=10000.0)
     cost = CostSnapshot(round_trip_cost_price=0.30, safety_buffer_price=0.10)
-    long_out = calculate_geometry(profile=profile, side="long", reference_price=100.0,
-                                  atr=4.0, broker=broker, cost=cost)
-    short_out = calculate_geometry(profile=profile, side="short", reference_price=100.0,
-                                   atr=4.0, broker=broker, cost=cost)
+    # Higher risk caps + real-scale price/ATR (0.19% atr_pct): this test
+    # compares long vs short parity, not capital sizing.
+    profile["risk"] = {"currency": "USD", "max_pct": 1.0, "max_cash": 100000.0}
+    profile["atr_sanity"] = {"min_atr_pct": 0.0005, "max_atr_pct": 0.03}
+    # ATR 8 on a 4159 price (~0.19% atr_pct) — inside the P0-2 sanity bounds.
+    long_out = calculate_geometry(profile=profile, side="long", reference_price=4159.30,
+                                  atr=8.0, broker=broker, cost=cost)
+    short_out = calculate_geometry(profile=profile, side="short", reference_price=4159.30,
+                                   atr=8.0, broker=broker, cost=cost)
     # same distance, same volume -> identical absolute estimated loss
     assert long_out.estimated_loss_at_sl == pytest.approx(short_out.estimated_loss_at_sl)
     assert long_out.estimated_loss_at_sl > 0.0
