@@ -158,7 +158,7 @@ def test_migration_001_noop_on_initialized_db(tmp_path):
     db_path = str(tmp_path / "stores.sqlite")
     init_trade_group_store(db_path)
     applied = apply_migrations(db_path)
-    assert [m.version for m in applied] == [1, 2]
+    assert [m.version for m in applied] == [1, 2, 3]
     assert applied[0].name == "initial"
     assert applied[1].name == "feature_store"
 

@@ -82,7 +82,8 @@ def test_real_run_applies_migrations(tmp_path):
 
     results = run_migrate_all(db_paths=[db_path], dry_run=False)
     entries = [(ok, summary) for name, ok, summary in results if name == db_path]
-    # Migration step succeeded and recorded versions 1-2 (002 = feature_store).
+    # Migration step succeeded and recorded versions 1-3 (002 = feature_store,
+    # 003 = provenance_store).
     conn = sqlite3.connect(db_path)
     try:
         applied = conn.execute(
@@ -90,7 +91,8 @@ def test_real_run_applies_migrations(tmp_path):
         ).fetchall()
     finally:
         conn.close()
-    assert applied == [(1, "initial"), (2, "feature_store")]
+    assert applied == [(1, "initial"), (2, "feature_store"),
+                       (3, "provenance_store")]
     # Registry check on the healthy payload passed.
     migration_ok, _ = entries[0]
     assert migration_ok
