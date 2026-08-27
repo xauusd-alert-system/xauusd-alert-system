@@ -1035,3 +1035,14 @@ monitoring:
     feed_stale_after_s: 30    # FEED_STALE: last tick older than N seconds
     disk_min_free_mb: 500     # DISK_LOW: free space below threshold (P2-31)
     mt5_disconnect_threshold: 5  # MT5_DISCONNECT: symbol_info_tick None N times
+  backup:
+    # TZ 6.5: SQLite backup retention (scripts/backup_db.py). Backups live in
+    # backups/ (git-ignored); keep = number of most recent *.bak files kept.
+    dir: backups
+    keep: 7
+  logging:
+    # TZ 6.6 / P2-33: structured logging. format: text (default, unchanged
+    # behaviour) | json. RotatingFileHandler limits below.
+    format: text
+    max_bytes: 10485760   # 10 MB
+    backup_count: 5

@@ -98,3 +98,5 @@ data/challenge_trades.csv
 *.db
 data/usstocks_export/
 data/book_bars/
+backups/ 
+# TZ 6.5: database backups stay local 
