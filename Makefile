@@ -1,10 +1,10 @@
 .PHONY: test test-cov lint format run-bot run-health paper clean
 
 test:
-	pytest tests/ -v
+	python3 -m pytest tests/ -v
 
 test-cov:
-	pytest tests/ --cov=usstocks --cov=shared --cov-report=term-missing --cov-fail-under=90
+	python3 -m pytest tests/ --cov=usstocks --cov=shared --cov-report=term-missing --cov-fail-under=90
 
 lint:
 	ruff check .
