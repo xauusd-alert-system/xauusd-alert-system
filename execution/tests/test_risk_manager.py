@@ -15,8 +15,10 @@ import execution.risk_manager as rm
 
 
 class _FakeAccount:
-    def __init__(self, equity):
+    def __init__(self, equity, balance=None):
         self.equity = equity
+        # P0-5: floating PnL = equity - balance (swap/carry approximation).
+        self.balance = equity if balance is None else balance
 
 
 class _FakePos:
@@ -36,13 +38,14 @@ def _cfg(**exec_overrides):
     }
 
 
-def _make_mt5(positions=None, equity=1000.0):
+def _make_mt5(positions=None, equity=1000.0, balance=None):
     fake = types.SimpleNamespace(
         _positions=positions or [],
         _equity=equity,
+        _balance=equity if balance is None else balance,
     )
     fake.initialize = lambda: True
-    fake.account_info = lambda: _FakeAccount(fake._equity)
+    fake.account_info = lambda: _FakeAccount(fake._equity, fake._balance)
     fake.positions_get = lambda *a, **k: fake._positions or None
     return fake
 
@@ -196,3 +199,92 @@ def test_state_persisted_and_restored(patched_mt5, tmp_path):
     ok2, reason2 = mgr2.can_trade("EURUSD")
     assert ok2 is False
     assert "Daily trade limit" in reason2
+
+
+# ==========================================================================
+# P0-5: circuit breaker measures TRADING loss — swaps are excluded
+# ==========================================================================
+
+def test_circuit_breaker_ignores_swaps(patched_mt5, state_path):
+    """P0-5: a -$50 overnight swap settling into `balance` must NOT trip the
+    circuit breaker when the trading loss itself is below the limit.
+
+    Scenario: starting equity = 1000 (limit 5% = $50). After a trading loss of
+    -$20 and a swap of -$50: balance = 930, equity = 980 (floating -50).
+    Old math (equity - starting_equity = -20) never saw the swap anyway, but
+    the REAL failure mode was: swap settles into balance, then a
+    (balance - starting_balance) based check trips. Both are now swap-clean:
+    daily PnL = (balance - starting_balance) + (equity - balance) = -20+(-50)
+    floating... The ТЗ formula: (balance - starting_balance_today) +
+    floating_pnl, where floating_pnl = equity - balance. Here that equals
+    (930-1000) + (980-930) = -70+50 = -20 -> under the $50 limit -> OK."""
+    mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state_path)
+    assert mgr.can_trade("XAUUSD")  # anchors starting equity/balance at 1000
+
+    # swap settles: balance 1000 -> 950; equity follows to 980 (floating -30)
+    patched_mt5._balance = 950.0
+    patched_mt5._equity = 980.0
+    ok, reason = mgr.can_trade("XAUUSD")
+    assert ok is True, reason
+    assert "CIRCUIT BREAKER" not in reason
+
+
+def test_circuit_breaker_still_trips_on_trading_loss(patched_mt5, state_path):
+    """P0-5: genuine trading losses beyond the limit still trip the breaker.
+    Starting 1000, limit 5% ($50): balance 950 (realized -50 trading) and
+    equity 955 (floating +5 of it closed) -> daily PnL = -45... push further:
+    balance 930, equity 935 -> PnL = -65 < -$50 -> TRIPPED."""
+    mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state_path)
+    assert mgr.can_trade("XAUUSD")
+    patched_mt5._balance = 930.0
+    patched_mt5._equity = 935.0
+    ok, reason = mgr.can_trade("XAUUSD")
+    assert ok is False
+    assert "CIRCUIT BREAKER" in reason
+
+
+def test_circuit_breaker_exclude_swaps_config_off(patched_mt5, state_path):
+    """P0-5: with risk.circuit_breaker.exclude_swaps=false the legacy
+    equity-delta behaviour is restored (swaps count)."""
+    cfg = _cfg()
+    cfg["risk"] = {"circuit_breaker": {"exclude_swaps": False}}
+    mgr = rm.InstitutionalRiskManager(cfg, magic=777111, state_path=state_path)
+    assert mgr.can_trade("XAUUSD")
+    patched_mt5._balance = 930.0
+    patched_mt5._equity = 935.0
+    ok, reason = mgr.can_trade("XAUUSD")
+    # equity 935 vs starting 1000 = -65 < -50 -> trips under the legacy rule
+    assert ok is False
+    assert "CIRCUIT BREAKER" in reason
+
+
+def test_starting_balance_persisted(patched_mt5, tmp_path):
+    """P0-5: risk_state.json persists BOTH starting_equity_today and
+    starting_balance_today, and a restart restores them."""
+    state = str(tmp_path / "risk_state.json")
+    mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state)
+    mgr.can_trade("XAUUSD")  # anchor day
+    data = json.load(open(state))
+    assert data["starting_equity_today"] == 1000.0
+    assert data["starting_balance_today"] == 1000.0
+
+    mgr2 = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state)
+    assert mgr2.starting_equity_today == 1000.0
+    assert mgr2.starting_balance_today == 1000.0
+
+
+def test_legacy_state_file_without_balance_field(patched_mt5, tmp_path):
+    """P0-5: a pre-P0-5 risk_state.json (no starting_balance_today) loads
+    without error and falls back to the stored equity value."""
+    state = str(tmp_path / "risk_state.json")
+    with open(state, "w", encoding="utf-8") as f:
+        json.dump({
+            "current_day": rm.datetime.now(rm.timezone.utc).date().isoformat(),
+            "starting_equity_today": 1000.0,
+            "daily_trades_count": {},
+            "circuit_breaker_tripped": False,
+        }, f)
+    mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state)
+    assert mgr.starting_balance_today == 1000.0
+    ok, _ = mgr.can_trade("XAUUSD")
+    assert ok is True

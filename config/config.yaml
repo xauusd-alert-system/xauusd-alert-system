@@ -770,6 +770,11 @@ risk:
     - [-0.06, 0.50]
     - [-0.08, 0.0]
   min_lot: 1
+  # P0-5: the daily-loss circuit breaker measures TRADING loss. Swaps and
+  # other carry adjustments that MT5 settles into `balance` overnight are
+  # excluded so a -$50 swap cannot trip a $150 daily-loss limit by itself.
+  circuit_breaker:
+    exclude_swaps: true
 
 
 # ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====

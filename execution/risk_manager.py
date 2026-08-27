@@ -46,10 +46,21 @@ class InstitutionalRiskManager:
             cfg.get("backtest", {}).get("max_daily_loss_pct", 5.0)
         )
 
+        # P0-5: the circuit breaker measures TRADING loss, excluding swaps and
+        # other carry adjustments that MT5 settles into `balance` overnight.
+        # `starting_equity_today` anchors floating PnL (equity - balance
+        # approximation); `starting_balance_today` anchors the realized
+        # (balance-delta) part. exclude_swaps=true (config `risk.circuit_breaker.
+        # exclude_swaps`, default true) keeps the daily-loss gate on trading PnL
+        # only — a swap of -$50 must not trip a $150 limit by itself.
+        self.exclude_swaps = bool(
+            cfg.get("risk", {}).get("circuit_breaker", {}).get(
+                "exclude_swaps", True))
         # W10: restore persisted daily state (circuit-breaker budget) across
         # process restarts.
         self.current_day = datetime.now(timezone.utc).date()
         self.starting_equity_today = None
+        self.starting_balance_today = None
         self.daily_trades_count = {}
         self.circuit_breaker_tripped = False
         self._load_state()
@@ -70,6 +81,10 @@ class InstitutionalRiskManager:
         try:
             self.current_day = datetime.fromisoformat(data["current_day"]).date()
             self.starting_equity_today = data.get("starting_equity_today")
+            # P0-5: starting_balance_today persisted alongside equity; older
+            # state files lack it -> fall back to the stored equity value.
+            self.starting_balance_today = data.get(
+                "starting_balance_today", self.starting_equity_today)
             self.daily_trades_count = data.get("daily_trades_count", {})
             self.circuit_breaker_tripped = bool(data.get("circuit_breaker_tripped", False))
         except (KeyError, ValueError, TypeError):
@@ -83,6 +98,7 @@ class InstitutionalRiskManager:
         data = {
             "current_day": self.current_day.isoformat(),
             "starting_equity_today": self.starting_equity_today,
+            "starting_balance_today": self.starting_balance_today,
             "daily_trades_count": self.daily_trades_count,
             "circuit_breaker_tripped": self.circuit_breaker_tripped,
         }
@@ -94,11 +110,16 @@ class InstitutionalRiskManager:
         except OSError as e:
             logger.error(f"Failed to persist risk state: {e}")
 
-    def _reset_daily_stats_if_needed(self, current_equity: float):
+    def _reset_daily_stats_if_needed(self, current_equity: float,
+                                     current_balance: float = None):
         today = datetime.now(timezone.utc).date()
         if today != self.current_day or self.starting_equity_today is None:
             self.current_day = today
             self.starting_equity_today = current_equity
+            # P0-5: anchor the balance baseline too (defaults to equity when
+            # the caller cannot supply a balance — legacy callers/tests).
+            self.starting_balance_today = (
+                current_equity if current_balance is None else current_balance)
             self.daily_trades_count = {}
             self.circuit_breaker_tripped = False
             logger.info(f"🛡 Risk Manager Reset for {today}. Starting Daily Equity: ${current_equity:.2f}")
@@ -139,11 +160,22 @@ class InstitutionalRiskManager:
             return False, "Could not fetch account info"
 
         current_equity = account_info.equity
-        self._reset_daily_stats_if_needed(current_equity)
+        current_balance = account_info.balance
+        self._reset_daily_stats_if_needed(current_equity, current_balance)
 
         # 1. 🚨 ПРОВЕРКА ДНЕВНОЙ ПРОСАДКИ (Circuit Breaker)
+        # P0-5: daily PnL = (balance - starting_balance_today) + floating_pnl,
+        # where floating_pnl = equity - balance (ТЗ approximation: no swap
+        # attribution per position). With exclude_swaps=true the swap part of
+        # the balance delta is NOT subtracted, so an overnight swap charge
+        # cannot trip the circuit breaker on its own.
         max_allowed_loss = self.starting_equity_today * (self.max_daily_loss_pct / 100.0)
-        current_daily_pnl = current_equity - self.starting_equity_today
+        if self.exclude_swaps:
+            floating_pnl = current_equity - current_balance
+            trading_balance_delta = current_balance - self.starting_balance_today
+            current_daily_pnl = trading_balance_delta + floating_pnl
+        else:
+            current_daily_pnl = current_equity - self.starting_equity_today
 
         if current_daily_pnl <= -max_allowed_loss:
             self.circuit_breaker_tripped = True
