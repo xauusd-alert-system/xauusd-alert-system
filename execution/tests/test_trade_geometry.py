@@ -524,3 +524,37 @@ def test_xau_profile_remains_validation_gated_until_evidence():
     with pytest.raises(GeometryRejected) as exc:
         validate_profile_gate(profile)
     assert exc.value.reason_code == PROFILE_NOT_VALIDATED
+
+
+# --------------------------------------------------------------------------
+# P1-8 / ТЗ 7.7: CostSnapshot validation
+# --------------------------------------------------------------------------
+
+def test_estimated_cost_zero_rejected():
+    """P1-8/7.7: an explicit status='estimated' with ALL zero cost values is
+    internally contradictory ("a cost source exists but carries no costs") and
+    must be rejected with ValueError instead of silently propagating zeros."""
+    with pytest.raises(ValueError, match="at least one non-zero cost"):
+        CostSnapshot(status="estimated")
+    with pytest.raises(ValueError, match="at least one non-zero cost"):
+        CostSnapshot(round_trip_cost_price=0.0,
+                     expected_exit_slippage=0.0,
+                     commission_buffer=0.0,
+                     status="estimated")
+
+
+def test_estimated_with_cost_accepted():
+    """Any single non-zero cost component satisfies the estimated contract."""
+    ok = CostSnapshot(status="estimated", round_trip_cost_price=0.30)
+    assert ok.available is True
+    ok2 = CostSnapshot(status="estimated", expected_exit_slippage=0.10)
+    assert ok2.available is True
+    ok3 = CostSnapshot(status="estimated", commission_buffer=0.05)
+    assert ok3.available is True
+
+
+def test_unavailable_zero_ok():
+    """status='unavailable' with all-zero costs is the valid 'no data' state."""
+    snap = CostSnapshot(status="unavailable")
+    assert snap.available is False
+    assert snap.round_trip_cost_price == 0.0

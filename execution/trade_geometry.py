@@ -103,6 +103,13 @@ class CostSnapshot:
       (``COST_DATA_UNAVAILABLE``).
 
     ``unavailable()`` is the explicit factory used instead of bare defaults.
+
+    P1-8 / ТЗ 7.7: an explicit ``estimated`` snapshot requires at least one
+    non-zero cost value (``estimated требует хотя бы одно ненулевое значение``).
+    An all-zero ``estimated`` claim is internally contradictory — it silently
+    advertises a cost source while carrying no costs — so it is rejected with
+    :class:`ValueError`. ``unavailable`` with all-zero costs remains valid
+    (that is exactly what "no data" means).
     """
 
     round_trip_cost_price: float = 0.0      # spread + expected slippage (round trip)
@@ -114,28 +121,42 @@ class CostSnapshot:
     source_id: str | None = None
     as_of_utc_ms: int | None = None
 
+    def _all_costs_zero(self) -> bool:
+        """True when every cost component is exactly zero."""
+        return (self.round_trip_cost_price == 0.0
+                and self.expected_exit_slippage == 0.0
+                and self.commission_buffer == 0.0)
+
     def __post_init__(self) -> None:
         # Backward compatibility: an explicit CostSnapshot(...) with cost
         # values is treated as "estimated" (approved profile values); a BARE
         # CostSnapshot() with all-zero defaults is "unavailable" — never a
         # silent zero (P1.6 §18).
         if self.status is None:
-            object.__setattr__(self, "status",
-                               "estimated" if self.round_trip_cost_price > 0.0
-                               or self.expected_exit_slippage > 0.0
-                               or self.commission_buffer > 0.0
-                               else "unavailable")
+            object.__setattr__(
+                self, "status",
+                "estimated" if not self._all_costs_zero() else "unavailable")
         if self.status not in {"observed", "estimated", "unavailable"}:
             raise ValueError(f"invalid CostSnapshot status {self.status!r}")
-        if self.status in {"observed", "estimated"}:
+        if self.status == "estimated" and self._all_costs_zero():
+            # P1-8 / ТЗ 7.7: "estimated" claims a cost source exists; all-zero
+            # values contradict that claim (spec: estimated требует хотя бы
+            # одно ненулевое значение). Reject loudly instead of silently
+            # treating zero costs as real costs downstream.
+            raise ValueError(
+                "estimated CostSnapshot requires at least one non-zero cost "
+                "(round_trip_cost_price, expected_exit_slippage or "
+                "commission_buffer); use status='unavailable' when no cost "
+                "data exists"
+            )
+        if self.status == "observed":
             if not self.source.strip() or self.source == "unknown":
-                # estimated costs without an explicit source: allowed (profile
-                # values), but observed costs MUST carry a real source
-                if self.status == "observed":
-                    raise ValueError(
-                        "observed CostSnapshot requires a real source "
-                        "(never 'unknown')"
-                    )
+                # observed costs MUST carry a real source; estimated without an
+                # explicit source is allowed (approved profile values)
+                raise ValueError(
+                    "observed CostSnapshot requires a real source "
+                    "(never 'unknown')"
+                )
 
     @property
     def available(self) -> bool:
