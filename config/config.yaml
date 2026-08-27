@@ -128,6 +128,23 @@ general:
   db_path: data/market_data_mt5.sqlite
 
 
+# ТЗ 8.7: provenance-модуль. TTL снапшотов (P2-51) и аудиторский
+# ProvenanceStore (P2-3). Всё опционально и выключено по умолчанию:
+# включение НЕ меняет существующую семантику provenance (P1.6) —
+# store лишь параллельно каталогизирует записи для аудита.
+provenance:
+  # Максимальный возраст снапшота (ms) для verify_record().age_ok.
+  # Когда null — TTL-проверка не настроена и age_ok всегда True.
+  max_snapshot_age_ms: null
+  store:
+    # Аудиторский каталог provenance-записей (fail-open; executor
+    # никогда не падает из-за недоступности store).
+    enabled: false
+    # null -> general.db_path (candles DB). Задайте отдельный путь,
+    # чтобы каталогизировать provenance в отдельный SQLite-файл.
+    db_path: null
+
+
 assets:
   XAUUSD:
     enabled: true

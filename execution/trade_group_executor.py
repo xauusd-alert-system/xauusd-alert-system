@@ -25,12 +25,14 @@ from __future__ import annotations
 import os
 from typing import Any, Protocol
 
+from config.loader import load_config
 from data.trade_group_store import (
     load_group,
     save_group,
     try_mark_submitted,
     update_group_state,
 )
+from provenance.store import ProvenanceStore, resolve_store_db_path
 from data.trading_event_ledger import append_trading_event
 from execution.trade_geometry import BrokerSnapshot, CostSnapshot, compute_break_even
 from execution.trade_group import (
@@ -225,12 +227,34 @@ class TradeGroupExecutor:
 
     # --- lifecycle ----------------------------------------------------------
 
+    def _record_provenance(self, spec: TradeGroupSpec) -> None:
+        """ТЗ 8.7: optional audit catalogization into ProvenanceStore.
+
+        Gated by ``provenance.store.enabled`` (default OFF -> zero behaviour
+        change) and fail-open: any store error is logged and swallowed —
+        the audit store must never break the execution path. The existing
+        provenance persistence inside trade_groups (data/trade_group_store)
+        is untouched; this is a parallel audit index only.
+        """
+        try:
+            cfg = load_config()
+            prov_cfg = (cfg.get("provenance") or {}).get("store") or {}
+            if not prov_cfg.get("enabled"):
+                return
+            db_path = resolve_store_db_path(cfg)
+            ProvenanceStore(str(db_path)).save_from_group_row({
+                "spec": spec,
+            })
+        except Exception as exc:  # fail-open (audit never blocks execution)
+            print(f"provenance store record failed (ignored): {exc}")
+
     def create_group(self, spec: TradeGroupSpec) -> GroupState:
         """Register a validated spec: DRAFT -> VALIDATED."""
         self._gate_mode(spec)
         require_transition(GroupState.DRAFT, GroupState.VALIDATED)
         save_group(self.db_path, spec, state=GroupState.DRAFT)
         save_group(self.db_path, spec, state=GroupState.VALIDATED)
+        self._record_provenance(spec)
         self._append(spec, "signal_validated",
                      payload={"geometry": spec.as_geometry_payload(),
                               "state": "VALIDATED", "mode": spec.mode})

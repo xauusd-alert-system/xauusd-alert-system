@@ -83,6 +83,22 @@ CFG = load_config()
 MODEL_PATH = get_env("MODEL_PATH", default=None)
 DATA_MODE = get_env("DATA_MODE", default="mock")
 
+# Provenance API (ТЗ 8.7): single GET + bulk lineage audit (P2-3). Mounted
+# ONLY when the audit store is enabled (provenance.store.enabled, off by
+# default) — fail-open: a broken store config must never take the dashboard
+# down. Auth arrives in Phase 4; the endpoints are read-only.
+try:
+    _PROV_CFG = CFG.get("provenance", {}) or {}
+    if (_PROV_CFG.get("store") or {}).get("enabled"):
+        from provenance.api import provenance_router
+        from provenance.store import resolve_store_db_path
+
+        app.include_router(provenance_router(
+            resolve_store_db_path(CFG), cfg=CFG,
+        ))
+except Exception as exc:
+    logger.warning("provenance router unavailable: %s", exc)
+
 # Initialize default pipeline (XAUUSD flagship)
 pipeline = RealtimePipeline(cfg=CFG, model_path=MODEL_PATH, data_mode=DATA_MODE)
 APP_STRATEGY_IDENTITY = pipeline.strategy_identity
