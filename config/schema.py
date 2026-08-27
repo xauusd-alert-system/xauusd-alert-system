@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -209,6 +209,22 @@ class MonitoringBackupConfig(_StrictModel):
     keep: int = 7
 
 
+class MonitoringDriftConfig(_StrictModel):
+    # P2-40 / TZ 5.3: PSI feature-drift monitoring (overnight stage drift_check).
+    enabled: bool = False
+    train_csv: Optional[str] = None
+    live_csv: Optional[str] = None
+    drifted_psi_threshold: float = 0.2
+
+
+class MonitoringCalibrationConfig(_StrictModel):
+    # P2-46 / TZ 5.3: Brier + ECE calibration monitoring
+    # (overnight stage calibration_check).
+    enabled: bool = False
+    input_path: Optional[str] = None
+    ece_threshold: float = 0.1
+
+
 class MonitoringLoggingConfig(_StrictModel):
     format: str = "text"
     max_bytes: int = 10485760
@@ -221,6 +237,10 @@ class MonitoringConfig(_StrictModel):
     alerts: MonitoringAlertsConfig = Field(
         default_factory=MonitoringAlertsConfig)
     backup: MonitoringBackupConfig = Field(default_factory=MonitoringBackupConfig)
+    drift: MonitoringDriftConfig = Field(
+        default_factory=MonitoringDriftConfig)
+    calibration: MonitoringCalibrationConfig = Field(
+        default_factory=MonitoringCalibrationConfig)
     logging: MonitoringLoggingConfig = Field(
         default_factory=MonitoringLoggingConfig)
 
