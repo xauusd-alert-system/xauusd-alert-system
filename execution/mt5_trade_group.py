@@ -83,6 +83,7 @@ from execution.trade_group import (
     new_leg_id,
     require_transition,
 )
+from execution import telegram_formatter as tf
 from execution.trade_group_executor import (
     DemoExecutionNotEnabled,
     DuplicateSubmissionError,
@@ -1505,61 +1506,34 @@ class MT5TradeGroupExecutor:
         return group
 
     # ------------------------------------------------------------------
-    # Telegram messages (ТЗ §35/§36) — only broker-confirmed events
+    # Telegram messages (ТЗ §35/§36) — only broker-confirmed events.
+    # P2-4: bodies live in execution.telegram_formatter; these thin delegates
+    # remain for backward compatibility (tests may patch/mock them).
     # ------------------------------------------------------------------
 
     def _opened_message(self, spec: TradeGroupSpec) -> str:
-        return (
-            f"🔥 TRADE GROUP OPENED\n{spec.asset_key}\n"
-            f"{'LONG' if spec.side == 'long' else 'SHORT'}\n\n"
-            f"Group: {spec.group_id}\n"
-            f"Entry: {spec.entry.actual_fill or spec.entry.reference}\n"
-            f"TP1: {spec.geometry.tp1}\nTP2: {spec.geometry.tp2}\n"
-            f"TP3: {spec.geometry.tp3}\nSL: {spec.geometry.sl}\n"
-            f"Mode: DEMO"
-        )
+        return tf.format_group_opened(spec)
 
     def _tp1_message(self, spec: TradeGroupSpec) -> str:
-        return (
-            f"✅ TP1 FILLED\nGroup: {spec.group_id}\n\n"
-            f"Leg 1: CLOSED\n\nBE requested for:\n"
-            f"Leg {spec.break_even.apply_to[0]}\nLeg {spec.break_even.apply_to[1]}\n"
-            f"Mode: DEMO"
-        )
+        return tf.format_tp1_filled(spec)
 
     def _tp_message(self, spec: TradeGroupSpec, label: str, header: str) -> str:
-        return f"{header}\nGroup: {spec.group_id}\nMode: DEMO"
+        return tf.format_tp_filled(spec, label, header)
 
     def _be_message(self, spec: TradeGroupSpec, sl_price: float) -> str:
-        return (
-            f"🟢 BE CONFIRMED\nGroup: {spec.group_id}\n\n"
-            f"SL remaining legs: {sl_price}\nMode: DEMO"
-        )
+        return tf.format_be_confirmed(spec, sl_price)
 
     def _stopped_message(self, spec: TradeGroupSpec) -> str:
-        return f"🛑 STOPPED\nGroup: {spec.group_id}\nMode: DEMO"
+        return tf.format_stopped(spec)
 
     def _partial_submission_message(self, spec: TradeGroupSpec,
                                     opened_legs: list[int],
                                     rejected_legs: list[int]) -> str:
-        return (
-            f"⚠️ TRADE GROUP PARTIAL SUBMISSION\nGroup: {spec.group_id}\n"
-            f"Opened legs: {', '.join(str(l) for l in opened_legs) or '-'}\n"
-            f"Rejected: {', '.join('leg ' + str(l) for l in rejected_legs)}\n"
-            f"Compensation: IN PROGRESS\nMode: DEMO"
-        )
+        return tf.format_partial_submission(spec, opened_legs, rejected_legs)
 
     def _failed_after_compensation_message(self, spec: TradeGroupSpec,
                                            reason: str) -> str:
-        return (
-            f"🛑 TRADE GROUP FAILED\nGroup: {spec.group_id}\n"
-            f"Reason: {reason}\nCompensation: CONFIRMED\nOpen risk: 0\nMode: DEMO"
-        )
+        return tf.format_failed_after_compensation(spec, reason)
 
     def _open_risk_message(self, spec: TradeGroupSpec, open_refs: list[Any]) -> str:
-        return (
-            f"🚨 EXECUTION ERROR\nGroup: {spec.group_id}\n"
-            f"State: FAILED_WITH_OPEN_RISK\n"
-            f"Open legs: {', '.join(str(r) for r in open_refs)}\n"
-            f"Compensation: FAILED\nMode: DEMO"
-        )
+        return tf.format_open_risk(spec, open_refs)
