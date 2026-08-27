@@ -48,6 +48,14 @@ def resolve_asset_timeframe(cfg: dict, asset_key: str | None, override: str | No
 def load_config(path: str = None) -> dict:
     """
     Load and cache the master YAML config with explicit UTF-8 encoding.
+
+    ТЗ 7.9 / P2-59: after loading, the config is validated against the
+    pydantic models in ``config/schema.py``. The validation mode is resolved
+    per :func:`config.schema.resolve_validation_mode` (env
+    ``CONFIG_VALIDATE_MODE`` -> top-level ``config_validation.mode`` ->
+    ``warn``); the default ``warn`` mode only logs WARNING messages for
+    unknown keys (e.g. a typo like ``max_daily_trades_per_asst``), keeping
+    loading backward compatible with minimal/test configs.
     """
     global _CONFIG_CACHE
     if _CONFIG_CACHE is not None:
@@ -58,6 +66,12 @@ def load_config(path: str = None) -> dict:
 
     with open(path, "r", encoding="utf-8") as f:  # <-- Добавлен encoding="utf-8"
         _CONFIG_CACHE = yaml.safe_load(f)
+
+    # ТЗ 7.9 / P2-59: schema validation with unknown-key detection. Lazy
+    # import keeps the module import light and defers the pydantic
+    # dependency to actual config loading.
+    from config.schema import resolve_validation_mode, validate_config
+    validate_config(_CONFIG_CACHE, mode=resolve_validation_mode(_CONFIG_CACHE))
 
     return _CONFIG_CACHE
 
