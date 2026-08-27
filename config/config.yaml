@@ -449,6 +449,17 @@ features:
     std_dev: 2.0
   structure_lookback: 20
   mtf_reference_timeframes: ["M15", "H1"]
+  # ТЗ 8.3: Feature Store — SQLite catalog of computed feature snapshots
+  # (features/feature_store.py). Default OFF: no snapshots are written and the
+  # pipeline behaviour is identical to the pre-store baseline. When enabled,
+  # each directional signal bar's feature dict is persisted with a
+  # deterministic snapshot_id (sha256 of symbol|tf|bar_ts|version|features
+  # hash); the id is published as `feature_snapshot_id` in the signal payload
+  # and flows into execution provenance via trade_geometry when present.
+  # db_path defaults to general.db_path (candles DB) when unset.
+  store:
+    enabled: false
+    db_path: null
 
 
 regime:

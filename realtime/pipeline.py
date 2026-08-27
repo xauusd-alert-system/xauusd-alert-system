@@ -56,6 +56,10 @@ class RealtimePipeline:
         self.cfg = cfg or load_config()
         self.data_mode = data_mode
         self.book_feed = book_feed
+        # Feature Store (ТЗ 8.3): lazily created on first write when
+        # `features.store.enabled` is true; disabled by default so the
+        # default behaviour is unchanged.
+        self._feature_store = None
 
         # asset_key may be passed explicitly or inferred from model_path.
         if asset_key is None:
@@ -179,6 +183,7 @@ class RealtimePipeline:
         session = str(latest["session"])
 
         feature_dict = {}
+        feature_snapshot_id = None
         if self._predictor is not None:
             # Phase 3: feature_cols may include regime_<label> one-hot columns that
             # the live row does not carry (it has only the raw causal `regime` column).
@@ -198,6 +203,14 @@ class RealtimePipeline:
             }
         else:
             ml_p_long, ml_p_short = 0.5, 0.5
+
+        # Feature Store (ТЗ 8.3): optionally persist the computed feature
+        # snapshot for this signal bar. The store catalogs ready-made values
+        # (it never recomputes or alters them). Disabled by default via
+        # `features.store.enabled: false` — baseline behaviour is unchanged.
+        feature_snapshot_id = self._store_feature_snapshot(
+            feature_dict, int(latest["timestamp_utc"])
+        )
 
         signal = compute_ensemble_signal(
             regime,
@@ -296,10 +309,50 @@ class RealtimePipeline:
             "timestamp_utc": signal_ts,
             "session": session,
             "features": feature_dict,
+            "feature_snapshot_id": feature_snapshot_id,
             "book_gate": book_gate,
             "book_features": book_features,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _store_feature_snapshot(self, feature_dict: dict, bar_ts_utc_seconds: int) -> str | None:
+        """Persist the signal-bar feature snapshot via the Feature Store (ТЗ 8.3).
+
+        Gated by `features.store.enabled` (default false). Fail-open by
+        contract: any store error is logged and the signal path continues
+        unchanged (returns None). ``bar_ts`` is converted from the pipeline's
+        epoch-seconds to the store's UTC milliseconds.
+        """
+        if not feature_dict:
+            return None
+        store_cfg = (self.cfg.get("features") or {}).get("store") or {}
+        if not store_cfg.get("enabled", False):
+            return None
+        try:
+            if self._feature_store is None:
+                from features.feature_store import FeatureStore
+
+                db_path = str(
+                    os.environ.get("FEATURE_STORE_DB_PATH")
+                    or store_cfg.get("db_path")
+                    or (self.cfg.get("general") or {}).get(
+                        "db_path", "data/market_data_mt5.sqlite"
+                    )
+                )
+                self._feature_store = FeatureStore(db_path)
+            snapshot_id, _ = self._feature_store.compute_and_store(
+                symbol=self.asset_key,
+                timeframe=self.timeframe,
+                bar_ts=int(bar_ts_utc_seconds) * 1000,
+                features=feature_dict,
+            )
+            return snapshot_id
+        except Exception as exc:  # pragma: no cover - defensive fail-open
+            logger.warning(
+                "[%s] feature snapshot store failed (continuing): %s",
+                self.asset_key, exc,
+            )
+            return None
 
     def _apply_book_gate(self, signal, feats: dict) -> dict:
         """Live book overlay: veto or confidence boost (mutates ``signal``).

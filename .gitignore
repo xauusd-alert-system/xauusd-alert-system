@@ -43,6 +43,9 @@ compact_project_code.pdf
 
 # Version stub files (e.g. "2.4.0" dropped by some package managers)
 [0-9]*.*
+# ...but versioned DB migration modules (data/migrations/001_initial.py etc.)
+# are real source files, not stubs.
+!data/migrations/*.py
 
 # One-off local migration/patch script
 fix_ingestion.py
