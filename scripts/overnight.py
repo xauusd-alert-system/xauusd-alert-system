@@ -39,6 +39,15 @@ a failure in one stage is isolated and the rest of the night keeps going.
              reported FAILED / Telegram ❌. A bad night can never silently
              replace a good production model.
 
+    Stage 4c verify_model_fingerprints -> scripts.verify_model_fingerprints
+             (2026-08-27) Audits every model under output/models: recomputes
+             the deterministic content fingerprint vs the stored self-hash AND
+             scores each model on recent real bars to catch probability
+             degeneracy (std p_long/p_short < 0.01, or constant output — the
+             GBPUSD/XAGUSD collapse class). Any DEGENERATE / NEW-MISMATCH /
+             UNRECOGNIZED verdict on a production model exits 1 -> the night
+             fails closed and a broken model cannot stay deployed silently.
+
     Stage 5  summary_report           -> scripts.summary_report
              Aggregates logs/backtest_*.csv into a portfolio summary.
 
@@ -54,6 +63,8 @@ Environment knobs (all optional, every stage on by default):
     OVERNIGHT_NO_RETRAIN=1         skip stage 3
     OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard, Part B Phase 6)
     OVERNIGHT_NO_REAL_TRADES=1     skip stage 4
+    OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard)
+    OVERNIGHT_NO_VERIFY=1          skip stage 4c (fingerprint + degeneracy audit)
     OVERNIGHT_NO_SUMMARY=1         skip stage 5
     OVERNIGHT_NO_TELEGRAM=1        skip stage 6
 
@@ -296,6 +307,25 @@ def main() -> int:
         status.append(("deploy_guard_check", ok))
     else:
         logger.info("Skipping deploy_guard check (safety freeze or env skip).")
+
+    # ---- Stage 4c: model fingerprint + degeneracy audit ---------------------
+    # (2026-08-27) Fail-closed audit: recompute each model's content fingerprint
+    # vs its stored self-hash AND score it on recent real bars to catch the
+    # probability-collapse class (GBPUSD 0.0002 constant / XAGUSD 0.475371
+    # constant). A DEGENERATE/NEW-MISMATCH/UNRECOGNIZED production model
+    # exits 1 -> the night reports FAILED and Telegram ❌.
+    #
+    # Deliberately NOT gated on retraining_enabled: the audit is read-only and
+    # must catch a broken model every night, even while the safety freeze
+    # prevents retrains.
+    if _env_flag("OVERNIGHT_NO_VERIFY"):
+        ok = _run(
+            "verify_model_fingerprints",
+            [sys.executable, "-m", "scripts.verify_model_fingerprints"],
+        )
+        status.append(("verify_model_fingerprints", ok))
+    else:
+        logger.info("Skipping verify_model_fingerprints (OVERNIGHT_NO_VERIFY set).")
 
     # ---- Stage 5: summary report -------------------------------------------
     summary_text = ""

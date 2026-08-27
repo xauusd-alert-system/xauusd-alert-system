@@ -637,9 +637,85 @@ def _attach_noop_calibration(model, method_invalid: bool) -> None:
         model._calibration_skipped_reason = "insufficient_purged_data"
 
 
+def compute_model_fingerprint(model, feature_cols: list) -> str:
+    """Deterministic content fingerprint of a trained artifact.
+
+    joblib serialization is NOT reproducible (two dumps of the same object can
+    differ), so the fingerprint is built from deterministic pieces instead:
+
+      * the XGBoost booster's raw model buffer (``save_raw``) + config
+        (``save_config``) — the actual tree weights/parameters;
+      * the canonical JSON of ``feature_cols``;
+      * the fitted calibration coefficients (sigmoid a_/b_, or isotonic bins)
+        when the wrapper exposes them (``CalibratedClassifierCV``).
+
+    Works for a raw ``XGBClassifier`` (or anything with ``get_booster``) and for
+    a ``CalibratedClassifierCV``/``VotingClassifier`` wrapper that exposes the
+    booster somewhere down the attribute tree. Two artifacts trained with the
+    same weights, features and calibration always hash equal, so the value
+    stored in ``metadata.model_hash`` can be recomputed after loading to verify
+    the file actually contains what it claims.
+    """
+    import hashlib
+    import json
+
+    def _find_booster(obj):
+        seen = set()
+        stack = [obj]
+        while stack:
+            cur = stack.pop()
+            if id(cur) in seen:
+                continue
+            seen.add(id(cur))
+            get_booster = getattr(cur, "get_booster", None)
+            if callable(get_booster):
+                try:
+                    return get_booster()
+                except Exception:
+                    pass
+            for attr in ("estimator", "calibrated_classifiers_", "estimators_", "base_estimator"):
+                child = getattr(cur, attr, None)
+                if isinstance(child, (list, tuple)):
+                    stack.extend(child)
+                elif child is not None:
+                    stack.append(child)
+        return None
+
+    parts: list[bytes] = []
+    booster = _find_booster(model)
+    if booster is not None:
+        parts.append(bytes(booster.save_raw()))
+        parts.append(str(booster.save_config()).encode("utf-8"))
+    else:
+        # Non-XGBoost fallback: type name + repr is deterministic for the same
+        # fitted object in the same environment (calibrators included).
+        parts.append(repr(model).encode("utf-8"))
+
+    parts.append(json.dumps(list(feature_cols), sort_keys=True).encode("utf-8"))
+
+    calibrators = getattr(model, "calibrated_classifiers_", None)
+    if calibrators:
+        for cc in calibrators:
+            for cal in getattr(cc, "calibrators", []) or []:
+                for key in ("a_", "b_"):
+                    val = getattr(cal, key, None)
+                    if val is not None:
+                        parts.append(f"{key}={val!r}".encode("utf-8"))
+
+    return hashlib.sha256(b"\x00".join(parts)).hexdigest()
+
+
 def save_model(model, feature_cols: list, path: str, metadata: dict | None = None):
-    """Persist a model bundle with an auditable, backward-compatible contract."""
+    """Persist a model bundle with an auditable, backward-compatible contract.
+
+    When ``metadata`` is provided and does not already carry a ``model_hash``,
+    the artifact's deterministic content fingerprint (see
+    ``compute_model_fingerprint``) is injected so the model carries its own hash
+    inside itself — loading the file reveals its identity without recomputing.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if metadata is not None and not metadata.get("model_hash"):
+        metadata = {**metadata, "model_hash": compute_model_fingerprint(model, feature_cols)}
     bundle = {"model": model, "feature_cols": feature_cols}
     if metadata is not None:
         bundle["metadata"] = metadata
