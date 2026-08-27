@@ -7,8 +7,8 @@ Programming for Traders» — оба анализа в `docs/analysis/`.
 
 **Итог: 15 задач закрыто полностью, 10 сделано в коде с оговоркой о
 контрольной сборке в MetaEditor, 1 отложена по условию самого ТЗ (T-24).
-Регресс тестов не сломан: все падения, находимые в затронутых пакетах,
-воспроизводятся на чистом дереве до интеграции.**
+Регресс: ПОЛНЫЙ тест-набор проекта — 1107 passed / 0 failed / 1 skip
+(skip — vendor-дерево NeuroBook не скачано, так задумано тестом).**
 
 **Дополнение (2026-08-28, вечер): эксперименты на РЕАЛЬНЫХ данных
 разблокированы** — импортирован публичный датасет XAUUSD M15 2004–2025
@@ -23,6 +23,15 @@ end-to-end: `scripts/publish_book_signals.py` (модели → `ensemble_vote` 
 (`run_book_ensemble_backtest.py`: 65 сделок, PF 1.24, WR 41.5% → FAIL),
 extended-фичи T-19 (edge не дали, но вскрыли и починили 2 бага фичесета,
 которые синтетика не ловила). подробности — 3.4–3.6.
+
+**Дополнение 3: регресс поднят в полный зелёный.** Починены все 12
+предсуществующих падений (10 в затронутых пакетах + 2 в дирах вне прежней
+выборки), существовавших до интеграции книг: застарелые тест-фикстуры
+(`object.__new__` без `trade_throttle`/`strategy_identity`), стаб без
+нового kwarg `quiet_market_closed`, замагиченное число фич 46 (стало 49),
+застарелые контракты (stop_mult 2.0→1.5 по OWNER REQUEST 2026-08-20;
+частичный анфриз 3 активов 2026-08-27). Продакшн-код не менялся —
+правились только тесты под задокументированные решения владельца.
 
 ---
 
@@ -259,13 +268,33 @@ scripts/tests/test_book_realdata_scripts.py       11  (T-23 drift-отчёт, T-
 Градиентные проверки (`model/book_nn`): FC 2.5e-8, LSTM 6.4e-8, GPT
 4.73e-8, MHA ≤3.66e-5 (6 seed'ов, tol 1e-4), композит MHA+LSTM+FC 1.06e-5.
 
-**Регресс:** полный прогон затронутых пакетов — 816 passed / 10 failed / 1 skipped;
-все 10 падений (`execution/test_close_notification*`, `test_breakeven_legs*`,
-`test_blackout*`, `scripts/test_audit_final_batch*`,
-`scripts/test_diag_r_metrics*`) воспроизводятся на чистом дереве до
-интеграции (проверено git-stash) — это существующие проблемы
-`MultiAssetMT5Trader` (нет `trade_throttle`/`strategy_identity` в тестовом
-пути инициализации), не связанные с задачами книг.
+**Регресс: полный тест-набор проекта — 1107 passed / 0 failed / 1 skipped**
+(18 тест-дир: alerts, backtest, config, contracts, data, execution,
+features, labeling, logs, model, model/book_nn, mql5, paper, realtime,
+regime, scripts, tests; skip — vendor NeuroBook не скачано). Из них 12
+падений были предсуществующими (воспроизводились на чистом дереве
+cb5ce46 до интеграции, проверено git-worktree) и ПОЧИНЕНЫ в рамках
+дочистки регресса:
+
+* `execution/test_close_notification*`, `test_breakeven_legs*` — фикстуры
+  строили трейдер через `object.__new__` и не задавали появившиеся позже
+  атрибуты `trade_throttle` (реальный `TradeThrottle` с tmp state) и
+  `strategy_identity` (леджер событий);
+* `execution/test_blackout*` — стаб `_close_partial_position` не принимал
+  добавленный kwarg `quiet_market_closed`;
+* `scripts/test_audit_final_batch*`, `test_diag_r_metrics*` — замагиченное
+  число фич 46 (список вырос до 49: `break_score`, `break_intensity`,
+  `agent_long_ratio`); теперь сверяется с `len(FEATURE_COLUMNS)`;
+* `realtime/test_pipeline*` — тест хардкодил stop=2×step, а
+  OWNER REQUEST 2026-08-20 перенёс stop_mult 2.0→1.5 (XAUUSD); теперь
+  проверяется соответствие сконфигурированному гриду;
+* `tests/test_safety_freeze*` — тест требовал deny-all вне trial-окна,
+  а владелец 2026-08-27 (cb5ce46) сознательно включил 3 демо-актива;
+  теперь проверяется точная синхронизация `execution.enabled_assets` с
+  `assets.*.enabled=true` (контракт `deploy_guard.check_config_sync`).
+
+Продакшн-код при этом не менялся: все правки — приведение тестов к
+задокументированным решениям владельца (комментарии в config.yaml).
 
 Контрактные тесты MQL5↔Python фиксируют: порядок 7 фич
 (`FeatureEngine` == `FEATURE_COLUMNS_BASE`), колонки/статусы/версию схемы

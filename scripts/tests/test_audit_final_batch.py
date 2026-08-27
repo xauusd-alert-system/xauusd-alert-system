@@ -232,13 +232,17 @@ def test_feature_selection_run(synthetic_gbp_df):
     from config.loader import load_config
     from scripts.feature_selection import run_feature_selection
     from labeling.label_generator import generate_labels_from_config
+    from model.trainer import FEATURE_COLUMNS
     cfg = load_config()
     df = synthetic_gbp_df.copy()
     if "label" not in df.columns:
         df["label"] = generate_labels_from_config(df, cfg)
     d = run_feature_selection(cfg, "GBPUSD", df,
                               max_features=5, n_splits=3, n_permute=2)
-    assert d["n_features_total"] == 46
+    # the feature list grew after these tests were written (46 -> 49 with
+    # break_score/break_intensity/agent_long_ratio); pin consistency with
+    # the source of truth instead of a stale magic number
+    assert d["n_features_total"] == len(FEATURE_COLUMNS)
     assert len(d["mda_rank"]) > 0
     assert len(d["suggested_subset"]) <= 5
     assert len(d["clustered"]) > 0

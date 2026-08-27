@@ -38,6 +38,15 @@ def _trader(tmp_path, active):
     t.bot = _FakeBot()
     t.management_state_path = str(tmp_path / "mgmt_state.json")
     t.trade_db_path = str(tmp_path / "trades.sqlite")
+    # attributes the close path acquired after these fixtures were written
+    # (TradeThrottle counters + strategy identity for the event ledger)
+    from execution.trade_throttle import TradeThrottle
+    t.cfg = {}
+    t.trade_throttle = TradeThrottle(
+        {}, state_path=str(tmp_path / "risk_throttle_state.json"))
+    t.strategy_identity = {"strategy_version": "test",
+                           "strategy_spec_hash": "test-spec",
+                           "config_hash": "test-cfg", "model_hash": None}
     return t
 
 

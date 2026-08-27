@@ -175,11 +175,17 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
     step = abs(tp1 - entry)
     assert step > 0
     assert result["step"] > 0
-    # rounding to 2 decimals gives ~0.01 tolerance per level
-    # Owner template (2026-08-18): TP1=1, TP2=2, TP3=3, Stop=2.
-    assert abs(abs(tp2 - entry) - 2.0 * step) < 0.05
-    assert abs(abs(tp3 - entry) - 3.0 * step) < 0.05
-    assert abs(abs(result["invalidation"] - entry) - 2.0 * step) < 0.05
+    # rounding to 2 decimals gives ~0.01 tolerance per level.
+    # The pipeline must honor the CONFIGURED equal-step grid, not a hardcoded
+    # template: owner template (2026-08-18) was TP1=1/TP2=2/TP3=3/Stop=2,
+    # then OWNER REQUEST 2026-08-20 moved stop_mult 2.0 -> 1.5 (cut the
+    # oversized loss tail; see config.yaml assets.XAUUSD.signal_grid).
+    from model.ensemble_backtest import get_signal_grid
+    grid = get_signal_grid(CFG, CFG.get("assets", {}).get("XAUUSD", {}))
+    assert abs(abs(tp2 - entry) - grid["tp2_mult"] * step) < 0.05
+    assert abs(abs(tp3 - entry) - grid["tp3_mult"] * step) < 0.05
+    assert abs(abs(result["invalidation"] - entry)
+               - grid["stop_mult"] * step) < 0.05
 
 
 # ---------------------------------------------------------------------------

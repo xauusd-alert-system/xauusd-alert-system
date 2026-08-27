@@ -22,18 +22,23 @@ def _trial_active() -> bool:
 
 
 def test_geometry_revalidation_safety_freeze_is_fail_closed():
-    """Fail-closed default: retraining stays off and no asset may trade while
-    the geometry-revalidation freeze is in force. The owner's 48h demo trial
-    (scripts/trial_window.py) is the ONLY documented exception: it explicitly
-    unfreezes all 5 assets until the auto-revert deadline. The test asserts
-    the config matches whichever contract is currently active, so a config
-    that drifts from the trial window (or a trial that fails to revert) fails
-    loudly."""
+    """Fail-closed default: retraining stays off and execution stays in sync
+    with the deliberately enabled models. The owner's 48h demo trial
+    (scripts/trial_window.py) unfreezes all 5 assets until the auto-revert
+    deadline. Outside a trial, execution.enabled_assets must exactly mirror
+    assets.*.enabled=true (the deploy_guard.check_config_sync contract): the
+    2026-08-27 owner decision re-enabled the 3 demo assets whose models are
+    enabled and dropped the XAGUSD/GBPUSD phantoms. Any drift from either
+    contract fails loudly."""
     cfg = load_config()
     assert cfg["retraining"]["enabled"] is False
     assert cfg["retraining"]["schedule"]["enabled"] is False
     if _trial_active():
         assert cfg["execution"]["enabled_assets"] == TRIAL_ASSETS
     else:
-        assert cfg["execution"]["enabled_assets"] == []
+        # 2026-08-27 (cb5ce46): partial unfreeze by the owner — the guard is
+        # now exact sync with the enabled-model set, not the old deny-all
+        enabled_models = sorted(a for a, c in cfg["assets"].items()
+                                if c.get("enabled"))
+        assert sorted(cfg["execution"]["enabled_assets"]) == enabled_models
     assert configured_execution_assets(cfg) == set(cfg["execution"]["enabled_assets"])
