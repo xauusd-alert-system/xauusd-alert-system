@@ -46,6 +46,7 @@ Example::
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone  # noqa: F401 — re-exported for tests
 from typing import Optional
 
 from risk.limits import RiskLimits
@@ -89,10 +90,17 @@ class RiskEngine:
         The HWM ratchets upward only (never resets on a calendar-day change),
         so a throttle level stays engaged until equity makes a new high.
         """
-        if equity <= 0 or self.state.hwm is None:
+        if equity <= 0:
             return True, "OK"
-        self.state.update_hwm(equity)
-        dd = equity / self.state.hwm - 1.0
+        prev_hwm = self.state.hwm
+        self.state.update_hwm(equity)  # ratchets upward only
+        # Persist the ratchet immediately (P1-7: HWM survives restarts).
+        if prev_hwm is None or self.state.hwm != prev_hwm:
+            self.state.save()
+        if prev_hwm is None:
+            # First observation: no drawdown to measure yet.
+            return True, "OK"
+        dd = equity / prev_hwm - 1.0
         mult = drawdown_throttle(dd)
         if mult <= 0.0 or dd <= _NO_ENTRY_DD:
             return False, (
