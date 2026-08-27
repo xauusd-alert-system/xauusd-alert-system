@@ -57,6 +57,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger("control_bot")
 
 
+def parse_admin_ids(raw: str | None) -> frozenset[str]:
+    """ТЗ 10.3: parse ``TELEGRAM_ADMIN_IDS`` (comma-separated user/chat ids).
+
+    Tolerates whitespace and trailing commas; non-numeric entries are dropped
+    (they can never match a Telegram chat id, so keeping them would be
+    misleading). Empty/None -> empty whitelist (fail-closed unchanged).
+    """
+    if not raw:
+        return frozenset()
+    ids: set[str] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(part)
+    return frozenset(ids)
+
+
 class TelegramControlBot:
     """Long-polling Telegram bot that controls a running MultiAssetMT5Trader."""
 
@@ -73,6 +90,12 @@ class TelegramControlBot:
             get_env("TELEGRAM_ADMIN_CHAT_ID", required=False)
             or get_env("TELEGRAM_CHAT_ID", required=False)
             or ""
+        )
+        # ТЗ 10.3: additional admin whitelist (comma-separated ids). The
+        # single admin chat above stays authoritative; the whitelist only
+        # EXTENDS access, never relaxes the fail-closed no-config refusal.
+        self.admin_ids: frozenset[str] = parse_admin_ids(
+            get_env("TELEGRAM_ADMIN_IDS", required=False)
         )
         self._base = f"https://api.telegram.org/bot{self.token}"
         self._offset: int = 0
@@ -232,13 +255,21 @@ class TelegramControlBot:
         # (like /closeall, /pause, /resume) must NOT be allowed for anyone.
         # Allow-all here is a dangerous fail-open that would let any Telegram
         # user shut down or close all positions of the live trader.
-        if not self.admin_id:
+        if not self.admin_id and not self.admin_ids:
             logger.warning(
-                "Telegram admin not configured (TELEGRAM_ADMIN_CHAT_ID/TELEGRAM_CHAT_ID "
-                "empty) - refusing mutating command from chat_id=%s", chat_id
+                "Telegram admin not configured (TELEGRAM_ADMIN_CHAT_ID/TELEGRAM_CHAT_ID/"
+                "TELEGRAM_ADMIN_IDS empty) - refusing mutating command from chat_id=%s",
+                chat_id,
             )
             return False
-        return chat_id == self.admin_id
+        if chat_id == self.admin_id or chat_id in self.admin_ids:
+            return True
+        if self.admin_ids:
+            logger.warning(
+                "Unauthorized Telegram command from chat_id=%s (not in TELEGRAM_ADMIN_IDS "
+                "and not the admin chat)", chat_id,
+            )
+        return False
 
     # ------------------------------------------------------------------
     # Individual command handlers
