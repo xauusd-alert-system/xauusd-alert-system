@@ -36,6 +36,16 @@ LABEL_EVENTS = ("barrier", "traded")
 # generate_labels_traded_direction for why both exist.
 TRADED_ENCODINGS = ("binary01", "pm1")
 
+# P2-41 / TZ 9.x: version of the labeling OUTPUT format produced by this
+# module. Any change to the label semantics (barrier rules, traded-event
+# resolution, encoding mapping, same-candle ambiguity policy) MUST bump this
+# constant and be recorded in docs/MIGRATIONS.md — labels trained against one
+# version must never be mixed silently with another. The label Series carries
+# no per-row version column (labels are offline artifacts keyed by bar
+# timestamp + asset), so callers who persist labeled datasets should store
+# this value alongside them (e.g. in the training metadata bundle).
+LABELING_SCHEMA_VERSION = "labels.v1"
+
 
 def resolve_label_event(cfg: dict) -> str:
     """Return the configured labeling.event, validated.
