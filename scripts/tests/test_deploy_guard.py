@@ -300,6 +300,14 @@ def test_rejected_asset_is_rolled_back_and_backup_removed(tmp_path, monkeypatch)
     bak.write_bytes(b"good-incumbent")
 
     cfg = _cfg(tmp_path, model_path=str(mp))
+    # Registry pre-flight mocked OK: this test covers the rollback mechanics,
+    # not the registry (see model/tests/test_registry.py).
+    monkeypatch.setattr(
+        dg, "registry_preflight_check",
+        lambda cfg_, asset, path, registry=None: {"ok": True,
+                                                  "reason": "registered_and_verified",
+                                                  "registry_id": "XAUUSD-M5-test"},
+    )
     monkeypatch.setattr(
         dg, "guard_asset",
         staticmethod(lambda cfg_, asset, bak_: {"deploy": False, "reason": "regressed_beyond_tolerance"}),
@@ -324,6 +332,14 @@ def test_ok_asset_keeps_new_model_and_removes_backup(tmp_path, monkeypatch):
     bak.write_bytes(b"good-incumbent")
 
     cfg = _cfg(tmp_path, model_path=str(mp))
+    # Registry pre-flight (ТЗ 8.4) is mocked: this test covers the deploy
+    # decision/backup mechanics, not the registry (see model/tests/test_registry.py).
+    monkeypatch.setattr(
+        dg, "registry_preflight_check",
+        lambda cfg_, asset, path, registry=None: {"ok": True,
+                                                  "reason": "registered_and_verified",
+                                                  "registry_id": "XAUUSD-M5-test"},
+    )
     monkeypatch.setattr(
         dg, "guard_asset",
         staticmethod(lambda cfg_, asset, bak_: {"deploy": True, "reason": "ok"}),
@@ -331,6 +347,7 @@ def test_ok_asset_keeps_new_model_and_removes_backup(tmp_path, monkeypatch):
     decisions, failed = dg.validate_and_deploy(cfg)
     assert failed is False
     assert decisions[0]["deploy"] is True
+    assert decisions[0]["registry_id"] == "XAUUSD-M5-test"
     assert mp.read_bytes() == b"new-nightly-model"
     assert not os.path.exists(bak)
 
@@ -356,6 +373,13 @@ def test_guard_error_rolls_back_and_marks_failed(tmp_path, monkeypatch):
     bak.write_bytes(b"good-incumbent")
 
     cfg = _cfg(tmp_path, model_path=str(mp))
+    # Registry pre-flight mocked OK: this test exercises the generic error path.
+    monkeypatch.setattr(
+        dg, "registry_preflight_check",
+        lambda cfg_, asset, path, registry=None: {"ok": True,
+                                                  "reason": "registered_and_verified",
+                                                  "registry_id": "XAUUSD-M5-test"},
+    )
     monkeypatch.setattr(
         dg, "guard_asset",
         staticmethod(lambda cfg_, asset, bak_: (_ for _ in ()).throw(RuntimeError("boom"))),
