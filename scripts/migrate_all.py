@@ -36,6 +36,17 @@ logger = logging.getLogger("migrate_all")
 
 
 # --------------------------------------------------------------------------
+# Per-table schema versioning (logical table families)
+# --------------------------------------------------------------------------
+
+# Logical table families versioned independently of the global
+# ``schema_migrations`` runner. Each family has its own migration line in
+# ``data/migrations/<name>/NNN_*.py`` and its own version recorded in the
+# ``table_versions`` bookkeeping table.
+PER_TABLE_FAMILIES = ("candles", "trade_groups", "trading_event_ledger")
+
+
+# --------------------------------------------------------------------------
 # Known database paths (project conventions)
 # --------------------------------------------------------------------------
 
@@ -143,14 +154,67 @@ def registry_check(db_path: str) -> RegistryCheckResult:
 # --------------------------------------------------------------------------
 
 
+def run_per_table_migrations(
+    db_path: str,
+    dry_run: bool = False,
+) -> str:
+    """Run per-table migrations for all known families on ``db_path``.
+
+    Returns a human-readable summary. ``dry_run`` reports pending migrations
+    without touching the database at all (the ``table_versions`` bookkeeping
+    table is not even created).
+    """
+    from data.migrate import (
+        get_table_version,
+        load_table_migrations,
+        migrate_table,
+        pending_table_migrations,
+    )
+    from data.storage import get_connection
+
+    conn = sqlite3.connect(db_path) if dry_run else get_connection(db_path)
+    try:
+        if not dry_run:
+            conn.execute("PRAGMA journal_mode=WAL;")
+        lines: list[str] = []
+        total_pending = 0
+        for table in PER_TABLE_FAMILIES:
+            migrations = load_table_migrations(table)
+            if not migrations:
+                continue
+            if dry_run:
+                pending = pending_table_migrations(conn, table)
+                total_pending += len(pending)
+                lines.append(
+                    f"  {table}: v{get_table_version(conn, table)} -> "
+                    f"v{max(m.version for m in migrations)}, "
+                    f"{len(pending)} pending"
+                )
+                for migration in pending:
+                    lines.append(f"    {migration.version:>4}  {migration.name}")
+            else:
+                applied = migrate_table(conn, table)
+                lines.append(
+                    f"  {table}: v{get_table_version(conn, table)}, "
+                    f"applied {len(applied)}"
+                )
+                for migration in applied:
+                    lines.append(f"    {migration.version:>4}  {migration.name}")
+        if dry_run:
+            return f"dry-run: {total_pending} per-table migration(s) pending"
+        return "per-table migrations up to date"
+    finally:
+        conn.close()
+
+
 def run_migrate_all(
     db_paths: Sequence[str] | None = None,
     dry_run: bool = False,
 ) -> list[tuple[str, bool, str]]:
-    """Run DB migrations + registry checks. Returns (db_path, ok, summary).
+    """Run DB migrations (global + per-table) + registry checks.
 
-    ``dry_run``: report pending migrations and run registry checks without
-    applying anything.
+    Returns (db_path, ok, summary). ``dry_run``: report pending migrations
+    and run registry checks without applying anything.
     """
     from data.migrate import apply_migrations, pending_migrations
 
@@ -164,13 +228,14 @@ def run_migrate_all(
                 summary = f"dry-run: would apply {len(pending)} migration(s) to {db_path}"
                 for migration in pending:
                     summary += f"\n  {migration.version:>4}  {migration.name}"
-                results.append((db_path, True, summary))
             else:
                 applied = apply_migrations(db_path)
                 summary = f"applied {len(applied)} migration(s) to {db_path}"
                 for migration in applied:
                     summary += f"\n  {migration.version:>4}  {migration.name}"
-                results.append((db_path, True, summary))
+            # Per-table families (never raises on dry-run read-only path).
+            summary += "\n" + run_per_table_migrations(db_path, dry_run=dry_run)
+            results.append((db_path, True, summary))
         except Exception as exc:
             results.append((db_path, False, f"migration error: {exc}"))
 

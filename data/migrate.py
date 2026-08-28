@@ -73,13 +73,17 @@ def load_builtin_migrations() -> list[Migration]:
 
     Every public submodule must expose ``VERSION``, ``NAME`` and ``apply``.
     Duplicate versions raise immediately — they are always a bug.
+
+    Per-table migration packages (subdirectories such as ``candles/`` hosting
+    per-table migrations, see :func:`load_table_migrations`) are skipped here:
+    only top-level *modules* are global migrations.
     """
     import data.migrations as package
 
     migrations: list[Migration] = []
     seen: dict[int, str] = {}
     for module_info in sorted(pkgutil.iter_modules(package.__path__), key=lambda m: m.name):
-        if module_info.name.startswith("_"):
+        if module_info.name.startswith("_") or module_info.ispkg:
             continue
         module = importlib.import_module(f"data.migrations.{module_info.name}")
         version = int(module.VERSION)
@@ -235,6 +239,168 @@ def main(argv: Sequence[str] | None = None) -> int:
     for migration in applied:
         print(f"  {migration.version:>4}  {migration.name}")
     return 0
+
+
+# ==========================================================================
+# Per-table schema versioning
+# ==========================================================================
+#
+# The global ``schema_migrations`` table versions the WHOLE database. This
+# section adds a finer-grained mechanism: every logical table family keeps
+# its own version in ``table_versions(table_name, version)`` and its own
+# migration line in ``data/migrations/<table_name>/NNN_*.py`` modules.
+#
+# Conventions for per-table migration modules:
+#
+# * located in ``data/migrations/<table_name>/``;
+# * module name ``NNN_<slug>.py`` where ``NNN`` matches ``VERSION``;
+# * must expose ``VERSION: int``, ``NAME: str``, ``up(conn)`` and ``down(conn)``;
+# * ``up`` is applied inside a ``BEGIN IMMEDIATE`` transaction together with
+#   the version record — atomic apply+record like the global runner.
+
+import os
+
+TABLE_VERSIONS_TABLE = "table_versions"
+
+TABLE_VERSIONS_TABLE_SQL = f"""
+CREATE TABLE IF NOT EXISTS {TABLE_VERSIONS_TABLE} (
+    table_name TEXT PRIMARY KEY,
+    version INTEGER NOT NULL
+)
+"""
+
+
+@dataclass(frozen=True)
+class TableMigration:
+    """One versioned migration for a single logical table family."""
+
+    version: int
+    name: str
+    up: Callable[[sqlite3.Connection], None]
+    down: Callable[[sqlite3.Connection], None]
+
+
+def _ensure_table_versions_table(conn: sqlite3.Connection) -> None:
+    conn.execute(TABLE_VERSIONS_TABLE_SQL)
+    conn.commit()
+
+
+def get_table_version(conn: sqlite3.Connection, table: str) -> int:
+    """Current recorded schema version of ``table``; 0 if never versioned.
+
+    Does NOT create the bookkeeping table — a database that was never
+    touched by the per-table runner simply reports version 0. This keeps
+    dry-run runs read-only.
+    """
+    existing = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if TABLE_VERSIONS_TABLE not in existing:
+        return 0
+    row = conn.execute(
+        f"SELECT version FROM {TABLE_VERSIONS_TABLE} WHERE table_name = ?", (table,)
+    ).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def set_table_version(conn: sqlite3.Connection, table: str, version: int) -> None:
+    """Record ``version`` as the current schema version of ``table``.
+
+    Must be called inside the caller's transaction (or committed explicitly
+    by a caller that is not migrating).
+    """
+    conn.execute(TABLE_VERSIONS_TABLE_SQL)
+    conn.execute(
+        f"INSERT INTO {TABLE_VERSIONS_TABLE} (table_name, version) VALUES (?, ?) "
+        "ON CONFLICT(table_name) DO UPDATE SET version = excluded.version",
+        (table, int(version)),
+    )
+
+
+def load_table_migrations(table: str) -> list[TableMigration]:
+    """Discover per-table migrations in ``data/migrations/<table>/``.
+
+    Every public submodule must expose ``VERSION``, ``NAME``, ``up`` and
+    ``down``. Duplicate versions raise immediately — they are always a bug.
+    Returns migrations ordered by version.
+    """
+    import data.migrations as package
+
+    subpath = os.path.join(package.__path__[0], table)
+    if not os.path.isdir(subpath):
+        return []
+
+    migrations: list[TableMigration] = []
+    seen: dict[int, str] = {}
+    for module_info in sorted(pkgutil.iter_modules([subpath]), key=lambda m: m.name):
+        if module_info.name.startswith("_"):
+            continue
+        module = importlib.import_module(f"data.migrations.{table}.{module_info.name}")
+        version = int(module.VERSION)
+        name = str(module.NAME)
+        if version in seen:
+            raise RuntimeError(
+                f"duplicate per-table migration version {version} for {table!r}: "
+                f"{seen[version]!r} and {module_info.name!r}"
+            )
+        seen[version] = module_info.name
+        migrations.append(
+            TableMigration(version=version, name=name, up=module.up, down=module.down)
+        )
+    return migrations
+
+
+def pending_table_migrations(
+    conn: sqlite3.Connection,
+    table: str,
+    target: int | None = None,
+) -> list[TableMigration]:
+    """Per-table migrations not yet applied, ordered by version.
+
+    ``target`` limits the result to versions ``<= target`` (``None`` = all).
+    Read-only: never creates the bookkeeping table.
+    """
+    current = get_table_version(conn, table)
+    return [
+        m
+        for m in load_table_migrations(table)
+        if m.version > current and (target is None or m.version <= target)
+    ]
+
+
+def migrate_table(
+    conn: sqlite3.Connection,
+    table: str,
+    target: int | None = None,
+    dry_run: bool = False,
+) -> list[TableMigration]:
+    """Bring ``table`` to the latest (or ``target``) per-table schema version.
+
+    Applies pending migrations in version order. Each migration runs inside a
+    ``BEGIN IMMEDIATE`` transaction together with its ``table_versions``
+    record — a crash can never leave a migration applied-but-unrecorded or
+    the reverse.
+
+    ``dry_run=True`` returns what WOULD be applied without touching the
+    database at all (no bookkeeping table is even created).
+    """
+    pending = pending_table_migrations(conn, table, target)
+    if dry_run or not pending:
+        return [] if dry_run else list(pending)
+
+    applied: list[TableMigration] = []
+    for migration in sorted(pending, key=lambda m: m.version):
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            migration.up(conn)
+            set_table_version(conn, table, migration.version)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        applied.append(migration)
+    return applied
 
 
 if __name__ == "__main__":
