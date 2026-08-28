@@ -6,6 +6,7 @@ Provides an abstract BrokerAdapter interface and concrete implementations for:
 - Mock FIX Protocol (Financial Information eXchange adapter)
 - cTrader Open API compatible adapter
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,9 +93,7 @@ class BaseBrokerAdapter(ABC):
         pass
 
     @abstractmethod
-    def modify_position(
-        self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None
-    ) -> OrderResult:
+    def modify_position(self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None) -> OrderResult:
         """Modify SL/TP of an open position."""
         pass
 
@@ -114,10 +113,17 @@ class BaseBrokerAdapter(ABC):
         touching MT5."""
         return {
             "symbol": symbol,
-            "symbol_point": 0.0, "tick_size": 0.0, "digits": 0,
-            "trade_stops_level": 0, "trade_freeze_level": 0, "spread": 0.0,
-            "contract_size": 0.0, "volume_min": 0.0, "volume_max": 0.0,
-            "volume_step": 0.0, "execution_mode": "unknown",
+            "symbol_point": 0.0,
+            "tick_size": 0.0,
+            "digits": 0,
+            "trade_stops_level": 0,
+            "trade_freeze_level": 0,
+            "spread": 0.0,
+            "contract_size": 0.0,
+            "volume_min": 0.0,
+            "volume_max": 0.0,
+            "volume_step": 0.0,
+            "execution_mode": "unknown",
             "account_margin_mode": self.get_account_mode(),
             "available": False,
         }
@@ -128,6 +134,7 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
 
     def __init__(self):
         from mt5_adapter.lazy import get_mt5_module
+
         # ТЗ 8.6: module resolution (real package, shim, dotted fallback)
         # consolidated into mt5_adapter.lazy.
         self.mt5 = get_mt5_module()
@@ -162,18 +169,20 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
         res = []
         for p in raw:
             dir_str = "buy" if p.type == 0 else "sell"
-            res.append(PositionSnapshot(
-                ticket=int(p.ticket),
-                symbol=str(p.symbol),
-                direction=dir_str,
-                volume=float(p.volume),
-                open_price=float(p.price_open),
-                current_price=float(p.price_current),
-                sl=float(p.sl) if p.sl else None,
-                tp=float(p.tp) if p.tp else None,
-                profit=float(p.profit),
-                magic=int(getattr(p, "magic", 0)),
-            ))
+            res.append(
+                PositionSnapshot(
+                    ticket=int(p.ticket),
+                    symbol=str(p.symbol),
+                    direction=dir_str,
+                    volume=float(p.volume),
+                    open_price=float(p.price_open),
+                    current_price=float(p.price_current),
+                    sl=float(p.sl) if p.sl else None,
+                    tp=float(p.tp) if p.tp else None,
+                    profit=float(p.profit),
+                    magic=int(getattr(p, "magic", 0)),
+                )
+            )
         return res
 
     def open_market_order(
@@ -248,11 +257,13 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
         res = self.mt5.order_send(req)
         if res and res.retcode == self.mt5.TRADE_RETCODE_DONE:
             return OrderResult(success=True, ticket=res.order, price=price, retcode=res.retcode)
-        return OrderResult(success=False, comment=getattr(res, "comment", "failed"), retcode=getattr(res, "retcode", -1) if res else -1)
+        return OrderResult(
+            success=False,
+            comment=getattr(res, "comment", "failed"),
+            retcode=getattr(res, "retcode", -1) if res else -1,
+        )
 
-    def modify_position(
-        self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None
-    ) -> OrderResult:
+    def modify_position(self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None) -> OrderResult:
         positions = self.mt5.positions_get(ticket=ticket)
         if not positions:
             return OrderResult(success=False, comment=f"Position {ticket} not found")
@@ -267,7 +278,11 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
         res = self.mt5.order_send(req)
         if res and res.retcode == self.mt5.TRADE_RETCODE_DONE:
             return OrderResult(success=True, ticket=ticket, retcode=res.retcode)
-        return OrderResult(success=False, comment=getattr(res, "comment", "modify failed"), retcode=getattr(res, "retcode", -1) if res else -1)
+        return OrderResult(
+            success=False,
+            comment=getattr(res, "comment", "modify failed"),
+            retcode=getattr(res, "retcode", -1) if res else -1,
+        )
 
     def get_account_mode(self) -> str:
         """MT5 account margin mode (ТЗ §13): RETAIL_HEDGING / RETAIL_NETTING."""
@@ -293,9 +308,14 @@ class MT5BrokerAdapter(BaseBrokerAdapter):
             info = self.mt5.symbol_info(symbol)
             if info is None:
                 result = super().get_symbol_constraints(symbol)
-                result.update({"symbol": symbol, "available": False,
-                               "account_margin_mode": self.get_account_mode(),
-                               "reason": "symbol_info unavailable"})
+                result.update(
+                    {
+                        "symbol": symbol,
+                        "available": False,
+                        "account_margin_mode": self.get_account_mode(),
+                        "reason": "symbol_info unavailable",
+                    }
+                )
                 return result
             tick = self.mt5.symbol_info_tick(symbol)
             spread = 0.0
@@ -338,8 +358,7 @@ class MockFIXBrokerAdapter(BaseBrokerAdapter):
         self.positions: Dict[int, PositionSnapshot] = {}
         self.ticket_counter = 10000
         self.connected = False
-        self._account_mode = account_mode if account_mode in {"hedging", "netting"} \
-            else "unknown"
+        self._account_mode = account_mode if account_mode in {"hedging", "netting"} else "unknown"
 
     def get_account_mode(self) -> str:
         return self._account_mode
@@ -421,9 +440,7 @@ class MockFIXBrokerAdapter(BaseBrokerAdapter):
             return OrderResult(success=True, ticket=ticket, comment="FIX Order Cancelled/Closed")
         return OrderResult(success=False, comment="Position not found")
 
-    def modify_position(
-        self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None
-    ) -> OrderResult:
+    def modify_position(self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None) -> OrderResult:
         if ticket in self.positions:
             pos = self.positions[ticket]
             if sl is not None:

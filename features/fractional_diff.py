@@ -19,6 +19,7 @@ The feature is NOT enabled by default (config `features.fractional_diff` is
 off); it is a research tool to be evaluated per-asset with the feature-
 selection + walk-forward pipeline (compare E[R]/AUC with and without).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -58,13 +59,12 @@ def frac_diff(series: pd.Series, d: float, thresh: float = 1e-5) -> pd.Series:
 
     out = np.full(len(x), np.nan)
     for i in range(wlen - 1, len(x)):
-        window = x.iloc[i - wlen + 1: i + 1].to_numpy(dtype=float)
+        window = x.iloc[i - wlen + 1 : i + 1].to_numpy(dtype=float)
         out[i] = float(np.dot(weights, window))
     return pd.Series(out, index=series.index, name=f"{series.name}_fd{d}")
 
 
-def min_d_adf(series: pd.Series, d_list: list[float] | None = None,
-              significance: float = 0.05) -> dict:
+def min_d_adf(series: pd.Series, d_list: list[float] | None = None, significance: float = 0.05) -> dict:
     """Smallest d in d_list whose fractionally-differenced series passes the
     ADF test at `significance` (i.e. is stationary). Returns the chosen d and
     the ADF statistic/p-value ladder."""
@@ -86,9 +86,14 @@ def min_d_adf(series: pd.Series, d_list: list[float] | None = None,
         except Exception:
             stat, p = None, None
         stationary = bool(p is not None and p < significance)
-        ladder.append({"d": d, "adf_stat": float(stat) if stat is not None else None,
-                       "p_value": float(p) if p is not None else None,
-                       "stationary": stationary})
+        ladder.append(
+            {
+                "d": d,
+                "adf_stat": float(stat) if stat is not None else None,
+                "p_value": float(p) if p is not None else None,
+                "stationary": stationary,
+            }
+        )
         if stationary and chosen is None:
             chosen = d
     return {"min_d": chosen, "ladder": ladder}

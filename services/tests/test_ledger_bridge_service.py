@@ -1,4 +1,5 @@
 """Ledger Bridge service checks + entrypoint guard (TZ 8.1, P2-19)."""
+
 from __future__ import annotations
 
 import time

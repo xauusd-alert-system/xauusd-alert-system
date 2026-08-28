@@ -4,6 +4,7 @@ The infinite loop (main()) is NOT tested directly; run_once() and the sleep-time
 calculation are the testable, deterministic units.
 Run with: pytest scripts/tests/test_scheduler.py -v
 """
+
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -37,6 +38,7 @@ def test_run_once_logs_signal_and_returns_dict(mock_post, tmp_path):
     mock_post.return_value = mock_resp
 
     from data.signal_log import init_schema, read_signal_history
+
     db_path = str(tmp_path / "test.db")
     init_schema(db_path)
 
@@ -53,6 +55,7 @@ def test_run_once_logs_signal_and_returns_dict(mock_post, tmp_path):
 @patch("alerts.telegram_bot.requests.post")
 def test_run_once_does_not_alert_when_no_trade(mock_post, tmp_path):
     from data.signal_log import init_schema
+
     db_path = str(tmp_path / "test.db")
     init_schema(db_path)
 

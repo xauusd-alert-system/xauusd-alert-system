@@ -25,9 +25,13 @@ JOURNAL_COLUMNS = ["ts_utc", "experiment", "asset", "params_json", "metrics_json
 def _git_commit() -> str:
     try:
         import subprocess
+
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        )
         return out.stdout.strip() if out.returncode == 0 else ""
     except Exception:
         return ""
@@ -79,6 +83,7 @@ def default_historical_trials(asset: str, floor: int = 729) -> int:
 # Locked hold-out guard
 # ---------------------------------------------------------------------------
 
+
 def locked_holdout_config(cfg: dict) -> dict:
     return cfg.get("validation", {}).get("locked_holdout", {}) or {}
 
@@ -105,13 +110,13 @@ def locked_holdout_violations(cfg: dict, windows) -> list:
         if end_s is not None and w_start >= end_s:
             overlap = False
         if overlap:
-            bad.append({"window": w, "test_start_utc": _fmt_utc(w_start),
-                        "test_end_utc": _fmt_utc(w_end)})
+            bad.append({"window": w, "test_start_utc": _fmt_utc(w_start), "test_end_utc": _fmt_utc(w_end)})
     return bad
 
 
 def pd_timestamp_epoch(iso_or_date: str) -> float:
     import pandas as pd
+
     return pd.Timestamp(iso_or_date).timestamp()
 
 
@@ -126,12 +131,15 @@ def enforce_locked_holdout(cfg: dict, windows, runner: str, allow: bool = False)
     if not violations:
         return
     if allow:
-        print(f"[journal] WARNING: {len(violations)} test window(s) overlap the "
-              "locked hold-out; continuing because --allow-locked was given.")
+        print(
+            f"[journal] WARNING: {len(violations)} test window(s) overlap the "
+            "locked hold-out; continuing because --allow-locked was given."
+        )
         return
     raise SystemExit(
         f"[journal] LOCKED HOLD-OUT VIOLATION: {len(violations)} test window(s) of "
         f"`{runner}` overlap the reserved period "
         f"{locked_holdout_config(cfg).get('start')}..{locked_holdout_config(cfg).get('end')}. "
         "The lock exists so research never looks at that data; re-run with "
-        "--allow-locked only if you accept the period is burned.")
+        "--allow-locked only if you accept the period is burned."
+    )

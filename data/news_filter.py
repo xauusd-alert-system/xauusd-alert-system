@@ -3,6 +3,7 @@ Economic Calendar News Guard - fetches High-Impact USD news events from Forex Fa
 and suppresses trading during volatile news windows in LIVE mode only.
 Completely silent and network-free during historical backtests.
 """
+
 import csv
 import logging
 import os
@@ -25,8 +26,9 @@ _LAST_SOURCE: str | None = None
 CACHE_TTL_SECONDS = 6 * 3600  # 6 часов кэша
 
 _FF_NFS_URL = "https://nfs.forexfactory.com/forexcalendar.json"
-_FF_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-          "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
+_FF_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
 
 
 def _build_event(title: str, country: str, event_dt: datetime) -> Dict:
@@ -55,8 +57,8 @@ def _fetch_ff_json() -> tuple[List[Dict], str]:
                 try:
                     event_dt = datetime.fromisoformat(date_str)
                     high_impact_events.append(
-                        _build_event(event.get("title", "High Impact News"),
-                                     event.get("country"), event_dt))
+                        _build_event(event.get("title", "High Impact News"), event.get("country"), event_dt)
+                    )
                 except Exception:
                     pass
     return high_impact_events, "forexfactory_json_api"
@@ -104,7 +106,7 @@ def fetch_economic_calendar() -> List[Dict]:
         attempts = [(_fetch_ff_json,)]
 
     last_error: str | None = None
-    for fetcher, in attempts:
+    for (fetcher,) in attempts:
         try:
             events, source = fetcher()
             _NEWS_CACHE = events
@@ -126,9 +128,7 @@ def fetch_economic_calendar() -> List[Dict]:
 
 
 def is_news_red_zone(
-    current_ts_utc: int,
-    buffer_before_minutes: int = 30,
-    buffer_after_minutes: int = 30
+    current_ts_utc: int, buffer_before_minutes: int = 30, buffer_after_minutes: int = 30
 ) -> tuple[bool, str]:
     """
     Checks if current_ts_utc falls within a High-Impact news window.
@@ -160,6 +160,7 @@ def is_news_red_zone(
 
     return False, ""
 
+
 def news_feed_status() -> dict:
     """Distinguish an available empty calendar from an unavailable feed."""
     age = (time.time() - _LAST_FETCH_TS) if _LAST_FETCH_TS else None
@@ -172,10 +173,13 @@ def news_feed_status() -> dict:
     }
 
 
-def news_guard_decision(current_ts_utc: int, buffer_before_minutes: int = 30,
-                        buffer_after_minutes: int = 30,
-                        failure_policy: str = "fail_closed",
-                        historical_calendar_path: str | None = None) -> tuple[bool, str, bool]:
+def news_guard_decision(
+    current_ts_utc: int,
+    buffer_before_minutes: int = 30,
+    buffer_after_minutes: int = 30,
+    failure_policy: str = "fail_closed",
+    historical_calendar_path: str | None = None,
+) -> tuple[bool, str, bool]:
     """Return (blocked, reason, feed_available), with optional dated research CSV."""
     if (time.time() - int(current_ts_utc or 0)) > 7 * 86400:
         if not historical_calendar_path or not os.path.exists(historical_calendar_path):

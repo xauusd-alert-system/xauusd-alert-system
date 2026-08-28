@@ -10,6 +10,7 @@ This is critical for accountability: the project brief requires transparency int
 WHY a signal was or wasn't sent, not just the alerts that went out. Every row here
 answers "what did the system think at time T", regardless of alert_sent status.
 """
+
 import json
 import os
 import sqlite3
@@ -40,9 +41,7 @@ def init_schema(db_path: str):
             is_legacy = "symbol" not in names or pk_cols != ["symbol", "timestamp_utc"]
             if is_legacy:
                 legacy = f"{TABLE_NAME}_legacy_single_symbol"
-                exists = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (legacy,)
-                ).fetchone()
+                exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (legacy,)).fetchone()
                 if exists:
                     raise RuntimeError(
                         f"Legacy backup table {legacy!r} already exists. "
@@ -69,9 +68,14 @@ def init_schema(db_path: str):
         """)
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE_NAME})")}
         optional = {
-            "signal_id": "TEXT", "signal_state": "TEXT", "strategy_version": "TEXT",
-            "config_hash": "TEXT", "model_hash": "TEXT", "feature_snapshot_hash": "TEXT",
-            "expires_at_utc": "INTEGER", "published_at_utc": "INTEGER",
+            "signal_id": "TEXT",
+            "signal_state": "TEXT",
+            "strategy_version": "TEXT",
+            "config_hash": "TEXT",
+            "model_hash": "TEXT",
+            "feature_snapshot_hash": "TEXT",
+            "expires_at_utc": "INTEGER",
+            "published_at_utc": "INTEGER",
             "publish_latency_seconds": "INTEGER",
         }
         for name, sql_type in optional.items():
@@ -114,10 +118,14 @@ def log_signal(db_path: str, signal: dict, alert_sent: bool, symbol: str = "XAUU
                 json.dumps(signal["targets"]) if signal.get("targets") else None,
                 signal.get("reasoning_summary", ""),
                 int(alert_sent),
-                signal.get("signal_id"), signal.get("signal_state"),
-                signal.get("strategy_version"), signal.get("config_hash"),
-                signal.get("model_hash"), signal.get("feature_snapshot_hash"),
-                signal.get("expires_at_utc"), signal.get("published_at_utc"),
+                signal.get("signal_id"),
+                signal.get("signal_state"),
+                signal.get("strategy_version"),
+                signal.get("config_hash"),
+                signal.get("model_hash"),
+                signal.get("feature_snapshot_hash"),
+                signal.get("expires_at_utc"),
+                signal.get("published_at_utc"),
                 signal.get("publish_latency_seconds"),
             ),
         )

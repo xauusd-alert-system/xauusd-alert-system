@@ -77,6 +77,7 @@ Optional stages (P2-40 / TZ 5.3, config-gated):
 Run:
     python -m scripts.overnight
 """
+
 import logging
 import os
 import subprocess
@@ -125,9 +126,7 @@ def _run(stage: str, cmd: list, timeout: int = None) -> bool:
             capture_output=True,
             text=True,
             timeout=timeout,
-            creationflags=(
-                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-            ),
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
         if result.stdout and result.stdout.strip():
             logger.info("  %s", result.stdout.strip().splitlines()[-1][-400:])
@@ -157,9 +156,7 @@ def _capture(cmd: list, timeout: int = None) -> str:
             timeout=timeout,
             capture_output=True,
             text=True,
-            creationflags=(
-                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-            ),
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
         return result.stdout.strip()
     except subprocess.TimeoutExpired as e:
@@ -210,9 +207,7 @@ def main() -> int:
     cfg = load_config()
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     timeframe = cfg.get("market_data", {}).get("timeframe", "M5")
-    enabled_assets = [
-        k for k, v in cfg.get("assets", {}).items() if v.get("enabled", False)
-    ]
+    enabled_assets = [k for k, v in cfg.get("assets", {}).items() if v.get("enabled", False)]
     retraining_enabled = bool(cfg.get("retraining", {}).get("enabled", True))
     if not retraining_enabled:
         logger.warning(
@@ -236,16 +231,27 @@ def main() -> int:
         )
         ok = True
         for tf in trade_tfs:
-            ok = _run(
-                f"backfill_fresh_data:{tf}",
-                [
-                    sys.executable, "-m", "scripts.backfill_data",
-                    "--all", "--timeframe", tf,
-                    "--start", start, "--end", end,
-                    "--db-path", db_path,
-                ],
-                timeout=_BACKFILL_TIMEOUT,
-            ) and ok
+            ok = (
+                _run(
+                    f"backfill_fresh_data:{tf}",
+                    [
+                        sys.executable,
+                        "-m",
+                        "scripts.backfill_data",
+                        "--all",
+                        "--timeframe",
+                        tf,
+                        "--start",
+                        start,
+                        "--end",
+                        end,
+                        "--db-path",
+                        db_path,
+                    ],
+                    timeout=_BACKFILL_TIMEOUT,
+                )
+                and ok
+            )
         status.append(("backfill_data", ok))
     else:
         logger.info("Skipping backfill (OVERNIGHT_NO_BACKFILL set).")
@@ -258,10 +264,15 @@ def main() -> int:
             ok = _run(
                 f"walk_forward_backtest:{asset}",
                 [
-                    sys.executable, "-m", "scripts.run_backtest",
-                    "--asset", asset,
-                    "--timeframe", asset_tf,
-                    "--db-path", db_path,
+                    sys.executable,
+                    "-m",
+                    "scripts.run_backtest",
+                    "--asset",
+                    asset,
+                    "--timeframe",
+                    asset_tf,
+                    "--db-path",
+                    db_path,
                 ],
             )
             all_ok = all_ok and ok
@@ -355,17 +366,20 @@ def main() -> int:
             else:
                 threshold = float(drift_cfg.get("drifted_psi_threshold", 0.2))
                 report = check_drift(
-                    _load_table(train_csv), _load_table(live_csv),
+                    _load_table(train_csv),
+                    _load_table(live_csv),
                     drifted_psi_threshold=threshold,
                 )
                 logger.info(
                     "drift_check: %d feature(s), max_psi=%.4f",
-                    report["n_features_checked"], report["max_psi"],
+                    report["n_features_checked"],
+                    report["max_psi"],
                 )
                 if report["drifted_features"]:
                     logger.warning(
                         "FEATURE DRIFT: %d feature(s) above PSI %.2f: %s",
-                        len(report["drifted_features"]), threshold,
+                        len(report["drifted_features"]),
+                        threshold,
                         ", ".join(report["drifted_features"]),
                     )
         except Exception as e:  # noqa: BLE001 - drift must never kill the night
@@ -399,12 +413,15 @@ def main() -> int:
                 report = check_calibration(preds, outs, ece_threshold=ece_threshold)
                 logger.info(
                     "calibration_check: n=%d, brier=%.4f, ece=%.4f",
-                    report["n_predictions"], report["brier_score"], report["ece"],
+                    report["n_predictions"],
+                    report["brier_score"],
+                    report["ece"],
                 )
                 if not report["is_calibrated"]:
                     logger.warning(
                         "CALIBRATION WARNING: ECE %.4f > threshold %.2f",
-                        report["ece"], ece_threshold,
+                        report["ece"],
+                        ece_threshold,
                     )
             except Exception as e:  # noqa: BLE001 - must never kill the night
                 logger.error("calibration_check failed (non-fatal): %s", e)
@@ -458,9 +475,7 @@ def _notify_telegram(cfg: dict, summary_text: str, status: list) -> None:
     if bot.send_text_message("\n".join(lines)):
         logger.info("Telegram summary sent.")
     else:
-        logger.warning(
-            "Telegram summary not sent (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)."
-        )
+        logger.warning("Telegram summary not sent (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).")
 
 
 if __name__ == "__main__":

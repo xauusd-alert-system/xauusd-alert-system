@@ -27,11 +27,20 @@ NAME = "initial"
 # Tables known to be created by the data layer. Presence is informational —
 # databases legitimately differ in which subsystems they host.
 KNOWN_TABLES = (
-    "ohlcv_m1", "ohlcv_m5", "ohlcv_m15", "ohlcv_h1", "ohlcv_h4",
+    "ohlcv_m1",
+    "ohlcv_m5",
+    "ohlcv_m15",
+    "ohlcv_h1",
+    "ohlcv_h4",
     "signal_log",
-    "trade_groups", "trade_group_actions",
-    "ledger_intents", "ledger_events", "ledger_outbox",
-    "trading_events", "execution_fills", "executed_trades",
+    "trade_groups",
+    "trade_group_actions",
+    "ledger_intents",
+    "ledger_events",
+    "ledger_outbox",
+    "trading_events",
+    "execution_fills",
+    "executed_trades",
     "channel_archive_messages",
 )
 
@@ -43,11 +52,7 @@ TABLE_FAMILIES: dict[str, tuple[str, ...]] = {
 
 
 def apply(conn) -> None:
-    existing = {
-        row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
-    }
+    existing = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     present = [table for table in KNOWN_TABLES if table in existing]
     if not present:
         # Fresh or non-application database: nothing to verify yet (no-op).

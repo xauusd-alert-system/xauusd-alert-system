@@ -1,4 +1,5 @@
 """Unit tests for MT5Client error wrapping, counting and DI (ТЗ 8.6)."""
+
 from __future__ import annotations
 
 import pytest
@@ -32,6 +33,7 @@ def client(mock):
 # ---------------------------------------------------------------------
 # Error wrapping
 # ---------------------------------------------------------------------
+
 
 def test_client_wraps_errors_none_result(mock):
     """A None return from the low-level module raises MT5NotInitializedError."""
@@ -72,6 +74,7 @@ def test_client_wraps_errors_rates_empty(mock):
 # Call counting
 # ---------------------------------------------------------------------
 
+
 def test_client_counts_calls(client):
     # fixture already called initialize() once
     client.symbol_info_tick("XAUUSD")
@@ -102,6 +105,7 @@ def test_client_counts_initialize_and_shutdown(mock):
 # Caching
 # ---------------------------------------------------------------------
 
+
 def test_client_symbol_info_tick_cached(client, mock):
     a = client.symbol_info_tick_cached("XAUUSD")
     b = client.symbol_info_tick_cached("XAUUSD")
@@ -127,22 +131,22 @@ def test_client_symbol_info_cached(mock):
 # Trading wrappers
 # ---------------------------------------------------------------------
 
+
 def test_client_order_send_rejects_bad_retcode(mock):
     from mt5_adapter.testing import TRADE_RETCODE_REJECT
 
     client = MT5Client(mt5_module=mock)
     client.initialize()
-    mock.order_send_handler = lambda req: type(
-        "R", (), {"retcode": TRADE_RETCODE_REJECT, "comment": "no money"})()
+    mock.order_send_handler = lambda req: type("R", (), {"retcode": TRADE_RETCODE_REJECT, "comment": "no money"})()
     with pytest.raises(MT5OrderRejectedError) as exc:
         client.order_send({"action": 1, "symbol": "XAUUSD", "volume": 0.1})
     assert exc.value.retcode == TRADE_RETCODE_REJECT
+    assert exc.value.comment is not None
     assert "no money" in exc.value.comment
 
 
 def test_client_order_send_ok(client):
-    res = client.order_send({"action": 1, "symbol": "XAUUSD",
-                             "volume": 0.1, "price": 2400.4})
+    res = client.order_send({"action": 1, "symbol": "XAUUSD", "volume": 0.1, "price": 2400.4})
     assert res.retcode == TRADE_RETCODE_DONE
 
 
@@ -158,6 +162,7 @@ def test_client_order_check_bad_retcode(mock):
 # Constants passthrough / timeout
 # ---------------------------------------------------------------------
 
+
 def test_client_exposes_constants(mock):
     from mt5_adapter import testing as t
 
@@ -172,6 +177,7 @@ def test_client_timeout_raises():
     class SlowMock(MockMT5Module):
         def symbol_info_tick(self, symbol):
             import time as _time
+
             _time.sleep(0.05)
             return super().symbol_info_tick(symbol)
 

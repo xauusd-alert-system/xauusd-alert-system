@@ -5,6 +5,7 @@ Two new strategies tested against ORB baseline:
 1. VWAP breakout: enter when price crosses VWAP with volume confirmation
 2. Opening drive: enter in the direction of the first 5-min candle after open
 """
+
 import datetime as dt
 import json
 import os
@@ -45,12 +46,14 @@ def _close(pos, price, ts, slip, reason):
     pos["exit_price"] = price * (1 - slip * pos["side"])
     pos["exit_ts"] = ts
     pos["exit_reason"] = reason
-    pos["pnl"] = (pos["exit_price"] - pos["entry"]) * pos["side"] * pos["qty"] \
-                 - fee(pos["entry"], pos["qty"]) - fee(pos["exit_price"], pos["qty"])
+    pos["pnl"] = (
+        (pos["exit_price"] - pos["entry"]) * pos["side"] * pos["qty"]
+        - fee(pos["entry"], pos["qty"])
+        - fee(pos["exit_price"], pos["qty"])
+    )
 
 
-def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0,
-             target=80.0, min_days=5):
+def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0, target=80.0, min_days=5):
     day_pnl = {}
     for tr in all_trades:
         d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.UTC).date()
@@ -100,16 +103,17 @@ def print_row(label, result):
         print(f"  {label:<40s} 0 trades")
         return
     n, wr, pf, net, avg_r, fees, sim = result
-    print(f"  {label:<40s} {n:>4d}  WR={wr:>4.0f}%  PF={pf:>5.2f}  "
-          f"net=${net:>+7.0f}  avgR={avg_r:>6.3f}  fees=${fees:>5.0f}  "
-          f"pass={sim['passed']}  days={sim['days_used']}")
+    print(
+        f"  {label:<40s} {n:>4d}  WR={wr:>4.0f}%  PF={pf:>5.2f}  "
+        f"net=${net:>+7.0f}  avgR={avg_r:>6.3f}  fees=${fees:>5.0f}  "
+        f"pass={sim['passed']}  days={sim['days_used']}"
+    )
 
 
 # ============================================================
 # STRATEGY: VWAP breakout
 # ============================================================
-def run_vwap_breakout(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0,
-                      vwap_window=30, min_vol_ratio=1.2):
+def run_vwap_breakout(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0, vwap_window=30, min_vol_ratio=1.2):
     """Enter when price crosses above/below VWAP with volume confirmation.
     VWAP is computed from the first `vwap_window` minutes of the session.
     After VWAP is established, a close beyond VWAP +/- buffer triggers entry."""
@@ -155,19 +159,27 @@ def run_vwap_breakout(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0,
                 if b["close"] > vwap * 1.001:
                     entry = b["close"] * (1 + SLIP)
                     qty = (risk_per_trade / stop_pct) / entry
-                    open_pos = {"side": 1, "entry": entry, "qty": qty,
-                                "stop": entry * (1 - stop_pct),
-                                "tp": entry + entry * stop_pct * tp_ratio,
-                                "bar": t}
+                    open_pos = {
+                        "side": 1,
+                        "entry": entry,
+                        "qty": qty,
+                        "stop": entry * (1 - stop_pct),
+                        "tp": entry + entry * stop_pct * tp_ratio,
+                        "bar": t,
+                    }
                     took = True
                 # Short: close below VWAP - 0.1% buffer
                 elif b["close"] < vwap * 0.999:
                     entry = b["close"] * (1 - SLIP)
                     qty = (risk_per_trade / stop_pct) / entry
-                    open_pos = {"side": -1, "entry": entry, "qty": qty,
-                                "stop": entry * (1 + stop_pct),
-                                "tp": entry - entry * stop_pct * tp_ratio,
-                                "bar": t}
+                    open_pos = {
+                        "side": -1,
+                        "entry": entry,
+                        "qty": qty,
+                        "stop": entry * (1 + stop_pct),
+                        "tp": entry - entry * stop_pct * tp_ratio,
+                        "bar": t,
+                    }
                     took = True
 
             if open_pos is None or t == open_pos["bar"]:
@@ -205,8 +217,7 @@ def run_vwap_breakout(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0,
 # ============================================================
 # STRATEGY: Opening drive
 # ============================================================
-def run_opening_drive(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
-                      risk_per_trade=5.0, min_body_ratio=0.5):
+def run_opening_drive(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0, min_body_ratio=0.5):
     """Enter in the direction of the first `drive_bars` 1-min candles.
     The opening drive is the net move in the first N minutes.
     If the first N bars form a strong directional candle (body > 0.5 * range),
@@ -245,8 +256,14 @@ def run_opening_drive(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
         tp = entry + bias * risk_dist * tp_ratio
         qty = (risk_per_trade / stop_pct) / entry
 
-        open_pos = {"side": bias, "entry": entry, "qty": qty,
-                    "stop": stop, "tp": tp, "bar": bars[drive_bars - 1]["time"]}
+        open_pos = {
+            "side": bias,
+            "entry": entry,
+            "qty": qty,
+            "stop": stop,
+            "tp": tp,
+            "bar": bars[drive_bars - 1]["time"],
+        }
 
         for b in bars[drive_bars:]:
             t = b["time"]
@@ -287,8 +304,7 @@ def run_opening_drive(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
 # ============================================================
 # STRATEGY: Opening drive + VWAP confirmation
 # ============================================================
-def run_drive_vwap(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
-                   risk_per_trade=5.0, min_body_ratio=0.5):
+def run_drive_vwap(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0, min_body_ratio=0.5):
     """Opening drive + VWAP filter: only take the drive direction if VWAP
     confirms (price above VWAP for long, below for short)."""
     days = build_days(candles)
@@ -333,8 +349,14 @@ def run_drive_vwap(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
         tp = entry + bias * risk_dist * tp_ratio
         qty = (risk_per_trade / stop_pct) / entry
 
-        open_pos = {"side": bias, "entry": entry, "qty": qty,
-                    "stop": stop, "tp": tp, "bar": bars[drive_bars - 1]["time"]}
+        open_pos = {
+            "side": bias,
+            "entry": entry,
+            "qty": qty,
+            "stop": stop,
+            "tp": tp,
+            "bar": bars[drive_bars - 1]["time"],
+        }
 
         for b in bars[drive_bars:]:
             t = b["time"]
@@ -400,16 +422,26 @@ def run_orb_baseline(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0):
                 if b["high"] >= rng_high:
                     entry = (rng_high if b["open"] < rng_high else b["open"]) * (1 + SLIP)
                     qty = (risk_per_trade / stop_pct) / entry
-                    open_pos = {"side": 1, "entry": entry, "qty": qty,
-                                "stop": entry * (1 - stop_pct),
-                                "tp": entry + entry * stop_pct * tp_ratio, "bar": t}
+                    open_pos = {
+                        "side": 1,
+                        "entry": entry,
+                        "qty": qty,
+                        "stop": entry * (1 - stop_pct),
+                        "tp": entry + entry * stop_pct * tp_ratio,
+                        "bar": t,
+                    }
                     took = True
                 elif b["low"] <= rng_low:
                     entry = (rng_low if b["open"] > rng_low else b["open"]) * (1 - SLIP)
                     qty = (risk_per_trade / stop_pct) / entry
-                    open_pos = {"side": -1, "entry": entry, "qty": qty,
-                                "stop": entry * (1 + stop_pct),
-                                "tp": entry - entry * stop_pct * tp_ratio, "bar": t}
+                    open_pos = {
+                        "side": -1,
+                        "entry": entry,
+                        "qty": qty,
+                        "stop": entry * (1 + stop_pct),
+                        "tp": entry - entry * stop_pct * tp_ratio,
+                        "bar": t,
+                    }
                     took = True
             if open_pos is None or t == open_pos["bar"]:
                 continue
@@ -460,7 +492,7 @@ def main():
     print("STRATEGY COMPARISON: VWAP BREAKOUT vs OPENING DRIVE vs ORB BASELINE")
     print("=" * 105)
     print(f"  {'Strategy':<40s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s} {'fees$':>6s} {'pass':>5s}")
-    print(f"  {'-'*95}")
+    print(f"  {'-' * 95}")
 
     strategies = [
         ("ORB baseline (30m range)", run_orb_baseline),
@@ -487,7 +519,7 @@ def main():
     print("OPENING DRIVE: BODY RATIO SWEEP")
     print("=" * 105)
     print(f"  {'min_body':<10s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s}")
-    print(f"  {'-'*50}")
+    print(f"  {'-' * 50}")
     for br in [0.3, 0.4, 0.5, 0.6, 0.7]:
         all_trades = []
         for t, c in all_candles.items():
@@ -504,7 +536,7 @@ def main():
     print("OPENING DRIVE: TP RATIO SWEEP (drive=5, body=0.5)")
     print("=" * 105)
     print(f"  {'tp_ratio':<10s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s}")
-    print(f"  {'-'*50}")
+    print(f"  {'-' * 50}")
     for tp in [1.0, 1.5, 2.0, 2.5, 3.0]:
         all_trades = []
         for t, c in all_candles.items():
@@ -521,7 +553,7 @@ def main():
     print("PER-TICKER BREAKDOWN (Opening drive 5-bars, body=0.5, tp=1.5)")
     print("=" * 105)
     print(f"  {'Ticker':<10s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s}")
-    print(f"  {'-'*50}")
+    print(f"  {'-' * 50}")
     for t in tickers:
         c = all_candles[t]
         trades = run_opening_drive(c)
@@ -545,8 +577,11 @@ def main():
     equity = 1000.0
     for d in sorted(day_pnl):
         equity += day_pnl[d]
-        bar = "+" * min(20, int(max(0, day_pnl[d] * 2))) if day_pnl[d] > 0 else \
-              "-" * min(20, int(max(0, -day_pnl[d] * 2)))
+        bar = (
+            "+" * min(20, int(max(0, day_pnl[d] * 2)))
+            if day_pnl[d] > 0
+            else "-" * min(20, int(max(0, -day_pnl[d] * 2)))
+        )
         print(f"  {d}  ${day_pnl[d]:>+7.2f}  ${equity:>8.2f}  {bar}")
     sim = simulate(all_trades)
     print(f"\n  Final: equity=${sim['equity_end']:.0f}  pass={sim['passed']}  days={sim['days_used']}")

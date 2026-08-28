@@ -5,6 +5,7 @@ rest of the codebase depends on :class:`MT5Client` (or on injected test
 doubles from :mod:`mt5_adapter.testing`), enforced by the guard test in
 ``mt5_adapter/tests/test_no_direct_mt5_calls.py``.
 """
+
 from mt5_adapter.cache import SymbolCache
 from mt5_adapter.client import TRADE_RETCODE_DONE, MT5Client
 from mt5_adapter.errors import (

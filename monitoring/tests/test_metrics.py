@@ -6,6 +6,7 @@ Covers:
     - endpoint_returns_aggregates   — TestClient payload (auth-guarded);
     - rejected_reasons_recorded     — reason-code accounting + executor hook.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ import pytest
 from monitoring.metrics import MetricsCollector, _percentile
 
 # --------------------------------------------------------- collector_counting
+
 
 def test_collector_counting():
     c = MetricsCollector()
@@ -65,10 +67,13 @@ def test_collector_thread_safety():
 
 # -------------------------------------------------- jsonl_append_and_rotation
 
+
 def test_jsonl_append_and_rotation(tmp_path):
     sink = tmp_path / "metrics.jsonl"
     c = MetricsCollector(
-        jsonl_path=str(sink), sink_max_bytes=2000, sink_backups=2,
+        jsonl_path=str(sink),
+        sink_max_bytes=2000,
+        sink_backups=2,
     )
     c.record("orders_sent")
     c.flush_summary()
@@ -106,6 +111,7 @@ def test_flush_summary_disabled_without_path():
 
 
 # ------------------------------------------------- endpoint_returns_aggregates
+
 
 def test_endpoint_returns_aggregates(monkeypatch):
     from fastapi.testclient import TestClient
@@ -151,6 +157,7 @@ def test_endpoint_is_not_public_when_auth_required(monkeypatch):
 
 # ------------------------------------------------- rejected_reasons_recorded
 
+
 def test_rejected_reasons_recorded():
     c = MetricsCollector()
     c.record("rejected:SIGNAL_EXPIRED")
@@ -185,8 +192,7 @@ def test_executor_rejection_and_submit_instrumented(tmp_path, monkeypatch):
     )
 
     db_path = str(tmp_path / "exec.sqlite")
-    ex = MT5TradeGroupExecutor(db_path, allow_demo=True,
-                               mt5=FakeMT5(), deployment_mode="demo_systematic")
+    ex = MT5TradeGroupExecutor(db_path, allow_demo=True, mt5=FakeMT5(), deployment_mode="demo_systematic")
     spec = make_spec()
     # Rejection path: an already-expired TTL is caught at submission and
     # rejected with reason_code=SIGNAL_EXPIRED (broker gates all pass on the
@@ -194,8 +200,11 @@ def test_executor_rejection_and_submit_instrumented(tmp_path, monkeypatch):
     object.__setattr__(spec, "expires_at_utc_ms", 1)
     ex.create_group(spec)
     state = ex.submit_group(spec.group_id)
-    assert str(state) == "GroupState.REJECTED" or getattr(state, "name", "") == "REJECTED" \
+    assert (
+        str(state) == "GroupState.REJECTED"
+        or getattr(state, "name", "") == "REJECTED"
         or "REJECT" in str(state).upper()
+    )
 
     s = collector.summary()
     assert s["groups_created"] == 1

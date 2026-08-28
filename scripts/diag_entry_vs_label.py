@@ -136,19 +136,21 @@ def _reweighted(control: pd.DataFrame, entry_mix: Counter) -> float:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Check the engine's protect rate against an independent barrier scan.")
+    parser = argparse.ArgumentParser(description="Check the engine's protect rate against an independent barrier scan.")
     parser.add_argument("--asset", required=True, help="Internal asset key (XAUUSD, ...)")
     parser.add_argument("--timeframe", default=None, help="Override timeframe (default: per-asset)")
     parser.add_argument("--db-path", default=None, help="SQLite DB (default: config general.db_path)")
-    parser.add_argument("--end-date", default=None,
-                        help="Drop candles at or after this UTC date (YYYY-MM-DD) before building "
-                             "features. Same semantics as scripts/run_backtest.py --end-date.")
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Drop candles at or after this UTC date (YYYY-MM-DD) before building "
+        "features. Same semantics as scripts/run_backtest.py --end-date.",
+    )
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds (quick runs)")
-    parser.add_argument("--allow-locked", action="store_true",
-                        help="Allow test windows overlapping the locked hold-out")
-    parser.add_argument("--out", default=None,
-                        help="Output CSV path (default: logs/entry_vs_label_<asset>.csv)")
+    parser.add_argument(
+        "--allow-locked", action="store_true", help="Allow test windows overlapping the locked hold-out"
+    )
+    parser.add_argument("--out", default=None, help="Output CSV path (default: logs/entry_vs_label_<asset>.csv)")
     args = parser.parse_args(argv)
 
     cfg = load_config()
@@ -200,18 +202,20 @@ def main(argv: list[str] | None = None) -> None:
 
         epochs = _epoch_array(fdf["timestamp_utc"])
         pos = {int(ts): k for k, ts in enumerate(epochs)}
-        sess = (fdf["session"].astype(str) if "session" in fdf.columns
-                else pd.Series(["n/a"] * len(fdf)))
-        reg = (fdf["regime"].astype(str) if "regime" in fdf.columns
-               else pd.Series(["n/a"] * len(fdf)))
+        sess = fdf["session"].astype(str) if "session" in fdf.columns else pd.Series(["n/a"] * len(fdf))
+        reg = fdf["regime"].astype(str) if "regime" in fdf.columns else pd.Series(["n/a"] * len(fdf))
 
-        control_parts.append(pd.DataFrame({
-            "fold": i + 1,
-            "session": sess.to_numpy(),
-            "regime": reg.to_numpy(),
-            "lab_short": labels[-1].to_numpy(dtype=float),
-            "lab_long": labels[1].to_numpy(dtype=float),
-        }))
+        control_parts.append(
+            pd.DataFrame(
+                {
+                    "fold": i + 1,
+                    "session": sess.to_numpy(),
+                    "regime": reg.to_numpy(),
+                    "lab_short": labels[-1].to_numpy(dtype=float),
+                    "lab_long": labels[1].to_numpy(dtype=float),
+                }
+            )
+        )
 
         for t in trades:
             key = _epoch_scalar(t.entry_ts)
@@ -223,18 +227,20 @@ def main(argv: list[str] | None = None) -> None:
             # the following bar, so the signal bar is one index earlier.
             sig_idx = entry_idx - 1
             lab = labels[int(t.direction)].iloc[sig_idx]
-            rows.append({
-                "fold": i + 1,
-                "entry_ts": key,
-                "day": pd.Timestamp(key, unit="s", tz="UTC").strftime("%Y-%m-%d"),
-                "direction": int(t.direction),
-                "session": str(sess.iloc[sig_idx]),
-                "regime": str(reg.iloc[sig_idx]),
-                "exit_reason": str(t.exit_reason),
-                "engine": _engine_outcome(t),
-                "label": _label_outcome(lab),
-                "pnl": round(float(t.pnl), 2),
-            })
+            rows.append(
+                {
+                    "fold": i + 1,
+                    "entry_ts": key,
+                    "day": pd.Timestamp(key, unit="s", tz="UTC").strftime("%Y-%m-%d"),
+                    "direction": int(t.direction),
+                    "session": str(sess.iloc[sig_idx]),
+                    "regime": str(reg.iloc[sig_idx]),
+                    "exit_reason": str(t.exit_reason),
+                    "engine": _engine_outcome(t),
+                    "label": _label_outcome(lab),
+                    "pnl": round(float(t.pnl), 2),
+                }
+            )
 
     if not rows:
         raise SystemExit("[evl] no trades matched a frame bar; nothing to compare")
@@ -247,8 +253,10 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Sample truncated at {args.end_date} (locked hold-out NOT touched)")
     if unmatched:
         print(f"WARNING: {unmatched} trade(s) could not be matched to a frame bar")
-    print(f"trades compared: {len(rep)}  "
-          f"(long {int((rep['direction'] == 1).sum())} / short {int((rep['direction'] == -1).sum())})")
+    print(
+        f"trades compared: {len(rep)}  "
+        f"(long {int((rep['direction'] == 1).sum())} / short {int((rep['direction'] == -1).sum())})"
+    )
 
     # --- 1. same bars, two independent verdicts ---------------------------
     print("\n1. CONFUSION MATRIX ON THE SAME BARS (rows = engine, cols = label)")
@@ -308,8 +316,10 @@ def main(argv: list[str] | None = None) -> None:
             print(f"   {'key':<22}{'n':>8}{'protect%':>11}{'entry n':>10}")
             mix = Counter(sub[dim].astype(str).tolist())
             for _, r in table.iterrows():
-                print(f"   {str(r['key']):<22}{int(r['n']):>8}{float(r['protect_pct']):>11.2f}"
-                      f"{mix.get(str(r['key']), 0):>10}")
+                print(
+                    f"   {str(r['key']):<22}{int(r['n']):>8}{float(r['protect_pct']):>11.2f}"
+                    f"{mix.get(str(r['key']), 0):>10}"
+                )
             exp = _reweighted(table, mix)
             print(f"   -> control reweighted to the entry {dim} mix = {exp:.2f}%")
             print(f"      (compare with the label protect% of {lab_pct:.2f} on the entries)")

@@ -5,6 +5,7 @@ the NEW package (the old tests keep testing the shim). Covers P0-5
 (swap-excluding breaker), W8/W9 (config limits, magic filter), W10
 (persistence), P2-10 (single daily-limit source).
 """
+
 import json
 import types
 
@@ -70,7 +71,7 @@ def test_circuit_breaker_ignores_swaps(patched_mt5, state_path):
     lim = RiskLimits(_cfg(), magic=777111, state_path=state_path)
     ok, _ = lim.can_trade("XAUUSD")  # anchor day at 1000
     patched_mt5._balance = 950.0  # swap settles
-    patched_mt5._equity = 980.0   # floating -30
+    patched_mt5._equity = 980.0  # floating -30
     ok, reason = lim.can_trade("XAUUSD")
     assert ok, reason
     assert "CIRCUIT BREAKER" not in reason
@@ -117,12 +118,9 @@ def test_group_aware_counting(patched_mt5, state_path):
     """A 3-leg group consumes ONE slot; the 2-slot budget allows a second
     asset's group."""
     lim = RiskLimits(_cfg(), magic=777111, state_path=state_path)
-    ok, _ = lim.can_trade("XAGUSD", groups_by_asset={"XAUUSD": {"G1"}},
-                          singles_by_asset={})
+    ok, _ = lim.can_trade("XAGUSD", groups_by_asset={"XAUUSD": {"G1"}}, singles_by_asset={})
     assert ok
-    ok2, reason2 = lim.can_trade(
-        "BTCUSD", groups_by_asset={"XAUUSD": {"G1"}, "XAGUSD": {"G2"}},
-        singles_by_asset={})
+    ok2, reason2 = lim.can_trade("BTCUSD", groups_by_asset={"XAUUSD": {"G1"}, "XAGUSD": {"G2"}}, singles_by_asset={})
     assert not ok2
     assert "groups limit" in reason2
 
@@ -158,10 +156,11 @@ def test_daily_pnl_math_exclude_swaps(patched_mt5, state_path):
     assert lim.daily_pnl(980.0, 950.0) == pytest.approx(-10.0)
     assert lim.daily_pnl(1000.0, 990.0) == pytest.approx(10.0)
 
-    lim2 = RiskLimits({"backtest": {"max_daily_loss_pct": 5.0},
-                       "risk": {"circuit_breaker": {"exclude_swaps": False}}},
-                      magic=777111,
-                      state=RiskState(state_path))
+    lim2 = RiskLimits(
+        {"backtest": {"max_daily_loss_pct": 5.0}, "risk": {"circuit_breaker": {"exclude_swaps": False}}},
+        magic=777111,
+        state=RiskState(state_path),
+    )
     lim2.state.starting_equity_today = 1000.0
     # legacy rule: equity delta = -20
     assert lim2.daily_pnl(980.0, 950.0) == pytest.approx(-20.0)

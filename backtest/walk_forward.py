@@ -16,6 +16,7 @@ must call it instead of re-deriving the boundaries, because a harness that skips
 the purge trains on rows whose labels resolve inside its own test window and
 then reports the result as out-of-sample.
 """
+
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -31,8 +32,9 @@ class WalkForwardWindow:
     test_end_ts: int
 
 
-def generate_windows(df: pd.DataFrame, train_window_days: int, test_window_days: int,
-                      step_days: int) -> List[WalkForwardWindow]:
+def generate_windows(
+    df: pd.DataFrame, train_window_days: int, test_window_days: int, step_days: int
+) -> List[WalkForwardWindow]:
     """
     Generate non-overlapping (in test) rolling windows across the full timestamp range.
     Each test window strictly follows its train window in time - train_end_ts <= test_start_ts,
@@ -73,8 +75,7 @@ def bar_seconds(df: pd.DataFrame) -> int:
     return int(np.median(diffs)) if len(diffs) else 1
 
 
-def purge_train_frame(train_df: pd.DataFrame, test_start_ts: int, cfg: dict,
-                      bar_secs: int) -> pd.DataFrame:
+def purge_train_frame(train_df: pd.DataFrame, test_start_ts: int, cfg: dict, bar_secs: int) -> pd.DataFrame:
     """Drop the tail of a train window whose labels reach into the test window.
 
     W3 (audit 2026-08-10): triple-barrier labels of the LAST `horizon` bars of a
@@ -99,8 +100,9 @@ def purge_train_frame(train_df: pd.DataFrame, test_start_ts: int, cfg: dict,
     return out
 
 
-def split_fold_frames(df: pd.DataFrame, cfg: dict, window: WalkForwardWindow,
-                       bar_secs: Optional[int] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def split_fold_frames(
+    df: pd.DataFrame, cfg: dict, window: WalkForwardWindow, bar_secs: Optional[int] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return (purged_train_df, test_df) for one walk-forward window.
 
     THE shared slicing path. The train frame is positionally re-indexed because
@@ -110,16 +112,15 @@ def split_fold_frames(df: pd.DataFrame, cfg: dict, window: WalkForwardWindow,
     """
     if bar_secs is None:
         bar_secs = bar_seconds(df)
-    train_df = df[(df["timestamp_utc"] >= window.train_start_ts) &
-                  (df["timestamp_utc"] < window.train_end_ts)]
-    test_df = df[(df["timestamp_utc"] >= window.test_start_ts) &
-                 (df["timestamp_utc"] < window.test_end_ts)]
+    train_df = df[(df["timestamp_utc"] >= window.train_start_ts) & (df["timestamp_utc"] < window.train_end_ts)]
+    test_df = df[(df["timestamp_utc"] >= window.test_start_ts) & (df["timestamp_utc"] < window.test_end_ts)]
     train_df = purge_train_frame(train_df, window.test_start_ts, cfg, bar_secs)
     return train_df.reset_index(drop=True), test_df
 
 
-def run_walk_forward(df: pd.DataFrame, cfg: dict,
-                      strategy_fn: Callable[[pd.DataFrame, pd.DataFrame, dict], Dict]) -> List[dict]:
+def run_walk_forward(
+    df: pd.DataFrame, cfg: dict, strategy_fn: Callable[[pd.DataFrame, pd.DataFrame, dict], Dict]
+) -> List[dict]:
     """
     strategy_fn(train_df, test_df, cfg) -> metrics dict for that fold.
     For the rule-based baseline, train_df is unused (no fitting needed) but is still

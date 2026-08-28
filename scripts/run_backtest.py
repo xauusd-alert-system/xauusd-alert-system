@@ -128,20 +128,24 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
     label_event = resolve_label_event(cfg)
     df["label"] = generate_labels_from_config(df, cfg, asset_key=asset_key)
     labelled = int(df["label"].notna().sum())
-    print(f"[run_backtest] label event = {label_event} | labelled rows "
-          f"{labelled}/{len(df)} ({labelled / len(df) * 100:.2f}%)" if len(df)
-          else f"[run_backtest] label event = {label_event} | empty frame")
+    print(
+        f"[run_backtest] label event = {label_event} | labelled rows "
+        f"{labelled}/{len(df)} ({labelled / len(df) * 100:.2f}%)"
+        if len(df)
+        else f"[run_backtest] label event = {label_event} | empty frame"
+    )
     if label_event == "traded" and labelled:
         valid = df["label"].dropna()
         long_share = float((valid == 1.0).mean() * 100)
-        print(f"[run_backtest] traded-direction labels: long {long_share:.2f}% / "
-              f"short {100.0 - long_share:.2f}% of {labelled} informative bars "
-              f"(NaN bars are those where BOTH sides resolve the same way)")
+        print(
+            f"[run_backtest] traded-direction labels: long {long_share:.2f}% / "
+            f"short {100.0 - long_share:.2f}% of {labelled} informative bars "
+            f"(NaN bars are those where BOTH sides resolve the same way)"
+        )
     return df
 
 
-def _maybe_downgrade_three_class(cfg_inner: dict, train_df: pd.DataFrame,
-                                asset_key: str) -> dict:
+def _maybe_downgrade_three_class(cfg_inner: dict, train_df: pd.DataFrame, asset_key: str) -> dict:
     """Use a binary model for this fold when three-class no-trade labels are absent.
 
     The configured three-class semantics remain intact for production and for folds
@@ -167,8 +171,7 @@ def _maybe_downgrade_three_class(cfg_inner: dict, train_df: pd.DataFrame,
     downgraded["model"]["include_zero_class_effectively_binary"] = True
     print(
         "[run_backtest] INFO: %s fold has %.3f%% no_trade labels (< %.3f%%); "
-        "using calibrated binary short/long model for this fold."
-        % (asset_key, no_trade_fraction * 100, minimum * 100)
+        "using calibrated binary short/long model for this fold." % (asset_key, no_trade_fraction * 100, minimum * 100)
     )
     return downgraded
 
@@ -210,11 +213,10 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
             # frame's positional index and aligned to the rows build_training_matrix
             # actually keeps (it drops NaN-label/feature rows).
             from model.uniqueness import aligned_uniqueness_weights
+
             horizon = int(cfg_inner.get("labeling", {}).get("horizon_candles_n", 36))
             try:
-                sw = aligned_uniqueness_weights(
-                    train_df.index, X_train.index, horizon=max(1, horizon)
-                )
+                sw = aligned_uniqueness_weights(train_df.index, X_train.index, horizon=max(1, horizon))
             except Exception:
                 sw = None
             try:
@@ -232,9 +234,7 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
 
         if calibrated is not None:
             # Save to a temp file only; do not touch the production model.
-            tmp_fd, tmp_path = tempfile.mkstemp(
-                prefix="wf_model_", suffix=".joblib"
-            )
+            tmp_fd, tmp_path = tempfile.mkstemp(prefix="wf_model_", suffix=".joblib")
             os.close(tmp_fd)
             try:
                 save_model(calibrated, cols, tmp_path)
@@ -252,8 +252,11 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
                 # feature columns are set to the NEUTRAL 0.5/0.5 (never a signal),
                 # and only complete rows are predicted.
                 feat_cols = [c for c in cols if c in test_df_eval.columns]
-                complete = test_df_eval[feat_cols].notna().all(axis=1) if feat_cols \
+                complete = (
+                    test_df_eval[feat_cols].notna().all(axis=1)
+                    if feat_cols
                     else pd.Series(True, index=test_df_eval.index)
+                )
                 test_df_eval["ml_p_long"] = 0.5
                 test_df_eval["ml_p_short"] = 0.5
                 if complete.any():
@@ -283,18 +286,23 @@ def main():
     parser.add_argument("--timeframe", default="M5")
     parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
     parser.add_argument(
-        "--label-event", choices=["configured", "barrier", "traded"], default="configured",
+        "--label-event",
+        choices=["configured", "barrier", "traded"],
+        default="configured",
         help="Explicit pre-lock legacy-vs-traded target A/B override.",
     )
-    parser.add_argument("--no-journal", action="store_true",
-                        help="Do not append this run to logs/trial_journal.csv")
-    parser.add_argument("--allow-locked", action="store_true",
-                        help="Allow test windows overlapping the locked hold-out")
-    parser.add_argument("--end-date", default=None,
-                        help="Drop candles at or after this UTC date (YYYY-MM-DD) before "
-                             "building features. Use this to keep a research run strictly "
-                             "before validation.locked_holdout instead of burning the "
-                             "hold-out with --allow-locked.")
+    parser.add_argument("--no-journal", action="store_true", help="Do not append this run to logs/trial_journal.csv")
+    parser.add_argument(
+        "--allow-locked", action="store_true", help="Allow test windows overlapping the locked hold-out"
+    )
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Drop candles at or after this UTC date (YYYY-MM-DD) before "
+        "building features. Use this to keep a research run strictly "
+        "before validation.locked_holdout instead of burning the "
+        "hold-out with --allow-locked.",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -320,6 +328,7 @@ def main():
     # true, the frozen manifest must exist and match the raw content BEFORE any
     # feature/label work. Mixing brokers or incomplete history stops the run.
     from data.provenance import provenance_gate
+
     provenance_gate(cfg, args.db_path, timeframe, args.asset)
 
     if args.end_date:
@@ -330,10 +339,13 @@ def main():
     print("Running Ensemble ML Walk-Forward Backtest...")
 
     from scripts.trial_journal import enforce_locked_holdout
+
     windows_probe = generate_windows(
-        df, cfg["backtest"]["walk_forward"]["train_window_days"],
+        df,
+        cfg["backtest"]["walk_forward"]["train_window_days"],
         cfg["backtest"]["walk_forward"]["test_window_days"],
-        cfg["backtest"]["walk_forward"]["step_days"])
+        cfg["backtest"]["walk_forward"]["step_days"],
+    )
     enforce_locked_holdout(cfg, windows_probe, "run_backtest", allow=args.allow_locked)
 
     results = run_walk_forward(df, cfg, strategy_fn_factory(cfg, model_path, asset_key=args.asset))
@@ -353,40 +365,48 @@ def main():
     # PF > 1 with < 50% positive VALID folds means the two statistics refer
     # to different fold sets.
     from backtest.metrics import fold_sign_test, summarize_folds
+
     summary = summarize_folds(results)
-    print(f"\nFold summary: {summary['positive_folds_valid']}/{summary['valid_folds']} "
-          f"positive valid folds ({summary['positive_folds_pct_valid']}%) | "
-          f"median PF (valid) = {summary['median_pf_valid']} | "
-          f"empty folds = {summary['n_folds'] - summary['valid_folds']}")
+    print(
+        f"\nFold summary: {summary['positive_folds_valid']}/{summary['valid_folds']} "
+        f"positive valid folds ({summary['positive_folds_pct_valid']}%) | "
+        f"median PF (valid) = {summary['median_pf_valid']} | "
+        f"empty folds = {summary['n_folds'] - summary['valid_folds']}"
+    )
     st = fold_sign_test(summary["positive_folds_valid"], summary["valid_folds"])
     print(f"Sign test vs 50%: z={st['z']}, p(one-sided)={st['p_one_sided']}")
     if summary["inconsistent"]:
-        print(f"WARNING: {summary['note']} -- re-check the aggregate tables "
-              "(positive folds must use valid folds only).")
-    pd.DataFrame([summary]).to_csv(
-        f"logs/backtest_{args.asset.lower()}{suffix}_fold_summary.csv", index=False
-    )
+        print(
+            f"WARNING: {summary['note']} -- re-check the aggregate tables (positive folds must use valid folds only)."
+        )
+    pd.DataFrame([summary]).to_csv(f"logs/backtest_{args.asset.lower()}{suffix}_fold_summary.csv", index=False)
 
     # Append-only trial journal (audit: N_trials for DSR comes from the real
     # project history, not from the last grid).
     if not args.no_journal:
         from scripts.trial_journal import log_trial
+
         log_trial(
             experiment="run_backtest",
             asset=args.asset,
             # end_date is journalled so a shortened run can never later be
             # mistaken for a full-sample one.
-            params={"timeframe": timeframe, "db_path": args.db_path,
-                    "end_date": args.end_date,
-                    # The label event is part of the trial's identity: the same
-                    # grid trained on a different event is a DIFFERENT trial.
-                    "label_event": resolve_label_event(
-                        merge_asset_cfg(cfg, args.asset, "labeling"))},
-            metrics={"n_folds": summary["n_folds"], "valid_folds": summary["valid_folds"],
-                     "positive_folds_valid": summary["positive_folds_valid"],
-                     "median_pf_valid": summary["median_pf_valid"],
-                     "total_pnl": float(results_df["total_pnl"].sum())
-                     if "total_pnl" in results_df.columns else None})
+            params={
+                "timeframe": timeframe,
+                "db_path": args.db_path,
+                "end_date": args.end_date,
+                # The label event is part of the trial's identity: the same
+                # grid trained on a different event is a DIFFERENT trial.
+                "label_event": resolve_label_event(merge_asset_cfg(cfg, args.asset, "labeling")),
+            },
+            metrics={
+                "n_folds": summary["n_folds"],
+                "valid_folds": summary["valid_folds"],
+                "positive_folds_valid": summary["positive_folds_valid"],
+                "median_pf_valid": summary["median_pf_valid"],
+                "total_pnl": float(results_df["total_pnl"].sum()) if "total_pnl" in results_df.columns else None,
+            },
+        )
 
 
 if __name__ == "__main__":

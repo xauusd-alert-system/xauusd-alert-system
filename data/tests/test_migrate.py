@@ -1,4 +1,5 @@
 """Tests for data/migrate.py — versioned schema migration runner (ТЗ §9.3)."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -24,14 +25,10 @@ def test_fresh_db_applies_all_migrations(tmp_path):
     # Bookkeeping rows written after successful application.
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            f"SELECT version, name FROM {MIGRATIONS_TABLE} ORDER BY version"
-        ).fetchall()
+        rows = conn.execute(f"SELECT version, name FROM {MIGRATIONS_TABLE} ORDER BY version").fetchall()
     finally:
         conn.close()
-    assert [(r[0], r[1]) for r in rows] == [
-        (m.version, m.name) for m in applied
-    ]
+    assert [(r[0], r[1]) for r in rows] == [(m.version, m.name) for m in applied]
 
 
 def test_migrations_idempotent(tmp_path):
@@ -44,9 +41,7 @@ def test_migrations_idempotent(tmp_path):
     assert pending_migrations(db_path) == []
     conn = sqlite3.connect(db_path)
     try:
-        count = conn.execute(
-            f"SELECT COUNT(*) FROM {MIGRATIONS_TABLE}"
-        ).fetchone()[0]
+        count = conn.execute(f"SELECT COUNT(*) FROM {MIGRATIONS_TABLE}").fetchone()[0]
     finally:
         conn.close()
     assert count == len(first)
@@ -71,14 +66,11 @@ def test_dry_run_does_not_apply(tmp_path):
     # migration is recorded and no version advances.
     conn = sqlite3.connect(db_path)
     try:
-        tables = {
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        assert MIGRATIONS_TABLE not in tables or conn.execute(
-            f"SELECT COUNT(*) FROM {MIGRATIONS_TABLE}"
-        ).fetchone()[0] == 0
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert (
+            MIGRATIONS_TABLE not in tables
+            or conn.execute(f"SELECT COUNT(*) FROM {MIGRATIONS_TABLE}").fetchone()[0] == 0
+        )
     finally:
         conn.close()
 
@@ -104,17 +96,9 @@ def test_failed_migration_rolls_back(tmp_path):
     assert current_version(db_path) == 1
     conn = sqlite3.connect(db_path)
     try:
-        tables = {
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "boom_marker" not in tables
-        recorded = {
-            row[0] for row in conn.execute(
-                f"SELECT version FROM {MIGRATIONS_TABLE}"
-            )
-        }
+        recorded = {row[0] for row in conn.execute(f"SELECT version FROM {MIGRATIONS_TABLE}")}
     finally:
         conn.close()
     assert recorded == {1}
@@ -123,10 +107,13 @@ def test_failed_migration_rolls_back(tmp_path):
     def fixed(conn: sqlite3.Connection) -> None:
         conn.execute("CREATE TABLE boom_marker (x INTEGER)")
 
-    apply_migrations(db_path, migrations=[
-        Migration(version=1, name="ok", apply=lambda conn: None),
-        Migration(version=2, name="boom", apply=fixed),
-    ])
+    apply_migrations(
+        db_path,
+        migrations=[
+            Migration(version=1, name="ok", apply=lambda conn: None),
+            Migration(version=2, name="boom", apply=fixed),
+        ],
+    )
     assert current_version(db_path) == 2
 
 
@@ -136,10 +123,7 @@ def test_migration_records_timestamp(tmp_path):
     assert applied
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            f"SELECT version, applied_at_utc_ms FROM {MIGRATIONS_TABLE} "
-            f"ORDER BY version"
-        ).fetchall()
+        rows = conn.execute(f"SELECT version, applied_at_utc_ms FROM {MIGRATIONS_TABLE} ORDER BY version").fetchall()
     finally:
         conn.close()
     assert len(rows) == len(applied)
@@ -168,9 +152,7 @@ def test_migration_001_rejects_partial_table_family(tmp_path):
     db_path = str(tmp_path / "broken.sqlite")
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            "CREATE TABLE trade_groups (group_id TEXT PRIMARY KEY)"
-        )
+        conn.execute("CREATE TABLE trade_groups (group_id TEXT PRIMARY KEY)")
         # companion trade_group_actions deliberately missing
         conn.commit()
     finally:

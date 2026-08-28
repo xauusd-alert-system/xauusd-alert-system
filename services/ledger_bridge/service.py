@@ -12,6 +12,7 @@ path in its own process and serves a health endpoint with two checks:
 
 Run: ``python -m services.ledger_bridge [--once] [--health-port 8791]``
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,9 +38,7 @@ def _latest_delivered_at_ms(db_path: str) -> int | None:
 
     conn = get_connection(db_path)
     try:
-        row = conn.execute(
-            "SELECT MAX(delivered_at_ms) FROM ledger_outbox"
-        ).fetchone()
+        row = conn.execute("SELECT MAX(delivered_at_ms) FROM ledger_outbox").fetchone()
         return int(row[0]) if row and row[0] is not None else None
     except sqlite3.OperationalError:
         return None
@@ -62,9 +61,7 @@ def make_ingest_db_check(db_path: str) -> Callable[[], tuple[bool, str]]:
         except Exception as exc:
             return False, f"outbox db unavailable: {exc}"
         try:
-            row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='ledger_outbox'"
-            ).fetchone()
+            row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ledger_outbox'").fetchone()
             if row is None:
                 return False, "table ledger_outbox missing (run init_outbox)"
         except sqlite3.OperationalError as exc:
@@ -100,8 +97,7 @@ def make_watermark_check(
         if latest is None:
             return (
                 False,
-                f"degraded: {pending} pending events and the delivery watermark "
-                f"has never moved",
+                f"degraded: {pending} pending events and the delivery watermark has never moved",
             )
         age_minutes = (time.time_ns() // 1_000_000 - latest) / 60_000.0
         if age_minutes > float(max_age_minutes):
@@ -183,16 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
         "with a health endpoint (P2-19 watermark check).",
     )
     parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
-    parser.add_argument("--account-mode", default="demo",
-                        choices=["demo", "contest", "real"])
+    parser.add_argument("--account-mode", default="demo", choices=["demo", "contest", "real"])
     parser.add_argument("--account-login", default="0")
     parser.add_argument("--interval", type=float, default=None)
     parser.add_argument("--batch-size", type=int, default=100)
-    parser.add_argument("--once", action="store_true",
-                        help="deliver one batch and exit")
+    parser.add_argument("--once", action="store_true", help="deliver one batch and exit")
     parser.add_argument("--health-port", type=int, default=DEFAULT_HEALTH_PORT)
-    parser.add_argument("--watermark-max-age-min", type=float,
-                        default=DEFAULT_WATERMARK_MAX_AGE_MIN)
+    parser.add_argument("--watermark-max-age-min", type=float, default=DEFAULT_WATERMARK_MAX_AGE_MIN)
     return parser
 
 

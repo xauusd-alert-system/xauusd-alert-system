@@ -8,6 +8,7 @@ log_trade_close on the executed_trades DB, no loss-streak update. Entry
 notifications kept working because they are sent synchronously in
 execute_signal(), which masked the bug in production.
 """
+
 import types
 
 from execution import mt5_trader as trader_mod
@@ -54,21 +55,36 @@ def _trader(tmp_path, active):
 
 
 TRACKED_LONG = {
-    "symbol": "XAUUSD", "type": "long", "entry_price": 2000.0,
-    "original_volume": 0.10, "tp1": 2005.0, "tp2": 2010.0, "tp3": 2015.0,
-    "tp1_hit": True, "tp2_hit": False,
+    "symbol": "XAUUSD",
+    "type": "long",
+    "entry_price": 2000.0,
+    "original_volume": 0.10,
+    "tp1": 2005.0,
+    "tp2": 2010.0,
+    "tp3": 2015.0,
+    "tp1_hit": True,
+    "tp2_hit": False,
 }
 
 
 def _deal(profit, entry=1, price=2010.0, ts=1_700_000_000):
     return types.SimpleNamespace(
-        profit=profit, swap=-1.0, commission=-1.0, entry=entry, time=ts, price=price,
+        profit=profit,
+        swap=-1.0,
+        commission=-1.0,
+        entry=entry,
+        time=ts,
+        price=price,
     )
 
 
 def _stub_open_position(ticket):
     return types.SimpleNamespace(
-        ticket=ticket, symbol="EURUSD", type=0, price_open=1.1000, volume=0.10,
+        ticket=ticket,
+        symbol="EURUSD",
+        type=0,
+        price_open=1.1000,
+        volume=0.10,
     )
 
 
@@ -76,21 +92,25 @@ def _run_be_check(monkeypatch, trader, positions, deals):
     """Drive check_and_move_breakeven() with a fake MT5 world."""
     monkeypatch.setattr(trader_mod.mt5, "initialize", lambda *a, **k: True)
     monkeypatch.setattr(
-        trader_mod, "positions_get_by_magic", lambda *a, **k: positions,
+        trader_mod,
+        "positions_get_by_magic",
+        lambda *a, **k: positions,
     )
     monkeypatch.setattr(
-        trader_mod.mt5, "history_deals_get", lambda *a, **k: deals,
+        trader_mod.mt5,
+        "history_deals_get",
+        lambda *a, **k: deals,
     )
     closed_logged = []
     monkeypatch.setattr(
-        trader_mod, "log_trade_close",
-        lambda db, ticket, close_time, close_price, pnl: closed_logged.append(
-            (ticket, close_price, pnl)
-        ),
+        trader_mod,
+        "log_trade_close",
+        lambda db, ticket, close_time, close_price, pnl: closed_logged.append((ticket, close_price, pnl)),
     )
     purged = []
     monkeypatch.setattr(
-        trader_mod, "purge_closed_position_context",
+        trader_mod,
+        "purge_closed_position_context",
         lambda ticket, path=None: purged.append(ticket),
     )
     trader.check_and_move_breakeven()
@@ -103,7 +123,8 @@ def test_close_of_last_position_sends_telegram_notification(monkeypatch, tmp_pat
     t = _trader(tmp_path, {123: dict(TRACKED_LONG)})
 
     closed_logged, purged = _run_be_check(
-        monkeypatch, t,
+        monkeypatch,
+        t,
         positions=[],  # real API empty tuple equivalent
         deals=[_deal(0.0, entry=0, price=2000.0), _deal(52.0, entry=1, price=2010.0)],
     )
@@ -126,7 +147,8 @@ def test_close_of_last_losing_position_tracks_streak(monkeypatch, tmp_path):
     t = _trader(tmp_path, {456: dict(TRACKED_LONG)})
 
     _run_be_check(
-        monkeypatch, t,
+        monkeypatch,
+        t,
         positions=[],
         deals=[_deal(0.0, entry=0, price=2000.0), _deal(-40.0, entry=1, price=1990.0)],
     )
@@ -142,7 +164,10 @@ def test_position_api_error_keeps_state_and_sends_nothing(monkeypatch, tmp_path)
     t = _trader(tmp_path, {123: dict(TRACKED_LONG)})
 
     closed_logged, purged = _run_be_check(
-        monkeypatch, t, positions=None, deals=[],
+        monkeypatch,
+        t,
+        positions=None,
+        deals=[],
     )
 
     assert t.bot.messages == []
@@ -157,7 +182,8 @@ def test_close_of_one_position_among_several_still_reported(monkeypatch, tmp_pat
     t = _trader(tmp_path, {123: dict(TRACKED_LONG), 789: dict(TRACKED_LONG)})
 
     closed_logged, purged = _run_be_check(
-        monkeypatch, t,
+        monkeypatch,
+        t,
         positions=[_stub_open_position(789)],  # 123 disappeared -> closed
         deals=[_deal(0.0, entry=0, price=2000.0), _deal(-12.5, entry=1, price=1995.0)],
     )
@@ -173,11 +199,14 @@ def test_group_position_counts_three_legs_are_one_group(tmp_path):
     """Audit 2026-08-19: the risk budget mapping counts a 3-leg group as ONE
     slot; tickets unknown to active_trades (restart edge) fall back to single
     positions via the position symbol."""
-    t = _trader(tmp_path, {
-        1: dict(TRACKED_LONG, leg=1, group_key="G1"),
-        2: dict(TRACKED_LONG, leg=2, group_key="G1"),
-        3: dict(TRACKED_LONG, leg=3, group_key="G1"),
-    })
+    t = _trader(
+        tmp_path,
+        {
+            1: dict(TRACKED_LONG, leg=1, group_key="G1"),
+            2: dict(TRACKED_LONG, leg=2, group_key="G1"),
+            3: dict(TRACKED_LONG, leg=3, group_key="G1"),
+        },
+    )
     positions = [
         types.SimpleNamespace(ticket=1, symbol="GOLD"),
         types.SimpleNamespace(ticket=2, symbol="GOLD"),
@@ -202,7 +231,8 @@ def test_history_lookup_failure_does_not_suppress_notification(monkeypatch, tmp_
     monkeypatch.setattr(trader_mod.mt5, "initialize", lambda *a, **k: True)
     monkeypatch.setattr(trader_mod, "positions_get_by_magic", lambda *a, **k: [])
     monkeypatch.setattr(
-        trader_mod.mt5, "history_deals_get",
+        trader_mod.mt5,
+        "history_deals_get",
         lambda position=None: boom() if position == 111 else [],
     )
     monkeypatch.setattr(trader_mod, "log_trade_close", lambda *a, **k: None)

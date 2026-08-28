@@ -1,4 +1,5 @@
 """Tests for provenance/verifier.py — completeness, hash, TTL (ТЗ 8.7/P2-51)."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,7 +14,7 @@ def test_complete_record_is_ok():
     assert result.complete is True
     assert result.missing_fields == []
     assert result.hash_ok is True
-    assert result.age_ok is True          # no TTL configured by default
+    assert result.age_ok is True  # no TTL configured by default
     assert result.snapshot_age_ms is None
 
 
@@ -31,7 +32,7 @@ def test_hash_mismatch_fails_hash_ok():
     record = make_record(record_hash="f" * 64)
     result = verify_record(record)
     assert result.hash_ok is False
-    assert result.complete is True        # completeness is independent
+    assert result.complete is True  # completeness is independent
 
 
 def test_stale_snapshot_fails_age_ok():
@@ -71,6 +72,7 @@ def test_verify_by_group_id_via_store(tmp_path):
 def test_verify_by_group_id_via_fallback_loader():
     """Adapter path: absent in the new store -> catalogized from the legacy
     trade_group_store row (data.trade_group_store.load_group semantics)."""
+
     class FakeStore:
         fallback_loader = None
 
@@ -80,10 +82,16 @@ def test_verify_by_group_id_via_fallback_loader():
     from execution.tests.test_trade_group_executor import make_spec
 
     spec = make_spec()
-    spec = spec.model_copy(update={"provenance": {
-        "market_snapshot_id": "MARKET:1", "feature_snapshot_id": "FEAT:1",
-        "broker_snapshot_id": "BROKER:1", "cost_snapshot_id": "COST:1",
-    }})
+    spec = spec.model_copy(
+        update={
+            "provenance": {
+                "market_snapshot_id": "MARKET:1",
+                "feature_snapshot_id": "FEAT:1",
+                "broker_snapshot_id": "BROKER:1",
+                "cost_snapshot_id": "COST:1",
+            }
+        }
+    )
 
     class FallbackStore(FakeStore):
         calls = []
@@ -98,4 +106,4 @@ def test_verify_by_group_id_via_fallback_loader():
     result = verify_record(spec.group_id, store=FallbackStore())
     assert result.group_id == spec.group_id
     # legacy spec provenance lacks config-context broker/cost snapshot dicts
-    assert result.complete in (True, False)   # adapter maps what exists
+    assert result.complete in (True, False)  # adapter maps what exists

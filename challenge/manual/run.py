@@ -15,6 +15,7 @@ Commands:
         summary
         weekly
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,15 +66,22 @@ def cmd_risk_calc(args) -> int:
     p = risk_mod.profile_params(stage, profile, 0.0, ref)
     stop_dist = abs(price - stop)
     qty = p["risk_usd"] / stop_dist if stop_dist else 0.0
-    risk_check = {"risk_usd": round(qty * stop_dist, 2), "qty": round(qty, 2),
-                  "cap_usd": p["max_risk_usd"],
-                  "ok": qty * stop_dist <= p["max_risk_usd"] + 1e-9}
-    print(f"Profile {profile} (stage {stage}): risk ${p['risk_usd']:.2f}, "
-          f"daily limit -${p['daily_limit_usd']:.0f}, max {p['max_trades']} trades, "
-          f"only A-setups: {p['only_a']}")
+    risk_check = {
+        "risk_usd": round(qty * stop_dist, 2),
+        "qty": round(qty, 2),
+        "cap_usd": p["max_risk_usd"],
+        "ok": qty * stop_dist <= p["max_risk_usd"] + 1e-9,
+    }
+    print(
+        f"Profile {profile} (stage {stage}): risk ${p['risk_usd']:.2f}, "
+        f"daily limit -${p['daily_limit_usd']:.0f}, max {p['max_trades']} trades, "
+        f"only A-setups: {p['only_a']}"
+    )
     print(f"Price {price:.2f}, stop {stop:.2f} -> stop distance {stop_dist:.2f}")
-    print(f"Size: {risk_check['qty']} shares (risk ${risk_check['risk_usd']:.2f}, "
-          f"cap ${risk_check['cap_usd']:.2f}) -> {'OK' if risk_check['ok'] else 'REJECT (risk > cap)'}")
+    print(
+        f"Size: {risk_check['qty']} shares (risk ${risk_check['risk_usd']:.2f}, "
+        f"cap ${risk_check['cap_usd']:.2f}) -> {'OK' if risk_check['ok'] else 'REJECT (risk > cap)'}"
+    )
     return 0
 
 
@@ -89,7 +97,7 @@ def cmd_risk_show(args) -> int:
         print(f"  {k:18s} {v}")
     print("\nDrawdown scaling (ТЗ §2.3):")
     for step_dd, r, mt, oa in risk_mod.DRAWDOWN_STEPS:
-        print(f"  at -{step_dd*100:.1f}%: risk ${r}, max {mt} trade(s), A-only={oa}")
+        print(f"  at -{step_dd * 100:.1f}%: risk ${r}, max {mt} trade(s), A-only={oa}")
     print(f"Pause limits: stage {stage} -${p['pause_usd']:.0f}")
     return 0
 
@@ -103,11 +111,15 @@ def cmd_day_start(args) -> int:
     res = sm.start_day(stage, profile, equity, start_eq, dt.datetime.now())
     if not res["ok"]:
         sys.exit(f"cannot start day: {res['reason']}")
-    print(f"Day started: stage {stage}, profile {profile}, day equity {equity:.2f}, "
-          f"stage start {start_eq:.2f}, total PnL {res['total_pnl']:+.2f}")
-    print(f"Effective risk ${sm.state.effective_risk_usd:.2f}, "
-          f"max {sm.state.effective_max_trades} trades, "
-          f"A-only={sm.state.effective_only_a} (risk_reduced={sm.state.risk_reduced})")
+    print(
+        f"Day started: stage {stage}, profile {profile}, day equity {equity:.2f}, "
+        f"stage start {start_eq:.2f}, total PnL {res['total_pnl']:+.2f}"
+    )
+    print(
+        f"Effective risk ${sm.state.effective_risk_usd:.2f}, "
+        f"max {sm.state.effective_max_trades} trades, "
+        f"A-only={sm.state.effective_only_a} (risk_reduced={sm.state.risk_reduced})"
+    )
     return 0
 
 
@@ -115,9 +127,8 @@ def cmd_day_status(args) -> int:
     sm = risk_mod.DailyStateMachine()
     s = sm.state
     print(f"Stage {s.stage} / profile {s.profile} / date {s.date}")
-    print(f"Equity {s.current_equity:.2f} (day start {s.day_start_equity:.2f}, "
-          f"stage start {s.total_start_equity:.2f})")
-    print(f"Daily PnL {s.daily_pnl():+.2f} ({100*s.daily_pnl()/s.day_start_equity:+.2f}%)")
+    print(f"Equity {s.current_equity:.2f} (day start {s.day_start_equity:.2f}, stage start {s.total_start_equity:.2f})")
+    print(f"Daily PnL {s.daily_pnl():+.2f} ({100 * s.daily_pnl() / s.day_start_equity:+.2f}%)")
     print(f"Trades {s.trades_today}/{s.effective_max_trades}, losses {s.losses_today}")
     print(f"Status: {s.status} — {s.status_reason}")
     if s.paused_until:
@@ -129,8 +140,7 @@ def cmd_day_equity(args) -> int:
     sm = risk_mod.DailyStateMachine()
     action = sm.update_equity(float(args.value))
     s = sm.state
-    print(f"Equity {s.current_equity:.2f}, daily PnL {s.daily_pnl():+.2f}, "
-          f"status {s.status} ({s.status_reason})")
+    print(f"Equity {s.current_equity:.2f}, daily PnL {s.daily_pnl():+.2f}, status {s.status} ({s.status_reason})")
     print(f"ACTION: {action}")
     return 0
 
@@ -140,11 +150,12 @@ def cmd_day_trade(args) -> int:
     result = float(args.result)
     outcome = (args.outcome or ("L" if result < 0 else "W")).upper()
     violation = args.violation or ""
-    sm.record_trade(result, was_planned=(args.by_plan in (None, "да", "yes", "1")),
-                    violation=violation)
+    sm.record_trade(result, was_planned=(args.by_plan in (None, "да", "yes", "1")), violation=violation)
     s = sm.state
-    print(f"Trade recorded: result {result:+.2f}, outcome {outcome}, "
-          f"trades {s.trades_today}/{s.effective_max_trades}, losses {s.losses_today}")
+    print(
+        f"Trade recorded: result {result:+.2f}, outcome {outcome}, "
+        f"trades {s.trades_today}/{s.effective_max_trades}, losses {s.losses_today}"
+    )
     print(f"Status: {s.status} — {s.status_reason}")
     return 0
 
@@ -163,23 +174,33 @@ def cmd_scan(args) -> int:
         candles = load_candles(sym)
         res = scanner_mod.scan_setup(sym, date, candles, ss, cfg)
         print("=" * 70)
-        print(f"{sym} {res.date} trend15={res.trend15} trend30={res.trend30} "
-              f"grade={res.grade} bias={res.bias} rr={res.rr}")
+        print(
+            f"{sym} {res.date} trend15={res.trend15} trend30={res.trend30} "
+            f"grade={res.grade} bias={res.bias} rr={res.rr}"
+        )
         if res.impulse_bar:
             ib = res.impulse_bar
-            print(f"  impulse: {dt.datetime.fromtimestamp(ib['time'], dt.UTC).strftime('%H:%M')} "
-                  f"O{ib['open']:.2f} H{ib['high']:.2f} L{ib['low']:.2f} C{ib['close']:.2f} V{ib.get('volume',0):.0f}")
+            print(
+                f"  impulse: {dt.datetime.fromtimestamp(ib['time'], dt.UTC).strftime('%H:%M')} "
+                f"O{ib['open']:.2f} H{ib['high']:.2f} L{ib['low']:.2f} C{ib['close']:.2f} V{ib.get('volume', 0):.0f}"
+            )
         if res.signal_bar:
             sb = res.signal_bar
-            print(f"  signal:  {dt.datetime.fromtimestamp(sb['time'], dt.UTC).strftime('%H:%M')} "
-                  f"O{sb['open']:.2f} H{sb['high']:.2f} L{sb['low']:.2f} C{sb['close']:.2f}")
+            print(
+                f"  signal:  {dt.datetime.fromtimestamp(sb['time'], dt.UTC).strftime('%H:%M')} "
+                f"O{sb['open']:.2f} H{sb['high']:.2f} L{sb['low']:.2f} C{sb['close']:.2f}"
+            )
         if res.pullback_bars:
-            print(f"  pullback: {len(res.pullback_bars)} bars, "
-                  f"{dt.datetime.fromtimestamp(res.pullback_bars[0]['time'], dt.UTC).strftime('%H:%M')} - "
-                  f"{dt.datetime.fromtimestamp(res.pullback_bars[-1]['time'], dt.UTC).strftime('%H:%M')}")
+            print(
+                f"  pullback: {len(res.pullback_bars)} bars, "
+                f"{dt.datetime.fromtimestamp(res.pullback_bars[0]['time'], dt.UTC).strftime('%H:%M')} - "
+                f"{dt.datetime.fromtimestamp(res.pullback_bars[-1]['time'], dt.UTC).strftime('%H:%M')}"
+            )
         if res.tradable:
-            print(f"  ENTRY {res.bias.upper()} @ {res.entry:.2f} stop {res.stop:.2f} "
-                  f"target {res.target:.2f} (R:R {res.rr})")
+            print(
+                f"  ENTRY {res.bias.upper()} @ {res.entry:.2f} stop {res.stop:.2f} "
+                f"target {res.target:.2f} (R:R {res.rr})"
+            )
         if res.no_go:
             print(f"  NO-GO: {', '.join(res.no_go)}")
     return 0
@@ -190,17 +211,31 @@ def cmd_journal(args) -> int:
     jpath = args.path or journal_mod.DEFAULT_JOURNAL
     if args.sub == "add":
         num = journal_mod.add_trade(
-            jpath, args.date, args.time, args.instrument.upper(),
-            args.direction.upper(), args.setup_class.upper(),
-            args.entry, args.stop, args.target, args.risk_usd, args.risk_pct,
-            comment=args.comment or "")
+            jpath,
+            args.date,
+            args.time,
+            args.instrument.upper(),
+            args.direction.upper(),
+            args.setup_class.upper(),
+            args.entry,
+            args.stop,
+            args.target,
+            args.risk_usd,
+            args.risk_pct,
+            comment=args.comment or "",
+        )
         print(f"added trade #{num}")
     elif args.sub == "close":
-        ok = journal_mod.close_trade(jpath, int(args.num), float(args.result),
-                                     float(args.r), args.outcome.upper(),
-                                     by_plan=args.by_plan or "да",
-                                     violation=args.violation or "",
-                                     comment=args.comment or "")
+        ok = journal_mod.close_trade(
+            jpath,
+            int(args.num),
+            float(args.result),
+            float(args.r),
+            args.outcome.upper(),
+            by_plan=args.by_plan or "да",
+            violation=args.violation or "",
+            comment=args.comment or "",
+        )
         print("closed" if ok else f"trade #{args.num} not found")
     elif args.sub == "summary":
         for d in journal_mod.daily_summary(jpath):
@@ -260,8 +295,9 @@ def cmd_earnings(args) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="python -m challenge.manual.run",
-                                     description="Prop-challenge manual system (ТЗ)")
+    parser = argparse.ArgumentParser(
+        prog="python -m challenge.manual.run", description="Prop-challenge manual system (ТЗ)"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     r = sub.add_parser("risk")

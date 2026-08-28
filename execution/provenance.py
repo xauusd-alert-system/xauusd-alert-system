@@ -24,6 +24,7 @@ ProvenanceSpec v1 — единый контракт происхождения �
   (``provenance_status="legacy_unavailable"``, §38);
 * model config frozen — immutable.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -35,12 +36,27 @@ from pydantic import BaseModel, Field, model_validator
 PROVENANCE_SCHEMA_VERSION = "provenance.v1"
 
 FRESHNESS_VALUES = frozenset({"fresh", "stale", "offline", "waiting", "error", "unknown"})
-SOURCE_TYPE_VALUES = frozenset({
-    "closed_candle", "broker_snapshot", "market_snapshot", "feature_snapshot",
-    "model_artifact", "model_inference", "trade_profile", "training_manifest",
-    "cost_snapshot", "derived", "order", "deal", "position", "ledger",
-    "fake_mt5", "paper_driver", "config",
-})
+SOURCE_TYPE_VALUES = frozenset(
+    {
+        "closed_candle",
+        "broker_snapshot",
+        "market_snapshot",
+        "feature_snapshot",
+        "model_artifact",
+        "model_inference",
+        "trade_profile",
+        "training_manifest",
+        "cost_snapshot",
+        "derived",
+        "order",
+        "deal",
+        "position",
+        "ledger",
+        "fake_mt5",
+        "paper_driver",
+        "config",
+    }
+)
 
 # Единый source mapping (§47): класс источника -> каноническое source-значение.
 SOURCE_MAPPING = {
@@ -68,9 +84,15 @@ def sha256_hex(payload: Any) -> str:
 def source_id_for(kind: str, value: Any) -> str:
     """Deterministic source id per class (§5): e.g. MARKET:<hash>."""
     prefix = {
-        "market": "MARKET", "feature": "FEATURE", "broker": "BROKER",
-        "cost": "COST", "model": "MODEL", "profile": "PROFILE",
-        "geometry": "GEOMETRY", "group": "GROUP", "inference": "INFERENCE",
+        "market": "MARKET",
+        "feature": "FEATURE",
+        "broker": "BROKER",
+        "cost": "COST",
+        "model": "MODEL",
+        "profile": "PROFILE",
+        "geometry": "GEOMETRY",
+        "group": "GROUP",
+        "inference": "INFERENCE",
         "training": "TRAINING",
     }.get(kind, "SRC")
     return f"{prefix}:{sha256_hex(value)}"
@@ -114,10 +136,7 @@ class ProvenanceSpec(BaseModel):
             raise ValueError("observed_at_utc_ms must be positive")
         # §4/§33: единый набор freshness-статусов
         if self.freshness not in FRESHNESS_VALUES:
-            raise ValueError(
-                f"invalid freshness {self.freshness!r}; expected one of "
-                f"{sorted(FRESHNESS_VALUES)}"
-            )
+            raise ValueError(f"invalid freshness {self.freshness!r}; expected one of {sorted(FRESHNESS_VALUES)}")
         # §37: unknown никогда не валиден как source — кроме явного legacy-маркера
         # (§38): старые записи честно помечаются legacy_unavailable, а не
         # получают задним числом выдуманный источник.
@@ -125,15 +144,14 @@ class ProvenanceSpec(BaseModel):
             raise ValueError("source='unknown' is not a valid provenance source")
         if self.freshness == "fresh" and self.observed_at_utc_ms < self.as_of_utc_ms:
             # fresh требует соответствия observation timestamp (§4)
-            raise ValueError(
-                "fresh provenance requires observed_at_utc_ms >= as_of_utc_ms"
-            )
+            raise ValueError("fresh provenance requires observed_at_utc_ms >= as_of_utc_ms")
         return self
 
     def canonical_hash(self) -> str:
         payload = json.dumps(
             self.model_dump(mode="json", exclude={"schema_version"}),
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -155,14 +173,20 @@ def provenance_of(
     provenance_status: str = "available",
 ) -> ProvenanceSpec:
     """Builder: observed_at defaults to as_of (same-instant observations)."""
-    observed = int(observed_at_utc_ms) if observed_at_utc_ms is not None \
-        else int(as_of_utc_ms)
+    observed = int(observed_at_utc_ms) if observed_at_utc_ms is not None else int(as_of_utc_ms)
     return ProvenanceSpec(
-        source=source, source_type=source_type, source_id=source_id,
-        mode=mode, asset_key=asset_key, broker_symbol=broker_symbol,
-        timeframe=timeframe, as_of_utc_ms=int(as_of_utc_ms),
-        observed_at_utc_ms=observed, freshness=freshness,
-        data_hash=data_hash, parent_ids=list(parent_ids or []),
+        source=source,
+        source_type=source_type,
+        source_id=source_id,
+        mode=mode,
+        asset_key=asset_key,
+        broker_symbol=broker_symbol,
+        timeframe=timeframe,
+        as_of_utc_ms=int(as_of_utc_ms),
+        observed_at_utc_ms=observed,
+        freshness=freshness,
+        data_hash=data_hash,
+        parent_ids=list(parent_ids or []),
         provenance_status=provenance_status,
     )
 
@@ -183,9 +207,7 @@ def legacy_provenance(*, mode: str, as_of_utc_ms: int | None = None) -> Provenan
     )
 
 
-def freshness_status(age_ms: int | None, now_ms: int,
-                     fresh_after_ms: int = 5_000,
-                     stale_after_ms: int = 60_000) -> str:
+def freshness_status(age_ms: int | None, now_ms: int, fresh_after_ms: int = 5_000, stale_after_ms: int = 60_000) -> str:
     """Единый freshness-контракт (§33) — совместим с realtime.data_envelope."""
     if age_ms is None:
         return "waiting"

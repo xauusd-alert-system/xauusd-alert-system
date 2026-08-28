@@ -43,8 +43,9 @@ python -m data.migrate [--db PATH] [--dry-run] [--status]
 
 ```python
 """Migration 00N — ``<slug>``: краткое описание (ТЗ §...)."""
-VERSION = N          # монотонно возрастает
-NAME = "<slug>"      # короткий человекочитаемый slug
+
+VERSION = N  # монотонно возрастает
+NAME = "<slug>"  # короткий человекочитаемый slug
 
 TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS my_table (
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS my_table (
     created_at_utc_ms INTEGER NOT NULL
 )
 """
+
 
 def apply(conn) -> None:
     conn.execute(TABLE_SQL)

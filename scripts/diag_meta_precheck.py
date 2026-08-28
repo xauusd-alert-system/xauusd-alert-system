@@ -49,8 +49,7 @@ from scripts.deflated_sharpe import (
 from scripts.run_backtest import merge_asset_cfg
 
 
-def run_meta_precheck(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                      max_folds: int | None = None) -> dict:
+def run_meta_precheck(cfg: dict, asset_key: str, df_full: pd.DataFrame, max_folds: int | None = None) -> dict:
     """Per-trade OOF primary-prob vs "TP2 before SL" + AUC/deciles/Brier."""
     windows, frames = _build_fold_frames(df_full, cfg, asset_key, max_folds)
     if not windows:
@@ -82,20 +81,31 @@ def run_meta_precheck(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             p_short = float(fdf_run["ml_p_short"].iloc[i - 1])
             p = p_long if t.direction == 1 else p_short
             reached_tp2 = bool(t.tp2_hit and t.pnl is not None and t.pnl >= 0)
-            risk = abs(t.entry_price - t.initial_stop_price) * t.volume * point_value_lot \
-                if t.initial_stop_price else 0.0
-            rows.append({
-                "p": float(p),
-                "y_tp2_before_sl": int(reached_tp2),
-                "net_r": float(t.pnl / risk) if risk > 1e-12 else float("nan"),
-            })
+            risk = (
+                abs(t.entry_price - t.initial_stop_price) * t.volume * point_value_lot if t.initial_stop_price else 0.0
+            )
+            rows.append(
+                {
+                    "p": float(p),
+                    "y_tp2_before_sl": int(reached_tp2),
+                    "net_r": float(t.pnl / risk) if risk > 1e-12 else float("nan"),
+                }
+            )
 
     if len(rows) < 30:
-        return {"asset": asset_key, "n_trades": len(rows), "verdict": "insufficient trades",
-                "auc": None, "brier": None, "ece": None, "deciles": []}
+        return {
+            "asset": asset_key,
+            "n_trades": len(rows),
+            "verdict": "insufficient trades",
+            "auc": None,
+            "brier": None,
+            "ece": None,
+            "deciles": [],
+        }
 
     rdf = pd.DataFrame(rows)
     from sklearn.metrics import brier_score_loss, roc_auc_score
+
     p = rdf["p"].to_numpy(dtype=float)
     y = rdf["y_tp2_before_sl"].to_numpy(dtype=int)
     try:
@@ -121,15 +131,21 @@ def run_meta_precheck(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     except ValueError:
         rdf["decile"] = pd.cut(p, 10, labels=False)
     for d, g in rdf.groupby("decile"):
-        deciles.append({"decile": int(d), "n": int(len(g)),
-                        "mean_p": round(float(g["p"].mean()), 4),
-                        "mean_net_r": round(float(g["net_r"].mean()), 4),
-                        "frac_tp2": round(float(g["y_tp2_before_sl"].mean()), 3)})
+        deciles.append(
+            {
+                "decile": int(d),
+                "n": int(len(g)),
+                "mean_p": round(float(g["p"].mean()), 4),
+                "mean_net_r": round(float(g["net_r"].mean()), 4),
+                "frac_tp2": round(float(g["y_tp2_before_sl"].mean()), 3),
+            }
+        )
     deciles.sort(key=lambda x: x["decile"])
     # monotonicity: Spearman of (mean_p, mean_net_r)
     mono = None
     if len(deciles) >= 4:
         from scipy.stats import spearmanr
+
         rho, _ = spearmanr([d["mean_p"] for d in deciles], [d["mean_net_r"] for d in deciles])
         mono = round(float(rho), 3)
 
@@ -141,24 +157,35 @@ def run_meta_precheck(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         verdict = "borderline (0.53-0.55): revisit after feature/TF work"
     else:
         verdict = "supported (AUC >= 0.55): meta-sizing may add value — proceed with the audit's gates"
-    return {"asset": asset_key, "n_trades": len(rows), "auc": auc,
-            "brier": round(brier, 4), "brier_skill": round(brier_skill, 4),
-            "ece": round(ece, 4), "base_rate_tp2": round(base_rate, 4),
-            "decile_monotonicity_spearman": mono, "deciles": deciles,
-            "verdict": verdict}
+    return {
+        "asset": asset_key,
+        "n_trades": len(rows),
+        "auc": auc,
+        "brier": round(brier, 4),
+        "brier_skill": round(brier_skill, 4),
+        "ece": round(ece, 4),
+        "base_rate_tp2": round(base_rate, 4),
+        "decile_monotonicity_spearman": mono,
+        "deciles": deciles,
+        "verdict": verdict,
+    }
 
 
 def print_report(d: dict) -> None:
     print(f"\n=== Meta-labeling pre-check (TP2-before-SL): {d['asset']} ===")
     print(f"Trades: {d['n_trades']} | base rate TP2-before-SL: {d.get('base_rate_tp2')}")
-    print(f"AUC = {d['auc']} | Brier = {d['brier']} (skill {d['brier_skill']}) | "
-          f"ECE = {d['ece']} | decile monotonicity (Spearman) = {d.get('decile_monotonicity_spearman')}")
+    print(
+        f"AUC = {d['auc']} | Brier = {d['brier']} (skill {d['brier_skill']}) | "
+        f"ECE = {d['ece']} | decile monotonicity (Spearman) = {d.get('decile_monotonicity_spearman')}"
+    )
     print(f"Verdict: {d['verdict']}")
     if d.get("deciles"):
         print("Deciles (mean p | mean net R | frac TP2):")
         for dd in d["deciles"]:
-            print(f"  d{dd['decile']:>2}: p={dd['mean_p']:.3f}  netR={dd['mean_net_r']:+.3f}  "
-                  f"TP2frac={dd['frac_tp2']:.2f}  (n={dd['n']})")
+            print(
+                f"  d{dd['decile']:>2}: p={dd['mean_p']:.3f}  netR={dd['mean_net_r']:+.3f}  "
+                f"TP2frac={dd['frac_tp2']:.2f}  (n={dd['n']})"
+            )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -181,13 +208,15 @@ def main(argv: list[str] | None = None) -> None:
     synthetic = False
     try:
         from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[meta] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[meta] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[meta] WARNING: cannot load real data ({exc.__class__.__name__}); SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)

@@ -10,6 +10,7 @@
 баз store дополнительно выполняет идемпотентный ``CREATE TABLE IF NOT
 EXISTS`` (идентичный DDL — тот же паттерн, что у Feature Store, Шаг 8).
 """
+
 from __future__ import annotations
 
 import json
@@ -39,16 +40,22 @@ CREATE TABLE IF NOT EXISTS provenance_records (
 """
 
 PROVENANCE_RECORDS_INDEXES = (
-    "CREATE INDEX IF NOT EXISTS idx_provenance_records_signal "
-    "ON provenance_records(signal_id);",
-    "CREATE INDEX IF NOT EXISTS idx_provenance_records_as_of "
-    "ON provenance_records(as_of_utc_ms);",
+    "CREATE INDEX IF NOT EXISTS idx_provenance_records_signal ON provenance_records(signal_id);",
+    "CREATE INDEX IF NOT EXISTS idx_provenance_records_as_of ON provenance_records(as_of_utc_ms);",
 )
 
 _COLUMNS = (
-    "group_id", "signal_id", "feature_snapshot_id", "config_hash",
-    "broker_snapshot_json", "cost_snapshot_json", "lineage_json",
-    "as_of_utc_ms", "executed_at_utc_ms", "record_hash", "schema_version",
+    "group_id",
+    "signal_id",
+    "feature_snapshot_id",
+    "config_hash",
+    "broker_snapshot_json",
+    "cost_snapshot_json",
+    "lineage_json",
+    "as_of_utc_ms",
+    "executed_at_utc_ms",
+    "record_hash",
+    "schema_version",
     "recorded_at_utc_ms",
 )
 
@@ -156,8 +163,7 @@ class ProvenanceStore:
         conn = get_connection(self.db_path)
         try:
             row = conn.execute(
-                f"SELECT {', '.join(_COLUMNS)} FROM {PROVENANCE_RECORDS_TABLE} "
-                f"WHERE group_id = ?",
+                f"SELECT {', '.join(_COLUMNS)} FROM {PROVENANCE_RECORDS_TABLE} WHERE group_id = ?",
                 (group_id,),
             ).fetchone()
         finally:

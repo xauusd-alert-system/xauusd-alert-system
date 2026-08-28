@@ -19,6 +19,7 @@ Endpoints:
 Usage:
     python -m scripts.news_feed_server --port 8765
 """
+
 import argparse
 import json
 import logging
@@ -110,8 +111,7 @@ class _BrowserWorkerProcess:
                     self._in_flight = False
                     self._kill()
                     return {"error": f"could not reach browser worker: {exc}"}
-                threading.Thread(target=self._reader, daemon=True,
-                                 name="worker-reader").start()
+                threading.Thread(target=self._reader, daemon=True, name="worker-reader").start()
         if not self._done.wait(timeout):
             # Hard backstop: the child is wedged. Kill it and respawn on the
             # next request - the NEXT /calendar call starts clean.
@@ -143,11 +143,10 @@ def _serve_calendar(self: BaseHTTPRequestHandler):
             cached = dict(LAST_GOOD)
         if cached:
             cached["stale"] = True
-            cached["stale_seconds"] = int(
-                time.monotonic() - cached.pop("_monotonic"))
+            cached["stale_seconds"] = int(time.monotonic() - cached.pop("_monotonic"))
             logger.warning(
-                "calendar fetch failed (%s); serving stale copy %ss old",
-                result["error"][:120], cached["stale_seconds"])
+                "calendar fetch failed (%s); serving stale copy %ss old", result["error"][:120], cached["stale_seconds"]
+            )
             self._send_json(200, cached)
             return
         self._send_json(502, {"error": result["error"]})
@@ -155,9 +154,7 @@ def _serve_calendar(self: BaseHTTPRequestHandler):
     payload = {
         "events": result.get("events", []),
         "source": "forexfactory_www_browser",
-        "fetched_at_utc": result.get(
-            "fetched_at_utc",
-            datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")),
+        "fetched_at_utc": result.get("fetched_at_utc", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")),
     }
     with LAST_GOOD_LOCK:
         LAST_GOOD.clear()
@@ -208,7 +205,9 @@ def main():
     if _port_in_use(args.port):
         logger.error(
             "Port %d already in use - a news feed service is ALREADY running. "
-            "Only ONE instance is allowed (one Chromium window). Exiting.", args.port)
+            "Only ONE instance is allowed (one Chromium window). Exiting.",
+            args.port,
+        )
         raise SystemExit(1)
 
     WORKER._spawn()

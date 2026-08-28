@@ -1,6 +1,7 @@
 """
 Tests for Phase 9 Multi-Broker Execution Layer.
 """
+
 from execution.broker_adapter import (
     AccountSnapshot,
     MockFIXBrokerAdapter,
@@ -71,9 +72,20 @@ def test_mt5_adapter_account_mode_and_constraints_shape():
     mode = adapter.get_account_mode()
     assert mode in {"hedging", "netting", "unknown"}
     constraints = adapter.get_symbol_constraints("XAUUSD")
-    for key in ("symbol_point", "tick_size", "digits", "trade_stops_level",
-                "trade_freeze_level", "spread", "contract_size", "volume_min",
-                "volume_max", "volume_step", "execution_mode",
-                "account_margin_mode", "available"):
+    for key in (
+        "symbol_point",
+        "tick_size",
+        "digits",
+        "trade_stops_level",
+        "trade_freeze_level",
+        "spread",
+        "contract_size",
+        "volume_min",
+        "volume_max",
+        "volume_step",
+        "execution_mode",
+        "account_margin_mode",
+        "available",
+    ):
         assert key in constraints, key
     adapter.disconnect()

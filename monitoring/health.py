@@ -16,6 +16,7 @@ Components (ТЗ 6.3 + Часть 6 criteria):
 
 Degraded (status != ok), never an HTTP error, per the ТЗ.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,8 +31,13 @@ logger = logging.getLogger("monitoring.health")
 # Group states that still require (or may soon require) executor management.
 # Anything else is terminal and does not count as "active".
 TERMINAL_GROUP_STATES = {
-    "DRAFT", "RECONCILED", "STOPPED", "REJECTED", "EXPIRED",
-    "CANCELLED", "FAILED",
+    "DRAFT",
+    "RECONCILED",
+    "STOPPED",
+    "REJECTED",
+    "EXPIRED",
+    "CANCELLED",
+    "FAILED",
 }
 
 DEFAULT_RISK_STATE_PATH = "logs/risk_state.json"
@@ -46,11 +52,7 @@ def db_check(db_path: str) -> Callable[[], "tuple[bool, str]"]:
             return False, f"database file missing: {db_path}"
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
         try:
-            tables = {
-                row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         finally:
             conn.close()
         if "schema_migrations" in tables:
@@ -72,16 +74,13 @@ def executor_check(db_path: str) -> Callable[[], "tuple[bool, str]"]:
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
             try:
-                rows = conn.execute(
-                    "SELECT state, COUNT(*) FROM trade_groups GROUP BY state"
-                ).fetchall()
+                rows = conn.execute("SELECT state, COUNT(*) FROM trade_groups GROUP BY state").fetchall()
             finally:
                 conn.close()
         except sqlite3.OperationalError:
             return True, "trade-group store not initialised (skipped)"
         counts = {str(state): int(n) for state, n in rows}
-        active = sum(n for state, n in counts.items()
-                     if state not in TERMINAL_GROUP_STATES)
+        active = sum(n for state, n in counts.items() if state not in TERMINAL_GROUP_STATES)
         detail = f"{active} active groups"
         if counts:
             detail += f" ({json.dumps(counts, sort_keys=True)})"
@@ -158,9 +157,7 @@ def services_check(cfg: dict) -> Callable[[], "tuple[bool, str]"]:
         }
         if not ports:
             return True, "no services configured"
-        return True, "configured: " + ", ".join(
-            f"{name}:{port}" for name, port in ports.items()
-        )
+        return True, "configured: " + ", ".join(f"{name}:{port}" for name, port in ports.items())
 
     return _check
 
@@ -168,15 +165,9 @@ def services_check(cfg: dict) -> Callable[[], "tuple[bool, str]"]:
 def build_health_checks(cfg: dict, db_path: str | None = None) -> dict:
     """Build the named-check mapping consumed by services.base.run_checks."""
     cfg = cfg or {}
-    resolved_db = db_path or cfg.get("general", {}).get(
-        "db_path", "data/market_data_mt5.sqlite"
-    )
+    resolved_db = db_path or cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     assets = cfg.get("assets", {}) or {}
-    symbols = [
-        str(a.get("mt5_symbol") or key)
-        for key, a in assets.items()
-        if isinstance(a, dict) and a.get("enabled")
-    ]
+    symbols = [str(a.get("mt5_symbol") or key) for key, a in assets.items() if isinstance(a, dict) and a.get("enabled")]
     return {
         "db": db_check(resolved_db),
         "executor": executor_check(resolved_db),

@@ -2,6 +2,7 @@
 Config loader utility - shared across all modules.
 Ensures a single source of truth: config/config.yaml.
 """
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -73,6 +74,7 @@ def load_config(path: str = None) -> dict:
     # import keeps the module import light and defers the pydantic
     # dependency to actual config loading.
     from config.schema import resolve_validation_mode, validate_config
+
     validate_config(_CONFIG_CACHE, mode=resolve_validation_mode(_CONFIG_CACHE))
 
     return _CONFIG_CACHE
@@ -168,9 +170,7 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None, regime: str = None) -> di
     }
     grid.update({k: v for k, v in cfg.get("signal_grid", {}).items() if v is not None})
     if asset_cfg:
-        grid.update(
-            {k: v for k, v in asset_cfg.get("signal_grid", {}).items() if v is not None}
-        )
+        grid.update({k: v for k, v in asset_cfg.get("signal_grid", {}).items() if v is not None})
     # trailing_atr_mult (for v4b "trailing-runner"): None = legacy (no trailing)
     # When set (e.g. 2.0), after TP2 the remaining 20% position is trailed at trailing*ATR
     # from the most recent high (long) / low (short).

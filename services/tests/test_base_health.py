@@ -1,4 +1,5 @@
 """Health server base: ok/degraded aggregation via TestClient."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

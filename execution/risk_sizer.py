@@ -7,6 +7,7 @@ This module re-exports the public surface so existing imports
 unchanged. It will be deleted in the cleanup phase (Фаза 7) — update
 imports to ``risk.sizing`` instead.
 """
+
 import warnings
 
 from risk.sizing import (  # noqa: F401

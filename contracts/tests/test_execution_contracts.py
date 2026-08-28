@@ -1,4 +1,5 @@
 """Tests for contracts/execution_contracts.py (SignalIntent / ExecutionEvent v1)."""
+
 from __future__ import annotations
 
 import pytest
@@ -119,9 +120,16 @@ def test_execution_event_validates_type_and_id():
 
 
 def test_execution_event_types_cover_plan_facts():
-    for t in ("deal_added", "order_history_added", "position_modified",
-              "request_result", "preflight_checked", "execution_reconciled",
-              "intent_created", "health_heartbeat"):
+    for t in (
+        "deal_added",
+        "order_history_added",
+        "position_modified",
+        "request_result",
+        "preflight_checked",
+        "execution_reconciled",
+        "intent_created",
+        "health_heartbeat",
+    ):
         assert t in EXECUTION_EVENT_TYPES
 
 

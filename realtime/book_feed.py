@@ -16,6 +16,7 @@ book history; the pipeline gate reads the last finalized bar's features via
 on demand (closing the poll-race at the M5 boundary), so by signal time the
 just-closed bar is always available when the feed is healthy.
 """
+
 import csv
 import logging
 import math
@@ -82,11 +83,7 @@ def book_features_from_levels(bids, asks) -> dict | None:
     walls = sum(1 for v in vols if median > 0.0 and v >= 10.0 * median)
 
     total_vol = full_b + full_a
-    microprice = (
-        (sum(p * v for p, v in bids) + sum(p * v for p, v in asks)) / total_vol
-        if total_vol > 0.0
-        else 0.0
-    )
+    microprice = (sum(p * v for p, v in bids) + sum(p * v for p, v in asks)) / total_vol if total_vol > 0.0 else 0.0
 
     return {
         "imb1": round(imb(b1, a1), 4),
@@ -121,9 +118,9 @@ class BookFeed:
                 "enabled": bool(abg.get("enabled", False)) and bool(acfg.get("enabled", False)),
             }
 
-        self._bars = {}      # asset_key -> {bar_ts: aggregated features}
-        self._current = {}   # asset_key -> accumulating bucket or None
-        self._status = {}    # asset_key -> diagnostics
+        self._bars = {}  # asset_key -> {bar_ts: aggregated features}
+        self._current = {}  # asset_key -> accumulating bucket or None
+        self._status = {}  # asset_key -> diagnostics
         self._lock = threading.Lock()
         self._thread = None
         self._stop = threading.Event()
@@ -135,9 +132,7 @@ class BookFeed:
         if not self.enabled or not any(a["enabled"] for a in self.assets.values()):
             logger.info("[BOOK] feed disabled (no book_gate.assets enabled)")
             return
-        self._thread = threading.Thread(
-            target=self._run, name="book-feed", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="book-feed", daemon=True)
         self._thread.start()
         logger.info("[BOOK] feed started (poll=%ss, persist=%s)", self.poll_interval_s, self.persist)
 
@@ -189,7 +184,11 @@ class BookFeed:
                 }
             logger.info(
                 "[BOOK] %s (%s): subscribed=%s (add_ok=%s, probe_ok=%s)",
-                key, acfg["mt5_symbol"], subscribed, add_ok, probe_ok,
+                key,
+                acfg["mt5_symbol"],
+                subscribed,
+                add_ok,
+                probe_ok,
             )
 
     def _unsubscribe_all(self):
@@ -249,8 +248,8 @@ class BookFeed:
                 bids.append((price, volume))
             else:
                 asks.append((price, volume))
-        bids.sort(key=lambda x: -x[0])   # nearest bid first
-        asks.sort(key=lambda x: x[0])    # nearest ask first
+        bids.sort(key=lambda x: -x[0])  # nearest bid first
+        asks.sort(key=lambda x: x[0])  # nearest ask first
         return book_features_from_levels(bids, asks)
 
     # ------------------------------------------------------------------ aggregation
@@ -306,7 +305,7 @@ class BookFeed:
             "imb5_last": cur["imb5_last"],
             "imb_all_last": cur["imb_all_last"],
             "imb5_mean": round(mean5, 4),
-            "imb5_std": round(math.sqrt(max(0.0, cur["imb5_sq"] / n - mean5 ** 2)), 4),
+            "imb5_std": round(math.sqrt(max(0.0, cur["imb5_sq"] / n - mean5**2)), 4),
             "depth_ratio_last": cur["depth_ratio_last"],
             "depth_ratio_mean": round(cur["depth_ratio_sum"] / n, 4),
             "walls_max": cur["walls_max"],

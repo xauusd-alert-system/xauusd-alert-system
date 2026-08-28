@@ -45,8 +45,7 @@ from scripts.deflated_sharpe import (
 from scripts.run_backtest import merge_asset_cfg
 
 
-def run_fill_modes(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                   max_folds: int | None = None) -> dict:
+def run_fill_modes(cfg: dict, asset_key: str, df_full: pd.DataFrame, max_folds: int | None = None) -> dict:
     """Run the honest walk-forward under both fill modes; returns per-mode
     trade frames + aggregate R metrics + the close->next-open gap stats."""
     windows, frames = _build_fold_frames(df_full, cfg, asset_key, max_folds)
@@ -90,9 +89,11 @@ def run_fill_modes(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             "n_trades": int(len(tdf)),
             "mean_r": r["mean_r"],
             "std_r": r["std_r"],
-            "pf": round(float(np.nansum(tdf["pnl"].clip(lower=0)) /
-                              max(-np.nansum(tdf["pnl"].clip(upper=0)), 1e-12)), 3)
-            if len(tdf) else 0.0,
+            "pf": round(
+                float(np.nansum(tdf["pnl"].clip(lower=0)) / max(-np.nansum(tdf["pnl"].clip(upper=0)), 1e-12)), 3
+            )
+            if len(tdf)
+            else 0.0,
             "win_rate_pct": r["actual_wr_pct"],
             "t_block": block_bootstrap_t(r_series) if r_series is not None and len(r_series) >= 2 else None,
         }
@@ -112,20 +113,26 @@ def print_report(d: dict) -> None:
     print(f"\n=== Entry-timing look-ahead check: {a} ===")
     h = d["gap_stats"]
     if h["n"]:
-        print(f"Close[signal] -> Open[next] gap: mean {h['mean_atr']} ATR | "
-              f"p50 {h['p50_atr']} | p90 {h['p90_atr']} (the size of the "
-              "look-ahead advantage)")
+        print(
+            f"Close[signal] -> Open[next] gap: mean {h['mean_atr']} ATR | "
+            f"p50 {h['p50_atr']} | p90 {h['p90_atr']} (the size of the "
+            "look-ahead advantage)"
+        )
     for mode in ("next_open", "signal_close"):
         m = d[mode]
         label = "HONEST (next open)" if mode == "next_open" else "LOOK-AHEAD (signal close)"
-        print(f"{label:<28} n={m['n_trades']:<6} E[R]={m['mean_r']:>7.3f} "
-              f"PF={m['pf']:>6.2f} WR={m['win_rate_pct']:>5.1f}% t_block={m['t_block']}")
+        print(
+            f"{label:<28} n={m['n_trades']:<6} E[R]={m['mean_r']:>7.3f} "
+            f"PF={m['pf']:>6.2f} WR={m['win_rate_pct']:>5.1f}% t_block={m['t_block']}"
+        )
     no, sc = d["next_open"], d["signal_close"]
     if no["n_trades"] and sc["n_trades"]:
         degrade = (no["mean_r"] - sc["mean_r"]) / max(abs(sc["mean_r"]), 1e-9)
-        verdict = ("WARNING: the honest fill eats most of the edge — part of the "
-                   "result is look-ahead" if degrade < -0.3 else
-                   "OK: honest fill retains the edge (degradation < 30%)")
+        verdict = (
+            "WARNING: the honest fill eats most of the edge — part of the result is look-ahead"
+            if degrade < -0.3
+            else "OK: honest fill retains the edge (degradation < 30%)"
+        )
         print(f"Relative E[R] change honest-vs-lookahead: {degrade:+.0%}  -> {verdict}")
 
 
@@ -149,13 +156,16 @@ def main(argv: list[str] | None = None) -> None:
     synthetic = False
     try:
         from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[timing] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[timing] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[timing] WARNING: cannot load real data ({exc.__class__.__name__}); "
+            "SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)

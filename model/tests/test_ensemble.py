@@ -149,6 +149,7 @@ def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
     mirrors the per-asset values, whatever they are."""
     from config.loader import load_config
     from scripts.run_backtest import merge_asset_cfg as _merge
+
     cfg = load_config()
     eur_raw = cfg["assets"]["EURUSD"]["ensemble"]
     expected_bar = float(eur_raw["min_confidence_to_alert"])
@@ -164,6 +165,7 @@ def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
     """Same contract for GBPUSD (see EURUSD test: drift-proof expectations)."""
     from config.loader import load_config
     from scripts.run_backtest import merge_asset_cfg as _merge
+
     cfg = load_config()
     gbp_raw = cfg["assets"]["GBPUSD"]["ensemble"]
     expected_bar = float(gbp_raw["min_confidence_to_alert"])
@@ -180,6 +182,7 @@ def test_per_asset_override_effective_cfg_in_pipeline():
     (audit 2026-08-23: drift-proof — expectations come from the config)."""
     from config.loader import load_config
     from realtime.pipeline import RealtimePipeline
+
     cfg = load_config()
 
     eur_pipe = RealtimePipeline(cfg=cfg, asset_key="EURUSD", data_mode="mock")
@@ -198,6 +201,7 @@ def test_sentiment_veto_blocks_opposing_signal_when_enabled(monkeypatch):
 
     def fake_sentiment(self, *a, **k):
         return {"score": -0.8, "bias": "bearish", "title": "hawkish Fed", "in_red_zone": True}
+
     monkeypatch.setattr(MacroNewsSentimentAnalyzer, "red_zone_event_sentiment", fake_sentiment)
 
     # Enabled -> long vetoed by bearish sentiment.
@@ -205,14 +209,12 @@ def test_sentiment_veto_blocks_opposing_signal_when_enabled(monkeypatch):
     cfg_on["ensemble"]["use_sentiment_guard"] = True
     cfg_on["ensemble"]["news_buffer_before_min"] = 30
     cfg_on["ensemble"]["news_buffer_after_min"] = 30
-    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_on,
-                                  session="london", timestamp_utc=1000000000)
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_on, session="london", timestamp_utc=1000000000)
     assert sig.bias == "no_trade"
 
     # Disabled -> baseline long preserved.
     cfg_off = _base_cfg()
-    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_off,
-                                   session="london", timestamp_utc=1000000000)
+    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_off, session="london", timestamp_utc=1000000000)
     assert sig2.bias == "long"
 
 

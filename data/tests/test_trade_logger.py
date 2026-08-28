@@ -1,6 +1,7 @@
 """
 Unit tests for data/trade_logger.py
 """
+
 import os
 import sys
 import tempfile

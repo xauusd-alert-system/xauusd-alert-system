@@ -13,6 +13,7 @@ Design notes:
     * The JSONL sink is optional (``jsonl_path=None`` disables persistence)
       and fail-open: a broken file sink must never break execution.
 """
+
 from __future__ import annotations
 
 import json
@@ -99,11 +100,9 @@ class MetricsCollector:
     def record_timing(self, stage: str, duration_ms: float, **extra: Any) -> None:
         """Record a per-stage duration (ms)."""
         with self._lock:
-            buf = self._stage_timings_ms.setdefault(
-                stage, deque(maxlen=self._stage_history))
+            buf = self._stage_timings_ms.setdefault(stage, deque(maxlen=self._stage_history))
             buf.append(float(duration_ms))
-            entry = {"ts": self._clock(), "metric": "timing", "stage": stage,
-                     "duration_ms": float(duration_ms)}
+            entry = {"ts": self._clock(), "metric": "timing", "stage": stage, "duration_ms": float(duration_ms)}
             if extra:
                 entry.update(extra)
             self._history.append(entry)
@@ -146,13 +145,8 @@ class MetricsCollector:
             "reject_reasons": reject_reasons,
             "poll_count": polls,
             "poll_p95_ms": round(_percentile(poll_durations, 95), 3),
-            "poll_avg_ms": (
-                round(sum(poll_durations) / len(poll_durations), 3)
-                if poll_durations else 0.0
-            ),
-            "mt5_calls_avg": (
-                round(sum(mt5_calls) / len(mt5_calls), 2) if mt5_calls else 0.0
-            ),
+            "poll_avg_ms": (round(sum(poll_durations) / len(poll_durations), 3) if poll_durations else 0.0),
+            "mt5_calls_avg": (round(sum(mt5_calls) / len(mt5_calls), 2) if mt5_calls else 0.0),
             "stages": stages,
             "uptime_s": round(self._clock() - started_at, 3),
         }

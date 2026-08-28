@@ -16,6 +16,7 @@ Health checks (``GET /health``):
 
 Run: ``python -m services.news_feed [--max-cache-age-hours 6] [--health-port 8793]``
 """
+
 from __future__ import annotations
 
 import argparse
@@ -88,8 +89,7 @@ def make_cache_freshness_check(
         if age > float(max_age_hours) * 3600.0:
             return (
                 False,
-                f"degraded: cache age {age / 3600.0:.1f}h exceeds budget "
-                f"{float(max_age_hours):.1f}h",
+                f"degraded: cache age {age / 3600.0:.1f}h exceeds budget {float(max_age_hours):.1f}h",
             )
         return True, f"ok (cache age {age / 3600.0:.2f}h)"
 
@@ -127,10 +127,7 @@ def run(args: argparse.Namespace) -> None:
     checks = build_checks(args.cache_path, args.max_cache_age_hours)
     server = start_health_server_thread(args.health_port, checks)
 
-    print(
-        f"[{os.getpid()}] news_feed service up "
-        f"(health: http://127.0.0.1:{args.health_port}/health)"
-    )
+    print(f"[{os.getpid()}] news_feed service up (health: http://127.0.0.1:{args.health_port}/health)")
     try:
         while True:
             try:
@@ -150,10 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
         "cache refresher with a freshness health endpoint.",
     )
     parser.add_argument("--cache-path", default=DEFAULT_CACHE_PATH)
-    parser.add_argument("--max-cache-age-hours", type=float,
-                        default=DEFAULT_MAX_CACHE_AGE_HOURS)
-    parser.add_argument("--refresh-interval", type=float,
-                        default=DEFAULT_REFRESH_INTERVAL_SECONDS)
+    parser.add_argument("--max-cache-age-hours", type=float, default=DEFAULT_MAX_CACHE_AGE_HOURS)
+    parser.add_argument("--refresh-interval", type=float, default=DEFAULT_REFRESH_INTERVAL_SECONDS)
     parser.add_argument("--health-port", type=int, default=DEFAULT_HEALTH_PORT)
     return parser
 

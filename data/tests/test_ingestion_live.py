@@ -3,6 +3,7 @@ Tests for data/ingestion.py::fetch_live_candles - HTTP calls are fully mocked,
 no real network requests are made. Validates response parsing, error handling,
 and the unified fetch_candles() dispatcher.
 """
+
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -25,10 +26,16 @@ def _mock_twelvedata_payload(n=5):
     for i in range(n):
         ts = base_ts + i * 900
         dt = pd.Timestamp(ts, unit="s", tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
-        values.append({
-            "datetime": dt, "open": "2400.5", "high": "2402.0",
-            "low": "2399.0", "close": "2401.0", "volume": "150.0",
-        })
+        values.append(
+            {
+                "datetime": dt,
+                "open": "2400.5",
+                "high": "2402.0",
+                "low": "2399.0",
+                "close": "2401.0",
+                "volume": "150.0",
+            }
+        )
     return {"values": values}
 
 

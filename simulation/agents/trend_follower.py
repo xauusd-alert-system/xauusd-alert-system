@@ -10,6 +10,7 @@ Key changes vs original:
 - Default lookback shortened from 10 → 5 bars (reacts to short-term moves)
 - Volume scales with |strength| * momentum_volume_multiplier
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -36,7 +37,7 @@ class TrendFollower(BaseAgent):
         if len(closes) < self.lookback + 1:
             return None
 
-        avg = sum(closes[-self.lookback:]) / self.lookback
+        avg = sum(closes[-self.lookback :]) / self.lookback
         last = closes[-1]
         # Normalized displacement: how far current price is from its SMA.
         strength = (last - avg) / (avg + 1e-12)

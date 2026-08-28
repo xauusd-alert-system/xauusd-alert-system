@@ -19,6 +19,7 @@ Guarantees:
   directly; Python emits the sha256 hex of the same canonical string. Both are
   deterministic and the server treats ``event_id`` as an opaque primary key.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -54,11 +55,13 @@ def check_protocol_version(raw: dict) -> tuple[bool, str, int]:
     except (TypeError, ValueError):
         return False, f"protocol_version must be an integer, got {version!r}", 0
     if version not in SUPPORTED_PROTOCOL_VERSIONS:
-        return False, (
-            f"unsupported protocol_version {version}; "
-            f"supported: {sorted(SUPPORTED_PROTOCOL_VERSIONS)}"
-        ), version
+        return (
+            False,
+            (f"unsupported protocol_version {version}; supported: {sorted(SUPPORTED_PROTOCOL_VERSIONS)}"),
+            version,
+        )
     return True, "", version
+
 
 # Sources that may publish execution facts.
 Source = Literal["mt5_observer", "mt5_python_sender", "ledger_bridge", "preflight_tool"]
@@ -74,19 +77,26 @@ Precision = Literal["probe", "passive", "history_reconciled", "request", "prefli
 
 # Deployment modes (must match config.deployment.mode values).
 IntentMode = Literal[
-    "simulation", "research", "paper", "human_confirmed", "demo_systematic", "live_systematic",
+    "simulation",
+    "research",
+    "paper",
+    "human_confirmed",
+    "demo_systematic",
+    "live_systematic",
 ]
 
-EXECUTION_EVENT_TYPES = frozenset({
-    "deal_added",            # broker deal fact (entry/exit/partial)
-    "order_history_added",   # order reached history (filled/closed/cancelled)
-    "position_modified",     # position SL/TP/volume change observed
-    "request_result",        # direct response of an order_send (Python sender)
-    "preflight_checked",     # OrderCheck-style preflight fact (diagnostics only)
-    "execution_reconciled",  # history reconciliation summary (restart)
-    "intent_created",        # SignalIntent persisted before order_send
-    "health_heartbeat",      # observer liveness (uptime, pending outbox count)
-})
+EXECUTION_EVENT_TYPES = frozenset(
+    {
+        "deal_added",  # broker deal fact (entry/exit/partial)
+        "order_history_added",  # order reached history (filled/closed/cancelled)
+        "position_modified",  # position SL/TP/volume change observed
+        "request_result",  # direct response of an order_send (Python sender)
+        "preflight_checked",  # OrderCheck-style preflight fact (diagnostics only)
+        "execution_reconciled",  # history reconciliation summary (restart)
+        "intent_created",  # SignalIntent persisted before order_send
+        "health_heartbeat",  # observer liveness (uptime, pending outbox count)
+    }
+)
 
 VALID_PRECISIONS = frozenset(Precision.__args__)  # type: ignore[attr-defined]
 VALID_SOURCES = frozenset(Source.__args__)  # type: ignore[attr-defined]
@@ -174,7 +184,8 @@ class SignalIntent(BaseModel):
     def canonical_hash(self) -> str:
         payload = json.dumps(
             self.model_dump(mode="json", exclude={"intent_id"}),
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -213,8 +224,7 @@ class ExecutionEvent(BaseModel):
     def validate_event(self):
         if self.event_type not in EXECUTION_EVENT_TYPES:
             raise ValueError(
-                f"unsupported execution event type {self.event_type!r}; "
-                f"expected one of {sorted(EXECUTION_EVENT_TYPES)}"
+                f"unsupported execution event type {self.event_type!r}; expected one of {sorted(EXECUTION_EVENT_TYPES)}"
             )
         if not self.event_id.strip():
             raise ValueError("event_id must not be empty")
@@ -223,7 +233,8 @@ class ExecutionEvent(BaseModel):
     def canonical_hash(self) -> str:
         payload = json.dumps(
             self.model_dump(mode="json", exclude={"event_id", "received_at_utc_ms"}),
-            sort_keys=True, separators=(",", ":"),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

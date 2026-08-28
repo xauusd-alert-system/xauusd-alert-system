@@ -6,6 +6,7 @@ The journal (logs/live_positions.json) is the read-only side channel the
 Telegram status commands (/status, /why) use to explain open trades. All tests
 use tmp_path files — no real MT5, no network.
 """
+
 import json
 import os
 
@@ -156,5 +157,7 @@ def test_atomic_write_leaves_no_tmp_and_uses_replace(tmp_path, monkeypatch):
 
 
 def test_default_path_constant_points_at_logs():
-    assert LIVE_POSITIONS_PATH.endswith(os.path.join("logs", "live_positions.json")) \
+    assert (
+        LIVE_POSITIONS_PATH.endswith(os.path.join("logs", "live_positions.json"))
         or LIVE_POSITIONS_PATH == "logs/live_positions.json"
+    )

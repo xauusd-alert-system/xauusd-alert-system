@@ -71,3 +71,25 @@ ruff check .
 # raw E/F/W/I view (includes ignored legacy debt):
 ruff check . --select E,F,W,I --statistics
 ```
+
+
+
+## Финальный отчёт по ruff cleanup (2026-08-29)
+
+### Категория E701/E702 (79 проблем)
+- Исправлено: 76
+- Deferred (WIP): 3 в mt5_trader.py
+- Коммит: 0c1b0f5
+
+### Категория E501 (180 проблем)
+- Автоформатом (ruff format): 78
+- Осталось: 102 — URLs, base64, HTML-строки (не переносятся)
+- Коммит: ["style: auto-format 390 files (ruff format), E501 180→102 remaining in URLs/base64/HTML"]
+
+### Категории F841/E402/E741/E731 (127 проблем)
+- Все в legacy ignore-списке .ruff.toml (задокументировано в RUFF_POLICY.md)
+- Причина: намеренный порядок импортов (sys.path, load_dotenv), unsafe-fixes
+
+### Итог
+- Обычный ruff check . = 0 ошибок
+- CI-гейт на линт проходит

@@ -21,6 +21,7 @@ strictly modelled (unknown keys inside them are detected). All other sections
 (assets, labeling, ensemble, ...) are legacy/lenient: only their presence at
 the top level is checked, their internals are not touched.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,17 +55,20 @@ class ConfigIssue:
 # detected issue instead of a silently ignored key.
 # --------------------------------------------------------------------------
 
+
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 # --- general ---------------------------------------------------------------
 
+
 class GeneralConfig(_StrictModel):
     db_path: str | None = None
 
 
 # --- mt5_adapter -----------------------------------------------------------
+
 
 class Mt5RateLimitConfig(_StrictModel):
     max_calls_per_second: int | None = None
@@ -81,6 +85,7 @@ class MT5AdapterConfig(_StrictModel):
 
 # --- security --------------------------------------------------------------
 
+
 class SecurityApiConfig(_StrictModel):
     require_auth: bool = False
 
@@ -90,6 +95,7 @@ class SecurityConfig(_StrictModel):
 
 
 # --- provenance ------------------------------------------------------------
+
 
 class ProvenanceStoreConfig(_StrictModel):
     enabled: bool = False
@@ -103,12 +109,14 @@ class ProvenanceConfig(_StrictModel):
 
 # --- features.store --------------------------------------------------------
 
+
 class FeatureStoreConfig(_StrictModel):
     enabled: bool = False
     db_path: str | None = None
 
 
 # --- execution -------------------------------------------------------------
+
 
 class FxExecutionProbesConfig(_StrictModel):
     enabled: bool = False
@@ -133,19 +141,18 @@ class ExecutionConfig(_StrictModel):
     signal_ttl_ms: dict[str, int] = Field(default_factory=dict)
     enabled_assets: list[str] = Field(default_factory=list)
     require_demo_account: bool = True
-    fx_execution_probes: FxExecutionProbesConfig = Field(
-        default_factory=FxExecutionProbesConfig)
+    fx_execution_probes: FxExecutionProbesConfig = Field(default_factory=FxExecutionProbesConfig)
     max_open_positions_mode: str = "per_asset"
     max_open_positions_per_asset: int = 2
     max_concurrent_positions_global: int = 6
     max_daily_trades_per_asset: int = 15
-    trading_blackout: TradingBlackoutConfig = Field(
-        default_factory=TradingBlackoutConfig)
+    trading_blackout: TradingBlackoutConfig = Field(default_factory=TradingBlackoutConfig)
     volume: float = 1.0
     signal_ranking_metric: str = "confidence"
 
 
 # --- risk ------------------------------------------------------------------
+
 
 class CircuitBreakerConfig(_StrictModel):
     exclude_swaps: bool = True
@@ -163,11 +170,11 @@ class RiskConfig(_StrictModel):
     # list of [drawdown, scale] pairs, e.g. [[-0.04, 0.75], [-0.08, 0.0]]
     drawdown_throttle: list[list[float]] = Field(default_factory=list)
     min_lot: float = 0.01
-    circuit_breaker: CircuitBreakerConfig = Field(
-        default_factory=CircuitBreakerConfig)
+    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
 
 
 # --- services --------------------------------------------------------------
+
 
 class LedgerBridgeConfig(_StrictModel):
     health_port: int = 8791
@@ -191,6 +198,7 @@ class ServicesConfig(_StrictModel):
 
 
 # --- monitoring ------------------------------------------------------------
+
 
 class MonitoringMetricsConfig(_StrictModel):
     jsonl_path: str = "logs/metrics.jsonl"
@@ -232,17 +240,12 @@ class MonitoringLoggingConfig(_StrictModel):
 
 
 class MonitoringConfig(_StrictModel):
-    metrics: MonitoringMetricsConfig = Field(
-        default_factory=MonitoringMetricsConfig)
-    alerts: MonitoringAlertsConfig = Field(
-        default_factory=MonitoringAlertsConfig)
+    metrics: MonitoringMetricsConfig = Field(default_factory=MonitoringMetricsConfig)
+    alerts: MonitoringAlertsConfig = Field(default_factory=MonitoringAlertsConfig)
     backup: MonitoringBackupConfig = Field(default_factory=MonitoringBackupConfig)
-    drift: MonitoringDriftConfig = Field(
-        default_factory=MonitoringDriftConfig)
-    calibration: MonitoringCalibrationConfig = Field(
-        default_factory=MonitoringCalibrationConfig)
-    logging: MonitoringLoggingConfig = Field(
-        default_factory=MonitoringLoggingConfig)
+    drift: MonitoringDriftConfig = Field(default_factory=MonitoringDriftConfig)
+    calibration: MonitoringCalibrationConfig = Field(default_factory=MonitoringCalibrationConfig)
+    logging: MonitoringLoggingConfig = Field(default_factory=MonitoringLoggingConfig)
 
 
 # --------------------------------------------------------------------------
@@ -268,20 +271,38 @@ SUBSECTION_MODELS: dict[str, type[BaseModel]] = {
 
 #: legacy top-level sections: presence checked, internals lenient
 LEGACY_TOP_LEVEL_SECTIONS = {
-    "alerts", "assets", "backtest", "book_gate", "challenge",
-    "correlation_filter", "config_validation", "deployment", "deploy_guard",
-    "ensemble", "features", "labeling", "market_data", "model",
-    "paper_forward", "regime", "retraining", "risk_throttle", "sessions",
-    "signal_grid", "strategy", "trade_profiles", "validation",
+    "alerts",
+    "assets",
+    "backtest",
+    "book_gate",
+    "challenge",
+    "correlation_filter",
+    "config_validation",
+    "deployment",
+    "deploy_guard",
+    "ensemble",
+    "features",
+    "labeling",
+    "market_data",
+    "model",
+    "paper_forward",
+    "regime",
+    "retraining",
+    "risk_throttle",
+    "sessions",
+    "signal_grid",
+    "strategy",
+    "trade_profiles",
+    "validation",
 }
 
-KNOWN_TOP_LEVEL_KEYS = set(SECTION_MODELS) | set(SUBSECTION_MODELS) | \
-    LEGACY_TOP_LEVEL_SECTIONS
+KNOWN_TOP_LEVEL_KEYS = set(SECTION_MODELS) | set(SUBSECTION_MODELS) | LEGACY_TOP_LEVEL_SECTIONS
 
 
 # --------------------------------------------------------------------------
 # Validation entry points
 # --------------------------------------------------------------------------
+
 
 def resolve_validation_mode(cfg: dict | None) -> str:
     """Resolve the validation mode: env CONFIG_VALIDATE_MODE → config key → warn."""
@@ -306,10 +327,9 @@ def collect_config_issues(cfg: dict | None) -> list[ConfigIssue]:
     # 1. unknown top-level keys
     for key in sorted(cfg.keys()):
         if key not in KNOWN_TOP_LEVEL_KEYS:
-            issues.append(ConfigIssue(
-                path=key,
-                message=f"unknown top-level config key {key!r} "
-                        f"(typo or unsupported section?)"))
+            issues.append(
+                ConfigIssue(path=key, message=f"unknown top-level config key {key!r} (typo or unsupported section?)")
+            )
 
     # 2. strictly modelled top-level sections
     for name, model in SECTION_MODELS.items():
@@ -317,8 +337,7 @@ def collect_config_issues(cfg: dict | None) -> list[ConfigIssue]:
         if section is None:
             continue
         if not isinstance(section, dict):
-            issues.append(ConfigIssue(
-                path=name, message=f"section {name!r} must be a mapping"))
+            issues.append(ConfigIssue(path=name, message=f"section {name!r} must be a mapping"))
             continue
         try:
             model.model_validate(section)
@@ -335,9 +354,7 @@ def collect_config_issues(cfg: dict | None) -> list[ConfigIssue]:
         if subsection is None:
             continue
         if not isinstance(subsection, dict):
-            issues.append(ConfigIssue(
-                path=dotted,
-                message=f"subsection {dotted!r} must be a mapping"))
+            issues.append(ConfigIssue(path=dotted, message=f"subsection {dotted!r} must be a mapping"))
             continue
         try:
             model.model_validate(subsection)
@@ -377,8 +394,5 @@ def validate_config(cfg: dict | None, mode: str = "warn") -> list[ConfigIssue]:
         logger.warning("config validation: %s", issue)
     if issues and mode == "strict":
         detail = "; ".join(str(i) for i in issues)
-        raise ConfigValidationError(
-            f"config validation failed ({len(issues)} issue(s)): {detail}")
+        raise ConfigValidationError(f"config validation failed ({len(issues)} issue(s)): {detail}")
     return issues
-
-

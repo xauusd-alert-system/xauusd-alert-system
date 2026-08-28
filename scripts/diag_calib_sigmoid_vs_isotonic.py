@@ -132,16 +132,22 @@ def main() -> int:
 
     print(f"\n{'arm':<22}{'ECE':>8}{'Brier':>8}{'std_p':>8}{'|p-.5|':>8}{'cov55':>8}{'cov60':>8}  sigmoid a_")
     for name, r in results.items():
-        print(f"{name:<22}{r['ece']:>8.4f}{r['brier']:>8.4f}{r['std_p']:>8.4f}"
-              f"{r['mean_abs_dev_05']:>8.4f}{r['cov55']:>8.3f}{r['cov60']:>8.3f}  {r['a_']:.4f}")
+        print(
+            f"{name:<22}{r['ece']:>8.4f}{r['brier']:>8.4f}{r['std_p']:>8.4f}"
+            f"{r['mean_abs_dev_05']:>8.4f}{r['cov55']:>8.3f}{r['cov60']:>8.3f}  {r['a_']:.4f}"
+        )
 
     s, i = results["sigmoid (prod)"], results["isotonic (3-fold)"]
     print("\n=== verdict ===")
-    print(f"ECE    : sigmoid {s['ece']:.4f} vs isotonic {i['ece']:.4f} -> "
-          f"{'isotonic better' if i['ece'] < s['ece'] else 'sigmoid better'}")
+    print(
+        f"ECE    : sigmoid {s['ece']:.4f} vs isotonic {i['ece']:.4f} -> "
+        f"{'isotonic better' if i['ece'] < s['ece'] else 'sigmoid better'}"
+    )
     print(f"Brier  : sigmoid {s['brier']:.4f} vs isotonic {i['brier']:.4f}")
-    print(f"std_p  : sigmoid {s['std_p']:.4f} vs isotonic {i['std_p']:.4f} "
-          f"-> {'isotonic sharper' if i['std_p'] > s['std_p'] else 'sigmoid sharper'}")
+    print(
+        f"std_p  : sigmoid {s['std_p']:.4f} vs isotonic {i['std_p']:.4f} "
+        f"-> {'isotonic sharper' if i['std_p'] > s['std_p'] else 'sigmoid sharper'}"
+    )
     print(f"cov55  : sigmoid {s['cov55']:.3f} vs isotonic {i['cov55']:.3f}")
     print(f"cov60  : sigmoid {s['cov60']:.3f} vs isotonic {i['cov60']:.3f}")
     return 0

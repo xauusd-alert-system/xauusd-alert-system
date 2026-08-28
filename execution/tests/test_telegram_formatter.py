@@ -4,6 +4,7 @@ These are light smoke checks (not None, key elements present) — the full
 end-to-end notification behavior is covered by the executor tests that exercise
 the thin ``_*_message`` delegates in ``mt5_trade_group``.
 """
+
 from __future__ import annotations
 
 import pytest

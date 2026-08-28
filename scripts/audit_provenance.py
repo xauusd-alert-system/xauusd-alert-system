@@ -9,6 +9,7 @@ summary (same aggregates as GET /api/provenance/bulk):
 Exit code 0 always (audit reports; it does not gate) unless --strict is
 given, in which case incomplete lineage exits 1.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,8 +22,7 @@ from provenance.store import ProvenanceStore
 from provenance.verifier import verify_record
 
 
-def collect_audit(store: ProvenanceStore, from_ts: int, to_ts: int,
-                  cfg: dict | None = None) -> dict:
+def collect_audit(store: ProvenanceStore, from_ts: int, to_ts: int, cfg: dict | None = None) -> dict:
     """Aggregate bulk audit over [from_ts, to_ts] (mirrors the bulk API)."""
     records = store.get_range(from_ts, to_ts)
     from collections import Counter
@@ -56,16 +56,11 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m scripts.audit_provenance",
         description="Bulk provenance lineage audit (TZ 8.7 / P2-3).",
     )
-    parser.add_argument("--from", dest="from_ts", type=int, required=True,
-                        help="range start, utc ms (inclusive)")
-    parser.add_argument("--to", dest="to_ts", type=int, required=True,
-                        help="range end, utc ms (inclusive)")
-    parser.add_argument("--db", default="data/market_data_mt5.sqlite",
-                        help="provenance store database path")
-    parser.add_argument("--strict", action="store_true",
-                        help="exit 1 when incomplete lineage exists")
-    parser.add_argument("--json", action="store_true",
-                        help="print the raw aggregate as JSON")
+    parser.add_argument("--from", dest="from_ts", type=int, required=True, help="range start, utc ms (inclusive)")
+    parser.add_argument("--to", dest="to_ts", type=int, required=True, help="range end, utc ms (inclusive)")
+    parser.add_argument("--db", default="data/market_data_mt5.sqlite", help="provenance store database path")
+    parser.add_argument("--strict", action="store_true", help="exit 1 when incomplete lineage exists")
+    parser.add_argument("--json", action="store_true", help="print the raw aggregate as JSON")
     args = parser.parse_args(argv)
 
     store = ProvenanceStore(args.db)

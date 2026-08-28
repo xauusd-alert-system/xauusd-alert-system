@@ -5,6 +5,7 @@ A 50/30/20 scale-out on a 0.01 base lot used to round(0.005, 2) -> 0.01
 zero-volume order). The fix quantizes each tranche to the broker's
 volume_step/volume_min and returns 0 (skip) when the tranche is not fillable.
 """
+
 import pytest
 
 from execution.mt5_trader import MultiAssetMT5Trader

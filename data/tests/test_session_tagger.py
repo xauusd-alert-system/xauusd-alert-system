@@ -3,6 +3,7 @@
 Sunday 21:00+ UTC must be tagged as a real session (e.g. newyork),
 NOT 'weekend'. Saturday and Sunday before 21:00 UTC remain 'weekend'.
 """
+
 import datetime as dt
 import os
 import sys
@@ -81,7 +82,7 @@ class TestTagSessionWithWeekend:
     def test_sunday_2059_vs_2100_boundary(self):
         """Exact boundary: 20:59 = weekend, 21:00 = session."""
         before = pd.Timestamp("2026-06-28 20:59", tz="UTC")  # Sunday
-        after = pd.Timestamp("2026-06-28 21:00", tz="UTC")   # Sunday
+        after = pd.Timestamp("2026-06-28 21:00", tz="UTC")  # Sunday
         assert tag_session_with_weekend(before, SESSIONS) == "weekend"
         assert tag_session_with_weekend(after, SESSIONS) != "weekend"
 
@@ -118,6 +119,7 @@ class TestTagSession:
 def _backfill_session_label(ts: pd.Timestamp) -> str:
     """Import and call the backfill_data._session_label function."""
     from scripts.backfill_data import _session_label
+
     return _session_label(ts)
 
 
@@ -158,6 +160,6 @@ class TestBackfillSessionLabel:
 
     def test_boundary_sunday_2059_vs_2100(self):
         before = pd.Timestamp("2026-06-28 20:59", tz="UTC")  # Sunday
-        after = pd.Timestamp("2026-06-28 21:00", tz="UTC")   # Sunday
+        after = pd.Timestamp("2026-06-28 21:00", tz="UTC")  # Sunday
         assert _backfill_session_label(before) == "weekend"
         assert _backfill_session_label(after) == "newyork"

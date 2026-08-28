@@ -5,6 +5,7 @@ Covers:
     - health_degraded_on_db_error     — a failing check degrades, not 500;
     - health_does_not_leak_secrets    — no tokens / secret paths in payload.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -28,6 +29,7 @@ def client():
 
 # ---------------------------------------------------------------- fixtures ---
 
+
 @pytest.fixture
 def fresh_db(tmp_path):
     db_path = str(tmp_path / "fresh.sqlite")
@@ -39,6 +41,7 @@ def fresh_db(tmp_path):
 
 
 # ------------------------------------------------------------------ tests ----
+
 
 def test_health_ok_on_fresh_state(client, tmp_path, monkeypatch):
     """Fresh deployment: db exists, no circuit breaker, no MT5 -> status ok."""
@@ -103,8 +106,7 @@ def test_health_does_not_leak_secrets(client, monkeypatch):
     res = client.get("/api/health")
     assert res.status_code == 200
     text = res.text.lower()
-    for needle in ("super-secret-value", "bearer ", "api_auth", ".env",
-                   "password", "secret"):
+    for needle in ("super-secret-value", "bearer ", "api_auth", ".env", "password", "secret"):
         assert needle not in text, f"leaked '{needle}' in /api/health"
     # No long token-like hex/base64 strings.
     import re as _re
@@ -116,8 +118,7 @@ def test_risk_check_detects_circuit_breaker(tmp_path):
     import json
 
     state_path = tmp_path / "risk_state.json"
-    state_path.write_text(json.dumps({"circuit_breaker_tripped": True}),
-                          encoding="utf-8")
+    state_path.write_text(json.dumps({"circuit_breaker_tripped": True}), encoding="utf-8")
     ok, detail = risk_check(str(state_path))()
     assert ok is False
     assert "circuit breaker" in detail.lower()
@@ -128,9 +129,7 @@ def test_executor_check_counts_active_groups(tmp_path):
 
     db_path = str(tmp_path / "groups.sqlite")
     conn = sqlite3.connect(db_path)
-    conn.execute(
-        "CREATE TABLE trade_groups (group_id TEXT PRIMARY KEY, state TEXT)"
-    )
+    conn.execute("CREATE TABLE trade_groups (group_id TEXT PRIMARY KEY, state TEXT)")
     conn.executemany(
         "INSERT INTO trade_groups VALUES (?, ?)",
         [("g1", "OPENED"), ("g2", "TP1_FILLED"), ("g3", "RECONCILED")],
@@ -154,8 +153,7 @@ def test_executor_check_fail_open_when_store_absent(tmp_path):
 def test_services_check_reports_ports_without_network():
     from monitoring.health import services_check
 
-    cfg = {"services": {"ledger_bridge": {"health_port": 8791},
-                        "news_feed": {"health_port": 8793}}}
+    cfg = {"services": {"ledger_bridge": {"health_port": 8791}, "news_feed": {"health_port": 8793}}}
     ok, detail = services_check(cfg)()
     assert ok is True
     assert "ledger_bridge:8791" in detail and "news_feed:8793" in detail
@@ -164,8 +162,10 @@ def test_services_check_reports_ports_without_network():
 def test_build_health_checks_maps_enabled_symbols():
     cfg = {
         "general": {"db_path": "data/x.sqlite"},
-        "assets": {"XAUUSD": {"enabled": True, "mt5_symbol": "GOLD"},
-                   "XAGUSD": {"enabled": False, "mt5_symbol": "SILVER"}},
+        "assets": {
+            "XAUUSD": {"enabled": True, "mt5_symbol": "GOLD"},
+            "XAGUSD": {"enabled": False, "mt5_symbol": "SILVER"},
+        },
     }
     checks = build_health_checks(cfg)
     assert set(checks) == {"db", "executor", "risk", "feed", "services"}

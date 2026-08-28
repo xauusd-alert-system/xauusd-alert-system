@@ -8,6 +8,7 @@ A service reports a dict of named checks; each check is a callable returning
 FastAPI + uvicorn are used (both already project dependencies). A check that
 raises is reported as a failed check — a health probe must never 500.
 """
+
 from __future__ import annotations
 
 import threading
@@ -77,11 +78,7 @@ def start_health_server_thread(port: int, checks, host: str = "127.0.0.1"):
     import uvicorn
 
     app = create_health_app(checks)
-    server = uvicorn.Server(
-        uvicorn.Config(app, host=host, port=int(port), log_level="warning")
-    )
-    thread = threading.Thread(
-        target=server.run, name="service-health-server", daemon=True
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning"))
+    thread = threading.Thread(target=server.run, name="service-health-server", daemon=True)
     thread.start()
     return server

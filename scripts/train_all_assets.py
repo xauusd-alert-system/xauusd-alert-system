@@ -7,6 +7,7 @@ NON-FATAL: a registry failure is logged as a warning and never aborts the
 training pipeline (safety > functionality; the model file itself is written
 by scripts/train_mt5.py exactly as before).
 """
+
 import os
 import subprocess
 import sys
@@ -48,11 +49,17 @@ def main():
         print("==========================================")
 
         cmd = [
-            sys.executable, "-m", "scripts.train_mt5",
-            "--symbol", asset,
-            "--timeframe", asset_tf,
-            "--db-path", db_path,
-            "--output", model_path
+            sys.executable,
+            "-m",
+            "scripts.train_mt5",
+            "--symbol",
+            asset,
+            "--timeframe",
+            asset_tf,
+            "--db-path",
+            db_path,
+            "--output",
+            model_path,
         ]
         subprocess.run(cmd, check=True)
 
@@ -64,12 +71,12 @@ def main():
                 registry_id = register_in_registry(model_path, asset, asset_tf)
                 print(f"registry: registered {model_path} as {registry_id}")
             except Exception as e:  # noqa: BLE001 - non-fatal by contract
-                print(f"registry WARNING: registration failed for {asset} ({e}); "
-                      f"training result unaffected")
+                print(f"registry WARNING: registration failed for {asset} ({e}); training result unaffected")
         else:
             print(f"registry WARNING: model file missing after training: {model_path}")
 
     print("\n✅ ALL MULTI-ASSET MODELS TRAINED SUCCESSFULLY!")
+
 
 if __name__ == "__main__":
     main()

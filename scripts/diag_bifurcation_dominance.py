@@ -97,14 +97,14 @@ def main() -> int:
 
     model_cfg = cfg["model"]
     random_state = model_cfg.get("random_seed", 42)
-    horizon = int(model_cfg.get("labeling", {}).get("horizon_candles_n", 0)) or \
-        int(cfg.get("labeling", {}).get("horizon_candles_n", 6))
+    horizon = int(model_cfg.get("labeling", {}).get("horizon_candles_n", 0)) or int(
+        cfg.get("labeling", {}).get("horizon_candles_n", 6)
+    )
     gap = max(horizon, int(model_cfg.get("purge_gap_bars", 36)))
     oos_bars = 1000
 
     fit_stop, cal_stop, oos_start, end = _split(X_all, gap, oos_bars)
-    print(f"split: fit=[0:{fit_stop}] cal=[{fit_stop}:{cal_stop}] "
-          f"oos=[{oos_start}:{end}]  purge_gap={gap}")
+    print(f"split: fit=[0:{fit_stop}] cal=[{fit_stop}:{cal_stop}] oos=[{oos_start}:{end}]  purge_gap={gap}")
 
     # full-feature model
     Xf, yf = X_all.iloc[:fit_stop], y_all.iloc[:fit_stop]
@@ -128,13 +128,14 @@ def main() -> int:
             if msk.any():
                 ece += (msk.sum() / len(p)) * abs(yo[msk].mean() - p[msk].mean())
         results[label] = {"auc": auc, "pr_auc": pr_auc, "ece": ece, "n": len(yo)}
-        print(f"\n[2] {label}: OOS n={len(yo)}  AUC={auc:.4f}  PR-AUC={pr_auc:.4f}  "
-              f"ECE={ece:.4f}")
+        print(f"\n[2] {label}: OOS n={len(yo)}  AUC={auc:.4f}  PR-AUC={pr_auc:.4f}  ECE={ece:.4f}")
 
     f_, n_ = results["full (49)"], results["no-bifurc (46)"]
     print("\n[3] delta (full - no-bifurc):")
-    print(f"    AUC    {f_['auc'] - n_['auc']:+.4f}  "
-          f"({'bifurcation HELPS' if f_['auc'] > n_['auc'] else 'bifurcation HURTS'})")
+    print(
+        f"    AUC    {f_['auc'] - n_['auc']:+.4f}  "
+        f"({'bifurcation HELPS' if f_['auc'] > n_['auc'] else 'bifurcation HURTS'})"
+    )
     print(f"    PR-AUC {f_['pr_auc'] - n_['pr_auc']:+.4f}")
     print(f"    ECE    {f_['ece'] - n_['ece']:+.4f}")
     return 0

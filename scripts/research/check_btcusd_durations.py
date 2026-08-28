@@ -5,7 +5,8 @@ import pandas as pd
 db_path = "data/market_data_mt5.sqlite"
 conn = sqlite3.connect(db_path)
 
-df = pd.read_sql_query("""
+df = pd.read_sql_query(
+    """
 SELECT
     ticket,
     entry_time,
@@ -15,7 +16,9 @@ SELECT
 FROM executed_trades
 WHERE symbol = 'BTCUSD' AND outcome IS NOT NULL
 ORDER BY entry_time ASC
-""", conn)
+""",
+    conn,
+)
 conn.close()
 
 df["duration_min"] = (pd.to_numeric(df["close_time"]) - pd.to_numeric(df["entry_time"])) / 60.0

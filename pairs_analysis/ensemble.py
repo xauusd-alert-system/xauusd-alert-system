@@ -12,6 +12,7 @@ EnsembleForecast with the final recommendation.
 All engines use ONLY data available up to the current bar (point-in-time).
 No external dependencies beyond numpy/scipy/statsmodels already in the project.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,37 +26,40 @@ from .analyzer import PairMetrics
 @dataclass
 class EngineResult:
     """One engine's forecast."""
+
     name: str
-    direction: str              # long | short | neutral
-    confidence: float           # 0-100
+    direction: str  # long | short | neutral
+    confidence: float  # 0-100
     details: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         # Clean numpy types for JSON serialization
         clean = {}
         for k, v in self.details.items():
-            if hasattr(v, 'item'):  # np.float64, np.int64, etc.
+            if hasattr(v, "item"):  # np.float64, np.int64, etc.
                 clean[k] = v.item()
             else:
                 clean[k] = v
-        return {"name": self.name, "direction": self.direction,
-                "confidence": round(self.confidence, 1), **clean}
+        return {"name": self.name, "direction": self.direction, "confidence": round(self.confidence, 1), **clean}
 
 
 @dataclass
 class EnsembleForecast:
     """Aggregated ensemble output (ТЗ §4.3, §6)."""
+
     pair_name: str
     timeframe: str
     ts: str
-    direction: str              # long | short | neutral
-    confidence: float           # 0-100 (weighted average)
+    direction: str  # long | short | neutral
+    confidence: float  # 0-100 (weighted average)
     engines: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
-            "pair": self.pair_name, "timeframe": self.timeframe,
-            "ts": self.ts, "direction": self.direction,
+            "pair": self.pair_name,
+            "timeframe": self.timeframe,
+            "ts": self.ts,
+            "direction": self.direction,
             "confidence": round(self.confidence, 1),
             "engines": [e.as_dict() for e in self.engines],
         }
@@ -64,13 +68,13 @@ class EnsembleForecast:
         """Format as ТЗ §4.3 reference: 'ENSEMBLE → NEUTRAL XAU · CONF 52%'"""
         s1 = self.pair_name.split("/")[0]
         arrow = {"long": "LONG", "short": "SHORT", "neutral": "NEUTRAL"}
-        return (f"ENSEMBLE → {arrow.get(self.direction, 'NEUTRAL')} {s1} "
-                f"· CONF {self.confidence:.0f}%")
+        return f"ENSEMBLE → {arrow.get(self.direction, 'NEUTRAL')} {s1} · CONF {self.confidence:.0f}%"
 
 
 # ====================================================================
 # Engine 1: OU Mean-Reversion
 # ====================================================================
+
 
 def engine_ou(m: PairMetrics) -> EngineResult:
     """Forecast based on Ornstein-Uhlenbeck mean-reversion.
@@ -105,15 +109,22 @@ def engine_ou(m: PairMetrics) -> EngineResult:
         theta_bonus = -20.0
     confidence = max(0, min(100, z_conf + theta_bonus))
 
-    return EngineResult("OU", direction, confidence, {
-        "z": round(z, 3), "theta": round(theta, 5),
-        "half_life_days": round(hl, 1) if np.isfinite(hl) else None,
-    })
+    return EngineResult(
+        "OU",
+        direction,
+        confidence,
+        {
+            "z": round(z, 3),
+            "theta": round(theta, 5),
+            "half_life_days": round(hl, 1) if np.isfinite(hl) else None,
+        },
+    )
 
 
 # ====================================================================
 # Engine 2: Kalman Trend
 # ====================================================================
+
 
 def engine_kalman_trend(m: PairMetrics) -> EngineResult:
     """Forecast spread trend via Kalman-filtered spread mean.
@@ -131,7 +142,7 @@ def engine_kalman_trend(m: PairMetrics) -> EngineResult:
 
     # Simple Kalman on the spread level (random walk + noise)
     q_local = 1e-5
-    r_local = float(m.sigma ** 2) if np.isfinite(m.sigma) and m.sigma > 0 else 0.01
+    r_local = float(m.sigma**2) if np.isfinite(m.sigma) and m.sigma > 0 else 0.01
     state = vals[0]
     P = 1.0
     states = np.empty(n)
@@ -162,15 +173,22 @@ def engine_kalman_trend(m: PairMetrics) -> EngineResult:
 
     confidence = min(abs(norm_slope) * 50.0, 80.0)
 
-    return EngineResult("KalmanTrend", direction, confidence, {
-        "slope": round(slope, 6), "norm_slope": round(norm_slope, 4),
-        "kalman_state_last": round(float(states[-1]), 4),
-    })
+    return EngineResult(
+        "KalmanTrend",
+        direction,
+        confidence,
+        {
+            "slope": round(slope, 6),
+            "norm_slope": round(norm_slope, 4),
+            "kalman_state_last": round(float(states[-1]), 4),
+        },
+    )
 
 
 # ====================================================================
 # Engine 3: GARCH(1,1)
 # ====================================================================
+
 
 def _garch_proxy(returns: np.ndarray) -> tuple[float, float, float] | None:
     """Fast analytical GARCH(1,1) proxy from autocorrelation of squared returns.
@@ -185,7 +203,7 @@ def _garch_proxy(returns: np.ndarray) -> tuple[float, float, float] | None:
     var0 = float(np.var(returns))
     if var0 < 1e-12:
         return None
-    eps2 = returns ** 2
+    eps2 = returns**2
     e2c = eps2 - var0  # centered
     # Autocovariances via FFT-like direct sum (fast for n < 10k)
     ac1 = float(np.dot(e2c[:-1], e2c[1:])) / n
@@ -219,7 +237,7 @@ def _fit_garch11(returns: np.ndarray, max_iter: int = 200) -> tuple[float, float
         return var * 0.05, 0.05, 0.90
 
     var0 = float(np.var(returns))
-    eps2 = returns ** 2
+    eps2 = returns**2
 
     # --- Step 1: fast proxy (O(n)) ---
     proxy = _garch_proxy(returns)
@@ -244,9 +262,14 @@ def _fit_garch11(returns: np.ndarray, max_iter: int = 200) -> tuple[float, float
 
     try:
         from scipy.optimize import minimize
-        res = minimize(neg_loglik, x0, method="L-BFGS-B",
-                       bounds=[(1e-10, None), (0.0, 0.5), (0.0, 0.998)],
-                       options={"maxiter": max_iter, "ftol": 1e-8})
+
+        res = minimize(
+            neg_loglik,
+            x0,
+            method="L-BFGS-B",
+            bounds=[(1e-10, None), (0.0, 0.5), (0.0, 0.998)],
+            options={"maxiter": max_iter, "ftol": 1e-8},
+        )
         omega, alpha, beta = res.x
         if omega > 0 and 0 <= alpha < 0.5 and 0 <= beta < 0.999 and alpha + beta < 0.999:
             return omega, alpha, beta
@@ -288,16 +311,24 @@ def engine_garch(m: PairMetrics) -> EngineResult:
     else:
         confidence = 50.0  # neutral
 
-    return EngineResult("GARCH", direction, confidence, {
-        "omega": round(omega, 8), "alpha": round(alpha, 4), "beta": round(beta, 4),
-        "sigma_forecast": round(sigma_forecast, 6),
-        "vol_ratio": round(vol_ratio, 3),
-    })
+    return EngineResult(
+        "GARCH",
+        direction,
+        confidence,
+        {
+            "omega": round(omega, 8),
+            "alpha": round(alpha, 4),
+            "beta": round(beta, 4),
+            "sigma_forecast": round(sigma_forecast, 6),
+            "vol_ratio": round(vol_ratio, 3),
+        },
+    )
 
 
 # ====================================================================
 # Engine 4: GBM Monte Carlo
 # ====================================================================
+
 
 def engine_gbm_mc(m: PairMetrics, n_paths: int = 5000, seed: int = 42) -> EngineResult:
     """Geometric Brownian Motion Monte Carlo on P1.
@@ -318,7 +349,7 @@ def engine_gbm_mc(m: PairMetrics, n_paths: int = 5000, seed: int = 42) -> Engine
     rng = np.random.default_rng(seed)
     # 1-day forward
     z = rng.standard_normal(n_paths)
-    S1 = S0 * np.exp((mu - 0.5 * sigma ** 2) + sigma * z)
+    S1 = S0 * np.exp((mu - 0.5 * sigma**2) + sigma * z)
 
     p_up = float(np.mean(S1 > S0))
     expected = float(np.mean(S1))
@@ -334,16 +365,24 @@ def engine_gbm_mc(m: PairMetrics, n_paths: int = 5000, seed: int = 42) -> Engine
     # Confidence: distance of P(up) from 0.5
     confidence = min(abs(p_up - 0.5) * 200.0, 80.0)
 
-    return EngineResult("GBM_MC", direction, confidence, {
-        "E_S": round(expected, 4), "S0": round(S0, 4),
-        "P_up": round(p_up * 100, 1), "mu_daily": round(mu, 6),
-        "sigma_daily": round(sigma, 6),
-    })
+    return EngineResult(
+        "GBM_MC",
+        direction,
+        confidence,
+        {
+            "E_S": round(expected, 4),
+            "S0": round(S0, 4),
+            "P_up": round(p_up * 100, 1),
+            "mu_daily": round(mu, 6),
+            "sigma_daily": round(sigma, 6),
+        },
+    )
 
 
 # ====================================================================
 # Engine 5: Heston SV (proxy: vol-of-vol estimation)
 # ====================================================================
+
 
 def engine_heston(m: PairMetrics) -> EngineResult:
     """Heston stochastic volatility proxy: estimate vol-of-vol ξ.
@@ -363,8 +402,7 @@ def engine_heston(m: PairMetrics) -> EngineResult:
     if len(ret) < win + 10:
         return EngineResult("Heston", "neutral", 0, {})
 
-    rv = np.array([np.std(ret[i:i + win], ddof=1)
-                   for i in range(len(ret) - win + 1)])
+    rv = np.array([np.std(ret[i : i + win], ddof=1) for i in range(len(ret) - win + 1)])
 
     if len(rv) < 10 or np.std(rv) < 1e-12:
         return EngineResult("Heston", "neutral", 0, {})
@@ -385,16 +423,22 @@ def engine_heston(m: PairMetrics) -> EngineResult:
     else:
         confidence = 30.0  # very unstable vol
 
-    return EngineResult("Heston", direction, confidence, {
-        "xi_vol_of_vol": round(xi, 4),
-        "rv_mean": round(float(np.mean(rv)), 6),
-        "rv_std": round(float(np.std(rv, ddof=1)), 6),
-    })
+    return EngineResult(
+        "Heston",
+        direction,
+        confidence,
+        {
+            "xi_vol_of_vol": round(xi, 4),
+            "rv_mean": round(float(np.mean(rv)), 6),
+            "rv_std": round(float(np.std(rv, ddof=1)), 6),
+        },
+    )
 
 
 # ====================================================================
 # Engine 6: Bayesian Regime
 # ====================================================================
+
 
 def engine_bayesian_regime(m: PairMetrics) -> EngineResult:
     """Bayesian classification: P(mean-reversion | features).
@@ -463,21 +507,25 @@ def engine_bayesian_regime(m: PairMetrics) -> EngineResult:
     direction = "neutral"
     confidence = p_mr * 100.0
 
-    return EngineResult("BayesRegime", direction, confidence, {
-        "p_mean_rev": round(p_mr * 100, 1),
-        "adf_p": round(adf_p, 4) if np.isfinite(adf_p) else None,
-        "hurst": round(hurst, 3) if np.isfinite(hurst) else None,
-        "variance_ratio": round(vr, 3) if np.isfinite(vr) else None,
-        "log_odds": round(log_odds, 3),
-    })
+    return EngineResult(
+        "BayesRegime",
+        direction,
+        confidence,
+        {
+            "p_mean_rev": round(p_mr * 100, 1),
+            "adf_p": round(adf_p, 4) if np.isfinite(adf_p) else None,
+            "hurst": round(hurst, 3) if np.isfinite(hurst) else None,
+            "variance_ratio": round(vr, 3) if np.isfinite(vr) else None,
+            "log_odds": round(log_odds, 3),
+        },
+    )
 
 
 # ====================================================================
 # Ensemble Aggregator
 # ====================================================================
 
-ENGINE_FUNCS = [engine_ou, engine_kalman_trend, engine_garch,
-                engine_gbm_mc, engine_heston, engine_bayesian_regime]
+ENGINE_FUNCS = [engine_ou, engine_kalman_trend, engine_garch, engine_gbm_mc, engine_heston, engine_bayesian_regime]
 
 ENGINE_NAMES = ["OU", "KalmanTrend", "GARCH", "GBM_MC", "Heston", "BayesRegime"]
 
@@ -534,5 +582,5 @@ class EnsembleEngine:
 
         ts = m.end if m.end else ""
         return EnsembleForecast(
-            pair_name=m.name, timeframe=m.timeframe, ts=ts,
-            direction=winner, confidence=confidence, engines=results)
+            pair_name=m.name, timeframe=m.timeframe, ts=ts, direction=winner, confidence=confidence, engines=results
+        )

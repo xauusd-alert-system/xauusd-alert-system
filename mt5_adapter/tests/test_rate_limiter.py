@@ -1,4 +1,5 @@
 """Unit tests for MT5RateLimiter (ТЗ 8.6 / P2-7)."""
+
 from __future__ import annotations
 
 import pytest
@@ -20,7 +21,7 @@ class FakeClock:
 
 def test_disabled_limiter_is_noop():
     clock = FakeClock()
-    sleeps = []
+    sleeps: list[float] = []
     limiter = MT5RateLimiter(None, clock=clock, sleeper=sleeps.append)
     assert not limiter.enabled
     for _ in range(100):
@@ -38,8 +39,7 @@ def test_rate_limiter_throttles():
         clock.advance(dt)  # emulate real time.sleep
 
     # 1 call/sec, burst 1: first call instant, second must sleep ~1s.
-    limiter = MT5RateLimiter(max_calls_per_second=1, burst=1,
-                             clock=clock, sleeper=advancing_sleep)
+    limiter = MT5RateLimiter(max_calls_per_second=1, burst=1, clock=clock, sleeper=advancing_sleep)
     limiter.wait()
     waited = limiter.wait()
     assert waited > 0.9, f"second call must be throttled, waited={waited}"
@@ -50,9 +50,8 @@ def test_rate_limiter_throttles():
 
 def test_rate_limiter_allows_burst_within_limit():
     clock = FakeClock()
-    sleeps = []
-    limiter = MT5RateLimiter(max_calls_per_second=10, burst=10,
-                             clock=clock, sleeper=sleeps.append)
+    sleeps: list[float] = []
+    limiter = MT5RateLimiter(max_calls_per_second=10, burst=10, clock=clock, sleeper=sleeps.append)
     # Full burst without any sleep; clock not moved -> no refill needed.
     for _ in range(10):
         assert limiter.wait() == 0.0
@@ -67,8 +66,7 @@ def test_rate_limiter_refills_over_time():
         sleeps.append(dt)
         clock.advance(dt)
 
-    limiter = MT5RateLimiter(max_calls_per_second=10, burst=2,
-                             clock=clock, sleeper=advancing_sleep)
+    limiter = MT5RateLimiter(max_calls_per_second=10, burst=2, clock=clock, sleeper=advancing_sleep)
     limiter.wait()
     limiter.wait()
     # bucket empty -> next call must sleep
@@ -100,8 +98,7 @@ def test_rate_limiter_is_thread_safe():
     def real_sleep(dt):
         clock.advance(dt)
 
-    limiter = MT5RateLimiter(max_calls_per_second=1000, burst=1,
-                             clock=clock, sleeper=real_sleep)
+    limiter = MT5RateLimiter(max_calls_per_second=1000, burst=1, clock=clock, sleeper=real_sleep)
     granted = []
     lock = threading.Lock()
 

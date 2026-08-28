@@ -11,6 +11,7 @@ Example:
     python -m scripts.run_ledger_bridge --db-path data/market_data_mt5.sqlite \
         --account-mode demo --account-login 12345678 --once
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,11 +34,9 @@ def main() -> None:
     parser.add_argument("--db-path", default="data/market_data_mt5.sqlite")
     parser.add_argument("--account-mode", default="demo", choices=["demo", "contest", "real"])
     parser.add_argument("--account-login", default="0", help="MT5 login for the event fingerprint")
-    parser.add_argument("--interval", type=float, default=None,
-                        help="Poll interval in seconds (default: config/env)")
+    parser.add_argument("--interval", type=float, default=None, help="Poll interval in seconds (default: config/env)")
     parser.add_argument("--batch-size", type=int, default=100)
-    parser.add_argument("--once", action="store_true",
-                        help="Deliver one batch (or drain if pending == 0) and exit")
+    parser.add_argument("--once", action="store_true", help="Deliver one batch (or drain if pending == 0) and exit")
     args = parser.parse_args()
 
     bridge = load_bridge_config(load_config())

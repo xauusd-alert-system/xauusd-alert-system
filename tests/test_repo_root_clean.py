@@ -8,6 +8,7 @@ The whitelist applies to *git-tracked* entries: local-only runtime dirs that
 are already covered by .gitignore (``venv/``, ``logs/``, ``output/``, ... or
 the local ``.env``) are not tracked and must not block the guard.
 """
+
 import os
 import subprocess
 
@@ -99,11 +100,7 @@ def _tracked_root_entries():
 
 def test_no_python_files_in_repo_root():
     """P2-28: no one-off .py utilities in the root — they belong in scripts/."""
-    offenders = [
-        name
-        for name in _tracked_root_entries()
-        if name.endswith(".py") and name not in ALLOWED_ROOT_FILES
-    ]
+    offenders = [name for name in _tracked_root_entries() if name.endswith(".py") and name not in ALLOWED_ROOT_FILES]
     assert offenders == [], (
         "Research/utility scripts must not live in the repo root "
         f"(moved to scripts/research/ in TZ 7.3): {sorted(offenders)}"
@@ -120,17 +117,14 @@ def test_no_artifact_files_in_repo_root():
         or name in {"session_index.txt", "pytest_mt5_out.txt"}
     ]
     assert offenders == [], (
-        "Generated artifacts must not live in the repo root "
-        f"(moved to artifacts/ per TZ 7.3): {sorted(offenders)}"
+        f"Generated artifacts must not live in the repo root (moved to artifacts/ per TZ 7.3): {sorted(offenders)}"
     )
 
 
 def test_root_entries_are_whitelisted():
     """Every git-tracked root entry is whitelisted."""
     offenders = [
-        name
-        for name in _tracked_root_entries()
-        if name not in ALLOWED_ROOT_FILES and name not in ALLOWED_ROOT_DIRS
+        name for name in _tracked_root_entries() if name not in ALLOWED_ROOT_FILES and name not in ALLOWED_ROOT_DIRS
     ]
     assert offenders == [], f"Unexpected tracked entries in repo root: {sorted(offenders)}"
 
@@ -152,9 +146,9 @@ def test_dotenv_not_tracked():
 )
 def test_research_scripts_relocated(script_name):
     """P2-28: research utilities exist in scripts/research/ (not in root)."""
-    assert os.path.isfile(
-        os.path.join(REPO_ROOT, "scripts", "research", script_name)
-    ), f"scripts/research/{script_name} is missing"
+    assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "research", script_name)), (
+        f"scripts/research/{script_name} is missing"
+    )
     assert not os.path.exists(os.path.join(REPO_ROOT, script_name))
 
 

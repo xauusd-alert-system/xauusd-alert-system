@@ -1,4 +1,5 @@
 """Tests for provenance/spec.py — ProvenanceRecordV2 (ТЗ 8.7)."""
+
 from __future__ import annotations
 
 import pytest
@@ -69,13 +70,17 @@ def test_from_trade_group_spec_adapter():
     from execution.tests.test_trade_group_executor import make_spec
 
     spec = make_spec()
-    spec = spec.model_copy(update={"provenance": {
-        "market_snapshot_id": "MARKET:1",
-        "feature_snapshot_id": "FEAT:1",
-        "broker_snapshot_id": "BROKER:1",
-        "cost_snapshot_id": "COST:1",
-        "source": "simulator",
-    }})
+    spec = spec.model_copy(
+        update={
+            "provenance": {
+                "market_snapshot_id": "MARKET:1",
+                "feature_snapshot_id": "FEAT:1",
+                "broker_snapshot_id": "BROKER:1",
+                "cost_snapshot_id": "COST:1",
+                "source": "simulator",
+            }
+        }
+    )
     original = spec.provenance
     record = ProvenanceRecordV2.from_trade_group_spec(spec)
     # spec provenance untouched (wrapper, not rewrite)

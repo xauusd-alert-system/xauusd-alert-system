@@ -4,6 +4,7 @@ The rule under test: an unavailable source must NEVER become a numeric
 fallback — no $100,000 balance, no neutral confidence=0.50, no fabricated
 signal row, no random chart.
 """
+
 from __future__ import annotations
 
 import pytest

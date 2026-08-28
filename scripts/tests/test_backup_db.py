@@ -5,6 +5,7 @@ Covers:
     - retention_deletes_old        — only N most recent *.bak remain;
     - dry_run_does_nothing         — plan only: no writes, no deletes.
 """
+
 from __future__ import annotations
 
 import io
@@ -30,6 +31,7 @@ def src_db(tmp_path):
 
 # ------------------------------------------------------ backup_creates_valid
 
+
 def test_backup_creates_valid_sqlite(src_db, tmp_path):
     backup_dir = str(tmp_path / "backups")
     created = backup_database(src_db, backup_dir, keep=3, risk_state_path=None)
@@ -53,8 +55,7 @@ def test_backup_copies_risk_state(src_db, tmp_path):
     state.write_text('{"circuit_breaker_tripped": false}', encoding="utf-8")
     backup_dir = str(tmp_path / "backups")
 
-    created = backup_database(src_db, backup_dir, keep=2,
-                              risk_state_path=str(state))
+    created = backup_database(src_db, backup_dir, keep=2, risk_state_path=str(state))
 
     assert len(created) == 2
     import json as _json
@@ -66,12 +67,12 @@ def test_backup_copies_risk_state(src_db, tmp_path):
 
 def test_backup_missing_db_is_noop(src_db, tmp_path):
     backup_dir = str(tmp_path / "backups")
-    created = backup_database(str(tmp_path / "ghost.sqlite"), backup_dir,
-                              keep=3, risk_state_path=None)
+    created = backup_database(str(tmp_path / "ghost.sqlite"), backup_dir, keep=3, risk_state_path=None)
     assert created == []
 
 
 # -------------------------------------------------------- retention_deletes_old
+
 
 def test_retention_deletes_old(src_db, tmp_path):
     backup_dir = str(tmp_path / "backups")
@@ -98,6 +99,7 @@ def test_prune_backups_no_dir_is_safe(tmp_path):
 
 # -------------------------------------------------------- dry_run_does_nothing
 
+
 def test_dry_run_does_nothing(src_db, tmp_path, caplog):
     backup_dir = str(tmp_path / "backups")
     os.makedirs(backup_dir)
@@ -105,8 +107,7 @@ def test_dry_run_does_nothing(src_db, tmp_path, caplog):
     with open(pre_existing, "w", encoding="utf-8") as f:
         f.write("x")
 
-    created = backup_database(src_db, backup_dir, keep=1, dry_run=True,
-                              risk_state_path=None)
+    created = backup_database(src_db, backup_dir, keep=1, dry_run=True, risk_state_path=None)
 
     # Nothing created, nothing deleted.
     assert created == []
@@ -115,6 +116,7 @@ def test_dry_run_does_nothing(src_db, tmp_path, caplog):
 
 
 # --------------------------------------------------- TZ 6.10: restore
+
 
 def _make_backup(src_db, backup_dir, monkeypatch):
     """Create a .bak next to src_db via the backup path under test."""
@@ -141,12 +143,11 @@ def test_restore_replaces_db_from_backup(src_db, tmp_path):
     conn = sqlite3.connect(src_db)
     try:
         count = conn.execute("SELECT COUNT(*) FROM t").fetchone()[0]
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
     finally:
         conn.close()
-    assert count == 10                      # back to backup content
+    assert count == 10  # back to backup content
     assert "junk" not in tables
     assert integrity == "ok"
     # Pre-restore safety copy exists for manual rollback.
@@ -186,6 +187,7 @@ def test_restore_copies_risk_state_bak(src_db, tmp_path):
     restore_database(backup_path, src_db, risk_state_path=str(state))
 
     import json as _json
+
     assert _json.loads(state.read_text(encoding="utf-8"))["tripped"] is False
 
 

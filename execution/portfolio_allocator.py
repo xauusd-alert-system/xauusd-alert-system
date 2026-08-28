@@ -16,6 +16,7 @@ Real call sites:
 Kept in execution/ because the live trader calls it for scaleout validation;
 full Kelly/HRP allocation remains OPT-IN (docs/TODO.md).
 """
+
 from __future__ import annotations
 
 from typing import Dict
@@ -144,12 +145,12 @@ def validate_scaleout_tranches(
     for idx, t in enumerate(tranches):
         if t < min_lot - 1e-9:
             valid = False
-            err_msg = f"Tranche {idx+1} volume {t:.4f} < min_lot {min_lot:.2f}"
+            err_msg = f"Tranche {idx + 1} volume {t:.4f} < min_lot {min_lot:.2f}"
             break
         rem = t % lot_step
         if not (abs(rem) < 1e-6 or abs(rem - lot_step) < 1e-6):
             valid = False
-            err_msg = f"Tranche {idx+1} volume {t:.4f} is not a multiple of lot_step {lot_step:.2f}"
+            err_msg = f"Tranche {idx + 1} volume {t:.4f} is not a multiple of lot_step {lot_step:.2f}"
             break
 
     if not valid and raise_on_invalid:

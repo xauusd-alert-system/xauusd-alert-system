@@ -5,6 +5,7 @@ Examples:
     python -m scripts.backfill_data --all --timeframe M15 --start 2023-10-01 --end 2026-07-30
     python -m scripts.backfill_data --asset XAUUSD --timeframe M15 --start 2023-10-01 --end 2026-07-30
 """
+
 import argparse
 import logging
 import os
@@ -72,23 +73,15 @@ def _to_storage_frame(df: pd.DataFrame) -> pd.DataFrame:
     frame = df.copy()
 
     timestamp_column = next(
-        (
-            name
-            for name in ("timestamp", "time", "datetime", "timestamp_utc")
-            if name in frame.columns
-        ),
+        (name for name in ("timestamp", "time", "datetime", "timestamp_utc") if name in frame.columns),
         None,
     )
     if timestamp_column is None:
-        raise ValueError(
-            f"MT5 frame has no timestamp column. Columns: {list(frame.columns)}"
-        )
+        raise ValueError(f"MT5 frame has no timestamp column. Columns: {list(frame.columns)}")
 
     timestamps = pd.to_datetime(frame[timestamp_column], utc=True)
     epoch = pd.Timestamp("1970-01-01", tz="UTC")
-    frame["timestamp_utc"] = (
-        (timestamps - epoch).dt.total_seconds().astype("int64")
-    )
+    frame["timestamp_utc"] = (timestamps - epoch).dt.total_seconds().astype("int64")
 
     if "volume" not in frame.columns:
         if "tick_volume" in frame.columns:
@@ -121,11 +114,8 @@ def _to_storage_frame(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Backfill enabled assets from the locally running FxPro MT5 terminal."
-    )
+    parser = argparse.ArgumentParser(description="Backfill enabled assets from the locally running FxPro MT5 terminal.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--asset", help="Internal asset key, for example XAUUSD")
     target.add_argument("--all", action="store_true", help="Backfill every enabled asset")
@@ -156,11 +146,7 @@ def main() -> None:
     assets = cfg.get("assets", {})
 
     if args.all:
-        selected = {
-            asset_key: asset_cfg
-            for asset_key, asset_cfg in assets.items()
-            if asset_cfg.get("enabled", False)
-        }
+        selected = {asset_key: asset_cfg for asset_key, asset_cfg in assets.items() if asset_cfg.get("enabled", False)}
     else:
         if args.asset not in assets:
             raise SystemExit(f"Unknown asset key: {args.asset}")

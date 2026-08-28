@@ -25,6 +25,7 @@ Design contract (Step 7 / Phase 2):
   updates registry state consistently and atomically, so the later switch is
   a pure read-side change.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -218,8 +219,7 @@ class ModelRegistry:
         recomputed = _bundle_fingerprint(path)
         if fingerprint is not None and recomputed is not None and recomputed != fingerprint:
             raise FingerprintMismatchError(
-                f"fingerprint mismatch for {path}: declared {fingerprint}, "
-                f"recomputed {recomputed}"
+                f"fingerprint mismatch for {path}: declared {fingerprint}, recomputed {recomputed}"
             )
         if fingerprint is None:
             fingerprint = recomputed
@@ -342,8 +342,7 @@ class ModelRegistry:
             raise RegistryError(f"unknown registry_id: {registry_id}")
         if not self.verify(registry_id):
             raise RegistryIntegrityError(
-                f"model file for {registry_id} is missing or corrupt "
-                f"(sha256 mismatch); activation refused"
+                f"model file for {registry_id} is missing or corrupt (sha256 mismatch); activation refused"
             )
         data = self._read_active()
         data[entry.key] = entry.registry_id
@@ -358,9 +357,7 @@ class ModelRegistry:
             return None
         return self.get(rid)
 
-    def rollback(
-        self, asset: str, timeframe: str, to_registry_id: Optional[str] = None
-    ) -> ModelEntry:
+    def rollback(self, asset: str, timeframe: str, to_registry_id: Optional[str] = None) -> ModelEntry:
         """Activate the previous entry for an asset+timeframe.
 
         Without ``to_registry_id`` the entry registered immediately before the
@@ -373,9 +370,7 @@ class ModelRegistry:
             if entry is None:
                 raise RegistryError(f"unknown registry_id: {to_registry_id}")
             if entry.asset != str(asset).upper() or entry.timeframe != str(timeframe).upper():
-                raise RegistryError(
-                    f"{to_registry_id} does not belong to {asset}/{timeframe}"
-                )
+                raise RegistryError(f"{to_registry_id} does not belong to {asset}/{timeframe}")
             return self.activate(to_registry_id)
 
         active = self.get_active(asset, timeframe)
@@ -387,9 +382,7 @@ class ModelRegistry:
         except ValueError:
             idx = len(ids)  # active entry not in history (foreign pointer)
         if idx <= 0:
-            raise RegistryError(
-                f"no previous entry to roll back to for {asset}/{timeframe}"
-            )
+            raise RegistryError(f"no previous entry to roll back to for {asset}/{timeframe}")
         return self.activate(hist[idx - 1].registry_id)
 
 

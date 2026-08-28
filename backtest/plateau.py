@@ -9,6 +9,7 @@ market dynamics shift slightly (immediate neighbors are negative).
 neighbors (+/-1 step along each grid dimension) are positive, finds the widest
 connected plateau, and returns its central/median configuration.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
@@ -104,6 +105,7 @@ def select_plateau_config(
 
         # Generate neighbor offsets in [-1, 0, 1]^d excluding (0, ..., 0)
         from itertools import product
+
         for offset in product([-1, 0, 1], repeat=d_dim):
             if all(o == 0 for o in offset):
                 continue

@@ -17,11 +17,18 @@ def test_paper_command_is_admin_only_liveness_without_outcomes(monkeypatch):
         lambda path, verify_model=False: {"run_id": "run-1"},
     )
     status = {
-        "run_id": "run-1", "asset_key": "XAUUSD", "variant": "wide_trend_filtered",
-        "mode": "paper_frozen", "source": "append_only_paper_ledger",
-        "manifest_sha256": "a" * 64, "signals": 12, "opened_trades": 7,
-        "closed_trades": 6, "minimum_closed_trades": 50,
-        "ready_for_one_time_validation": False, "latest_bar_timestamp_utc": 123,
+        "run_id": "run-1",
+        "asset_key": "XAUUSD",
+        "variant": "wide_trend_filtered",
+        "mode": "paper_frozen",
+        "source": "append_only_paper_ledger",
+        "manifest_sha256": "a" * 64,
+        "signals": 12,
+        "opened_trades": 7,
+        "closed_trades": 6,
+        "minimum_closed_trades": 50,
+        "ready_for_one_time_validation": False,
+        "latest_bar_timestamp_utc": 123,
     }
     monkeypatch.setattr("data.paper_ledger.paper_accumulation_status", lambda db, run: status)
 

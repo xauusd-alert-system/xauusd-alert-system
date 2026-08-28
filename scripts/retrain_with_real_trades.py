@@ -41,6 +41,7 @@ Exit codes (consumed by scripts/overnight.py stage 4):
     0  - all enabled assets retrained OK.
     1  - missing real-trade payload (see #27 above).
 """
+
 import json
 import logging
 import os
@@ -161,8 +162,7 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
     raw_candles = read_candles(db_path, timeframe, asset_key)
     if raw_candles.empty:
         logger.warning(f"No historical candles found for {asset_key}. Skipping.")
-        return {"asset": asset_key, "ok": False, "samples": 0, "real_trades": 0,
-                "reason": "no_candles"}
+        return {"asset": asset_key, "ok": False, "samples": 0, "real_trades": 0, "reason": "no_candles"}
 
     full_df = build_full_df(
         raw_candles,
@@ -229,8 +229,13 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
 
     if len(X_combined) < 500:
         logger.warning(f"Not enough training samples for {asset_key}: {len(X_combined)}")
-        return {"asset": asset_key, "ok": False, "samples": len(X_combined),
-                "real_trades": real_trades, "reason": "too_few_samples"}
+        return {
+            "asset": asset_key,
+            "ok": False,
+            "samples": len(X_combined),
+            "real_trades": real_trades,
+            "reason": "too_few_samples",
+        }
 
     train_ratio = cfg["model"].get("train_ratio", 0.8)
     horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 0))
@@ -240,25 +245,30 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
     )
 
     if reason == "historical_only_policy":
-        sample_weight = aligned_uniqueness_weights(
-            full_df.index, X_train.index, horizon=max(1, horizon)
-        )
+        sample_weight = aligned_uniqueness_weights(full_df.index, X_train.index, horizon=max(1, horizon))
     else:
         # Legacy opt-in merge has mixed event durations; use conservative
         # positional horizon weights rather than pretending row indices align.
         all_weights = average_uniqueness_weights(len(X_combined) + horizon + 1, max(1, horizon))
-        sample_weight = all_weights[:len(X_train)]
+        sample_weight = all_weights[: len(X_train)]
     base_model = train_model(X_train, y_train, cfg, sample_weight=sample_weight)
-    calibrated_model = calibrate_model(
-        base_model, X_train, y_train, cfg, sample_weight=sample_weight
-    )
+    calibrated_model = calibrate_model(base_model, X_train, y_train, cfg, sample_weight=sample_weight)
     cal_report = _purged_oos_calibration(calibrated_model, X_test, y_test, asset_key)
     metadata = build_artifact_metadata(
-        cfg, asset_key, timeframe, full_df, y_combined, len(X_train), len(X_test),
-        "uniqueness", calibration_report_oos=cal_report,
+        cfg,
+        asset_key,
+        timeframe,
+        full_df,
+        y_combined,
+        len(X_train),
+        len(X_test),
+        "uniqueness",
+        calibration_report_oos=cal_report,
     )
     metadata["retraining_real_trade_merge"] = {
-        "enabled": merge_enabled, "rows": int(real_trades), "reason": reason,
+        "enabled": merge_enabled,
+        "rows": int(real_trades),
+        "reason": reason,
     }
     save_model(calibrated_model, available_cols, model_path, metadata=metadata)
 
@@ -270,8 +280,7 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
     # not present as a fully successful retrain (that would be a silent no-op
     # for #26).
     ok_flag = reason in {"ok", "historical_only_policy"}
-    return {"asset": asset_key, "ok": ok_flag, "samples": len(X_combined),
-            "real_trades": real_trades, "reason": reason}
+    return {"asset": asset_key, "ok": ok_flag, "samples": len(X_combined), "real_trades": real_trades, "reason": reason}
 
 
 def main() -> int:
@@ -287,29 +296,29 @@ def main() -> int:
             stats.append(retrain_asset(asset_key, cfg))
         except Exception as e:
             logger.error(f"Failed retraining for {asset_key}: {e}", exc_info=True)
-            stats.append({"asset": asset_key, "ok": False, "samples": 0,
-                          "real_trades": 0, "reason": f"exception: {e}"})
+            stats.append({"asset": asset_key, "ok": False, "samples": 0, "real_trades": 0, "reason": f"exception: {e}"})
 
     ok_assets = [s["asset"] for s in stats if s.get("ok")]
     failed_assets = [s["asset"] for s in stats if not s.get("ok")]
-    skipped_merge = [
-        s["asset"] for s in stats
-        if not s.get("ok") and str(s.get("reason", "")).startswith("skip_merge")
-    ]
+    skipped_merge = [s["asset"] for s in stats if not s.get("ok") and str(s.get("reason", "")).startswith("skip_merge")]
     hard_failed = [a for a in failed_assets if a not in skipped_merge]
 
-    logger.info(f"Attempted {len(enabled_assets)} asset(s); OK: {len(ok_assets)}, "
-                f"hard failed: {len(hard_failed)}, merge skipped: {len(skipped_merge)}")
+    logger.info(
+        f"Attempted {len(enabled_assets)} asset(s); OK: {len(ok_assets)}, "
+        f"hard failed: {len(hard_failed)}, merge skipped: {len(skipped_merge)}"
+    )
     for s in stats:
-        logger.info(f"  [{s['asset']}] ok={s['ok']} samples={s['samples']} "
-                    f"real_trades={s['real_trades']} ({s['reason']})")
+        logger.info(
+            f"  [{s['asset']}] ok={s['ok']} samples={s['samples']} real_trades={s['real_trades']} ({s['reason']})"
+        )
 
     # Step 5d #27: surface real problems instead of a silent green exit code.
     if hard_failed:
         logger.warning(
             "Retraining finished with hard-failed assets: %s. Returning non-zero so the "
             "overnight stage-4 wrapper marks this stage FAILED and Telegram is notified "
-            "(#27 - a real failure must not look like a success).", hard_failed
+            "(#27 - a real failure must not look like a success).",
+            hard_failed,
         )
         return EXIT_PAYLOAD_MISSING
     if stats and len(skipped_merge) == len(stats):
@@ -317,7 +326,8 @@ def main() -> int:
             "Real-trade merge was skipped for ALL enabled assets (%s) because of the model "
             "configuration (include_zero_class / use_regime_feature). Nothing real was folded "
             "into retraining (#26), so the run returns non-zero to surface the missing payload "
-            "(#27) instead of a silent green tick.", skipped_merge
+            "(#27) instead of a silent green tick.",
+            skipped_merge,
         )
         return EXIT_PAYLOAD_MISSING
 

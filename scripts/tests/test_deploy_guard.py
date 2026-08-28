@@ -17,6 +17,7 @@ dicts, and the orchestration (`backup_production_models`, `validate_and_deploy`,
 `main`) is tested with tmp files and monkeypatched heavy dependencies - no
 subprocesses or a real SQLite DB.
 """
+
 import os
 import sys
 
@@ -97,17 +98,13 @@ def test_candidate_better_deploys():
 
 
 def test_regression_beyond_tolerance_is_rejected():
-    dec = dg.is_improvement(
-        _metrics(expectancy=2.0), _metrics(expectancy=1.0), tolerance=0.0
-    )
+    dec = dg.is_improvement(_metrics(expectancy=2.0), _metrics(expectancy=1.0), tolerance=0.0)
     assert dec["deploy"] is False
     assert dec["reason"] == "regressed_beyond_tolerance"
 
 
 def test_small_regression_within_tolerance_is_allowed():
-    dec = dg.is_improvement(
-        _metrics(expectancy=2.0), _metrics(expectancy=1.9), tolerance=0.2
-    )
+    dec = dg.is_improvement(_metrics(expectancy=2.0), _metrics(expectancy=1.9), tolerance=0.2)
     assert dec["deploy"] is True
     assert dec["reason"] == "within_tolerance"
 
@@ -150,7 +147,8 @@ def test_both_thin_still_compared_but_flagged():
     # Both sides have < min_trades: neither the "candidate thin" nor the
     # "incumbent thin" branch fires; a regression is still rejected.
     dec = dg.is_improvement(
-        _metrics(expectancy=2.0, n_trades=5), _metrics(expectancy=0.5, n_trades=8),
+        _metrics(expectancy=2.0, n_trades=5),
+        _metrics(expectancy=0.5, n_trades=8),
         min_trades=20,
     )
     assert dec["deploy"] is False
@@ -206,35 +204,30 @@ def cfg_dict():
 
 def test_decide_no_valid_windows_deploys_only_without_incumbent(cfg_dict):
     # No incumbent -> first deploy allowed even without windows.
-    dec = dg.decide_from_evaluations(
-        None, None, cfg_dict, has_incumbent=False, windows_valid=False
-    )
+    dec = dg.decide_from_evaluations(None, None, cfg_dict, has_incumbent=False, windows_valid=False)
     assert dec["deploy"] is True and dec["reason"] == "no_valid_windows"
     # Has incumbent -> never overwrite without valid evidence.
-    dec = dg.decide_from_evaluations(
-        None, None, cfg_dict, has_incumbent=True, windows_valid=False
-    )
+    dec = dg.decide_from_evaluations(None, None, cfg_dict, has_incumbent=True, windows_valid=False)
     assert dec["deploy"] is False and dec["reason"] == "no_valid_windows"
 
 
 def test_decide_no_deployed_model_deploys(cfg_dict):
-    dec = dg.decide_from_evaluations(
-        None, _metrics(), cfg_dict, has_incumbent=False, windows_valid=True
-    )
+    dec = dg.decide_from_evaluations(None, _metrics(), cfg_dict, has_incumbent=False, windows_valid=True)
     assert dec["deploy"] is True and dec["reason"] == "no_deployed_model"
 
 
 def test_decide_candidate_evaluation_failure_rejects(cfg_dict):
-    dec = dg.decide_from_evaluations(
-        _metrics(), None, cfg_dict, has_incumbent=True, windows_valid=True
-    )
+    dec = dg.decide_from_evaluations(_metrics(), None, cfg_dict, has_incumbent=True, windows_valid=True)
     assert dec["deploy"] is False and dec["reason"] == "candidate_evaluation_failed"
 
 
 def test_decide_propagates_improvement_decision(cfg_dict):
     dec = dg.decide_from_evaluations(
-        _metrics(expectancy=2.0), _metrics(expectancy=0.5), cfg_dict,
-        has_incumbent=True, windows_valid=True,
+        _metrics(expectancy=2.0),
+        _metrics(expectancy=0.5),
+        cfg_dict,
+        has_incumbent=True,
+        windows_valid=True,
     )
     assert dec["deploy"] is False and dec["reason"] == "regressed_beyond_tolerance"
 
@@ -242,8 +235,11 @@ def test_decide_propagates_improvement_decision(cfg_dict):
 def test_decide_reads_tolerance_from_cfg(cfg_dict):
     cfg_dict["deploy_guard"]["tolerance"] = 2.0
     dec = dg.decide_from_evaluations(
-        _metrics(expectancy=2.0), _metrics(expectancy=0.5), cfg_dict,
-        has_incumbent=True, windows_valid=True,
+        _metrics(expectancy=2.0),
+        _metrics(expectancy=0.5),
+        cfg_dict,
+        has_incumbent=True,
+        windows_valid=True,
     )
     assert dec["deploy"] is True and dec["reason"] == "within_tolerance"
 
@@ -303,13 +299,17 @@ def test_rejected_asset_is_rolled_back_and_backup_removed(tmp_path, monkeypatch)
     # Registry pre-flight mocked OK: this test covers the rollback mechanics,
     # not the registry (see model/tests/test_registry.py).
     monkeypatch.setattr(
-        dg, "registry_preflight_check",
-        lambda cfg_, asset, path, registry=None: {"ok": True,
-                                                  "reason": "registered_and_verified",
-                                                  "registry_id": "XAUUSD-M5-test"},
+        dg,
+        "registry_preflight_check",
+        lambda cfg_, asset, path, registry=None: {
+            "ok": True,
+            "reason": "registered_and_verified",
+            "registry_id": "XAUUSD-M5-test",
+        },
     )
     monkeypatch.setattr(
-        dg, "guard_asset",
+        dg,
+        "guard_asset",
         staticmethod(lambda cfg_, asset, bak_: {"deploy": False, "reason": "regressed_beyond_tolerance"}),
     )
     decisions, failed = dg.validate_and_deploy(cfg)
@@ -335,13 +335,17 @@ def test_ok_asset_keeps_new_model_and_removes_backup(tmp_path, monkeypatch):
     # Registry pre-flight (ТЗ 8.4) is mocked: this test covers the deploy
     # decision/backup mechanics, not the registry (see model/tests/test_registry.py).
     monkeypatch.setattr(
-        dg, "registry_preflight_check",
-        lambda cfg_, asset, path, registry=None: {"ok": True,
-                                                  "reason": "registered_and_verified",
-                                                  "registry_id": "XAUUSD-M5-test"},
+        dg,
+        "registry_preflight_check",
+        lambda cfg_, asset, path, registry=None: {
+            "ok": True,
+            "reason": "registered_and_verified",
+            "registry_id": "XAUUSD-M5-test",
+        },
     )
     monkeypatch.setattr(
-        dg, "guard_asset",
+        dg,
+        "guard_asset",
         staticmethod(lambda cfg_, asset, bak_: {"deploy": True, "reason": "ok"}),
     )
     decisions, failed = dg.validate_and_deploy(cfg)
@@ -375,13 +379,17 @@ def test_guard_error_rolls_back_and_marks_failed(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path, model_path=str(mp))
     # Registry pre-flight mocked OK: this test exercises the generic error path.
     monkeypatch.setattr(
-        dg, "registry_preflight_check",
-        lambda cfg_, asset, path, registry=None: {"ok": True,
-                                                  "reason": "registered_and_verified",
-                                                  "registry_id": "XAUUSD-M5-test"},
+        dg,
+        "registry_preflight_check",
+        lambda cfg_, asset, path, registry=None: {
+            "ok": True,
+            "reason": "registered_and_verified",
+            "registry_id": "XAUUSD-M5-test",
+        },
     )
     monkeypatch.setattr(
-        dg, "guard_asset",
+        dg,
+        "guard_asset",
         staticmethod(lambda cfg_, asset, bak_: (_ for _ in ()).throw(RuntimeError("boom"))),
     )
     decisions, failed = dg.validate_and_deploy(cfg)
@@ -414,6 +422,7 @@ def test_main_check_ok_returns_zero(tmp_path, monkeypatch):
     monkeypatch.setattr(dg, "validate_and_deploy", staticmethod(lambda *a, **k: ([], False)))
     # Patch weekend audit so it doesn't hit real CSVs
     import scripts.audit_weekend_tags as _awt
+
     monkeypatch.setattr(_awt, "audit_weekend_tags", lambda log_dir="logs": [])
     assert dg.main(["--check"]) == 0
 

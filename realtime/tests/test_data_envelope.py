@@ -1,4 +1,5 @@
 """Unit tests for realtime/data_envelope.py (freshness contract, spec §6.3)."""
+
 from __future__ import annotations
 
 from realtime.data_envelope import (
@@ -53,8 +54,7 @@ def test_freshness_fields_shape():
 def test_stamp_preserves_payload_and_adds_fields():
     now = 1_000_000
     payload = {"available": True, "balance": 123.0}
-    out = stamp(payload, last_activity_ms=now, source="mt5_account", mode="live",
-                coverage=0.95, now=now)
+    out = stamp(payload, last_activity_ms=now, source="mt5_account", mode="live", coverage=0.95, now=now)
     assert out["balance"] == 123.0
     assert out["freshness_status"] == "fresh"
     assert out["coverage"] == 0.95

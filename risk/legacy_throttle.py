@@ -25,6 +25,7 @@ Example::
     # legacy usage via the shim (preferred for existing code):
     from execution.trade_throttle import TradeThrottle
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger("trade_throttle")
@@ -79,8 +80,7 @@ class TradeThrottle:
         self.cooldown_minutes = int(tc.get("cooldown_minutes", _DEFAULTS["cooldown_minutes"]))
         self.hard_stop_streak = int(tc.get("hard_stop_streak", _DEFAULTS["hard_stop_streak"]))
         self.risk_step_down_map: dict[int, float] = {
-            int(k): float(v)
-            for k, v in dict(tc.get("risk_step_down_map") or _DEFAULTS["risk_step_down_map"]).items()
+            int(k): float(v) for k, v in dict(tc.get("risk_step_down_map") or _DEFAULTS["risk_step_down_map"]).items()
         }  # audit 2026-08-23 D: int-cast keys — YAML strings ("1") would silently
         # never match the int consecutive_losses and the multiplier stayed 1.0
         self.max_daily_loss_pct = float(tc.get("max_daily_loss_pct", _DEFAULTS["max_daily_loss_pct"]))
@@ -89,6 +89,11 @@ class TradeThrottle:
         mdlu = tc.get("max_daily_loss_usd")
         self.max_daily_loss_usd = float(mdlu) if mdlu is not None else None
         self.reset_on_utc_midnight = bool(tc.get("reset_on_utc_midnight", _DEFAULTS["reset_on_utc_midnight"]))
+        # Temporary demo-testing stub (2026-08-28, owner request): when true,
+        # ALL loss-based gates are disabled — cooldown, hard stop, daily loss
+        # limit and risk step-down. The daily trade-count cap still applies.
+        # Remove `stub: true` from config to re-enable real loss protection.
+        self.stub = bool(tc.get("stub", False))
 
         self.state_path = state_path
         self._lock = threading.RLock()  # reentrant: get_state() calls risk_multiplier() which also acquires
@@ -167,7 +172,7 @@ class TradeThrottle:
         startup recovery). A full reset happens only when the date actually
         changes.
         """
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         if self.current_day == today:
             return
         prev_day = self.current_day
@@ -184,10 +189,7 @@ class TradeThrottle:
             self.cooldown_until = 0.0
             self.hard_stopped = False
             self.halt_reason = None
-            logger.info(
-                f"TradeThrottle day reset ({prev_day} -> {today}). "
-                f"Starting equity: ${current_equity:,.2f}"
-            )
+            logger.info(f"TradeThrottle day reset ({prev_day} -> {today}). Starting equity: ${current_equity:,.2f}")
         else:
             # First call ever: just anchor day/equity, preserve any trades_today
             logger.info(
@@ -209,15 +211,20 @@ class TradeThrottle:
         with self._lock:
             self._reset_if_new_day(current_equity)
 
-            # 1. Hard stop (critical loss streak)
-            if self.hard_stopped:
-                return False, f"hard_stop_streak: {self.consecutive_losses} consecutive losses >= {self.hard_stop_streak}; trading halted for today"
-
-            # 2. Cooldown active
-            now = time.time()
-            if self.cooldown_until > 0 and now < self.cooldown_until:
-                remaining = int(self.cooldown_until - now)
-                return False, f"cooldown_active: {self.consecutive_losses} consecutive losses; wait {remaining}s ({self.cooldown_minutes}min window)"
+            # 1+2. Loss-based gates (hard stop / cooldown) — disabled in stub mode
+            if not self.stub:
+                if self.hard_stopped:
+                    return (
+                        False,
+                        f"hard_stop_streak: {self.consecutive_losses} consecutive losses >= {self.hard_stop_streak}; trading halted for today",
+                    )
+                now = time.time()
+                if self.cooldown_until > 0 and now < self.cooldown_until:
+                    remaining = int(self.cooldown_until - now)
+                    return (
+                        False,
+                        f"cooldown_active: {self.consecutive_losses} consecutive losses; wait {remaining}s ({self.cooldown_minutes}min window)",
+                    )
 
             # 3. Daily trade limit
             if self.trades_today >= self.max_trades_per_day:
@@ -225,15 +232,12 @@ class TradeThrottle:
 
             # 4. Daily loss limit — absolute USD first (fires on any account
             # size), then the %-based fallback for small accounts.
-            if self.starting_equity > 0 and current_equity > 0:
+            # Disabled in stub mode.
+            if not self.stub and self.starting_equity > 0 and current_equity > 0:
                 daily_pnl = current_equity - self.starting_equity
-                if self.max_daily_loss_usd is not None \
-                        and daily_pnl <= -self.max_daily_loss_usd:
+                if self.max_daily_loss_usd is not None and daily_pnl <= -self.max_daily_loss_usd:
                     self.hard_stopped = True
-                    self.halt_reason = (
-                        f"daily_loss_limit: ${daily_pnl:,.2f} <= "
-                        f"-${self.max_daily_loss_usd:,.2f}"
-                    )
+                    self.halt_reason = f"daily_loss_limit: ${daily_pnl:,.2f} <= -${self.max_daily_loss_usd:,.2f}"
                     self._save_state()
                     self._notify_halt()
                     return False, self.halt_reason
@@ -266,6 +270,8 @@ class TradeThrottle:
         Returns 1.0 when no losses, decreasing per risk_step_down_map.
         """
         with self._lock:
+            if self.stub:
+                return 1.0
             for threshold in sorted(self.risk_step_down_map.keys(), reverse=True):
                 if self.consecutive_losses >= threshold:
                     return float(self.risk_step_down_map[threshold])
@@ -286,20 +292,22 @@ class TradeThrottle:
             # NOTE: do NOT call _reset_if_new_day here — this method receives
             # PnL, not equity. Day reset is handled by can_trade().
 
+            if self.stub:
+                # Stub mode: count the trade for the daily cap, but never
+                # activate cooldown / hard stop / step-down.
+                self._save_state()
+                return
+
             if pnl < 0:
                 self.consecutive_losses += 1
-                logger.info(
-                    f"TradeThrottle: loss #{self.consecutive_losses} "
-                    f"(pnl=${pnl:+.2f})"
-                )
+                logger.info(f"TradeThrottle: loss #{self.consecutive_losses} (pnl=${pnl:+.2f})")
 
                 # Hard stop
                 if self.consecutive_losses >= self.hard_stop_streak:
                     newly_halted = not self.hard_stopped
                     self.hard_stopped = True
                     self.halt_reason = (
-                        f"hard_stop_streak: {self.consecutive_losses} consecutive losses "
-                        f">= {self.hard_stop_streak}"
+                        f"hard_stop_streak: {self.consecutive_losses} consecutive losses >= {self.hard_stop_streak}"
                     )
                     logger.warning(f"TradeThrottle: {self.halt_reason}")
                     if newly_halted:
@@ -316,10 +324,7 @@ class TradeThrottle:
             else:
                 # Win — reset streak and cooldown
                 if self.consecutive_losses > 0:
-                    logger.info(
-                        f"TradeThrottle: streak reset after {self.consecutive_losses} losses "
-                        f"(pnl=${pnl:+.2f})"
-                    )
+                    logger.info(f"TradeThrottle: streak reset after {self.consecutive_losses} losses (pnl=${pnl:+.2f})")
                 self.consecutive_losses = 0
                 self.cooldown_until = 0.0
 

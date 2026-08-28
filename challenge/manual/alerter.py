@@ -12,6 +12,7 @@ Usage (from repo root):
 Telegram credentials come from .env (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID),
 same as the XAUUSD alert system.
 """
+
 import datetime as dt
 import json
 import os
@@ -30,11 +31,9 @@ sys.path.insert(0, ROOT)
 # and every print() would silently vanish. Route them to a log file instead.
 os.makedirs(os.path.join(ROOT, "logs", "challenge"), exist_ok=True)
 if sys.stderr is None:
-    sys.stderr = open(os.path.join(ROOT, "logs", "challenge", "alerter_stderr.log"),
-                      "a", encoding="utf-8")
+    sys.stderr = open(os.path.join(ROOT, "logs", "challenge", "alerter_stderr.log"), "a", encoding="utf-8")
 if sys.stdout is None:
-    sys.stdout = open(os.path.join(ROOT, "logs", "challenge", "alerter_stdout.log"),
-                      "a", encoding="utf-8")
+    sys.stdout = open(os.path.join(ROOT, "logs", "challenge", "alerter_stdout.log"), "a", encoding="utf-8")
 
 # Audit G: single-instance guard — a second copy would double-scan and race
 # the sent-file dedupe. Same pattern as watchdog.lock.
@@ -45,7 +44,9 @@ def _pid_alive(pid: int) -> bool:
     try:
         out = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         ).stdout
         return '"python' in out
     except Exception:
@@ -57,8 +58,7 @@ def acquire_single_instance() -> bool:
         try:
             old_pid = int(open(_LOCK_FILE, encoding="utf-8").read().strip())
             if old_pid != os.getpid() and _pid_alive(old_pid):
-                print(f"another alerter alive (pid={old_pid}) — exiting",
-                      file=sys.stderr)
+                print(f"another alerter alive (pid={old_pid}) — exiting", file=sys.stderr)
                 return False
         except (ValueError, OSError):
             pass
@@ -74,7 +74,9 @@ from challenge.manual import risk as risk_mod
 from challenge.manual import scanner as scanner_mod
 from config.loader import get_env  # loads .env via dotenv
 
-REFRESH_URL = "https://api.utex.io/rest/grpc/com.unitedtraders.luna.sessionservice.api.sso.SsoService.refreshAuthorization"
+REFRESH_URL = (
+    "https://api.utex.io/rest/grpc/com.unitedtraders.luna.sessionservice.api.sso.SsoService.refreshAuthorization"
+)
 GRPC_BASE = "https://demoususdt-api-margin.utex.io/rest/grpc/com.unitedtraders.luna.utex.protocol.mobile."
 TOKEN_FILE = os.path.join(ROOT, "data", "challenge_tokens.json")
 SENT_FILE = os.path.join(ROOT, "data", "manual", "alerts_sent.json")
@@ -93,10 +95,8 @@ FINALIZE_MINUTES = 20
 REALM = "aurora"
 CLIENT_ID = "utexweb"
 
-CFG = yaml.safe_load(open(os.path.join(ROOT, "challenge", "manual", "manual_config.yaml"),
-                          encoding="utf-8"))
-SYMBOLS = json.load(open(os.path.join(ROOT, "data", "backtest", "symbols.json"),
-                         encoding="utf-8"))
+CFG = yaml.safe_load(open(os.path.join(ROOT, "challenge", "manual", "manual_config.yaml"), encoding="utf-8"))
+SYMBOLS = json.load(open(os.path.join(ROOT, "data", "backtest", "symbols.json"), encoding="utf-8"))
 POLL_SECONDS = int(CFG.get("alert_poll_seconds", 90))
 SESSION_START = dt.time(*map(int, CFG.get("session_start_utc", "13:30").split(":")))
 SESSION_END = dt.time(*map(int, CFG.get("session_end_utc", "19:55").split(":")))
@@ -112,8 +112,9 @@ def tg_send(text: str) -> bool:
         print("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — cannot send", file=sys.stderr)
         return False
     try:
-        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                          data={"chat_id": chat, "text": text}, timeout=10)
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage", data={"chat_id": chat, "text": text}, timeout=10
+        )
         r.raise_for_status()
         return True
     except Exception as e:
@@ -125,12 +126,14 @@ def refresh_access():
     with open(TOKEN_FILE, encoding="utf-8") as f:
         rt = json.load(f)["refresh_token"]
     payload = {"realm": REALM, "clientId": CLIENT_ID, "refreshToken": rt}
-    headers = {"Authorization": "Bearer",
-               "Content-Type": "application/json",
-               "X-UT-GRPC-METADATA": "{}",
-               "Origin": "https://markets-app.hashhedge.com",
-               "Referer": "https://markets-app.hashhedge.com/",
-               "User-Agent": "Mozilla/5.0"}
+    headers = {
+        "Authorization": "Bearer",
+        "Content-Type": "application/json",
+        "X-UT-GRPC-METADATA": "{}",
+        "Origin": "https://markets-app.hashhedge.com",
+        "Referer": "https://markets-app.hashhedge.com/",
+        "User-Agent": "Mozilla/5.0",
+    }
     # 1) обычный путь через requests
     try:
         r = requests.post(REFRESH_URL, json=payload, headers=headers, timeout=30)
@@ -139,29 +142,33 @@ def refresh_access():
     except Exception as e:
         msg = str(e)
         is_network = (
-            isinstance(e, (requests.exceptions.SSLError,
-                           requests.exceptions.ConnectionError,
-                           requests.exceptions.ReadTimeout,
-                           requests.exceptions.Timeout))
-            or "SSLEOF" in msg or "Read timed out" in msg
-            or "handshake" in msg.lower() or "Max retries" in msg
+            isinstance(
+                e,
+                (
+                    requests.exceptions.SSLError,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.ReadTimeout,
+                    requests.exceptions.Timeout,
+                ),
+            )
+            or "SSLEOF" in msg
+            or "Read timed out" in msg
+            or "handshake" in msg.lower()
+            or "Max retries" in msg
             or "Timeout" in type(e).__name__
         )
         if not is_network:
             raise
-        print(f"refresh via requests failed ({type(e).__name__}), "
-              f"пробую через Playwright…", file=sys.stderr)
+        print(f"refresh via requests failed ({type(e).__name__}), пробую через Playwright…", file=sys.stderr)
         try:
             import json as _json
 
             from playwright.sync_api import sync_playwright
+
             with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=True,
-                    args=["--disable-blink-features=AutomationControlled"])
+                browser = pw.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
                 ctx = browser.new_context()
-                resp = ctx.request.post(REFRESH_URL,
-                    data=_json.dumps(payload),
-                    headers=headers)
+                resp = ctx.request.post(REFRESH_URL, data=_json.dumps(payload), headers=headers)
                 if not resp.ok:
                     raise RuntimeError(f"playwright refresh {resp.status}: {resp.text()[:200]}")
                 data = resp.json()
@@ -173,62 +180,83 @@ def refresh_access():
 
 
 def fetch_candles(access, symbol_id, candles_count=720):
-    payload = {"to": int(time.time()), "symbolId": symbol_id,
-               "candlesCount": candles_count, "interval": "Min1"}
-    headers = {"Authorization": "Bearer " + access,
-               "Content-Type": "application/json",
-               "X-UT-GRPC-METADATA": "{}",
-               "X-B3-SpanId": uuid.uuid4().hex[:16],
-               "X-B3-TraceId": uuid.uuid4().hex[:16],
-               "Origin": "https://markets-app.hashhedge.com",
-               "Referer": "https://markets-app.hashhedge.com/",
-               "User-Agent": "Mozilla/5.0"}
+    payload = {"to": int(time.time()), "symbolId": symbol_id, "candlesCount": candles_count, "interval": "Min1"}
+    headers = {
+        "Authorization": "Bearer " + access,
+        "Content-Type": "application/json",
+        "X-UT-GRPC-METADATA": "{}",
+        "X-B3-SpanId": uuid.uuid4().hex[:16],
+        "X-B3-TraceId": uuid.uuid4().hex[:16],
+        "Origin": "https://markets-app.hashhedge.com",
+        "Referer": "https://markets-app.hashhedge.com/",
+        "User-Agent": "Mozilla/5.0",
+    }
     # 1) requests
     try:
-        r = requests.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
-                          json=payload, headers=headers, timeout=60)
+        r = requests.post(GRPC_BASE + "MobileDataService.getCandlesToDate", json=payload, headers=headers, timeout=60)
         if r.status_code != 200:
             raise RuntimeError(f"getCandlesToDate {symbol_id}: {r.status_code} {r.text[:200]}")
         out = []
         for c in r.json().get("candles", []):
-            out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
-                        "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
-                        "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
+            out.append(
+                {
+                    "time": int(c["time"]),
+                    "open": int(c["open"]) / 1e8,
+                    "high": int(c["high"]) / 1e8,
+                    "low": int(c["low"]) / 1e8,
+                    "close": int(c["close"]) / 1e8,
+                    "volume": float(c.get("volume", 0)),
+                }
+            )
         out.sort(key=lambda x: x["time"])
         return out
     except Exception as e:
         msg = str(e)
         is_network = (
-            isinstance(e, (requests.exceptions.SSLError,
-                           requests.exceptions.ConnectionError,
-                           requests.exceptions.ReadTimeout,
-                           requests.exceptions.Timeout))
-            or "SSLEOF" in msg or "Read timed out" in msg
-            or "handshake" in msg.lower() or "Max retries" in msg
+            isinstance(
+                e,
+                (
+                    requests.exceptions.SSLError,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.ReadTimeout,
+                    requests.exceptions.Timeout,
+                ),
+            )
+            or "SSLEOF" in msg
+            or "Read timed out" in msg
+            or "handshake" in msg.lower()
+            or "Max retries" in msg
             or "Timeout" in type(e).__name__
         )
         if not is_network:
             raise
-        print(f"getCandles {symbol_id} via requests failed ({type(e).__name__}), "
-              f"пробую Playwright…", file=sys.stderr)
+        print(f"getCandles {symbol_id} via requests failed ({type(e).__name__}), пробую Playwright…", file=sys.stderr)
         import json as _json
 
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True,
-                args=["--disable-blink-features=AutomationControlled"])
+            browser = pw.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
             ctx = browser.new_context()
-            resp = ctx.request.post(GRPC_BASE + "MobileDataService.getCandlesToDate",
-                data=_json.dumps(payload), headers=headers)
+            resp = ctx.request.post(
+                GRPC_BASE + "MobileDataService.getCandlesToDate", data=_json.dumps(payload), headers=headers
+            )
             if not resp.ok:
                 raise RuntimeError(f"playwright getCandles {symbol_id}: {resp.status}: {resp.text()[:200]}")
             data = resp.json()
             browser.close()
             out = []
             for c in data.get("candles", []):
-                out.append({"time": int(c["time"]), "open": int(c["open"]) / 1e8,
-                            "high": int(c["high"]) / 1e8, "low": int(c["low"]) / 1e8,
-                            "close": int(c["close"]) / 1e8, "volume": float(c.get("volume", 0))})
+                out.append(
+                    {
+                        "time": int(c["time"]),
+                        "open": int(c["open"]) / 1e8,
+                        "high": int(c["high"]) / 1e8,
+                        "low": int(c["low"]) / 1e8,
+                        "close": int(c["close"]) / 1e8,
+                        "volume": float(c.get("volume", 0)),
+                    }
+                )
             out.sort(key=lambda x: x["time"])
             return out
 
@@ -248,13 +276,14 @@ def save_sent(sent: dict) -> None:
         json.dump(sent, f, indent=2, ensure_ascii=False)
 
 
-
 def day_line() -> str:
     sm = risk_mod.DailyStateMachine()
     s = sm.state
-    return (f"День {s.stage}-й, профиль {s.profile}: сделок {s.trades_today}/"
-            f"{s.effective_max_trades}, убытков {s.losses_today}, PnL {s.daily_pnl():+.2f}$, "
-            f"статус: {s.status}")
+    return (
+        f"День {s.stage}-й, профиль {s.profile}: сделок {s.trades_today}/"
+        f"{s.effective_max_trades}, убытков {s.losses_today}, PnL {s.daily_pnl():+.2f}$, "
+        f"статус: {s.status}"
+    )
 
 
 def format_setup(res) -> str:
@@ -292,8 +321,9 @@ def resolve_open_setups(access) -> int:
         bias = rec.get("bias")
         signal_ts = rec.get("signal_time")
         if not bias or not signal_ts:
-            print(f"{now:%H:%M:%S} UTC: outcome: {key} без bias/signal_time "
-                  f"(legacy-запись), пропускаю", file=sys.stderr)
+            print(
+                f"{now:%H:%M:%S} UTC: outcome: {key} без bias/signal_time (legacy-запись), пропускаю", file=sys.stderr
+            )
             continue
         sid = SYMBOLS.get(sym)
         if not sid:
@@ -304,19 +334,33 @@ def resolve_open_setups(access) -> int:
             print(f"{now:%H:%M:%S} UTC: outcome fetch {sym}: {e}", file=sys.stderr)
             continue
         outcome, r, mins = outcomes_mod.simulate_outcome(
-            int(signal_ts), float(rec["entry"]), float(rec["stop"]),
-            float(rec["target"]), bias, candles, now_ts=int(now.timestamp()))
+            int(signal_ts),
+            float(rec["entry"]),
+            float(rec["stop"]),
+            float(rec["target"]),
+            bias,
+            candles,
+            now_ts=int(now.timestamp()),
+        )
         if outcome is None:
             continue  # сессия ещё идёт — сетап не разрешился
-        row = {"date": date_str, "symbol": sym, "grade": rec.get("grade", ""),
-               "bias": bias, "signal_utc": signal_ts,
-               "entry": rec["entry"], "stop": rec["stop"],
-               "target": rec["target"], "rr": rec.get("rr", ""),
-               "outcome": outcome, "r": r, "minutes": mins,
-               "resolved_utc": now.isoformat(timespec="seconds")}
+        row = {
+            "date": date_str,
+            "symbol": sym,
+            "grade": rec.get("grade", ""),
+            "bias": bias,
+            "signal_utc": signal_ts,
+            "entry": rec["entry"],
+            "stop": rec["stop"],
+            "target": rec["target"],
+            "rr": rec.get("rr", ""),
+            "outcome": outcome,
+            "r": r,
+            "minutes": mins,
+            "resolved_utc": now.isoformat(timespec="seconds"),
+        }
         outcomes_mod.append_journal(OUTCOMES_CSV, row)
-        resolved[key] = {"outcome": outcome, "r": r,
-                         "resolved_utc": row["resolved_utc"]}
+        resolved[key] = {"outcome": outcome, "r": r, "resolved_utc": row["resolved_utc"]}
         outcomes_mod.save_resolved(RESOLVED_FILE, resolved)
         stats = outcomes_mod.compute_stats(outcomes_mod.read_journal(OUTCOMES_CSV))
         outcomes_mod.save_stats(STATS_FILE, stats)
@@ -371,13 +415,12 @@ def main() -> int:
     test = "--test" in sys.argv
 
     if test:
-        ok = tg_send(f"Алертер ручной системы: тест (UTC {dt.datetime.now(dt.UTC):%H:%M:%S}). "
-                     f"\n{day_line()}")
+        ok = tg_send(f"Алертер ручной системы: тест (UTC {dt.datetime.now(dt.UTC):%H:%M:%S}). \n{day_line()}")
         print("sent:", ok)
         return 0 if ok else 1
 
     if once:
-        #现货 setups (UTEX) — опционально, может упасть при протухшем токене
+        # 现货 setups (UTEX) — опционально, может упасть при протухшем токене
         try:
             access = refresh_access()
             hits = scan_watchlist(access)
@@ -388,8 +431,11 @@ def main() -> int:
             print(f"UTEX unavailable: {e}", file=sys.stderr)
         return 0
 
-    print(f"Алертер запущен: poll {POLL_SECONDS}s, сессия {SESSION_START}-{SESSION_END} UTC, "
-          f"watchlist {len(CFG.get('watchlist', []))}", file=sys.stderr)
+    print(
+        f"Алертер запущен: poll {POLL_SECONDS}s, сессия {SESSION_START}-{SESSION_END} UTC, "
+        f"watchlist {len(CFG.get('watchlist', []))}",
+        file=sys.stderr,
+    )
     last_summary_date = ""
     # Audit A: token-death monitor — if the UTEX refresh token rots, the loop
     # used to fail silently every cycle forever. Now: 5 failures in a row ->
@@ -399,8 +445,7 @@ def main() -> int:
     while True:
         now = dt.datetime.now(dt.UTC)
         t = now.time()
-        end_plus = (dt.datetime.combine(now.date(), SESSION_END)
-                    + dt.timedelta(minutes=FINALIZE_MINUTES)).time()
+        end_plus = (dt.datetime.combine(now.date(), SESSION_END) + dt.timedelta(minutes=FINALIZE_MINUTES)).time()
         in_session = SESSION_START <= t <= SESSION_END
         finalizing = SESSION_END < t <= end_plus
         if not (in_session or finalizing):
@@ -417,24 +462,31 @@ def main() -> int:
         except Exception as e:
             msg = str(e)
             is_network = (
-                isinstance(e, (requests.exceptions.SSLError,
-                               requests.exceptions.ConnectionError,
-                               requests.exceptions.ReadTimeout,
-                               requests.exceptions.Timeout))
-                or "SSLEOF" in msg or "Read timed out" in msg
-                or "handshake" in msg.lower() or "Max retries" in msg
+                isinstance(
+                    e,
+                    (
+                        requests.exceptions.SSLError,
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.ReadTimeout,
+                        requests.exceptions.Timeout,
+                    ),
+                )
+                or "SSLEOF" in msg
+                or "Read timed out" in msg
+                or "handshake" in msg.lower()
+                or "Max retries" in msg
             )
             if is_network:
-                print(f"{now:%H:%M:%S} UTC: refresh network fail: {e}",
-                      file=sys.stderr)
+                print(f"{now:%H:%M:%S} UTC: refresh network fail: {e}", file=sys.stderr)
                 time.sleep(POLL_SECONDS)
                 continue
             refresh_failures += 1
-            print(f"{now:%H:%M:%S} UTC: refresh failed ({refresh_failures}): {e}",
-                  file=sys.stderr)
+            print(f"{now:%H:%M:%S} UTC: refresh failed ({refresh_failures}): {e}", file=sys.stderr)
             if refresh_failures >= 5 and now.timestamp() - last_dead_alert > 600:
-                tg_send("🚨 Алерты челленджа МЕРТВЫ: UTEX-токен не обновляется "
-                        f"({refresh_failures} неудач подряд). Нужен релогин в браузере.")
+                tg_send(
+                    "🚨 Алерты челленджа МЕРТВЫ: UTEX-токен не обновляется "
+                    f"({refresh_failures} неудач подряд). Нужен релогин в браузере."
+                )
                 last_dead_alert = now.timestamp()
             time.sleep(POLL_SECONDS)
             continue
@@ -476,22 +528,29 @@ def main() -> int:
                             k_date, k_sym = k.split(":", 1)
                         except ValueError:
                             continue
-                        if k_date == today and k_sym != res.symbol \
-                                and symbol_cluster(k_sym) == cluster:
+                        if k_date == today and k_sym != res.symbol and symbol_cluster(k_sym) == cluster:
                             same_cluster.append(k_sym)
                 if cluster and same_cluster:
-                    msg += (f"\n⚠️ Кластер «{cluster}»: сегодня уже алертились "
-                            f"{', '.join(sorted(set(same_cluster)))}. Кап: "
-                            f"макс 1 позиция на кластер в день — входи только "
-                            f"если уверен, что та сделка не открыта.")
+                    msg += (
+                        f"\n⚠️ Кластер «{cluster}»: сегодня уже алертились "
+                        f"{', '.join(sorted(set(same_cluster)))}. Кап: "
+                        f"макс 1 позиция на кластер в день — входи только "
+                        f"если уверен, что та сделка не открыта."
+                    )
                 ok = tg_send(msg)
                 if ok:
                     sb = res.signal_bar or res.impulse_bar or {}
-                    sent[key] = {"sent_at": now.isoformat(), "grade": res.grade,
-                                 "entry": res.entry, "stop": res.stop,
-                                 "target": res.target, "bias": res.bias,
-                                 "signal_time": sb.get("time") if sb else None,
-                                 "rr": res.rr, "cluster": cluster}
+                    sent[key] = {
+                        "sent_at": now.isoformat(),
+                        "grade": res.grade,
+                        "entry": res.entry,
+                        "stop": res.stop,
+                        "target": res.target,
+                        "bias": res.bias,
+                        "signal_time": sb.get("time") if sb else None,
+                        "rr": res.rr,
+                        "cluster": cluster,
+                    }
                     save_sent(sent)
                     print(f"{now:%H:%M:%S} UTC: alert sent for {res.symbol}", file=sys.stderr)
             # После скана — разрешение открытых сетапов.

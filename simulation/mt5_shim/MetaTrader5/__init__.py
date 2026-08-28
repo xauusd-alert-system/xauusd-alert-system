@@ -75,8 +75,8 @@ POSITION_TYPE_SELL: int = 1
 # Module-level state (set via _inject()).
 # ----------------------------------------------------------------------
 
-_STATE = None       # VirtualState
-_SIMULATOR = None   # MarketSimulator
+_STATE = None  # VirtualState
+_SIMULATOR = None  # MarketSimulator
 _SIM_CFG: dict = {}
 _SYMBOL_TIMEFRAME_TICKS = {
     TIMEFRAME_M1: 12,
@@ -97,6 +97,7 @@ def _inject(state, simulator, cfg: dict) -> None:
 # ----------------------------------------------------------------------
 # Session / init helpers
 # ----------------------------------------------------------------------
+
 
 def initialize(*args, **kwargs) -> bool:
     """Report a successful connection to the virtual terminal."""
@@ -179,6 +180,7 @@ def symbols_get(*args, **kwargs) -> tuple:
 # Market data (candles)
 # ----------------------------------------------------------------------
 
+
 def _timestamp_now() -> int:
     """Current Unix seconds (UTC), used to anchor newly-closed bars."""
     return int(datetime.now(UTC).timestamp())
@@ -202,9 +204,7 @@ def copy_rates_from_pos(
 
     interval_ticks = _SYMBOL_TIMEFRAME_TICKS.get(int(timeframe), 60)
     try:
-        df = _SIMULATOR.aggregator.get_bars_by_interval(
-            interval_ticks, n=max(int(count) + int(start_pos), 1)
-        )
+        df = _SIMULATOR.aggregator.get_bars_by_interval(interval_ticks, n=max(int(count) + int(start_pos), 1))
     except Exception:
         return None
 
@@ -319,6 +319,7 @@ def pd_timestamp(value) -> datetime:
 # Orders / positions / history
 # ----------------------------------------------------------------------
 
+
 def positions_get(
     symbol: Optional[str] = None,
     group: Optional[str] = None,
@@ -432,9 +433,7 @@ def order_send(request: dict) -> object:
                     comment="No such open position to close",
                 )
             price = float(request.get("price") or _SIMULATOR.current_bid)
-            out_deal = _STATE.close_partial(
-                pos, volume, price, comment=comment, t=t
-            )
+            out_deal = _STATE.close_partial(pos, volume, price, comment=comment, t=t)
             if out_deal is None:
                 return VirtualOrderResult(
                     retcode=TRADE_RETCODE_INVALID_REQUEST,
@@ -509,9 +508,7 @@ def order_send(request: dict) -> object:
 def _result(retcode: int, order: int, comment: str) -> object:
     from simulation.virtual_state import VirtualOrderResult
 
-    return VirtualOrderResult(
-        retcode=retcode, order=order, comment=comment
-    )
+    return VirtualOrderResult(retcode=retcode, order=order, comment=comment)
 
 
 def positions_total(*args, **kwargs) -> int:

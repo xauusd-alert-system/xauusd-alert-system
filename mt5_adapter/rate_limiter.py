@@ -10,6 +10,7 @@ test/paper behaviour does not change; the mechanism is opt-in via config
 (``mt5_adapter.rate_limit.max_calls_per_second`` or the
 ``MT5_RATE_LIMIT_MAX_CPS`` env var).
 """
+
 from __future__ import annotations
 
 import threading
@@ -83,8 +84,8 @@ class MT5RateLimiter:
 
             if self.strict:
                 from mt5_adapter.errors import MT5RateLimitedError
-                raise MT5RateLimitedError(
-                    f"MT5 rate limit exceeded ({self.rate}/s, strict mode)")
+
+                raise MT5RateLimitedError(f"MT5 rate limit exceeded ({self.rate}/s, strict mode)")
 
             chunk = max(0.001, min(need, 0.25))
             self.sleeper(chunk)

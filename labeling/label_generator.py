@@ -26,6 +26,7 @@ a config refactor can do by accident.
 CRITICAL NO-LOOK-AHEAD WARNING:
 This module is intentionally forward-looking for OFFLINE labeling only.
 """
+
 import numpy as np
 import pandas as pd
 
@@ -57,14 +58,13 @@ def resolve_label_event(cfg: dict) -> str:
     lab_cfg = (cfg or {}).get("labeling", {}) or {}
     event = str(lab_cfg.get("event", "barrier")).strip().lower()
     if event not in LABEL_EVENTS:
-        raise ValueError(
-            f"Unknown labeling.event: {event!r}; expected one of {LABEL_EVENTS}"
-        )
+        raise ValueError(f"Unknown labeling.event: {event!r}; expected one of {LABEL_EVENTS}")
     return event
 
 
-def generate_labels(df: pd.DataFrame, target_x: float, stop_y: float, horizon_n: int,
-                     price_col: str = "close") -> pd.Series:
+def generate_labels(
+    df: pd.DataFrame, target_x: float, stop_y: float, horizon_n: int, price_col: str = "close"
+) -> pd.Series:
     n = len(df)
     highs = df["high"].values
     lows = df["low"].values
@@ -165,6 +165,7 @@ def generate_labels_atr_scaled(
 # ---------------------------------------------------------------------------
 # A10: labels for the event the execution engine actually resolves.
 # ---------------------------------------------------------------------------
+
 
 def _execution_costs(cfg: dict, asset_key: str) -> tuple:
     """(spread, slippage) in absolute price units, resolved exactly like
@@ -385,9 +386,7 @@ def generate_labels_traded_direction(
     Emitted with name "label" in both encodings.
     """
     if encoding not in TRADED_ENCODINGS:
-        raise ValueError(
-            f"encoding must be one of {TRADED_ENCODINGS}, got {encoding!r}"
-        )
+        raise ValueError(f"encoding must be one of {TRADED_ENCODINGS}, got {encoding!r}")
 
     long_lab = generate_labels_traded_event(df, cfg, asset_key, direction=1, **kwargs).values
     short_lab = generate_labels_traded_event(df, cfg, asset_key, direction=-1, **kwargs).values
@@ -457,8 +456,7 @@ def traded_event_summary(
     }
 
 
-def generate_labels_from_config(df: pd.DataFrame, cfg: dict,
-                                asset_key: str = None) -> pd.Series:
+def generate_labels_from_config(df: pd.DataFrame, cfg: dict, asset_key: str = None) -> pd.Series:
     """The single entry point every training path uses to build `label`.
 
     Dispatches on labeling.event (see module docstring and resolve_label_event).
@@ -490,9 +488,7 @@ def generate_labels_from_config(df: pd.DataFrame, cfg: dict,
             )
         # "pm1" is mandatory here: build_training_matrix filters on
         # isin([1, -1]), so the {0, 1} space would lose every short row.
-        return generate_labels_traded_direction(
-            df, cfg, asset_key, encoding="pm1"
-        )
+        return generate_labels_traded_direction(df, cfg, asset_key, encoding="pm1")
 
     method = lab_cfg.get("method", "fixed")
 

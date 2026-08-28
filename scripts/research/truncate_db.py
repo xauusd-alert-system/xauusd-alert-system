@@ -10,6 +10,7 @@ Usage:
     python scripts/research/truncate_db.py --yes --no-confirm       # non-interactive delete
     python scripts/research/truncate_db.py --db PATH --cutoff 2026-08-08 --dry-run
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,9 +20,7 @@ import sys
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Delete rows with timestamp_utc >= cutoff from ohlcv_* tables."
-    )
+    parser = argparse.ArgumentParser(description="Delete rows with timestamp_utc >= cutoff from ohlcv_* tables.")
     parser.add_argument(
         "--db",
         default="data/research_prelock.sqlite",
@@ -30,8 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cutoff",
         default="2026-08-08",
-        help="UTC date (YYYY-MM-DD); rows with timestamp_utc >= its epoch are deleted "
-        "(default: 2026-08-08)",
+        help="UTC date (YYYY-MM-DD); rows with timestamp_utc >= its epoch are deleted (default: 2026-08-08)",
     )
     parser.add_argument(
         "--dry-run",
@@ -41,8 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="Explicitly acknowledge deletion; non-interactive runs REQUIRE "
-        "--yes together with --no-confirm",
+        help="Explicitly acknowledge deletion; non-interactive runs REQUIRE --yes together with --no-confirm",
     )
     parser.add_argument(
         "--no-confirm",
@@ -53,26 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cutoff_epoch(cutoff: str) -> int:
-    dt = datetime.datetime.strptime(cutoff, "%Y-%m-%d").replace(
-        tzinfo=datetime.UTC
-    )
+    dt = datetime.datetime.strptime(cutoff, "%Y-%m-%d").replace(tzinfo=datetime.UTC)
     return int(dt.timestamp())
 
 
 def ohlcv_tables(con: sqlite3.Connection) -> list[str]:
-    rows = con.execute(
-        "select name from sqlite_master "
-        "where type='table' and name like 'ohlcv_%'"
-    ).fetchall()
+    rows = con.execute("select name from sqlite_master where type='table' and name like 'ohlcv_%'").fetchall()
     return [r[0] for r in rows]
 
 
 def count_rows_to_delete(con: sqlite3.Connection, table: str, cut: int) -> int:
-    return int(
-        con.execute(
-            f"select count(*) from \"{table}\" where timestamp_utc >= ?", (cut,)
-        ).fetchone()[0]
-    )
+    return int(con.execute(f'select count(*) from "{table}" where timestamp_utc >= ?', (cut,)).fetchone()[0])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,10 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         if not args.no_confirm:
-            print(
-                f"Delete rows with timestamp_utc >= {args.cutoff} from "
-                f"{len(tables)} ohlcv_* tables in {args.db}?"
-            )
+            print(f"Delete rows with timestamp_utc >= {args.cutoff} from {len(tables)} ohlcv_* tables in {args.db}?")
             answer = input("Are you sure? [y/N] ").strip().lower()
             if answer not in ("y", "yes"):
                 print("Aborted — nothing deleted.")
@@ -114,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         deleted = []
         for t in tables:
             n = count_rows_to_delete(con, t, cut)
-            con.execute(f"delete from \"{t}\" where timestamp_utc >= ?", (cut,))
+            con.execute(f'delete from "{t}" where timestamp_utc >= ?', (cut,))
             deleted.append((t, n))
         con.commit()
         print("truncated:", [t for t, _ in deleted])

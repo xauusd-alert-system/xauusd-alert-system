@@ -7,6 +7,7 @@ Covers:
 * a missing section falls back to model defaults;
 * a minimal config still loads (backward compatibility of existing tests).
 """
+
 from __future__ import annotations
 
 import logging
@@ -55,10 +56,7 @@ def test_typo_detected_in_warn_mode(real_config, caplog):
 
     assert issues, "typo must be detected"
     assert any("max_daily_trades_per_asst" in str(i) for i in issues)
-    assert any(
-        "max_daily_trades_per_asst" in r.message and r.levelno == logging.WARNING
-        for r in caplog.records
-    )
+    assert any("max_daily_trades_per_asst" in r.message and r.levelno == logging.WARNING for r in caplog.records)
 
 
 def test_typo_raises_in_strict_mode(real_config):
@@ -89,8 +87,7 @@ def test_missing_section_uses_defaults():
     issues = collect_config_issues({})
     assert issues == []
     # explicitly empty sections also validate against defaults
-    assert validate_config({"general": None, "risk": {}, "execution": {}},
-                           mode="strict") == []
+    assert validate_config({"general": None, "risk": {}, "execution": {}}, mode="strict") == []
 
 
 def test_minimal_config_still_loads():

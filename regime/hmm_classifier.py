@@ -8,6 +8,7 @@ NOTE: despite the historical file name, this is a GMM, not an HMM — no
 temporal transition modelling is performed. Kept under this name to avoid
 churn; the class is currently NOT wired into any production pipeline.
 """
+
 from __future__ import annotations
 
 from typing import Dict
@@ -51,12 +52,15 @@ class UnsupervisedRegimeClassifier:
         slope = (df["close"] - df["close"].shift(10)) / df["close"].shift(10).replace(0, np.nan)
         slope = slope.fillna(0.0)
 
-        feats = pd.DataFrame({
-            "return": returns,
-            "rel_volatility": rel_vol,
-            "norm_volume": norm_volume,
-            "slope": slope,
-        }, index=df.index)
+        feats = pd.DataFrame(
+            {
+                "return": returns,
+                "rel_volatility": rel_vol,
+                "norm_volume": norm_volume,
+                "slope": slope,
+            },
+            index=df.index,
+        )
         return feats
 
     def fit(self, df: pd.DataFrame) -> "UnsupervisedRegimeClassifier":

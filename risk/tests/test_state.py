@@ -7,6 +7,7 @@ Covers:
   - HWM ratchet (never decreases);
   - atomic save (tmp + replace leaves a single file).
 """
+
 import json
 from datetime import UTC, datetime
 
@@ -38,12 +39,15 @@ def test_legacy_file_without_balance_and_hwm(tmp_path):
     """Pre-P0-5 / pre-P1-7 file: no starting_balance_today, no hwm."""
     path = str(tmp_path / "risk_state.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({
-            "current_day": datetime.now(UTC).date().isoformat(),
-            "starting_equity_today": 1000.0,
-            "daily_trades_count": {"EURUSD": 1},
-            "circuit_breaker_tripped": False,
-        }, f)
+        json.dump(
+            {
+                "current_day": datetime.now(UTC).date().isoformat(),
+                "starting_equity_today": 1000.0,
+                "daily_trades_count": {"EURUSD": 1},
+                "circuit_breaker_tripped": False,
+            },
+            f,
+        )
     st = RiskState(path)
     # P0-5 fallback: balance anchor = stored equity.
     assert st.starting_balance_today == 1000.0

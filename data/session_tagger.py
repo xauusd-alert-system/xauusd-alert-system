@@ -5,6 +5,7 @@ A candle can belong to multiple overlapping sessions (e.g. London+NY overlap);
 in that case we tag with a combined label so backtest/metrics.py can still
 report clean per-session and per-overlap breakdowns.
 """
+
 import pandas as pd
 
 

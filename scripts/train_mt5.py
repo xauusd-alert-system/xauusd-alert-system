@@ -2,8 +2,11 @@
 Train one per-asset model from the MT5-backed SQLite database.
 
 Example:
-    python -m scripts.train_mt5 --symbol XAUUSD --db-path data/market_data_mt5.sqlite --output output/models/xauusd_direction_model.joblib
+    python -m scripts.train_mt5 --symbol XAUUSD
+        --db-path data/market_data_mt5.sqlite
+        --output output/models/xauusd_direction_model.joblib
 """
+
 import argparse
 import hashlib
 import json
@@ -60,9 +63,11 @@ def build_full_df(
     # so it can use adx/cvd/bb_width_percentile.
     try:
         from features.bifurcation import add_bifurcation_features
+
         df = add_bifurcation_features(df)
     except Exception as e:
         import logging
+
         logging.getLogger("train_mt5").warning("bifurcation features skipped: %s", e)
 
     # Загружаем старшие таймфреймы (H1, H4) из SQLite для расчета MTF Confluence
@@ -109,8 +114,7 @@ def _config_hash(cfg: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _purged_oos_calibration(model, X_test: pd.DataFrame, y_test: pd.Series,
-                            asset_key: str) -> dict:
+def _purged_oos_calibration(model, X_test: pd.DataFrame, y_test: pd.Series, asset_key: str) -> dict:
     """Mandatory untouched production-split probability report."""
     import numpy as np
 
@@ -126,11 +130,8 @@ def _purged_oos_calibration(model, X_test: pd.DataFrame, y_test: pd.Series,
         # from {0:short, 2:long} to binary {0,1} by train_model.
         if set(np.unique(y_arr)) <= {0, 2} and 2 in set(np.unique(y_arr)):
             y_arr = (y_arr == 2).astype(int)
-        report = calibration_report(
-            y_arr, probabilities[:, classes.index(1)], asset_name=asset_key
-        )
-        report.update({"scope": "purged_production_holdout", "available": True,
-                       "class_encoding": classes})
+        report = calibration_report(y_arr, probabilities[:, classes.index(1)], asset_name=asset_key)
+        report.update({"scope": "purged_production_holdout", "available": True, "class_encoding": classes})
         return report
 
     # Multiclass confidence calibration: Brier over the full probability vector
@@ -138,8 +139,7 @@ def _purged_oos_calibration(model, X_test: pd.DataFrame, y_test: pd.Series,
     class_to_col = {c: i for i, c in enumerate(classes)}
     valid = np.asarray([v in class_to_col for v in y_arr])
     if not valid.any():
-        return {"scope": "purged_production_holdout", "n_samples": 0,
-                "available": False, "class_encoding": classes}
+        return {"scope": "purged_production_holdout", "n_samples": 0, "available": False, "class_encoding": classes}
     p = probabilities[valid]
     yt = y_arr[valid]
     one_hot = np.zeros_like(p)
@@ -150,8 +150,14 @@ def _purged_oos_calibration(model, X_test: pd.DataFrame, y_test: pd.Series,
     correct = (predicted == yt).astype(int)
     report = calibration_report(correct, confidence, asset_name=asset_key)
     report["brier_score_multiclass"] = float(np.mean(np.sum((p - one_hot) ** 2, axis=1)))
-    report.update({"scope": "purged_production_holdout", "available": True,
-                   "class_encoding": classes, "metric_semantics": "confidence_calibration"})
+    report.update(
+        {
+            "scope": "purged_production_holdout",
+            "available": True,
+            "class_encoding": classes,
+            "metric_semantics": "confidence_calibration",
+        }
+    )
     return report
 
 
@@ -176,6 +182,7 @@ def build_artifact_metadata(
     spread = asset_cfg.get("spread_usd", cfg.get("backtest", {}).get("spread_points", 25) / 100.0)
     slippage = asset_cfg.get("slippage_usd", cfg.get("backtest", {}).get("slippage_points", 5) / 100.0)
     from config.strategy_contract import strategy_identity
+
     identity = strategy_identity(cfg)
     return {
         "bundle_schema_version": 2,
@@ -188,8 +195,7 @@ def build_artifact_metadata(
             "end_timestamp_utc": period_end,
             "cutoff_exclusive_utc": data_cutoff_utc,
         },
-        "rows": {"featured": int(len(df)), "labeled": int(len(y)),
-                 "train": int(train_rows), "test": int(test_rows)},
+        "rows": {"featured": int(len(df)), "labeled": int(len(y)), "train": int(train_rows), "test": int(test_rows)},
         "label_event": resolve_label_event(cfg),
         "labeling": cfg.get("labeling", {}),
         "signal_grid": get_signal_grid(cfg, asset_cfg),
@@ -201,16 +207,14 @@ def build_artifact_metadata(
         "class_counts": counts,
         "effective_config_sha256": _config_hash(cfg),
         "sample_weight_mode": weights_mode,
-        "calibration_report_oos": calibration_report_oos or {
-            "scope": "purged_production_holdout", "available": False
-        },
+        "calibration_report_oos": calibration_report_oos or {"scope": "purged_production_holdout", "available": False},
         "calibration_policy": {
             "method": cfg.get("model", {}).get("calibration_method"),
             "split": "purged_time_ordered",
             "sample_weight_mode": (
-                weights_mode if cfg.get("model", {}).get(
-                    "calibration_weight_mode", "same_as_training"
-                ) == "same_as_training" else "unweighted"
+                weights_mode
+                if cfg.get("model", {}).get("calibration_weight_mode", "same_as_training") == "same_as_training"
+                else "unweighted"
             ),
         },
     }
@@ -223,14 +227,21 @@ def main():
     parser.add_argument("--timeframe", default="M15", choices=["M1", "M5", "M15", "H1", "H4"])
     parser.add_argument("--output", required=True, help="Destination .joblib path")
     parser.add_argument(
-        "--end-date", default=None,
-        help=("Drop raw candles at or after this UTC date/time before features are built. "
-              "Required for pre-lock A/B model artifacts."),
+        "--end-date",
+        default=None,
+        help=(
+            "Drop raw candles at or after this UTC date/time before features are built. "
+            "Required for pre-lock A/B model artifacts."
+        ),
     )
     parser.add_argument(
-        "--label-event", choices=["configured", "barrier", "traded"], default="configured",
-        help=("Target contract. 'configured' uses assets.<SYMBOL>.labeling.event; "
-              "explicit barrier/traded is intended for legacy-vs-traded A/B runs."),
+        "--label-event",
+        choices=["configured", "barrier", "traded"],
+        default="configured",
+        help=(
+            "Target contract. 'configured' uses assets.<SYMBOL>.labeling.event; "
+            "explicit barrier/traded is intended for legacy-vs-traded A/B runs."
+        ),
     )
     args = parser.parse_args()
 
@@ -248,6 +259,7 @@ def main():
     # true, the frozen manifest must exist and match the raw content BEFORE any
     # feature/label work. Mixing brokers or incomplete history stops the run.
     from data.provenance import provenance_gate
+
     provenance_gate(cfg, args.db_path, args.timeframe, args.symbol)
 
     if args.end_date:
@@ -277,44 +289,38 @@ def main():
     # backtest/walk_forward.py already does this; production training did not.
     horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 0))
     embargo = int(cfg.get("backtest", {}).get("walk_forward", {}).get("embargo_candles", 0))
-    X_train, X_test, y_train, y_test = purged_time_ordered_split(
-        X, y, train_ratio, horizon=horizon, embargo=embargo
-    )
+    X_train, X_test, y_train, y_test = purged_time_ordered_split(X, y, train_ratio, horizon=horizon, embargo=embargo)
 
     weights_mode = str(cfg.get("model", {}).get("sample_weight_mode", "uniqueness"))
     if weights_mode == "uniqueness":
-        sample_weight = aligned_uniqueness_weights(
-            df.index, X_train.index, horizon=max(1, horizon)
-        )
+        sample_weight = aligned_uniqueness_weights(df.index, X_train.index, horizon=max(1, horizon))
     elif weights_mode == "none":
         sample_weight = None
     else:
-        raise SystemExit(
-            f"Unsupported model.sample_weight_mode={weights_mode!r}; expected uniqueness or none"
-        )
+        raise SystemExit(f"Unsupported model.sample_weight_mode={weights_mode!r}; expected uniqueness or none")
 
     base = train_model(X_train, y_train, cfg, sample_weight=sample_weight)
-    calibration_weight_mode = cfg.get("model", {}).get(
-        "calibration_weight_mode", "same_as_training"
-    )
+    calibration_weight_mode = cfg.get("model", {}).get("calibration_weight_mode", "same_as_training")
     if calibration_weight_mode == "same_as_training":
         calibration_weight = sample_weight
     elif calibration_weight_mode == "none":
         calibration_weight = None
     else:
         raise SystemExit(
-            "Unsupported model.calibration_weight_mode="
-            f"{calibration_weight_mode!r}; expected same_as_training or none"
+            f"Unsupported model.calibration_weight_mode={calibration_weight_mode!r}; expected same_as_training or none"
         )
-    calibrated = calibrate_model(
-        base, X_train, y_train, cfg, sample_weight=calibration_weight
-    )
-    calibration_report_oos = _purged_oos_calibration(
-        calibrated, X_test, y_test, args.symbol
-    )
+    calibrated = calibrate_model(base, X_train, y_train, cfg, sample_weight=calibration_weight)
+    calibration_report_oos = _purged_oos_calibration(calibrated, X_test, y_test, args.symbol)
     metadata = build_artifact_metadata(
-        cfg, args.symbol, args.timeframe, df, y, len(X_train), len(X_test),
-        weights_mode, calibration_report_oos=calibration_report_oos,
+        cfg,
+        args.symbol,
+        args.timeframe,
+        df,
+        y,
+        len(X_train),
+        len(X_test),
+        weights_mode,
+        calibration_report_oos=calibration_report_oos,
         data_cutoff_utc=args.end_date,
     )
     save_model(calibrated, cols, args.output, metadata=metadata)

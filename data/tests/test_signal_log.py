@@ -2,6 +2,7 @@
 Unit tests for data/signal_log.py.
 Run with: pytest data/tests/test_signal_log.py -v
 """
+
 import json
 import os
 import sys

@@ -1,4 +1,5 @@
 """News feed service cache-freshness checks + entrypoint guard (TZ 8.8)."""
+
 from __future__ import annotations
 
 import json
@@ -12,10 +13,16 @@ from services.news_feed import service as nf
 
 def _write_cache(path, ts: float, events: int = 3):
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"ts": ts, "events": [
-            {"title": f"e{i}", "country": "USD", "date": "2026-01-01T00:00:00+00:00",
-             "impact": "High"} for i in range(events)
-        ]}, f)
+        json.dump(
+            {
+                "ts": ts,
+                "events": [
+                    {"title": f"e{i}", "country": "USD", "date": "2026-01-01T00:00:00+00:00", "impact": "High"}
+                    for i in range(events)
+                ],
+            },
+            f,
+        )
 
 
 def test_cache_freshness_fresh_is_ok(tmp_path):

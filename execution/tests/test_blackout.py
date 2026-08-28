@@ -5,6 +5,7 @@ The trader must be OFF while the market is inactive: weekend window
 (22:00 -> 08:00 UTC, new entries skipped, crosses midnight), and an
 optional one-off manual halt covering unattended stretches.
 """
+
 import types
 from datetime import UTC, datetime
 
@@ -16,8 +17,7 @@ def _cfg(**blackout_overrides):
     bo = {
         "enabled": True,
         "daily_break_utc": ["22:00", "08:00"],
-        "weekend": {"start_dow": 4, "start_utc": "21:00",
-                    "end_dow": 6, "end_utc": "21:00"},
+        "weekend": {"start_dow": 4, "start_utc": "21:00", "end_dow": 6, "end_utc": "21:00"},
         "flatten_before_minutes": 10,
     }
     bo.update(blackout_overrides)
@@ -40,13 +40,13 @@ def _utc(s):
 
 def test_weekend_window_halts_and_resumes():
     t = _trader(_cfg())
-    assert t._blackout_status(_utc("2026-08-19 20:00"))[0] is False   # Wed
+    assert t._blackout_status(_utc("2026-08-19 20:00"))[0] is False  # Wed
     halted, reason, resume = t._blackout_status(_utc("2026-08-21 22:00"))  # Fri
     assert halted is True
     assert "weekend" in reason
-    assert resume == _utc("2026-08-23 21:00")                           # Sun
-    assert t._blackout_status(_utc("2026-08-22 12:00"))[0] is True      # Sat
-    assert t._blackout_status(_utc("2026-08-23 22:00"))[0] is False     # Sun after
+    assert resume == _utc("2026-08-23 21:00")  # Sun
+    assert t._blackout_status(_utc("2026-08-22 12:00"))[0] is True  # Sat
+    assert t._blackout_status(_utc("2026-08-23 22:00"))[0] is False  # Sun after
 
 
 def test_manual_halt_overrides_weekend():
@@ -55,8 +55,8 @@ def test_manual_halt_overrides_weekend():
     assert halted is True
     assert "manual halt" in reason
     # After the manual halt expires the recurring weekend window applies.
-    assert t._blackout_status(_utc("2026-08-24 08:00"))[0] is False     # Mon
-    assert t._blackout_status(_utc("2026-08-28 22:00"))[0] is True      # Fri
+    assert t._blackout_status(_utc("2026-08-24 08:00"))[0] is False  # Mon
+    assert t._blackout_status(_utc("2026-08-28 22:00"))[0] is True  # Fri
 
 
 def test_disabled_blackout_never_halts():
@@ -87,17 +87,23 @@ def test_flatten_all_positions_closes_every_position(monkeypatch):
     pos1 = types.SimpleNamespace(ticket=1, symbol="GOLD", type=0, volume=0.34)
     pos2 = types.SimpleNamespace(ticket=2, symbol="EURUSD", type=1, volume=0.33)
     monkeypatch.setattr(trader_mod.mt5, "initialize", lambda *a, **k: True)
-    monkeypatch.setattr(trader_mod, "positions_get_by_magic",
-                        lambda *a, **k: [pos1, pos2])
-    monkeypatch.setattr(trader_mod.mt5, "symbol_info_tick", lambda s: (
-        types.SimpleNamespace(bid=2400.0, ask=2400.1)
-        if s == "GOLD" else types.SimpleNamespace(bid=1.1000, ask=1.1001)))
+    monkeypatch.setattr(trader_mod, "positions_get_by_magic", lambda *a, **k: [pos1, pos2])
+    monkeypatch.setattr(
+        trader_mod.mt5,
+        "symbol_info_tick",
+        lambda s: (
+            types.SimpleNamespace(bid=2400.0, ask=2400.1)
+            if s == "GOLD"
+            else types.SimpleNamespace(bid=1.1000, ask=1.1001)
+        ),
+    )
     closed = []
     # _close_partial_position gained keyword args over time (e.g.
     # quiet_market_closed for blackout passes); accept **kwargs so the
     # harness tracks the current call signature.
     t._close_partial_position = lambda pos, price, volume, label, **kwargs: (
-        closed.append((pos.ticket, volume, label)) or True)
+        closed.append((pos.ticket, volume, label)) or True
+    )
     t._flatten_all_positions("weekend blackout")
     assert sorted(c[0] for c in closed) == [1, 2]
     assert all(c[1] in (0.34, 0.33) for c in closed)
@@ -107,9 +113,10 @@ def test_flatten_all_positions_closes_every_position(monkeypatch):
 def test_flatten_with_no_positions_is_noop(monkeypatch):
     t = _trader(_cfg())
     monkeypatch.setattr(trader_mod.mt5, "initialize", lambda *a, **k: True)
-    monkeypatch.setattr(trader_mod, "positions_get_by_magic",
-                        lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "positions_get_by_magic", lambda *a, **k: None)
+
     def _boom(*a, **k):
         raise AssertionError("should not close anything")
+
     t._close_partial_position = _boom
     t._flatten_all_positions("weekend blackout")

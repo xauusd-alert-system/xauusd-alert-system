@@ -5,6 +5,7 @@ Bets against short-term moves: when the latest price deviates from the recent
 average by more than a threshold, it takes a position in the opposite
 direction, expecting price to revert.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -27,7 +28,7 @@ class MeanReversion(BaseAgent):
         if len(closes) < self.lookback + 1:
             return None
 
-        avg = sum(closes[-self.lookback:]) / self.lookback
+        avg = sum(closes[-self.lookback :]) / self.lookback
         last = closes[-1]
         deviation = (last - avg) / (avg + 1e-12)
 

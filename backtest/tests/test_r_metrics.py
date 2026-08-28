@@ -26,13 +26,20 @@ from backtest.metrics import (
 )
 
 
-def _mk_trade(pnl, entry=1.30, stop=1.297, tp1=1.3003, reason="tp3_runner",
-              tp1_hit=True, tp2_hit=True):
+def _mk_trade(pnl, entry=1.30, stop=1.297, tp1=1.3003, reason="tp3_runner", tp1_hit=True, tp2_hit=True):
     return SimpleNamespace(
-        entry_ts=1, exit_ts=2, direction=1, session="london",
-        regime_at_entry="trend_up", pnl=pnl, exit_reason=reason,
-        entry_price=entry, initial_stop_price=stop, tp1_price=tp1,
-        volume=0.01)
+        entry_ts=1,
+        exit_ts=2,
+        direction=1,
+        session="london",
+        regime_at_entry="trend_up",
+        pnl=pnl,
+        exit_reason=reason,
+        entry_price=entry,
+        initial_stop_price=stop,
+        tp1_price=tp1,
+        volume=0.01,
+    )
 
 
 def test_trades_to_dataframe_carries_r_fields():
@@ -45,8 +52,9 @@ def test_trades_to_dataframe_carries_r_fields():
 
 
 def test_trades_to_dataframe_backward_compatible_with_plain_trades():
-    t = SimpleNamespace(entry_ts=1, exit_ts=2, direction=1, session="london",
-                        regime_at_entry="trend_up", pnl=1.0, exit_reason="stop")
+    t = SimpleNamespace(
+        entry_ts=1, exit_ts=2, direction=1, session="london", regime_at_entry="trend_up", pnl=1.0, exit_reason="stop"
+    )
     df = trades_to_dataframe([t])
     assert df.loc[0, "pnl"] == 1.0
     assert df.loc[0, "initial_stop_price"] is None
@@ -55,12 +63,14 @@ def test_trades_to_dataframe_backward_compatible_with_plain_trades():
 def test_compute_r_metrics_known_geometry():
     """TP3 full grid: 0.5*1/3 + 0.3*2/3 + 0.2*1 = 0.567R; stop = -1R."""
     risk_money = abs(1.30 - 1.297) * 0.01 * 100000  # = 3.0
-    tdf = pd.DataFrame({
-        "entry_price": [1.30, 1.30, 1.30],
-        "initial_stop_price": [1.297, 1.297, 1.297],
-        "pnl": [0.567 * risk_money, 0.567 * risk_money, -1.0 * risk_money],
-        "exit_reason": ["tp3_runner", "tp3_runner", "stop"],
-    })
+    tdf = pd.DataFrame(
+        {
+            "entry_price": [1.30, 1.30, 1.30],
+            "initial_stop_price": [1.297, 1.297, 1.297],
+            "pnl": [0.567 * risk_money, 0.567 * risk_money, -1.0 * risk_money],
+            "exit_reason": ["tp3_runner", "tp3_runner", "stop"],
+        }
+    )
     r = compute_r_metrics(tdf, point_value_lot=100000, volume=0.01)
     assert r["n"] == 3
     assert r["avg_win_r"] == pytest.approx(0.567, abs=1e-3)
@@ -69,7 +79,8 @@ def test_compute_r_metrics_known_geometry():
     assert r["breakeven_wr_pct"] == pytest.approx(63.8, abs=0.2)
     assert r["buckets"]["stop"]["mean_r"] == pytest.approx(-1.0, abs=1e-3)
     assert r["buckets"]["tp3_runner"]["r_contribution_pct"] == pytest.approx(
-        100.0 * (2 * 0.567) / (2 * 0.567 - 1.0), abs=0.1)
+        100.0 * (2 * 0.567) / (2 * 0.567 - 1.0), abs=0.1
+    )
 
 
 def test_compute_r_metrics_empty_and_missing_columns():
@@ -131,13 +142,15 @@ def test_summarize_folds_consistency_flag():
 def test_compute_r_metrics_honors_per_trade_volume_column():
     """W7: a per-trade `volume` column (as trades_to_dataframe produces) must be
     used for risk_money instead of the scalar default that matches no asset."""
-    tdf = pd.DataFrame({
-        "entry_price": [1.30, 1.30],
-        "initial_stop_price": [1.297, 1.297],
-        "pnl": [1.0, 1.0],
-        "volume": [0.01, 0.02],
-        "exit_reason": ["tp3_runner", "tp3_runner"],
-    })
+    tdf = pd.DataFrame(
+        {
+            "entry_price": [1.30, 1.30],
+            "initial_stop_price": [1.297, 1.297],
+            "pnl": [1.0, 1.0],
+            "volume": [0.01, 0.02],
+            "exit_reason": ["tp3_runner", "tp3_runner"],
+        }
+    )
     # risk_price = 0.003
     # trade 1: risk_money = 0.003 * 0.01 * 100000 = 3.0  -> R = 1/3
     # trade 2: risk_money = 0.003 * 0.02 * 100000 = 6.0  -> R = 1/6

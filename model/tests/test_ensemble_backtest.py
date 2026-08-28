@@ -9,6 +9,7 @@ instant loss (0% win rate, pnl == -commission exactly). Production MT5 slippage
 is instrument-specific deviation in points, so the backtester must honour a
 per-asset `slippage_usd` override, mirroring the existing `spread_usd` pattern.
 """
+
 import pandas as pd
 import pytest
 
@@ -104,10 +105,13 @@ def test_next_open_grid_uses_causal_signal_atr_not_completed_entry_bar_atr():
 
 
 def test_grid_step_clamps_are_applied_in_backtester():
-    cfg = _cfg({
-        "slippage_usd": 0.0, "spread_usd": 0.0,
-        "signal_grid": {"step_min_points": 0.002, "stop_mult": 1.0},
-    })
+    cfg = _cfg(
+        {
+            "slippage_usd": 0.0,
+            "spread_usd": 0.0,
+            "signal_grid": {"step_min_points": 0.002, "stop_mult": 1.0},
+        }
+    )
     trade = EnsembleBacktester(cfg, asset_key="TEST").run(_df())[0]
     assert abs(trade.entry_price - trade.initial_stop_price) == pytest.approx(0.002)
 
@@ -184,33 +188,30 @@ def test_config_point_value_lot_overrides_match_contract_sizes_per_asset():
         if default_pvl is None:
             bt = EnsembleBacktester(cfg, asset_key=asset_key)
             resolved = bt.point_value_lot
-            assert resolved == pytest.approx(expected["XAUUSD"]), (
-                f"{asset_key} must fall back to the gold-default 100"
-            )
+            assert resolved == pytest.approx(expected["XAUUSD"]), f"{asset_key} must fall back to the gold-default 100"
         else:
-            assert default_pvl == pvl, (
-                f"assets.{asset_key}.point_value_lot must be {pvl}, got {default_pvl}"
-            )
+            assert default_pvl == pvl, f"assets.{asset_key}.point_value_lot must be {pvl}, got {default_pvl}"
 
     # Zeros / negative values would break the money scale entirely.
     for asset_key in expected:
-        assert (
-            cfg["assets"][asset_key].get("point_value_lot", 100) > 0
-        ), f"{asset_key} point_value_lot must be > 0"
+        assert cfg["assets"][asset_key].get("point_value_lot", 100) > 0, f"{asset_key} point_value_lot must be > 0"
 
 
 # ---------------------------------------------------------------------------
 # FX v3: early breakeven (signal_grid.breakeven_trigger_atr)
 # ---------------------------------------------------------------------------
 
+
 def _fx_v3_early_be_cfg(breakeven_trigger_atr=None):
     """Zero-cost config on the equal-step grid (stop = 3*step) with an optional
     early-breakeven trigger. Zero commission/slippage/spread so PnL assertions
     reflect pure barrier mechanics, not transaction costs."""
-    cfg = _cfg({
-        "slippage_usd": 0.0,
-        "spread_usd": 0.0,
-    })
+    cfg = _cfg(
+        {
+            "slippage_usd": 0.0,
+            "spread_usd": 0.0,
+        }
+    )
     cfg["backtest"]["commission_per_trade"] = 0.0
     grid = {"stop_mult": 3.0}
     if breakeven_trigger_atr is not None:
@@ -254,6 +255,7 @@ def test_legacy_trigger_keeps_full_stop_loss():
 # -----------------------------------------------------------------
 # v4b trailing_atr_mult (after TP1+TP2)
 # -----------------------------------------------------------------
+
 
 def _cfg_with_trailing(trail_mult=2.0):
     cfg = _fx_v3_early_be_cfg(1.0)  # legacy BE
@@ -312,6 +314,7 @@ def test_trailing_atr_mult_exits_on_trail_after_tp2():
 # Quant audit 2026-08-07: fill_mode (look-ahead check), per-regime exit
 # policy (signal_grid.regime_overrides), scaleout ratios, queue loss
 # ---------------------------------------------------------------------------
+
 
 def _regime_cfg(regime_overrides=None, scaleout=None):
     cfg = _fx_v3_early_be_cfg(1.0)
@@ -418,6 +421,7 @@ def test_simulate_blocked_entry_uses_honest_next_open():
 #   W4: a same-candle double-touch of the ORIGINAL stop and a take-profit must
 #       resolve conservatively as a full stop loss (not a TP scaleout + BE gift).
 # ---------------------------------------------------------------------------
+
 
 def test_exit_costs_charged_on_timeout():
     """W1: a timeout exit must book the exit half-spread + slippage.

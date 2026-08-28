@@ -17,6 +17,7 @@ that is a Phase-4 task on ``scripts/run_bot.py``.
 
 Run: ``python -m services.telegram_bot [--health-port 8792]``
 """
+
 from __future__ import annotations
 
 import argparse
@@ -57,9 +58,7 @@ def enqueue_text(text: str) -> bool:
 UNSET = object()
 
 
-def make_token_check(
-    bot_token=UNSET, chat_id=UNSET
-) -> Callable[[], tuple[bool, str]]:
+def make_token_check(bot_token=UNSET, chat_id=UNSET) -> Callable[[], tuple[bool, str]]:
     """Health check: Telegram credentials configured (no API call).
 
     Default (``UNSET``) resolves ``TELEGRAM_BOT_TOKEN`` / ``TELEGRAM_CHAT_ID``
@@ -70,16 +69,8 @@ def make_token_check(
     def check() -> tuple[bool, str]:
         from config.loader import get_env
 
-        token = (
-            get_env("TELEGRAM_BOT_TOKEN", required=False)
-            if bot_token is UNSET
-            else bot_token
-        )
-        chat = (
-            get_env("TELEGRAM_CHAT_ID", required=False)
-            if chat_id is UNSET
-            else chat_id
-        )
+        token = get_env("TELEGRAM_BOT_TOKEN", required=False) if bot_token is UNSET else bot_token
+        chat = get_env("TELEGRAM_CHAT_ID", required=False) if chat_id is UNSET else chat_id
         if not token:
             return False, "TELEGRAM_BOT_TOKEN is not configured (degraded)"
         if not chat:
@@ -98,9 +89,7 @@ def make_process_alive_check() -> Callable[[], tuple[bool, str]]:
     return check
 
 
-def build_checks(
-    bot_token: Optional[str] = None, chat_id: Optional[str] = None
-) -> dict:
+def build_checks(bot_token: Optional[str] = None, chat_id: Optional[str] = None) -> dict:
     """Assemble the service checks dict (unit-tested without the network)."""
     return {
         "process_alive": make_process_alive_check(),
@@ -126,10 +115,7 @@ def run(args: argparse.Namespace) -> None:
 
     bot = TelegramAlertBot(load_config())
 
-    print(
-        f"[{os.getpid()}] telegram_bot service up "
-        f"(health: http://127.0.0.1:{args.health_port}/health)"
-    )
+    print(f"[{os.getpid()}] telegram_bot service up (health: http://127.0.0.1:{args.health_port}/health)")
     try:
         while True:
             try:

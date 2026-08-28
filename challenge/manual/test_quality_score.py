@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for session quality score."""
+
 import datetime as dt
 import os
 import sys
@@ -96,7 +97,7 @@ class TestComposite(unittest.TestCase):
         """Prime time + high volume + aligned regime = near-perfect."""
         s = compute_quality_score(
             signal_ts=_ts(14, 30),  # prime
-            volume_ratio=2.5,       # exceptional
+            volume_ratio=2.5,  # exceptional
             regime="trend_up",
             bias="long",
         )
@@ -110,7 +111,7 @@ class TestComposite(unittest.TestCase):
         """Degraded time + low volume + compression = very low."""
         s = compute_quality_score(
             signal_ts=_ts(19, 30),  # degraded
-            volume_ratio=0.5,       # weak
+            volume_ratio=0.5,  # weak
             regime="compression",
             bias="long",
         )
@@ -122,7 +123,7 @@ class TestComposite(unittest.TestCase):
         s = compute_quality_score(signal_ts=_ts(14, 30))
         self.assertEqual(s["time_of_day"], 30)
         self.assertEqual(s["volume"], 15)  # default 1.0x = average
-        self.assertEqual(s["total"], 57)   # 15 + 30 + 12
+        self.assertEqual(s["total"], 57)  # 15 + 30 + 12
 
 
 class TestFormat(unittest.TestCase):

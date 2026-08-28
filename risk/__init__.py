@@ -29,6 +29,7 @@ Example::
     engine = RiskEngine(cfg, magic=777111)
     ok, reason = engine.can_open("XAUUSD", equity=10_000)
 """
+
 from risk.compat import InstitutionalRiskManager
 from risk.engine import RiskEngine
 from risk.limits import RiskLimits

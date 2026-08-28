@@ -21,4 +21,5 @@ History:
   (indicators, order_flow, candle_anatomy, structure, bifurcation,
   mtf_confluence, regime indicators) as of the refactor/master-plan branch.
 """
+
 FEATURES_SCHEMA_VERSION = "v1"

@@ -1,4 +1,5 @@
 """Round-trip tests for MockMT5Module and the typed mirrors (ТЗ 8.6)."""
+
 from __future__ import annotations
 
 import pytest
@@ -38,8 +39,7 @@ def test_mock_module_roundtrip():
     positions = client.positions_get(magic=777111)
     assert list(positions) == [pos]
 
-    res = client.order_send({"action": 1, "symbol": "XAUUSD",
-                             "volume": 0.1, "price": 2400.40})
+    res = client.order_send({"action": 1, "symbol": "XAUUSD", "volume": 0.1, "price": 2400.40})
     assert res.retcode == TRADE_RETCODE_DONE
 
     client.shutdown()
@@ -82,6 +82,7 @@ def test_mock_market_book():
 # Typed mirrors
 # ---------------------------------------------------------------------
 
+
 def test_types_roundtrip_tick():
     mock = MockMT5Module()
     mock.set_tick("XAUUSD", bid=2400.10, ask=2400.40, time=1700000001)
@@ -106,27 +107,54 @@ def test_types_roundtrip_symbol_and_account():
 
 def test_types_roundtrip_position_deal_order():
     mock = MockMT5Module()
-    pos = mock.add_position("XAUUSD", ticket=42, type=1, volume=0.2,
-                            price_open=2401.0, magic=777111, profit=-1.5)
+    pos = mock.add_position("XAUUSD", ticket=42, type=1, volume=0.2, price_open=2401.0, magic=777111, profit=-1.5)
     typed_pos = PositionInfo.from_raw(pos)
     assert typed_pos.ticket == 42 and typed_pos.magic == 777111
 
-    deal = DealInfo.from_raw(type("D", (), {
-        "ticket": 7, "order": 8, "position_id": 42, "symbol": "XAUUSD",
-        "type": 0, "entry": 0, "volume": 0.2, "price": 2401.0,
-        "profit": 0.0, "commission": -0.2, "swap": 0.0, "magic": 777111,
-        "comment": "", "time": 1700000000})())
+    deal = DealInfo.from_raw(
+        type(
+            "D",
+            (),
+            {
+                "ticket": 7,
+                "order": 8,
+                "position_id": 42,
+                "symbol": "XAUUSD",
+                "type": 0,
+                "entry": 0,
+                "volume": 0.2,
+                "price": 2401.0,
+                "profit": 0.0,
+                "commission": -0.2,
+                "swap": 0.0,
+                "magic": 777111,
+                "comment": "",
+                "time": 1700000000,
+            },
+        )()
+    )
     assert deal.position_id == 42 and deal.commission == -0.2
 
-    order = OrderResult.from_raw(type("R", (), {
-        "retcode": 10009, "deal": 1, "order": 2, "volume": 0.2,
-        "price": 2401.0, "comment": "", "request_id": 3,
-        "retcode_external": 0})())
+    order = OrderResult.from_raw(
+        type(
+            "R",
+            (),
+            {
+                "retcode": 10009,
+                "deal": 1,
+                "order": 2,
+                "volume": 0.2,
+                "price": 2401.0,
+                "comment": "",
+                "request_id": 3,
+                "retcode_external": 0,
+            },
+        )()
+    )
     assert order.ok is True
     bad = OrderResult(retcode=10004)
     assert bad.ok is False
 
-    for factory, raw in ((PositionInfo, None), (DealInfo, None),
-                         (OrderResult, None)):
+    for factory, raw in ((PositionInfo, None), (DealInfo, None), (OrderResult, None)):
         with pytest.raises(ValueError):
             factory.from_raw(raw)

@@ -51,9 +51,11 @@ from backtest.metrics import block_bootstrap_t
 # Statistical helpers
 # ---------------------------------------------------------------------------
 
+
 def _t_to_p_two_sided(t_stat: float, df: int) -> float:
     """Two-sided p-value from t-statistic using the survival function."""
     from scipy import stats
+
     if df <= 0 or not np.isfinite(t_stat):
         return 1.0
     return float(2.0 * stats.t.sf(abs(t_stat), df))
@@ -99,9 +101,11 @@ def _dsr_correction(
 # Subset metrics
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SubsetResult:
     """Metrics for one subset of trades."""
+
     label: str
     n: int
     mean_R: float
@@ -210,6 +214,7 @@ def _compute_subset_metrics(
 # ---------------------------------------------------------------------------
 # Scanner
 # ---------------------------------------------------------------------------
+
 
 class SubsetScanner:
     """Scan all subsets of a trades DataFrame by categorical groupby columns.
@@ -349,17 +354,21 @@ class SubsetScanner:
         n_weak = sum(1 for r in results if r.verdict == "weak")
         n_noise = sum(1 for r in results if r.verdict == "noise")
 
-        print(f"\n{'='*72}")
-        print(f"SUBSET SCAN: {len(results)} subsets tested, "
-              f"{n_sig} significant(+), {n_sig_neg} significant(-), "
-              f"{n_weak} weak, {n_noise} noise")
+        print(f"\n{'=' * 72}")
+        print(
+            f"SUBSET SCAN: {len(results)} subsets tested, "
+            f"{n_sig} significant(+), {n_sig_neg} significant(-), "
+            f"{n_weak} weak, {n_noise} noise"
+        )
         print(f"Corrections: Bonferroni (n={n_tests}), DSR (N_trials={n_tests})")
-        print(f"{'='*72}\n")
+        print(f"{'=' * 72}\n")
 
         # Header
-        hdr = (f"{'verdict':>7} {'subset':<35} {'n':>5} {'meanR':>8} "
-               f"{'sumR':>8} {'WR%':>6} {'PF':>5} {'t_blk':>6} "
-               f"{'p_raw':>8} {'p_bonf':>8} {'DSR':>6}")
+        hdr = (
+            f"{'verdict':>7} {'subset':<35} {'n':>5} {'meanR':>8} "
+            f"{'sumR':>8} {'WR%':>6} {'PF':>5} {'t_blk':>6} "
+            f"{'p_raw':>8} {'p_bonf':>8} {'DSR':>6}"
+        )
         print(hdr)
         print("-" * len(hdr))
 
@@ -375,20 +384,24 @@ class SubsetScanner:
             else:
                 vmark = "    ."
 
-            print(f"{vmark} {r.label:<35} {r.n:>5} {r.mean_R:>+8.4f} "
-                  f"{r.sum_R:>+8.2f} {r.WR_pct:>5.1f}% {r.PF:>5.2f} "
-                  f"{r.t_block:>+6.2f} {r.p_value_raw:>8.4f} "
-                  f"{r.p_value_bonf:>8.4f} {r.dsr:>6.3f}")
+            print(
+                f"{vmark} {r.label:<35} {r.n:>5} {r.mean_R:>+8.4f} "
+                f"{r.sum_R:>+8.2f} {r.WR_pct:>5.1f}% {r.PF:>5.2f} "
+                f"{r.t_block:>+6.2f} {r.p_value_raw:>8.4f} "
+                f"{r.p_value_bonf:>8.4f} {r.dsr:>6.3f}"
+            )
 
         # Summary
-        print(f"\n{'='*72}")
+        print(f"\n{'=' * 72}")
         print("SIGNIFICANT SUBSETS (survive Bonferroni + DSR):")
         sig = [r for r in results if r.verdict == "sig"]
         if sig:
             for r in sig:
-                print(f"  {r.label}: n={r.n}, meanR={r.mean_R:+.4f}, "
-                      f"sumR={r.sum_R:+.2f}, t={r.t_block:+.2f}, "
-                      f"p_bonf={r.p_value_bonf:.4f}, DSR={r.dsr:.3f}")
+                print(
+                    f"  {r.label}: n={r.n}, meanR={r.mean_R:+.4f}, "
+                    f"sumR={r.sum_R:+.2f}, t={r.t_block:+.2f}, "
+                    f"p_bonf={r.p_value_bonf:.4f}, DSR={r.dsr:.3f}"
+                )
         else:
             print("  (none)")
 
@@ -396,9 +409,11 @@ class SubsetScanner:
         neg = [r for r in results if r.verdict == "sig_neg"]
         if neg:
             for r in neg:
-                print(f"  {r.label}: n={r.n}, meanR={r.mean_R:+.4f}, "
-                      f"sumR={r.sum_R:+.2f}, p_bonf={r.p_value_bonf:.4f}, "
-                      f"DSR={r.dsr:.3f}")
+                print(
+                    f"  {r.label}: n={r.n}, meanR={r.mean_R:+.4f}, "
+                    f"sumR={r.sum_R:+.2f}, p_bonf={r.p_value_bonf:.4f}, "
+                    f"DSR={r.dsr:.3f}"
+                )
         else:
             print("  (none)")
 
@@ -406,8 +421,7 @@ class SubsetScanner:
         weak = [r for r in results if r.verdict == "weak"]
         if weak:
             for r in weak:
-                print(f"  {r.label}: n={r.n}, meanR={r.mean_R:+.4f}, "
-                      f"DSR={r.dsr:.3f}")
+                print(f"  {r.label}: n={r.n}, meanR={r.mean_R:+.4f}, DSR={r.dsr:.3f}")
         else:
             print("  (none)")
         print()
@@ -417,16 +431,13 @@ class SubsetScanner:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Subset-scan with Bonferroni/DSR multiple-testing correction"
-    )
+    parser = argparse.ArgumentParser(description="Subset-scan with Bonferroni/DSR multiple-testing correction")
     parser.add_argument("--csv", required=True, help="Path to trades CSV")
     parser.add_argument("--r-col", default="R", help="Column name for R-multiplicators")
-    parser.add_argument("--groupby", action="append", default=[],
-                        help="Column to group by (repeat for multiple)")
-    parser.add_argument("--min-trades", type=int, default=5,
-                        help="Minimum trades per subset (default: 5)")
+    parser.add_argument("--groupby", action="append", default=[], help="Column to group by (repeat for multiple)")
+    parser.add_argument("--min-trades", type=int, default=5, help="Minimum trades per subset (default: 5)")
     parser.add_argument("--out", default=None, help="Output CSV path")
     args = parser.parse_args(argv)
 

@@ -23,6 +23,7 @@ Message layout (clean format):
     → TP3: 4242.89
     Стоп: 4268.42
 """
+
 import warnings
 from datetime import UTC
 from typing import Optional
@@ -80,8 +81,7 @@ def resolve_step(signal: dict) -> float:
             return step
 
     raise ValueError(
-        "Cannot resolve TP/SL step: signal must provide 'step', 'atr', "
-        "equal-step 'targets' or 'invalidation'"
+        "Cannot resolve TP/SL step: signal must provide 'step', 'atr', equal-step 'targets' or 'invalidation'"
     )
 
 
@@ -109,9 +109,7 @@ def compute_levels(signal: dict, step: Optional[float] = None) -> dict:
     return out
 
 
-def format_clean_signal_message(
-    signal: dict, asset_key: str = "XAUUSD", include_meta: bool = False
-) -> str:
+def format_clean_signal_message(signal: dict, asset_key: str = "XAUUSD", include_meta: bool = False) -> str:
     """
     Formats a trade signal in the clean Telegram layout:
 
@@ -139,8 +137,7 @@ def format_clean_signal_message(
     removal plan is tracked in docs/TODO.md.
     """
     group_payload = signal.get("group_spec") if isinstance(signal, dict) else None
-    if group_payload is None and isinstance(signal, dict) and \
-            signal.get("schema_version") == GROUP_SCHEMA_VERSION:
+    if group_payload is None and isinstance(signal, dict) and signal.get("schema_version") == GROUP_SCHEMA_VERSION:
         group_payload = signal
     if group_payload is not None:
         return format_trade_group_message(group_payload)
@@ -162,9 +159,7 @@ def format_clean_signal_message(
     asset_line = ASSET_LABELS.get(asset_key, asset_key)
     levels = compute_levels(signal)
 
-    target_lines = "\n".join(
-        f"→ TP{i}: {_fmt_price(price)}" for i, price in enumerate(levels["targets"], 1)
-    )
+    target_lines = "\n".join(f"→ TP{i}: {_fmt_price(price)}" for i, price in enumerate(levels["targets"], 1))
     message = (
         f"{direction}\n"
         f"{asset_line}\n"
@@ -177,9 +172,7 @@ def format_clean_signal_message(
         confidence_pct = round(signal.get("confidence", 0.0) * 100, 1)
         regime = signal.get("regime", "unknown")
         session = signal.get("session", "unknown")
-        message += (
-            f"\n\n📊 Conf: {confidence_pct}% · Regime: {regime} · Session: {session}"
-        )
+        message += f"\n\n📊 Conf: {confidence_pct}% · Regime: {regime} · Session: {session}"
 
     return message
 
@@ -196,9 +189,7 @@ def _warn_legacy_formatting(signal: dict) -> None:
     )
 
 
-def format_signal_message(
-    signal: dict, asset_key: str = "XAUUSD", include_meta: bool = False
-) -> str:
+def format_signal_message(signal: dict, asset_key: str = "XAUUSD", include_meta: bool = False) -> str:
     """Backwards-compatible entry point; emits the clean signal format."""
     return format_clean_signal_message(signal, asset_key, include_meta=include_meta)
 
@@ -206,6 +197,7 @@ def format_signal_message(
 # --------------------------------------------------------------------------
 # TradeGroupSpec v1 — authoritative final geometry (ТЗ §19–§22)
 # --------------------------------------------------------------------------
+
 
 def geometry_from_spec(spec: TradeGroupSpec) -> dict:
     """Parity helper: the one authoritative geometry dict used by Telegram, MT5
@@ -216,16 +208,19 @@ def geometry_from_spec(spec: TradeGroupSpec) -> dict:
 def _require_final_geometry(spec: TradeGroupSpec) -> None:
     """ТЗ §19: for trade-group.v1 the final geometry is mandatory; a missing
     level is ``formatter_error``, never a recomputation."""
-    missing = [name for name, value in (
-        ("tp1", spec.geometry.tp1), ("tp2", spec.geometry.tp2),
-        ("tp3", spec.geometry.tp3), ("sl", spec.geometry.sl),
-        ("entry.reference", spec.entry.reference),
-    ) if value is None]
-    if missing:
-        raise ValueError(
-            f"formatter_error: trade-group.v1 requires final geometry; "
-            f"missing {missing}"
+    missing = [
+        name
+        for name, value in (
+            ("tp1", spec.geometry.tp1),
+            ("tp2", spec.geometry.tp2),
+            ("tp3", spec.geometry.tp3),
+            ("sl", spec.geometry.sl),
+            ("entry.reference", spec.entry.reference),
         )
+        if value is None
+    ]
+    if missing:
+        raise ValueError(f"formatter_error: trade-group.v1 requires final geometry; missing {missing}")
 
 
 def _coerce_group_spec(spec: TradeGroupSpec | dict) -> TradeGroupSpec:
@@ -234,9 +229,7 @@ def _coerce_group_spec(spec: TradeGroupSpec | dict) -> TradeGroupSpec:
     if not isinstance(spec, dict):
         raise ValueError("formatter_error: expected TradeGroupSpec or dict")
     if spec.get("schema_version") != GROUP_SCHEMA_VERSION:
-        raise ValueError(
-            f"formatter_error: unsupported schema {spec.get('schema_version')!r}"
-        )
+        raise ValueError(f"formatter_error: unsupported schema {spec.get('schema_version')!r}")
     try:
         return TradeGroupSpec.model_validate(spec)
     except Exception as exc:  # pydantic ValidationError and friends
@@ -282,6 +275,7 @@ def format_trade_group_message(spec: TradeGroupSpec | dict) -> str:
     ]
     if spec.expires_at_utc_ms:
         from datetime import datetime
+
         expires = datetime.fromtimestamp(spec.expires_at_utc_ms / 1000, tz=UTC)
         lines.append(f"Срок идеи: {expires.strftime('%H:%M')} UTC")
     lines.append(f"Profile: {spec.profile_id}")

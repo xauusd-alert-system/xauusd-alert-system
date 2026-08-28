@@ -114,16 +114,20 @@ def main():
 
         print(f"--- Fold {fold_i} ({len(fdf_cap)} bars) ---")
         print(f"  {'Metric':<32} {'cap100':>12} {'proportional':>12}")
-        print(f"  {'-'*56}")
+        print(f"  {'-' * 56}")
         print(f"  {'p_long mean':<32} {pl_cap.mean():>12.4f} {pl_prop.mean():>12.4f}")
         print(f"  {'p_long std':<32} {np.std(pl_cap):>12.4f} {np.std(pl_prop):>12.4f}")
         print(f"  {'p_short mean':<32} {ps_cap.mean():>12.4f} {ps_prop.mean():>12.4f}")
         print(f"  {'p_short std':<32} {np.std(ps_cap):>12.4f} {np.std(ps_prop):>12.4f}")
-        print(f"  {'p_short range':<32} {ps_cap.max()-ps_cap.min():>12.4f} {ps_prop.max()-ps_prop.min():>12.4f}")
+        print(f"  {'p_short range':<32} {ps_cap.max() - ps_cap.min():>12.4f} {ps_prop.max() - ps_prop.min():>12.4f}")
         print(f"  {'edge mean':<32} {edges_cap.mean():>12.4f} {edges_prop.mean():>12.4f}")
         print(f"  {'edge std':<32} {np.std(edges_cap):>12.4f} {np.std(edges_prop):>12.4f}")
-        print(f"  {'edge >= 0.15':<32} {passes_cap.sum():>9}/{len(passes_cap)} {passes_prop.sum():>9}/{len(passes_prop)}")
-        print(f"  {'dir: long / short':<32} {long_dir_cap:>5}/{short_dir_cap:<5} {long_dir_prop:>5}/{short_dir_prop:<5}")
+        print(
+            f"  {'edge >= 0.15':<32} {passes_cap.sum():>9}/{len(passes_cap)} {passes_prop.sum():>9}/{len(passes_prop)}"
+        )
+        print(
+            f"  {'dir: long / short':<32} {long_dir_cap:>5}/{short_dir_cap:<5} {long_dir_prop:>5}/{short_dir_prop:<5}"
+        )
         print(f"  {'after edge: long / short':<32} {lp_cap:>5}/{sp_cap:<5} {lp_prop:>5}/{sp_prop:<5}")
         print()
 
@@ -162,13 +166,16 @@ def main():
     sp_prop = ((all_ps_prop > all_pl_prop) & passes_prop).sum()
 
     print(f"\n  {'Metric':<32} {'cap100':>12} {'proportional':>12}")
-    print(f"  {'-'*56}")
+    print(f"  {'-' * 56}")
     print(f"  {'Total bars':<32} {len(all_pl_cap):>12} {len(all_pl_prop):>12}")
     print(f"  {'p_long mean':<32} {all_pl_cap.mean():>12.4f} {all_pl_prop.mean():>12.4f}")
     print(f"  {'p_long std':<32} {np.std(all_pl_cap):>12.4f} {np.std(all_pl_prop):>12.4f}")
     print(f"  {'p_short mean':<32} {all_ps_cap.mean():>12.4f} {all_ps_prop.mean():>12.4f}")
     print(f"  {'p_short std':<32} {np.std(all_ps_cap):>12.4f} {np.std(all_ps_prop):>12.4f}")
-    print(f"  {'p_short range':<32} {all_ps_cap.max()-all_ps_cap.min():>12.4f} {all_ps_prop.max()-all_ps_prop.min():>12.4f}")
+    print(
+        f"  {'p_short range':<32} {all_ps_cap.max() - all_ps_cap.min():>12.4f} "
+        f"{all_ps_prop.max() - all_ps_prop.min():>12.4f}"
+    )
     print(f"  {'edge mean':<32} {edges_cap.mean():>12.4f} {edges_prop.mean():>12.4f}")
     print(f"  {'edge std':<32} {np.std(edges_cap):>12.4f} {np.std(edges_prop):>12.4f}")
     print(f"  {'edge >= 0.15':<32} {passes_cap.sum():>9}/{len(passes_cap)} {passes_prop.sum():>9}/{len(passes_prop)}")
@@ -188,10 +195,14 @@ def main():
 
     # Save
     os.makedirs("logs", exist_ok=True)
-    rdf = pd.DataFrame({
-        "p_long_cap": all_pl_cap, "p_short_cap": all_ps_cap,
-        "p_long_prop": all_pl_prop, "p_short_prop": all_ps_prop,
-    })
+    rdf = pd.DataFrame(
+        {
+            "p_long_cap": all_pl_cap,
+            "p_short_cap": all_ps_cap,
+            "p_long_prop": all_pl_prop,
+            "p_short_prop": all_ps_prop,
+        }
+    )
     rdf.to_csv("logs/diag_calib_ab_btcusd.csv", index=False)
     print("\n  CSV -> logs/diag_calib_ab_btcusd.csv")
 

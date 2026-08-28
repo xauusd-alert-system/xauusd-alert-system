@@ -6,6 +6,7 @@ within a few seconds, recording pre/post quotes, requested and filled prices,
 retcodes and realized PnL in a CSV. It refuses real accounts, existing positions
 on the symbol, and execution without two explicit confirmations.
 """
+
 import argparse
 import csv
 import os
@@ -23,11 +24,29 @@ from data.mt5_provider import initialize_mt5, shutdown_mt5, validate_symbol
 PROBE_MAGIC = 777222
 ALLOWED_ASSETS = {"EURUSD", "GBPUSD"}
 CSV_FIELDS = [
-    "timestamp_utc", "asset", "symbol", "side", "volume", "entry_bid", "entry_ask",
-    "entry_requested_price", "entry_fill_price", "entry_retcode", "entry_comment",
-    "close_bid", "close_ask", "close_requested_price", "close_fill_price",
-    "close_retcode", "close_comment", "position_ticket", "entry_commission",
-    "close_commission", "total_commission", "realized_profit", "status",
+    "timestamp_utc",
+    "asset",
+    "symbol",
+    "side",
+    "volume",
+    "entry_bid",
+    "entry_ask",
+    "entry_requested_price",
+    "entry_fill_price",
+    "entry_retcode",
+    "entry_comment",
+    "close_bid",
+    "close_ask",
+    "close_requested_price",
+    "close_fill_price",
+    "close_retcode",
+    "close_comment",
+    "position_ticket",
+    "entry_commission",
+    "close_commission",
+    "total_commission",
+    "realized_profit",
+    "status",
 ]
 
 
@@ -38,8 +57,7 @@ def _utc_now() -> str:
 def _is_demo_account() -> bool:
     account = mt5.account_info()
     demo_mode = getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", None)
-    return bool(account is not None and demo_mode is not None and
-                getattr(account, "trade_mode", None) == demo_mode)
+    return bool(account is not None and demo_mode is not None and getattr(account, "trade_mode", None) == demo_mode)
 
 
 def _append_row(path: str, row: dict) -> None:
@@ -65,9 +83,16 @@ def _open_positions(symbol: str):
     return mt5.positions_get(symbol=symbol) or []
 
 
-def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
-                  csv_path: str, execute: bool, manage_connection: bool = True,
-                  max_spread_pips: float | None = None) -> dict:
+def execute_probe(
+    asset: str,
+    side: str,
+    volume: float,
+    hold_seconds: float,
+    csv_path: str,
+    execute: bool,
+    manage_connection: bool = True,
+    max_spread_pips: float | None = None,
+) -> dict:
     """Run one deliberately short, independently logged demo execution probe."""
     if asset not in ALLOWED_ASSETS:
         raise ValueError(f"asset must be one of {sorted(ALLOWED_ASSETS)}, got {asset!r}")
@@ -105,18 +130,30 @@ def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
         order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
         entry_price = tick.ask if side == "buy" else tick.bid
         row = {
-            "timestamp_utc": _utc_now(), "asset": asset, "symbol": asset,
-            "side": side, "volume": volume, "entry_bid": tick.bid, "entry_ask": tick.ask,
-            "entry_requested_price": entry_price, "status": "dry_run" if not execute else "pending",
+            "timestamp_utc": _utc_now(),
+            "asset": asset,
+            "symbol": asset,
+            "side": side,
+            "volume": volume,
+            "entry_bid": tick.bid,
+            "entry_ask": tick.ask,
+            "entry_requested_price": entry_price,
+            "status": "dry_run" if not execute else "pending",
         }
         if not execute:
             _append_row(csv_path, row)
             return row
 
         request = {
-            "action": mt5.TRADE_ACTION_DEAL, "symbol": asset, "volume": volume,
-            "type": order_type, "price": entry_price, "deviation": 20,
-            "magic": PROBE_MAGIC, "comment": "FX_COST_PROBE", "type_time": mt5.ORDER_TIME_GTC,
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": asset,
+            "volume": volume,
+            "type": order_type,
+            "price": entry_price,
+            "deviation": 20,
+            "magic": PROBE_MAGIC,
+            "comment": "FX_COST_PROBE",
+            "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
         entry = mt5.order_send(request)
@@ -139,14 +176,22 @@ def execute_probe(asset: str, side: str, volume: float, hold_seconds: float,
         close_tick = mt5.symbol_info_tick(asset)
         close_type = mt5.ORDER_TYPE_SELL if side == "buy" else mt5.ORDER_TYPE_BUY
         close_price = close_tick.bid if side == "buy" else close_tick.ask
-        row.update({"close_bid": close_tick.bid, "close_ask": close_tick.ask,
-                    "close_requested_price": close_price})
-        close = mt5.order_send({
-            "action": mt5.TRADE_ACTION_DEAL, "symbol": asset, "volume": float(position.volume),
-            "type": close_type, "position": position.ticket, "price": close_price,
-            "deviation": 20, "magic": PROBE_MAGIC, "comment": "FX_COST_PROBE_CLOSE",
-            "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC,
-        })
+        row.update({"close_bid": close_tick.bid, "close_ask": close_tick.ask, "close_requested_price": close_price})
+        close = mt5.order_send(
+            {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": asset,
+                "volume": float(position.volume),
+                "type": close_type,
+                "position": position.ticket,
+                "price": close_price,
+                "deviation": 20,
+                "magic": PROBE_MAGIC,
+                "comment": "FX_COST_PROBE_CLOSE",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+        )
         row.update(_result_fields(close, "close"))
         row["status"] = "closed" if getattr(close, "retcode", None) == mt5.TRADE_RETCODE_DONE else "close_rejected"
         # The order result itself has no commission. Read the terminal's deals
@@ -181,6 +226,7 @@ class FXProbeScheduler:
     buy/sell round trip used only to estimate broker cost. State stays in memory
     because a restart may safely delay a sample; the CSV is the source of truth.
     """
+
     def __init__(self, cfg: dict):
         probe_cfg = cfg.get("execution", {}).get("fx_execution_probes", {})
         self.enabled = bool(probe_cfg.get("enabled", False))
@@ -216,9 +262,13 @@ class FXProbeScheduler:
             side = "buy" if self.daily_counts.get(count_key, 0) % 2 == 0 else "sell"
             try:
                 row = execute_probe(
-                    asset=asset, side=side, volume=self.volume,
-                    hold_seconds=self.hold_seconds, csv_path=self.csv_path,
-                    execute=True, manage_connection=False,
+                    asset=asset,
+                    side=side,
+                    volume=self.volume,
+                    hold_seconds=self.hold_seconds,
+                    csv_path=self.csv_path,
+                    execute=True,
+                    manage_connection=False,
                     max_spread_pips=self.max_spread_pips.get(asset),
                 )
             except Exception as exc:

@@ -8,6 +8,7 @@ Tests are pure unit tests: retrain_with_real_trades imports a per-asset
 `retrain_asset()` and a `main()` that iterates it, both of which are tested here
 without spawning real subprocesses or touching a real SQLite DB.
 """
+
 import os
 import sys
 
@@ -58,8 +59,8 @@ def _trade_df(rows: list) -> pd.DataFrame:
 def test_prepare_real_trades_maps_outcomes_and_fills_missing_features():
     trades = _trade_df(
         [
-            {"bias": "long", "outcome": 1, "features": {"rsi": 70.0}},   # -> 1 (long win), atr/ema_9 -> 0.0
-            {"bias": "long", "outcome": 0, "features": {"rsi": 30.0}},   # -> 0 (long loss)
+            {"bias": "long", "outcome": 1, "features": {"rsi": 70.0}},  # -> 1 (long win), atr/ema_9 -> 0.0
+            {"bias": "long", "outcome": 0, "features": {"rsi": 30.0}},  # -> 0 (long loss)
             {"bias": "short", "outcome": 1, "features": {"rsi": 25.0}},  # -> 0 (short win)
             {"bias": "short", "outcome": 0, "features": {"rsi": 75.0}},  # -> 1 (short loss)
         ]
@@ -76,11 +77,11 @@ def test_prepare_real_trades_maps_outcomes_and_fills_missing_features():
 def test_prepare_real_trades_drops_malformed_rows_without_crashing():
     trades = _trade_df(
         [
-            {"bias": "long", "outcome": 1, "features": {"rsi": 5.0}},   # kept
-            {"bias": "long", "outcome": 1, "features": None},            # empty -> dropped
-            {"bias": "weird", "outcome": 1, "features": {"rsi": 5.0}},   # bad bias -> dropped
+            {"bias": "long", "outcome": 1, "features": {"rsi": 5.0}},  # kept
+            {"bias": "long", "outcome": 1, "features": None},  # empty -> dropped
+            {"bias": "weird", "outcome": 1, "features": {"rsi": 5.0}},  # bad bias -> dropped
             {"bias": "short", "outcome": "x", "features": {"rsi": 5.0}},  # non-numeric outcome -> dropped
-            {"bias": "short", "outcome": None, "features": {"rsi": 5.0}}, # missing outcome -> dropped
+            {"bias": "short", "outcome": None, "features": {"rsi": 5.0}},  # missing outcome -> dropped
         ]
     )
     X, y = prepare_real_trades_df(trades, FEATURE_COLS)
@@ -109,9 +110,11 @@ def test_retrain_asset_skips_merge_and_returns_not_ok_in_three_class_mode(tmp_pa
     # No candles -> early "no_candles" return path; we only need the flags/exit
     # semantics, not a full SQLite/data + train pipeline.
     monkeypatch.setattr(mod, "read_candles", lambda *a, **k: pd.DataFrame())
-    monkeypatch.setattr(mod, "read_executed_trades", lambda *a, **k: _trade_df(
-        [{"bias": "long", "outcome": 1, "features": {"rsi": 5.0}}]
-    ))
+    monkeypatch.setattr(
+        mod,
+        "read_executed_trades",
+        lambda *a, **k: _trade_df([{"bias": "long", "outcome": 1, "features": {"rsi": 5.0}}]),
+    )
 
     stats = retrain_asset("XAUUSD", cfg)
 
@@ -129,9 +132,11 @@ def test_retrain_asset_skips_merge_and_returns_not_ok_in_regime_feature_mode(tmp
     cfg["model"]["use_regime_feature"] = True
 
     monkeypatch.setattr(mod, "read_candles", lambda *a, **k: pd.DataFrame())
-    monkeypatch.setattr(mod, "read_executed_trades", lambda *a, **k: _trade_df(
-        [{"bias": "long", "outcome": 1, "features": {"rsi": 5.0}}]
-    ))
+    monkeypatch.setattr(
+        mod,
+        "read_executed_trades",
+        lambda *a, **k: _trade_df([{"bias": "long", "outcome": 1, "features": {"rsi": 5.0}}]),
+    )
 
     stats = retrain_asset("XAUUSD", cfg)
 
@@ -153,8 +158,7 @@ def test_main_returns_ok_when_all_assets_retrain_successfully(tmp_path, monkeypa
     monkeypatch.setattr("scripts.retrain_with_real_trades.load_config", lambda *a, **k: cfg)
 
     def fake_retrain(asset_key, cfg_inner):
-        return {"asset": asset_key, "ok": True, "samples": 1000,
-                "real_trades": 10, "reason": "ok"}
+        return {"asset": asset_key, "ok": True, "samples": 1000, "real_trades": 10, "reason": "ok"}
 
     monkeypatch.setattr("scripts.retrain_with_real_trades.retrain_asset", fake_retrain)
 
@@ -168,8 +172,7 @@ def test_main_returns_nonzero_when_merge_skipped_for_all_assets(tmp_path, monkey
     monkeypatch.setattr("scripts.retrain_with_real_trades.load_config", lambda *a, **k: cfg)
 
     def fake_retrain(asset_key, cfg_inner):
-        return {"asset": asset_key, "ok": False, "samples": 1000,
-                "real_trades": 0, "reason": "skip_merge_three_class"}
+        return {"asset": asset_key, "ok": False, "samples": 1000, "real_trades": 0, "reason": "skip_merge_three_class"}
 
     monkeypatch.setattr("scripts.retrain_with_real_trades.retrain_asset", fake_retrain)
 

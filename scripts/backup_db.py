@@ -19,6 +19,7 @@ stdin is a TTY. Refuses (exit 2) when neither is available, so a stray
 Backups are local-only artifacts (``backups/`` is git-ignored) and are never
 committed. Full procedure: docs/RECOVERY.md.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -77,8 +78,7 @@ def backup_database(
         logger.warning("db_path %s does not exist — skipping DB backup", db_path)
 
     if risk_state_path and os.path.exists(risk_state_path):
-        target = os.path.join(
-            backup_dir, os.path.basename(risk_state_path) + ".bak")
+        target = os.path.join(backup_dir, os.path.basename(risk_state_path) + ".bak")
         if dry_run:
             logger.info("[dry-run] would copy %s -> %s", risk_state_path, target)
         else:
@@ -91,8 +91,7 @@ def backup_database(
 
     pruned = prune_backups(backup_dir, keep=keep, dry_run=dry_run)
     if pruned:
-        logger.info("%s %d old backup file(s)",
-                    "[dry-run] would remove" if dry_run else "removed", len(pruned))
+        logger.info("%s %d old backup file(s)", "[dry-run] would remove" if dry_run else "removed", len(pruned))
     return created
 
 
@@ -100,11 +99,7 @@ def prune_backups(backup_dir: str, keep: int, dry_run: bool = False) -> list[str
     """Keep the N most recent ``*.bak`` files (by mtime), remove the rest."""
     if not os.path.isdir(backup_dir):
         return []
-    candidates = [
-        os.path.join(backup_dir, name)
-        for name in os.listdir(backup_dir)
-        if name.endswith(".bak")
-    ]
+    candidates = [os.path.join(backup_dir, name) for name in os.listdir(backup_dir) if name.endswith(".bak")]
     candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     stale = candidates[keep:]
     removed: list[str] = []
@@ -133,8 +128,7 @@ def validate_backup(backup_path: str) -> bool:
         return False
 
 
-def restore_database(backup_path: str, db_path: str,
-                     risk_state_path: str | None = None) -> str:
+def restore_database(backup_path: str, db_path: str, risk_state_path: str | None = None) -> str:
     """ТЗ 6.10: replace the live DB with a backup.
 
     Fails fast (``FileNotFoundError`` / ``ValueError``) when the backup does
@@ -147,8 +141,7 @@ def restore_database(backup_path: str, db_path: str,
     if not os.path.exists(backup_path):
         raise FileNotFoundError(f"backup not found: {backup_path}")
     if not validate_backup(backup_path):
-        raise ValueError(
-            f"backup {backup_path} failed integrity_check — refusing restore")
+        raise ValueError(f"backup {backup_path} failed integrity_check — refusing restore")
 
     os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".", exist_ok=True)
 
@@ -157,8 +150,7 @@ def restore_database(backup_path: str, db_path: str,
         safety_copy = db_path + ".pre_restore.bak"
         shutil.copy2(db_path, safety_copy)
         logger.info("pre-restore safety copy: %s -> %s", db_path, safety_copy)
-        for sidecar in (db_path + "-wal", db_path + "-shm",
-                        db_path + "-journal"):
+        for sidecar in (db_path + "-wal", db_path + "-shm", db_path + "-journal"):
             if os.path.exists(sidecar):
                 os.remove(sidecar)
                 logger.info("removed stale sidecar %s", sidecar)
@@ -186,10 +178,10 @@ def _confirm_restore(backup_path: str, db_path: str) -> bool:
     if not sys.stdin.isatty():
         logger.error(
             "refusing restore: no --yes and stdin is not a TTY "
-            "(non-interactive context). Pass --yes to confirm explicitly.")
+            "(non-interactive context). Pass --yes to confirm explicitly."
+        )
         return False
-    answer = input(
-        f"Replace {db_path} with {backup_path}? Type RESTORE to confirm: ")
+    answer = input(f"Replace {db_path} with {backup_path}? Type RESTORE to confirm: ")
     if answer.strip() != "RESTORE":
         logger.error("confirmation mismatch — restore aborted")
         return False
@@ -198,60 +190,56 @@ def _confirm_restore(backup_path: str, db_path: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Back up the main SQLite DB (+risk state) with retention; "
-                    "optionally restore a backup (ТЗ 6.10).")
-    parser.add_argument("--db-path", default=None,
-                        help="main SQLite DB (default: config general.db_path)")
-    parser.add_argument("--backup-dir", default=None,
-                        help="backup destination (default: backups/)")
-    parser.add_argument("--keep", type=int, default=None,
-                        help="number of recent backups to retain "
-                             "(default: config monitoring.backup.keep, else 7)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="plan only: create nothing, delete nothing")
-    parser.add_argument("--restore", default=None, metavar="BACKUP",
-                        help="ТЗ 6.10: replace the live DB with BACKUP "
-                             "(integrity-checked; destructive)")
-    parser.add_argument("--yes", action="store_true",
-                        help="with --restore: skip the interactive confirmation")
+        description="Back up the main SQLite DB (+risk state) with retention; optionally restore a backup (ТЗ 6.10)."
+    )
+    parser.add_argument("--db-path", default=None, help="main SQLite DB (default: config general.db_path)")
+    parser.add_argument("--backup-dir", default=None, help="backup destination (default: backups/)")
+    parser.add_argument(
+        "--keep",
+        type=int,
+        default=None,
+        help="number of recent backups to retain (default: config monitoring.backup.keep, else 7)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="plan only: create nothing, delete nothing")
+    parser.add_argument(
+        "--restore",
+        default=None,
+        metavar="BACKUP",
+        help="ТЗ 6.10: replace the live DB with BACKUP (integrity-checked; destructive)",
+    )
+    parser.add_argument("--yes", action="store_true", help="with --restore: skip the interactive confirmation")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     cfg = load_config()
-    db_path = args.db_path or cfg.get("general", {}).get(
-        "db_path", "data/market_data_mt5.sqlite")
+    db_path = args.db_path or cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
 
     if args.restore:
         if not args.yes and not _confirm_restore(args.restore, db_path):
             return 2
         try:
-            restore_database(args.restore, db_path,
-                             risk_state_path=RISK_STATE_PATH)
+            restore_database(args.restore, db_path, risk_state_path=RISK_STATE_PATH)
         except (FileNotFoundError, ValueError) as exc:
             logger.error("restore failed: %s", exc)
             return 1
-        logger.info("restore complete — run 'python -m scripts.migrate_all "
-                    "--dry-run' before restarting (docs/RECOVERY.md)")
+        logger.info(
+            "restore complete — run 'python -m scripts.migrate_all --dry-run' before restarting (docs/RECOVERY.md)"
+        )
         return 0
 
     backup_dir = args.backup_dir or (
-        (cfg.get("monitoring", {}).get("backup", {}) or {}).get("dir")
-        or DEFAULT_BACKUP_DIR
+        (cfg.get("monitoring", {}).get("backup", {}) or {}).get("dir") or DEFAULT_BACKUP_DIR
     )
     keep = args.keep
     if keep is None:
-        keep = int((cfg.get("monitoring", {}).get("backup", {}) or {})
-                   .get("keep", DEFAULT_KEEP))
+        keep = int((cfg.get("monitoring", {}).get("backup", {}) or {}).get("keep", DEFAULT_KEEP))
 
-    created = backup_database(db_path, backup_dir, keep=keep,
-                              dry_run=args.dry_run)
+    created = backup_database(db_path, backup_dir, keep=keep, dry_run=args.dry_run)
     ok = True
     for path in created:
         if not validate_backup(path):
             ok = False
-    logger.info("done: %d created, keep=%d, dry_run=%s",
-                len(created), keep, args.dry_run)
+    logger.info("done: %d created, keep=%d, dry_run=%s", len(created), keep, args.dry_run)
     return 0 if ok else 1
 
 

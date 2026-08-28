@@ -3,6 +3,7 @@ Ensemble layer: combines rule-based baseline signal + ML probability + a meta-fi
 that suppresses signals during noisy/choppy regimes and off-sessions.
 Supports 24/7 Crypto Trading (BTCUSD) in Asia with Extra-High Confidence Threshold.
 """
+
 import logging
 from dataclasses import dataclass
 
@@ -59,7 +60,10 @@ def compute_ensemble_signal(
         try:
             failure_policy = ens_cfg.get("news_feed_failure_policy_live", "fail_closed")
             in_red_zone, news_title, _feed_available = news_guard_decision(
-                timestamp_utc, buf_before, buf_after, failure_policy=failure_policy,
+                timestamp_utc,
+                buf_before,
+                buf_after,
+                failure_policy=failure_policy,
                 historical_calendar_path=ens_cfg.get("historical_news_calendar_path"),
             )
             if in_red_zone:
@@ -77,8 +81,11 @@ def compute_ensemble_signal(
             logger.error("News guard check failed: %s", e)
             if ens_cfg.get("news_feed_failure_policy_live", "fail_closed") == "fail_closed":
                 return EnsembleSignal(
-                    bias="no_trade", confidence=0.0, rule_vote=0,
-                    ml_p_long=float(ml_p_long), ml_p_short=float(ml_p_short),
+                    bias="no_trade",
+                    confidence=0.0,
+                    rule_vote=0,
+                    ml_p_long=float(ml_p_long),
+                    ml_p_short=float(ml_p_short),
                     regime=regime.value if hasattr(regime, "value") else str(regime),
                     suppressed_by_meta_filter=True,
                     reasoning_summary=f"Blocked: news guard unavailable ({e})",
@@ -135,8 +142,7 @@ def compute_ensemble_signal(
             regime=regime.value if hasattr(regime, "value") else str(regime),
             suppressed_by_meta_filter=True,
             reasoning_summary=(
-                f"ALL_MODELS_LOW_CONFIDENCE: p_max={ml_p_max:.3f} < "
-                f"reject_threshold={reject_threshold:.3f}"
+                f"ALL_MODELS_LOW_CONFIDENCE: p_max={ml_p_max:.3f} < reject_threshold={reject_threshold:.3f}"
             ),
         )
 
@@ -177,7 +183,9 @@ def compute_ensemble_signal(
                     ml_p_short=float(ml_p_short),
                     regime=regime.value if hasattr(regime, "value") else str(regime),
                     suppressed_by_meta_filter=True,
-                    reasoning_summary=f"Crypto Night Mode: P={ml_p_max:.3f} below night threshold ({crypto_night_min_p})",
+                    reasoning_summary=(
+                        f"Crypto Night Mode: P={ml_p_max:.3f} below night threshold ({crypto_night_min_p})"
+                    ),
                 )
         else:
             return EnsembleSignal(
@@ -296,8 +304,7 @@ def compute_ensemble_signal(
             regime=regime.value if hasattr(regime, "value") else str(regime),
             suppressed_by_meta_filter=False,
             reasoning_summary=(
-                f"Hard divergence veto (#41): rule_vote={rule_vote}, ml_vote={ml_vote} "
-                "are opposite -> forced no_trade"
+                f"Hard divergence veto (#41): rule_vote={rule_vote}, ml_vote={ml_vote} are opposite -> forced no_trade"
             ),
         )
 
@@ -326,7 +333,7 @@ def compute_ensemble_signal(
     suppressed = False
     regime_val = regime.value if hasattr(regime, "value") else str(regime)
 
-    if (regime_val in suppress_regimes):
+    if regime_val in suppress_regimes:
         if (rule_vote == 0) or (blended_confidence < min_regime_confidence):
             suppressed = True
             blended_confidence = 0.0
@@ -343,6 +350,7 @@ def compute_ensemble_signal(
     if ens_cfg.get("use_sentiment_guard", False) and final_vote != 0:
         try:
             from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
+
             veto_threshold = float(ens_cfg.get("sentiment_veto_threshold", 0.5))
             if timestamp_utc is not None:
                 sent = MacroNewsSentimentAnalyzer().red_zone_event_sentiment(
@@ -352,8 +360,9 @@ def compute_ensemble_signal(
                 )
                 if sent["in_red_zone"] and abs(sent["score"]) >= veto_threshold:
                     # sentiment positive -> against a short; negative -> against a long
-                    sentiment_opposes = (final_vote == 1 and sent["score"] < 0) or \
-                                        (final_vote == -1 and sent["score"] > 0)
+                    sentiment_opposes = (final_vote == 1 and sent["score"] < 0) or (
+                        final_vote == -1 and sent["score"] > 0
+                    )
                     if sentiment_opposes:
                         return EnsembleSignal(
                             bias="no_trade",

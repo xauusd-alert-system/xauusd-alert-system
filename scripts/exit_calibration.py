@@ -71,9 +71,7 @@ def calibrate_targets(mfe: np.ndarray, tp1_q: float = 0.55, tp2_q: float = 0.75)
     m = m[np.isfinite(m)]
     if len(m) < 10:
         return {"tp1_steps": None, "tp2_steps": None, "n": len(m)}
-    return {"tp1_steps": float(np.quantile(m, tp1_q)),
-            "tp2_steps": float(np.quantile(m, tp2_q)),
-            "n": int(len(m))}
+    return {"tp1_steps": float(np.quantile(m, tp1_q)), "tp2_steps": float(np.quantile(m, tp2_q)), "n": int(len(m))}
 
 
 def trailing_decision(mfe_mae_df: pd.DataFrame, trend_regimes=("trend_up", "trend_down")) -> dict:
@@ -86,8 +84,7 @@ def trailing_decision(mfe_mae_df: pd.DataFrame, trend_regimes=("trend_up", "tren
     if len(reached) < 10:
         return {"p_mfe5_given_trend_mfe2": None, "verdict": "insufficient data", "n": len(reached)}
     p = float((reached["mfe"] >= 5.0).mean())
-    verdict = ("trailing_recommended" if p >= 0.25 else
-               "fixed_tp3" if p < 0.15 else "neutral")
+    verdict = "trailing_recommended" if p >= 0.25 else "fixed_tp3" if p < 0.15 else "neutral"
     return {"p_mfe5_given_trend_mfe2": round(p, 3), "verdict": verdict, "n": int(len(reached))}
 
 
@@ -103,14 +100,12 @@ def calibrate_per_regime(mfe_mae_df: pd.DataFrame) -> dict:
     return out
 
 
-def run_calibration(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                    max_folds: int | None = None) -> dict:
+def run_calibration(cfg: dict, asset_key: str, df_full: pd.DataFrame, max_folds: int | None = None) -> dict:
     """Calibrate on the TRAIN part of each fold only (never the test window)."""
     wf_cfg = cfg["backtest"]["walk_forward"]
     lab_cfg = merge_asset_cfg(cfg, asset_key, "labeling")["labeling"]
     horizon = int(lab_cfg.get("horizon_candles_n", 36))
-    windows = generate_windows(df_full, wf_cfg["train_window_days"],
-                               wf_cfg["test_window_days"], wf_cfg["step_days"])
+    windows = generate_windows(df_full, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"])
     if not windows:
         raise ValueError(f"No walk-forward folds produced for {asset_key}.")
     if max_folds is not None:
@@ -118,8 +113,7 @@ def run_calibration(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 
     frames = []
     for w in windows:
-        train = df_full[(df_full["timestamp_utc"] >= w.train_start_ts) &
-                        (df_full["timestamp_utc"] < w.train_end_ts)]
+        train = df_full[(df_full["timestamp_utc"] >= w.train_start_ts) & (df_full["timestamp_utc"] < w.train_end_ts)]
         frames.append(train)
 
     all_mm = []
@@ -131,12 +125,20 @@ def run_calibration(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             reg = regs[i]
             if hasattr(reg, "value"):
                 reg = reg.value
-            all_mm.append({"regime": str(reg),
-                           "mfe": float(mm["mfe"].iloc[i]) if np.isfinite(mm["mfe"].iloc[i]) else np.nan,
-                           "mae": float(mm["mae"].iloc[i]) if np.isfinite(mm["mae"].iloc[i]) else np.nan})
+            all_mm.append(
+                {
+                    "regime": str(reg),
+                    "mfe": float(mm["mfe"].iloc[i]) if np.isfinite(mm["mfe"].iloc[i]) else np.nan,
+                    "mae": float(mm["mae"].iloc[i]) if np.isfinite(mm["mae"].iloc[i]) else np.nan,
+                }
+            )
     mdf = pd.DataFrame(all_mm)
-    return {"asset": asset_key, "n_folds": len(frames), "n_signals": len(mdf),
-            "per_regime": calibrate_per_regime(mdf.dropna(subset=["mfe"]) if len(mdf) else mdf)}
+    return {
+        "asset": asset_key,
+        "n_folds": len(frames),
+        "n_signals": len(mdf),
+        "per_regime": calibrate_per_regime(mdf.dropna(subset=["mfe"]) if len(mdf) else mdf),
+    }
 
 
 def print_report(d: dict) -> None:
@@ -145,11 +147,14 @@ def print_report(d: dict) -> None:
     for reg, v in d["per_regime"].items():
         if reg == "_trailing":
             t = v
-            print(f"Trailing: P(MFE>=5 | trend, MFE>=2) = {t['p_mfe5_given_trend_mfe2']} "
-                  f"-> {t['verdict']} (n={t['n']})")
+            print(
+                f"Trailing: P(MFE>=5 | trend, MFE>=2) = {t['p_mfe5_given_trend_mfe2']} -> {t['verdict']} (n={t['n']})"
+            )
             continue
-        print(f"  {reg:<14} SL={v['sl_steps']} (P(MAE>=SL|MFE>=2)={v['p_mae_ge_sl_given_mfe2']}) "
-              f"| TP1={v['tp1_steps']} TP2={v['tp2_steps']} (n={v['n']})")
+        print(
+            f"  {reg:<14} SL={v['sl_steps']} (P(MAE>=SL|MFE>=2)={v['p_mae_ge_sl_given_mfe2']}) "
+            f"| TP1={v['tp1_steps']} TP2={v['tp2_steps']} (n={v['n']})"
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -172,13 +177,15 @@ def main(argv: list[str] | None = None) -> None:
     synthetic = False
     try:
         from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[calib] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[calib] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[calib] WARNING: cannot load real data ({exc.__class__.__name__}); SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)

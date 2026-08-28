@@ -10,6 +10,7 @@ Usage:
 
 Requires env var: TWELVEDATA_API_KEY
 """
+
 import argparse
 import os
 import sys
@@ -26,8 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description="Seed historical OHLCV data into SQLite.")
     parser.add_argument("--days", type=int, default=90, help="How many days back to seed (default: 90)")
     parser.add_argument("--timeframe", type=str, default=None, help="Single timeframe to seed (default: all)")
-    parser.add_argument("--symbol", type=str, default="XAUUSD",
-                        help="Asset key from config (default: XAUUSD)")
+    parser.add_argument("--symbol", type=str, default="XAUUSD", help="Asset key from config (default: XAUUSD)")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -82,5 +82,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

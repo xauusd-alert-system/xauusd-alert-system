@@ -12,6 +12,7 @@ session scheme) and the POST-fix leg (true UTC + corrected sessions). The
 panel lets the operator see, in one table, whether the timestamp fix changed
 the walk-forward outcome of each of the 5 assets.
 """
+
 from __future__ import annotations
 
 import glob
@@ -49,7 +50,7 @@ def _block_bootstrap_sumR_ci(
     sums = np.empty(n_boot)
     for i in range(n_boot):
         starts = rng.integers(0, n - block, size=nb)
-        sample = np.concatenate([arr[s:s + block] for s in starts])[:n]
+        sample = np.concatenate([arr[s : s + block] for s in starts])[:n]
         sums[i] = sample.sum()
     alpha = (1.0 - confidence) / 2.0
     ci_low = float(np.percentile(sums, alpha * 100))
@@ -60,9 +61,17 @@ def _block_bootstrap_sumR_ci(
 def _metrics_for(df_slice: pd.DataFrame, compute_ci: bool = False) -> dict[str, Any]:
     n = len(df_slice)
     if n == 0:
-        return {"n": 0, "wr_pct": None, "pf": None, "sum_r": 0.0, "mean_r": None,
-                "sum_pnl": 0.0, "long_n": 0, "short_n": 0,
-                "sum_r_ci": [None, None]}
+        return {
+            "n": 0,
+            "wr_pct": None,
+            "pf": None,
+            "sum_r": 0.0,
+            "mean_r": None,
+            "sum_pnl": 0.0,
+            "long_n": 0,
+            "short_n": 0,
+            "sum_r_ci": [None, None],
+        }
     r = df_slice["R"].astype(float)
     wins = r[r > 0]
     losses = r[r <= 0]
@@ -90,8 +99,9 @@ def _load_trades(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     if "direction" in df.columns:
         d = df["direction"].astype(str).str.lower()
-        df["_dir_norm"] = d.map({"long": "long", "buy": "long", "l": "long",
-                                   "short": "short", "sell": "short", "s": "short"}).fillna(d)
+        df["_dir_norm"] = d.map(
+            {"long": "long", "buy": "long", "l": "long", "short": "short", "sell": "short", "s": "short"}
+        ).fillna(d)
     else:
         df["_dir_norm"] = "unknown"
     return df
@@ -161,10 +171,16 @@ def collect_prepost(log_dir: Optional[str] = None) -> dict[str, Any]:
         rec["delta"] = {
             "sum_r": round((rec["post"]["sum_r"] or 0) - (rec["pre"]["sum_r"] or 0), 3),
             "sum_pnl": round((rec["post"]["sum_pnl"] or 0) - (rec["pre"]["sum_pnl"] or 0), 2),
-            "wr_pct": (None if rec["post"]["wr_pct"] is None or rec["pre"]["wr_pct"] is None
-                       else round(rec["post"]["wr_pct"] - rec["pre"]["wr_pct"], 1)),
-            "pf": (None if rec["post"]["pf"] is None or rec["pre"]["pf"] is None
-                   else round(rec["post"]["pf"] - rec["pre"]["pf"], 2)),
+            "wr_pct": (
+                None
+                if rec["post"]["wr_pct"] is None or rec["pre"]["wr_pct"] is None
+                else round(rec["post"]["wr_pct"] - rec["pre"]["wr_pct"], 1)
+            ),
+            "pf": (
+                None
+                if rec["post"]["pf"] is None or rec["pre"]["pf"] is None
+                else round(rec["post"]["pf"] - rec["pre"]["pf"], 2)
+            ),
             "n": (rec["post"]["n"] or 0) - (rec["pre"]["n"] or 0),
         }
         # Keep the newest file's pair when the same asset has several TFs.
@@ -180,6 +196,7 @@ def collect_prepost(log_dir: Optional[str] = None) -> dict[str, Any]:
     as_of = None
     if mtimes:
         from datetime import datetime
+
         as_of = datetime.fromtimestamp(max(mtimes), tz=UTC).isoformat()
 
     # Strip the internal bookkeeping key before handing the payload to the API.
@@ -239,10 +256,12 @@ def collect_prepost_filtered(
     delta = {
         "sum_r": round((post_m["sum_r"] or 0) - (pre_m["sum_r"] or 0), 3),
         "sum_pnl": round((post_m["sum_pnl"] or 0) - (pre_m["sum_pnl"] or 0), 2),
-        "wr_pct": (None if post_m["wr_pct"] is None or pre_m["wr_pct"] is None
-                   else round(post_m["wr_pct"] - pre_m["wr_pct"], 1)),
-        "pf": (None if post_m["pf"] is None or pre_m["pf"] is None
-               else round(post_m["pf"] - pre_m["pf"], 2)),
+        "wr_pct": (
+            None
+            if post_m["wr_pct"] is None or pre_m["wr_pct"] is None
+            else round(post_m["wr_pct"] - pre_m["wr_pct"], 1)
+        ),
+        "pf": (None if post_m["pf"] is None or pre_m["pf"] is None else round(post_m["pf"] - pre_m["pf"], 2)),
         "n": (post_m["n"] or 0) - (pre_m["n"] or 0),
     }
 

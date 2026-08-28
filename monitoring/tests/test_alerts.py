@@ -7,6 +7,7 @@ Covers:
     - feed_stale_rule                   — FEED_STALE threshold behaviour;
     - config_disabled_no_side_effects   — disabled config -> None manager.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -28,9 +29,15 @@ def notifier():
 
 # --------------------------------------------------------- rule fires callback
 
+
 def test_rule_triggers_callback(notifier):
-    rule = AlertRule("CIRCUIT_BREAKER", lambda ctx: ctx.get("circuit_breaker") is True,
-                     cooldown_sec=3600, severity="P0", description="CB tripped")
+    rule = AlertRule(
+        "CIRCUIT_BREAKER",
+        lambda ctx: ctx.get("circuit_breaker") is True,
+        cooldown_sec=3600,
+        severity="P0",
+        description="CB tripped",
+    )
     am = AlertManager([rule], notifier)
 
     fired = am.evaluate({"circuit_breaker": True})
@@ -66,13 +73,14 @@ def test_broken_rule_condition_does_not_crash(notifier):
 
 # ------------------------------------------------------------- cooldown logic
 
+
 def test_cooldown_suppresses_repeats(notifier):
     rule = AlertRule("FEED_STALE", lambda ctx: True, cooldown_sec=600)
     am = AlertManager([rule], notifier)
 
-    assert am.evaluate({}) == ["FEED_STALE"]          # first fires
-    assert am.evaluate({}) == []                      # inside cooldown
-    assert am.evaluate({}) == []                      # still inside
+    assert am.evaluate({}) == ["FEED_STALE"]  # first fires
+    assert am.evaluate({}) == []  # inside cooldown
+    assert am.evaluate({}) == []  # still inside
     stats = am.rule_stats()["FEED_STALE"]
     assert stats["fires"] == 1
     assert stats["suppressed"] == 2
@@ -101,6 +109,7 @@ def test_per_rule_cooldowns_are_independent(notifier):
 
 # ------------------------------------------------------------ default rules --
 
+
 def test_feed_stale_rule():
     rules = {r.rule_name: r for r in default_rules(feed_stale_after_s=30.0)}
     fresh = rules["FEED_STALE"]
@@ -127,16 +136,15 @@ def test_circuit_breaker_rule():
 def test_disk_low_rule_uses_real_path(tmp_path):
     free_mb = disk_status(str(tmp_path)).free_mb
     # Threshold just above actual free space -> triggers.
-    rules = {r.rule_name: r for r in default_rules(
-        disk_path=str(tmp_path), disk_min_free_mb=free_mb + 1)}
+    rules = {r.rule_name: r for r in default_rules(disk_path=str(tmp_path), disk_min_free_mb=free_mb + 1)}
     assert rules["DISK_LOW"].condition({}) is True
     # Threshold at/below actual free space -> no alert.
-    rules_ok = {r.rule_name: r for r in default_rules(
-        disk_path=str(tmp_path), disk_min_free_mb=free_mb)}
+    rules_ok = {r.rule_name: r for r in default_rules(disk_path=str(tmp_path), disk_min_free_mb=free_mb)}
     assert rules_ok["DISK_LOW"].condition({}) is False
 
 
 # ------------------------------------------------------------- disk checker --
+
 
 def test_disk_check_thresholds(tmp_path):
     status = disk_status(str(tmp_path))
@@ -149,6 +157,7 @@ def test_disk_check_thresholds(tmp_path):
 
 # --------------------------------------------------------------- config gate --
 
+
 def test_config_disabled_no_side_effects(notifier, monkeypatch):
     """monitoring.alerts.enabled missing/false -> no manager, no Telegram import."""
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
@@ -159,17 +168,24 @@ def test_config_disabled_no_side_effects(notifier, monkeypatch):
 def test_config_enabled_builds_manager(monkeypatch):
     # Telegram import must not even be attempted with telegram: false.
     monkeypatch.setitem(
-        __import__("sys").modules, "alerts.telegram_bot", None,
+        __import__("sys").modules,
+        "alerts.telegram_bot",
+        None,
     )
-    mgr = build_from_config({
-        "monitoring": {"alerts": {
-            "enabled": True, "telegram": False,
-            "feed_stale_after_s": 45, "disk_min_free_mb": 250,
-        }},
-    })
+    mgr = build_from_config(
+        {
+            "monitoring": {
+                "alerts": {
+                    "enabled": True,
+                    "telegram": False,
+                    "feed_stale_after_s": 45,
+                    "disk_min_free_mb": 250,
+                }
+            },
+        }
+    )
     assert mgr is not None
-    assert set(mgr.rules) == {"FEED_STALE", "CIRCUIT_BREAKER", "DISK_LOW",
-                              "MT5_DISCONNECT"}
+    assert set(mgr.rules) == {"FEED_STALE", "CIRCUIT_BREAKER", "DISK_LOW", "MT5_DISCONNECT"}
     assert mgr.notifier is None
 
 

@@ -6,6 +6,7 @@ Covers:
   - the window clears as stamps age out;
   - P2-10: no daily-limit knowledge (guard duplicated at unit level).
 """
+
 import time
 
 from risk.throttle import RateThrottle
@@ -33,8 +34,7 @@ def test_per_asset_isolation():
 
 
 def test_window_ages_out():
-    rt = RateThrottle({"risk_throttle": {"rate_window_seconds": 0.05}},
-                      max_orders_per_minute=1)
+    rt = RateThrottle({"risk_throttle": {"rate_window_seconds": 0.05}}, max_orders_per_minute=1)
     rt.record_order("XAUUSD")
     ok, _ = rt.can_trade("XAUUSD")
     assert not ok
@@ -60,7 +60,12 @@ def test_no_daily_limits_in_throttle():
     """P2-10 guard (unit level): the throttle module has no daily-limit
     state or methods — daily limits live ONLY in risk/limits.py."""
     rt = RateThrottle()
-    for forbidden in ("max_trades_per_day", "trades_today",
-                      "daily_trades_count", "max_daily_loss_pct",
-                      "hard_stopped", "on_trade_closed"):
+    for forbidden in (
+        "max_trades_per_day",
+        "trades_today",
+        "daily_trades_count",
+        "max_daily_loss_pct",
+        "hard_stopped",
+        "on_trade_closed",
+    ):
         assert not hasattr(rt, forbidden), forbidden

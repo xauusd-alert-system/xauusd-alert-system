@@ -1,6 +1,7 @@
 """
 Tests for scripts/diag_trade_quality.py using synthetic data.
 """
+
 import os
 import sys
 
@@ -31,8 +32,19 @@ def test_collect_trades_for_variant_synthetic():
     assert isinstance(records, list)
     if records:
         # Must have all diagnostic fields
-        required = {"variant", "entry_ts", "session", "regime", "p_long", "p_short",
-                    "p_max", "pnl", "R", "exit_reason", "atr"}
+        required = {
+            "variant",
+            "entry_ts",
+            "session",
+            "regime",
+            "p_long",
+            "p_short",
+            "p_max",
+            "pnl",
+            "R",
+            "exit_reason",
+            "atr",
+        }
         for r in records[:1]:
             assert required.issubset(r.keys())
         # R calculations should be finite
@@ -43,8 +55,6 @@ def test_collect_trades_consistent_with_variant_name():
     """The variant field in records must match the requested variant."""
     cfg = load_config()
     df = _synthetic_xauusd_with_probs()
-    records = collect_trades_for_variant(cfg, "XAUUSD", df, "wide",
-                                         {"signal_grid": {"stop_mult": 4.0}},
-                                         max_folds=1)
+    records = collect_trades_for_variant(cfg, "XAUUSD", df, "wide", {"signal_grid": {"stop_mult": 4.0}}, max_folds=1)
     if records:
         assert all(r["variant"] == "wide" for r in records)

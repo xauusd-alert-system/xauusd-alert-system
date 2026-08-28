@@ -19,6 +19,7 @@ Data files (all under data/manual/):
   outcomes_resolved.json  — which alerts_sent keys are already resolved
   setup_stats.json        — cumulative aggregates by grade (A/B) + total
 """
+
 from __future__ import annotations
 
 import csv
@@ -28,18 +29,30 @@ import os
 import time
 
 DEFAULT_DAY_END = "19:55"
-CSV_FIELDS = ["date", "symbol", "grade", "bias", "signal_utc",
-              "entry", "stop", "target", "rr", "outcome", "r",
-              "minutes", "resolved_utc"]
+CSV_FIELDS = [
+    "date",
+    "symbol",
+    "grade",
+    "bias",
+    "signal_utc",
+    "entry",
+    "stop",
+    "target",
+    "rr",
+    "outcome",
+    "r",
+    "minutes",
+    "resolved_utc",
+]
 
 # outcome key -> human label
 OUTCOME_LABELS = {
-    "stop":        "СТОП (−1R)",
-    "target":      "ТЕЙК (по плану)",
-    "eod":         "закрытие EOD по плану",
+    "stop": "СТОП (−1R)",
+    "target": "ТЕЙК (по плану)",
+    "eod": "закрытие EOD по плану",
     # legacy keys (pre-2026-08-21 plan with the 50%@1R -> BE -> 2R model)
-    "r1_be":       "1R → BE (+0.5R)",
-    "r1_r2":       "1R → 2R (+1.5R)",
+    "r1_be": "1R → BE (+0.5R)",
+    "r1_r2": "1R → 2R (+1.5R)",
     "eod_after_r1": "1R, остаток закрыт на EOD",
 }
 
@@ -48,8 +61,7 @@ def _utc(ts) -> dt.datetime:
     return dt.datetime.fromtimestamp(ts, dt.UTC)
 
 
-def simulate_outcome(signal_ts, entry, stop, target, bias, candles,
-                     now_ts=None, day_end=DEFAULT_DAY_END):
+def simulate_outcome(signal_ts, entry, stop, target, bias, candles, now_ts=None, day_end=DEFAULT_DAY_END):
     """Simulate the planned exit on real candles.
 
     Plan (2026-08-21): the FULL position rides to the take-profit, hard stop
@@ -74,15 +86,15 @@ def simulate_outcome(signal_ts, entry, stop, target, bias, candles,
         return None, None, None
     rr = abs(target - entry) / risk if target else 0.0
 
-    bars = [c for c in candles
-            if c["time"] > signal_ts and c["time"] <= day_end_ts
-            and _utc(c["time"]).date() == sig_date]
+    bars = [
+        c for c in candles if c["time"] > signal_ts and c["time"] <= day_end_ts and _utc(c["time"]).date() == sig_date
+    ]
 
     for c in bars:
         t = _utc(c["time"])
         mins = (t - sig).total_seconds() / 60
         if long:
-            if c["low"] <= stop:              # stop wins intrabar (conservative)
+            if c["low"] <= stop:  # stop wins intrabar (conservative)
                 return "stop", -1.0, mins
             if target and c["high"] >= target:
                 return "target", rr, mins
@@ -93,7 +105,7 @@ def simulate_outcome(signal_ts, entry, stop, target, bias, candles,
                 return "target", rr, mins
 
     if now_ts < day_end_ts:
-        return None, None, None          # market still open — pending
+        return None, None, None  # market still open — pending
 
     eod_close = bars[-1]["close"] if bars else entry
     r_eod = (eod_close - entry) / risk if long else (entry - eod_close) / risk
@@ -104,6 +116,7 @@ def simulate_outcome(signal_ts, entry, stop, target, bias, candles,
 # ---------------------------------------------------------------------------
 # Journal (CSV) + resolved-state + stats
 # ---------------------------------------------------------------------------
+
 
 def load_resolved(path) -> dict:
     if os.path.exists(path):
@@ -155,14 +168,17 @@ def compute_stats(rows: list) -> dict:
                 continue
         n = len(vals)
         if n == 0:
-            out[label] = {"n": 0, "wins": 0, "losses": 0, "flat": 0,
-                          "sum_r": 0.0, "avg_r": None, "win_rate_pct": None}
+            out[label] = {"n": 0, "wins": 0, "losses": 0, "flat": 0, "sum_r": 0.0, "avg_r": None, "win_rate_pct": None}
             continue
         wins = sum(1 for v in vals if v > 0)
         losses = sum(1 for v in vals if v < 0)
         out[label] = {
-            "n": n, "wins": wins, "losses": losses, "flat": n - wins - losses,
-            "sum_r": round(sum(vals), 3), "avg_r": round(sum(vals) / n, 3),
+            "n": n,
+            "wins": wins,
+            "losses": losses,
+            "flat": n - wins - losses,
+            "sum_r": round(sum(vals), 3),
+            "avg_r": round(sum(vals) / n, 3),
             "win_rate_pct": round(100 * wins / n, 1),
         }
     return out
@@ -192,6 +208,7 @@ def _fmt_avg(v) -> str:
 # Telegram formatting
 # ---------------------------------------------------------------------------
 
+
 def format_resolution(row: dict, stats: dict) -> str:
     label = OUTCOME_LABELS.get(row.get("outcome"), str(row.get("outcome")))
     mins = row.get("minutes")
@@ -217,9 +234,12 @@ def format_stats_summary(stats: dict) -> str:
     def line(d):
         if not d or d.get("n", 0) == 0:
             return "сделок ещё нет"
-        return (f"{d['n']} сд. | побед {d['wins']} | убытков {d['losses']} | "
-                f"flat {d['flat']} | сумма R {d['sum_r']:+.2f} | "
-                f"avgR {d['avg_r']:+.2f} | WR {d['win_rate_pct']}%")
+        return (
+            f"{d['n']} сд. | побед {d['wins']} | убытков {d['losses']} | "
+            f"flat {d['flat']} | сумма R {d['sum_r']:+.2f} | "
+            f"avgR {d['avg_r']:+.2f} | WR {d['win_rate_pct']}%"
+        )
+
     as_of = (stats.get("as_of") or "")[:16]
     return (
         f"📈 Накопительная статистика сетапов (по {as_of} UTC)\n"

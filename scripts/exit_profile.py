@@ -73,8 +73,7 @@ def classify_path(exit_reason: str, tp1_hit: bool, tp2_hit: bool) -> str:
     return f"other:{exit_reason}"
 
 
-def build_exit_profile(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                       max_folds: int | None = None) -> dict:
+def build_exit_profile(cfg: dict, asset_key: str, df_full: pd.DataFrame, max_folds: int | None = None) -> dict:
     """Run the honest walk-forward for one asset and profile exit paths.
 
     Returns a dict with per-trade rows (fold, regime, path, net_r, pnl) and
@@ -82,9 +81,7 @@ def build_exit_profile(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     """
     windows, frames = _build_fold_frames(df_full, cfg, asset_key, max_folds)
     if not windows:
-        raise ValueError(
-            f"No walk-forward folds produced for {asset_key} "
-            f"({len(df_full)} rows).")
+        raise ValueError(f"No walk-forward folds produced for {asset_key} ({len(df_full)} rows).")
 
     from backtest.metrics import trades_to_dataframe
 
@@ -105,16 +102,17 @@ def build_exit_profile(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             vol = row["volume"] if pd.notna(row["volume"]) else engine.volume
             risk_money = risk_dist * vol * engine.point_value_lot
             net_r = float(row["pnl"] / risk_money) if risk_money > 0 else float("nan")
-            rows.append({
-                "fold": fold_i,
-                "regime": row["regime_at_entry"],
-                "direction": row["direction"],
-                "exit_reason": row["exit_reason"],
-                "path": classify_path(row["exit_reason"], row.get("tp1_hit", False),
-                                      row.get("tp2_hit", False)),
-                "net_r": round(net_r, 4),
-                "pnl": round(float(row["pnl"]), 4),
-            })
+            rows.append(
+                {
+                    "fold": fold_i,
+                    "regime": row["regime_at_entry"],
+                    "direction": row["direction"],
+                    "exit_reason": row["exit_reason"],
+                    "path": classify_path(row["exit_reason"], row.get("tp1_hit", False), row.get("tp2_hit", False)),
+                    "net_r": round(net_r, 4),
+                    "pnl": round(float(row["pnl"]), 4),
+                }
+            )
 
     trades_df = pd.DataFrame(rows)
     overall = _aggregate(trades_df)
@@ -122,8 +120,14 @@ def build_exit_profile(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     if len(trades_df):
         for reg, g in trades_df.groupby("regime"):
             per_regime[str(reg)] = _aggregate(g)
-    return {"asset": asset_key, "n_folds": len(windows), "n_trades": len(rows),
-            "trades": trades_df, "overall": overall, "per_regime": per_regime}
+    return {
+        "asset": asset_key,
+        "n_folds": len(windows),
+        "n_trades": len(rows),
+        "trades": trades_df,
+        "overall": overall,
+        "per_regime": per_regime,
+    }
 
 
 def _aggregate(tdf: pd.DataFrame) -> dict:
@@ -168,25 +172,27 @@ def print_report(prof: dict) -> None:
     if o.get("n", 0) == 0:
         print("  no trades on this data slice.")
         return
-    print(f"Payoff geometry: avg win {pay.get('avg_win_R')} R | avg loss "
-          f"{pay.get('avg_loss_R')} R | breakeven WR needed "
-          f"{pay.get('breakeven_wr_pct')}% | actual WR {pay.get('actual_wr_pct')}% | "
-          f"net expectancy {pay.get('net_expectancy_R')} R/trade")
-    hdr = (f"{'path':<15}{'n':>6}{'share%':>7}{'PnL$':>9}{'PnL%':>7}"
-           f"{'meanR':>8}{'WR%':>7}")
+    print(
+        f"Payoff geometry: avg win {pay.get('avg_win_R')} R | avg loss "
+        f"{pay.get('avg_loss_R')} R | breakeven WR needed "
+        f"{pay.get('breakeven_wr_pct')}% | actual WR {pay.get('actual_wr_pct')}% | "
+        f"net expectancy {pay.get('net_expectancy_R')} R/trade"
+    )
+    hdr = f"{'path':<15}{'n':>6}{'share%':>7}{'PnL$':>9}{'PnL%':>7}{'meanR':>8}{'WR%':>7}"
     print(hdr)
     print("-" * len(hdr))
     for path in sorted(o["paths"], key=lambda p: -abs(o["paths"][p]["total_pnl"])):
         pth = o["paths"][path]
-        print(f"{path:<15}{pth['n']:>6}{pth['share_pct']:>7.1f}{pth['total_pnl']:>9.1f}"
-              f"{pth['pnl_share_pct']:>7.1f}{pth['mean_net_r']:>8.3f}{pth['win_rate_pct']:>7.1f}")
+        print(
+            f"{path:<15}{pth['n']:>6}{pth['share_pct']:>7.1f}{pth['total_pnl']:>9.1f}"
+            f"{pth['pnl_share_pct']:>7.1f}{pth['mean_net_r']:>8.3f}{pth['win_rate_pct']:>7.1f}"
+        )
     print("\nPer regime (paths sorted by |PnL contribution|):")
     for reg, agg in prof["per_regime"].items():
         if agg.get("n", 0) == 0:
             continue
         top = sorted(agg["paths"].items(), key=lambda kv: -abs(kv[1]["total_pnl"]))[:4]
-        desc = ", ".join(f"{p}: {v['total_pnl']:.1f}$ ({v['mean_net_r']:.2f}R, n={v['n']})"
-                         for p, v in top)
+        desc = ", ".join(f"{p}: {v['total_pnl']:.1f}$ ({v['mean_net_r']:.2f}R, n={v['n']})" for p, v in top)
         print(f"  {reg:<14} n={agg['n']:<5} {desc}")
 
 
@@ -210,13 +216,16 @@ def main(argv: list[str] | None = None) -> None:
     synthetic = False
     try:
         from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[exit-profile] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[exit-profile] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[exit-profile] WARNING: cannot load real data ({exc.__class__.__name__}); "
+            "SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)
@@ -236,6 +245,7 @@ def main(argv: list[str] | None = None) -> None:
     out_df.to_csv(out_csv, index=False)
     # Summary sidecar (JSON-serializable aggregates)
     import json
+
     summary = {k: v for k, v in prof.items() if k != "trades"}
     with open(out_csv.replace(".csv", ".json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, default=str)

@@ -11,6 +11,7 @@ simulation shim is found through the normal import machinery when
 2. fallback: the dotted ``simulation.mt5_shim.MetaTrader5`` (pre-existing
    fallback semantics of ``execution/broker_adapter.py``).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,8 +31,9 @@ def get_mt5_module() -> Any:
     try:
         # Pre-existing fallback (execution/broker_adapter.py): dotted import.
         from simulation.mt5_shim import MetaTrader5  # type: ignore
+
         return MetaTrader5
     except ImportError as exc:
         raise ImportError(
-            "MetaTrader5 package is unavailable and no simulation shim "
-            "found (mt5_adapter.lazy.get_mt5_module)") from exc
+            "MetaTrader5 package is unavailable and no simulation shim found (mt5_adapter.lazy.get_mt5_module)"
+        ) from exc

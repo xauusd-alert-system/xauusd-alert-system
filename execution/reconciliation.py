@@ -11,6 +11,7 @@ Bridges broker state <-> TradeGroupStore <-> ledger. Rules:
 * Local OPENED, broker volume < expected -> exact volume sync (partial fill note).
 * Duplicate broker state -> no new orders (actionId idempotency in the store).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,14 +43,9 @@ class BrokerStateInspection:
 def inspect_group(driver, group: dict[str, Any]) -> BrokerStateInspection:
     """Compare local group state with fresh broker state (positions + deals)."""
     spec: TradeGroupSpec = group["spec"]
-    inspection = BrokerStateInspection(
-        group_id=spec.group_id, local_state=group["state"]
-    )
+    inspection = BrokerStateInspection(group_id=spec.group_id, local_state=group["state"])
     positions = driver.query_positions_by_magic()
-    known_tickets = {
-        int(item.get("broker", {}).get("position_id") or 0)
-        for item in group.get("legs", [])
-    }
+    known_tickets = {int(item.get("broker", {}).get("position_id") or 0) for item in group.get("legs", [])}
     known_tickets.discard(0)
     # map by comment group id too (robust when broker ids were lost)
     group_positions = []
@@ -73,17 +69,23 @@ def inspect_group(driver, group: dict[str, Any]) -> BrokerStateInspection:
     # volume sync: legs sharing one position (netting virtual legs) are
     # summed; a single-leg position (hedging) compares per leg.
     for pos in group_positions:
-        matching = [item for item in group.get("legs", [])
-                    if int(item.get("broker", {}).get("position_id") or 0) == pos["ticket"]]
+        matching = [
+            item
+            for item in group.get("legs", [])
+            if int(item.get("broker", {}).get("position_id") or 0) == pos["ticket"]
+        ]
         if not matching:
             continue
         expected = sum(float(item.get("volume") or 0.0) for item in matching)
         actual = float(pos.get("volume") or 0.0)
         if expected > 0.0 and actual < expected - 1e-9:
-            inspection.volume_mismatch.append({
-                "legs": [item.get("leg") for item in matching],
-                "expected": expected, "actual": actual,
-            })
+            inspection.volume_mismatch.append(
+                {
+                    "legs": [item.get("leg") for item in matching],
+                    "expected": expected,
+                    "actual": actual,
+                }
+            )
     if not group_positions and not group.get("submitted"):
         inspection.notes.append("group not submitted; nothing to reconcile")
     return inspection
@@ -96,8 +98,7 @@ def latest_out_deal(inspection: BrokerStateInspection) -> dict[str, Any] | None:
     return max(inspection.closed_out_deals, key=lambda d: int(d.get("time", 0)))
 
 
-def classify_broker_close(spec: TradeGroupSpec, out_deal: dict[str, Any],
-                          tolerance: float = 0.0) -> str:
+def classify_broker_close(spec: TradeGroupSpec, out_deal: dict[str, Any], tolerance: float = 0.0) -> str:
     """Classify a broker-side OUT deal: tp1 | tp2 | tp3 | stop | other.
 
     The price is matched against the IMMUTABLE spec levels (never recomputed).
@@ -105,21 +106,30 @@ def classify_broker_close(spec: TradeGroupSpec, out_deal: dict[str, Any],
     """
     price = float(out_deal.get("price", 0.0) or 0.0)
     side = 1.0 if spec.side == "long" else -1.0
-    for level, name in ((spec.geometry.tp1, "tp1"), (spec.geometry.tp2, "tp2"),
-                        (spec.geometry.tp3, "tp3"), (spec.geometry.sl, "stop")):
+    for level, name in (
+        (spec.geometry.tp1, "tp1"),
+        (spec.geometry.tp2, "tp2"),
+        (spec.geometry.tp3, "tp3"),
+        (spec.geometry.sl, "stop"),
+    ):
         if abs(price - level) <= tolerance:
             return name
     # direction-aware fallback: pick the nearest spec level
     best = min(
-        (("tp1", spec.geometry.tp1), ("tp2", spec.geometry.tp2),
-         ("tp3", spec.geometry.tp3), ("stop", spec.geometry.sl)),
+        (
+            ("tp1", spec.geometry.tp1),
+            ("tp2", spec.geometry.tp2),
+            ("tp3", spec.geometry.tp3),
+            ("stop", spec.geometry.sl),
+        ),
         key=lambda pair: abs(price - pair[1]),
     )
     return best[0]
 
 
-def detect_orphan_positions(driver, db_path: str, *, ledger_db_path: str | None = None,
-                            now_ms: int | None = None) -> list[dict[str, Any]]:
+def detect_orphan_positions(
+    driver, db_path: str, *, ledger_db_path: str | None = None, now_ms: int | None = None
+) -> list[dict[str, Any]]:
     """Broker positions with our magic that no local group covers.
 
     Emits an idempotent ``orphan_broker_position`` ledger event per ticket
@@ -159,9 +169,13 @@ def detect_orphan_positions(driver, db_path: str, *, ledger_db_path: str | None 
             actor="reconciliation",
             group_id=group_id,
             event_id=f"orphan:{pos['ticket']}",
-            payload={"broker_position_id": pos["ticket"],
-                     "symbol": pos.get("symbol"), "volume": pos.get("volume"),
-                     "comment": comment, "detected_at_utc_ms": now},
+            payload={
+                "broker_position_id": pos["ticket"],
+                "symbol": pos.get("symbol"),
+                "volume": pos.get("volume"),
+                "comment": comment,
+                "detected_at_utc_ms": now,
+            },
         )
     return orphans
 
@@ -176,14 +190,13 @@ def _parse_group_id(comment: str) -> str | None:
 
 
 def _asset_from_symbol(symbol: str) -> str:
-    mapping = {"GOLD": "XAUUSD", "SILVER": "XAGUSD", "BITCOIN": "BTCUSD",
-               "EURUSD": "EURUSD", "GBPUSD": "GBPUSD"}
+    mapping = {"GOLD": "XAUUSD", "SILVER": "XAGUSD", "BITCOIN": "BTCUSD", "EURUSD": "EURUSD", "GBPUSD": "GBPUSD"}
     return mapping.get(symbol, symbol or "unknown")
 
 
-def emit_execution_error(db_path: str, spec: TradeGroupSpec, *, reason: str,
-                         payload: dict[str, Any] | None = None,
-                         leg: int | None = None) -> None:
+def emit_execution_error(
+    db_path: str, spec: TradeGroupSpec, *, reason: str, payload: dict[str, Any] | None = None, leg: int | None = None
+) -> None:
     """Append an ``execution_error`` fact (used for partial submission etc.)."""
     append_trading_event(
         db_path,

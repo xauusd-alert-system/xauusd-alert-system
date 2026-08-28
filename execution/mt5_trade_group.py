@@ -30,6 +30,7 @@ broker positions/deals and advances groups; local price is only a CANDIDATE
 trigger for netting partial closes — every state change waits for broker
 confirmation (order result / deal / position query).
 """
+
 from __future__ import annotations
 
 import logging
@@ -157,6 +158,7 @@ class MT5TradeGroupExecutor:
         self.be_close_tolerance = float(be_close_tolerance)
         self.deployment_mode = deployment_mode
         import os
+
         if allow_demo is None:
             allow_demo = os.environ.get("TRADE_GROUP_ENABLE_DEMO", "0") == "1"
         self.allow_demo = bool(allow_demo)
@@ -171,19 +173,14 @@ class MT5TradeGroupExecutor:
     def _gate_mode(self, spec: TradeGroupSpec) -> None:
         if spec.mode == "live":
             raise LiveExecutionForbidden(
-                "live trade-group execution is forbidden until explicit "
-                "P2 live promotion approval"
+                "live trade-group execution is forbidden until explicit P2 live promotion approval"
             )
         if spec.mode == "paper":
             return  # delegated below
         if not self.allow_demo:
-            raise DemoExecutionNotEnabled(
-                "demo trade-group execution requires TRADE_GROUP_ENABLE_DEMO=1"
-            )
+            raise DemoExecutionNotEnabled("demo trade-group execution requires TRADE_GROUP_ENABLE_DEMO=1")
         if self.deployment_mode == "live_systematic":
-            raise ExecutionForbidden(
-                "deployment.mode=live_systematic forbids demo trade-group execution"
-            )
+            raise ExecutionForbidden("deployment.mode=live_systematic forbids demo trade-group execution")
 
     def _require_demo_account(self) -> dict[str, Any]:
         """ТЗ §38: the connected account must be a DEMO account."""
@@ -230,21 +227,26 @@ class MT5TradeGroupExecutor:
         if spec.mode == "paper":
             if self._paper is None:
                 self._paper = TradeGroupExecutor(
-                    self.db_path, ledger_db_path=self.ledger_db_path,
-                    driver=PaperDriver(), cost=self.cost,
+                    self.db_path,
+                    ledger_db_path=self.ledger_db_path,
+                    driver=PaperDriver(),
+                    cost=self.cost,
                 )
             return self._paper.create_group(spec)
         require_transition(GroupState.DRAFT, GroupState.VALIDATED)
         save_group(self.db_path, spec, state=GroupState.VALIDATED)
         _metrics_record("groups_created", asset_key=spec.asset_key)
         append_trading_event(
-            self.ledger_db_path, event_type="signal_validated",
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+            self.ledger_db_path,
+            event_type="signal_validated",
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
             group_id=spec.group_id,
-            payload={"geometry": spec.as_geometry_payload(), "state": "VALIDATED",
-                     "mode": spec.mode},
+            payload={"geometry": spec.as_geometry_payload(), "state": "VALIDATED", "mode": spec.mode},
         )
         return GroupState.VALIDATED
 
@@ -304,20 +306,20 @@ class MT5TradeGroupExecutor:
             self._reject_group(spec, "SIGNAL_EXPIRED", "signal TTL expired before submission")
             return GroupState.REJECTED
         ok, reason = check_group_risk(
-            spec.risk.estimated_loss_at_sl, spec.risk.max_cash,
-            spec.risk.max_pct, account["balance"],
+            spec.risk.estimated_loss_at_sl,
+            spec.risk.max_cash,
+            spec.risk.max_pct,
+            account["balance"],
         )
         if not ok:
-            self._reject_group(spec, reason or "RISK_LIMIT_EXCEEDED",
-                               "group risk re-check failed at submission")
+            self._reject_group(spec, reason or "RISK_LIMIT_EXCEEDED", "group risk re-check failed at submission")
             return GroupState.REJECTED
 
-        if not mark_action(self.db_path, group_id, "OPEN-GROUP",
-                           {"intent_id": intent.intent_id,
-                            "geometry_hash": intent.geometry_hash}):
+        if not mark_action(
+            self.db_path, group_id, "OPEN-GROUP", {"intent_id": intent.intent_id, "geometry_hash": intent.geometry_hash}
+        ):
             raise DuplicateSubmissionError(
-                f"group {group_id} was already submitted (action OPEN-GROUP); "
-                f"restart recovery must not resubmit"
+                f"group {group_id} was already submitted (action OPEN-GROUP); restart recovery must not resubmit"
             )
 
         volumes = intent.leg_volumes
@@ -332,8 +334,10 @@ class MT5TradeGroupExecutor:
             "total_remaining": 0.0,
             "legs": {
                 str(leg): {
-                    "requested_volume": float(v), "filled_volume": 0.0,
-                    "closed_volume": 0.0, "remaining_volume": 0.0,
+                    "requested_volume": float(v),
+                    "filled_volume": 0.0,
+                    "closed_volume": 0.0,
+                    "remaining_volume": 0.0,
                 }
                 for leg, v in zip((1, 2, 3), volumes)
             },
@@ -361,10 +365,15 @@ class MT5TradeGroupExecutor:
             else:
                 leg_state = "REJECTED"
                 self._append_leg_event(spec, "leg_rejected", leg, result, volume)
-            legs.append({
-                "leg": leg, "price": spec.leg_price(leg), "volume": volume,
-                "state": leg_state, "broker": result,
-            })
+            legs.append(
+                {
+                    "leg": leg,
+                    "price": spec.leg_price(leg),
+                    "volume": volume,
+                    "state": leg_state,
+                    "broker": result,
+                }
+            )
             if filled > 0.0:
                 leg_entry = volume_ledger["legs"][str(leg)]
                 leg_entry["filled_volume"] = round(filled, 8)
@@ -376,29 +385,48 @@ class MT5TradeGroupExecutor:
             volume_ledger["total_filled"] = round(aggregate_filled, 8)
         else:
             volume_ledger["total_filled"] = round(
-                sum(float(entry["filled_volume"]) for entry in volume_ledger["legs"].values()), 8)
-        volume_ledger["total_remaining"] = round(
-            volume_ledger["total_filled"] - volume_ledger["total_closed"], 8)
+                sum(float(entry["filled_volume"]) for entry in volume_ledger["legs"].values()), 8
+            )
+        volume_ledger["total_remaining"] = round(volume_ledger["total_filled"] - volume_ledger["total_closed"], 8)
 
-        update_group_state(self.db_path, group_id, GroupState.SUBMITTED,
-                           legs=legs, broker_ids=broker_ids,
-                           be_state=current.get("be_state"),
-                           volume=volume_ledger)
-        save_group(self.db_path, spec, state=GroupState.SUBMITTED,
-                   legs=legs, broker_ids=broker_ids, submitted=True,
-                   be_state=current.get("be_state"),
-                   intent_json=intent.model_dump_json(),
-                   account_mode=driver.account_mode,
-                   volume=volume_ledger)
+        update_group_state(
+            self.db_path,
+            group_id,
+            GroupState.SUBMITTED,
+            legs=legs,
+            broker_ids=broker_ids,
+            be_state=current.get("be_state"),
+            volume=volume_ledger,
+        )
+        save_group(
+            self.db_path,
+            spec,
+            state=GroupState.SUBMITTED,
+            legs=legs,
+            broker_ids=broker_ids,
+            submitted=True,
+            be_state=current.get("be_state"),
+            intent_json=intent.model_dump_json(),
+            account_mode=driver.account_mode,
+            volume=volume_ledger,
+        )
         append_trading_event(
-            self.ledger_db_path, event_type="group_submitted",
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+            self.ledger_db_path,
+            event_type="group_submitted",
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
             group_id=spec.group_id,
-            payload={"account_mode": driver.account_mode, "legs": legs,
-                     "geometry": spec.as_geometry_payload(),
-                     "mode": spec.mode, "intent_id": intent.intent_id},
+            payload={
+                "account_mode": driver.account_mode,
+                "legs": legs,
+                "geometry": spec.as_geometry_payload(),
+                "mode": spec.mode,
+                "intent_id": intent.intent_id,
+            },
         )
         return GroupState.SUBMITTED
 
@@ -409,31 +437,41 @@ class MT5TradeGroupExecutor:
         require_transition(GroupState.VALIDATED, GroupState.REJECTED)
         save_group(self.db_path, spec, state=GroupState.REJECTED, submitted=False)
         append_trading_event(
-            self.ledger_db_path, event_type="group_rejected",
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
-            reason=reason_code, group_id=spec.group_id,
+            self.ledger_db_path,
+            event_type="group_rejected",
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
+            reason=reason_code,
+            group_id=spec.group_id,
             payload={"reason_code": reason_code, "detail": detail, "mode": spec.mode},
         )
 
-    def _append_leg_event(self, spec: TradeGroupSpec, event_type: str, leg: int,
-                          result: dict[str, Any], requested_volume: float) -> None:
+    def _append_leg_event(
+        self, spec: TradeGroupSpec, event_type: str, leg: int, result: dict[str, Any], requested_volume: float
+    ) -> None:
         # P1.6 §26/§27: actor (кто записал) и source (откуда факт) разделены.
         # Leg facts от broker order/deal несут source=mt5 + broker ids.
         deal_id = result.get("deal_id")
         order_id = result.get("order_id")
         append_trading_event(
-            self.ledger_db_path, event_type=event_type,
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+            self.ledger_db_path,
+            event_type=event_type,
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
             reason=str(result.get("comment", "") or "") or None,
-            group_id=spec.group_id, leg_id=new_leg_id(spec.group_id, leg),
+            group_id=spec.group_id,
+            leg_id=new_leg_id(spec.group_id, leg),
             source="mt5" if (deal_id or order_id) else "simulator",
             source_type="deal" if deal_id else ("order" if order_id else "paper_driver"),
-            source_id=f"DEAL-{deal_id}" if deal_id
-            else (f"ORDER-{order_id}" if order_id else None),
+            source_id=f"DEAL-{deal_id}" if deal_id else (f"ORDER-{order_id}" if order_id else None),
             payload={
                 "broker_order_id": order_id,
                 "broker_position_id": result.get("position_id"),
@@ -463,9 +501,14 @@ class MT5TradeGroupExecutor:
             spec = group["spec"]
             if spec.mode != "demo":
                 continue
-            if group["state"] in (GroupState.RECONCILED, GroupState.STOPPED,
-                                  GroupState.REJECTED, GroupState.EXPIRED,
-                                  GroupState.CANCELLED, GroupState.FAILED):
+            if group["state"] in (
+                GroupState.RECONCILED,
+                GroupState.STOPPED,
+                GroupState.REJECTED,
+                GroupState.EXPIRED,
+                GroupState.CANCELLED,
+                GroupState.FAILED,
+            ):
                 continue
             events.extend(self._advance_group(group))
         # ТЗ 6.1: poll duration for latency monitoring (poll_duration_ms).
@@ -486,9 +529,11 @@ class MT5TradeGroupExecutor:
         # Deals are CONSUMED once (actionId "DEAL-<ticket>"): re-polling the
         # same history can never re-fire a transition (ТЗ §28/§30).
         unconsumed = [
-            deal for deal in sorted(
+            deal
+            for deal in sorted(
                 inspection.closed_out_deals,
-                key=lambda d: int(d.get("time", 0)), reverse=True,
+                key=lambda d: int(d.get("time", 0)),
+                reverse=True,
             )
             if not has_action(self.db_path, group_id, f"DEAL-{deal.get('ticket')}")
         ]
@@ -496,13 +541,21 @@ class MT5TradeGroupExecutor:
             out_deal = unconsumed[0]
             kind = classify_broker_close(spec, out_deal, self.be_close_tolerance)
             if kind == "stop":
-                mark_action(self.db_path, group_id, f"DEAL-{out_deal.get('ticket')}",
-                            {"kind": "stop", "price": out_deal.get("price")})
+                mark_action(
+                    self.db_path,
+                    group_id,
+                    f"DEAL-{out_deal.get('ticket')}",
+                    {"kind": "stop", "price": out_deal.get("price")},
+                )
                 return [self._stop_group(group, float(out_deal["price"]))]
             if kind == "tp1":
                 if state in (GroupState.SUBMITTED, GroupState.OPENED):
-                    mark_action(self.db_path, group_id, f"DEAL-{out_deal.get('ticket')}",
-                                {"kind": "tp1", "price": out_deal.get("price")})
+                    mark_action(
+                        self.db_path,
+                        group_id,
+                        f"DEAL-{out_deal.get('ticket')}",
+                        {"kind": "tp1", "price": out_deal.get("price")},
+                    )
                     self._tp1_filled(group, float(out_deal["price"]), broker_closed=True)
                     events.append("tp1_filled")
                     state = GroupState.TP1_FILLED
@@ -511,23 +564,30 @@ class MT5TradeGroupExecutor:
                 # still TP1_FILLED is picked up on the NEXT poll after BE
                 # confirms — the deal stays in history, nothing is lost)
                 if state == GroupState.BE_CONFIRMED:
-                    mark_action(self.db_path, group_id, f"DEAL-{out_deal.get('ticket')}",
-                                {"kind": "tp2", "price": out_deal.get("price")})
+                    mark_action(
+                        self.db_path,
+                        group_id,
+                        f"DEAL-{out_deal.get('ticket')}",
+                        {"kind": "tp2", "price": out_deal.get("price")},
+                    )
                     self._tp2_filled(group, float(out_deal["price"]), broker_closed=True)
                     events.append("tp2_filled")
                     state = GroupState.TP2_FILLED
             elif kind == "tp3":
                 if state == GroupState.TP2_FILLED:
-                    mark_action(self.db_path, group_id, f"DEAL-{out_deal.get('ticket')}",
-                                {"kind": "tp3", "price": out_deal.get("price")})
+                    mark_action(
+                        self.db_path,
+                        group_id,
+                        f"DEAL-{out_deal.get('ticket')}",
+                        {"kind": "tp3", "price": out_deal.get("price")},
+                    )
                     self._tp3_filled(group, float(out_deal["price"]), broker_closed=True)
                     events.append("tp3_filled")
                     state = GroupState.RECONCILED
 
         # --- fills while SUBMITTED (hedging: positions appear) ---------------
         if state == GroupState.SUBMITTED:
-            rejected = [item for item in group.get("legs", [])
-                        if item.get("state") == "REJECTED"]
+            rejected = [item for item in group.get("legs", []) if item.get("state") == "REJECTED"]
             if rejected:
                 # P1.5.1 §2–§9: a partial open NEVER fails the group while
                 # already-opened legs remain at the broker. Compensation closes
@@ -540,21 +600,26 @@ class MT5TradeGroupExecutor:
                     events.append("partial_submission")
                     events.append("compensation_requested")
                 return events
-            filled = [item for item in group.get("legs", [])
-                      if item.get("state") in ("SUBMITTED", "PARTIALLY_FILLED", "VIRTUAL")]
+            filled = [
+                item
+                for item in group.get("legs", [])
+                if item.get("state") in ("SUBMITTED", "PARTIALLY_FILLED", "VIRTUAL")
+            ]
             if filled:
                 self._open_group(group, inspection)
                 events.append("group_opened")
                 state = GroupState.OPENED
 
         # --- P1.5.1 compensation flow (§2/§8/§19) ----------------------------
-        if state in (GroupState.PARTIAL_SUBMISSION, GroupState.COMPENSATION_REQUESTED,
-                     GroupState.FAILED_WITH_OPEN_RISK):
+        if state in (
+            GroupState.PARTIAL_SUBMISSION,
+            GroupState.COMPENSATION_REQUESTED,
+            GroupState.FAILED_WITH_OPEN_RISK,
+        ):
             if state == GroupState.PARTIAL_SUBMISSION:
                 # crash-safe retry: re-running _begin_compensation is idempotent
                 # (mark_action guards every COMPENSATE action)
-                rejected_legs = [item for item in group.get("legs", [])
-                                 if item.get("state") == "REJECTED"]
+                rejected_legs = [item for item in group.get("legs", []) if item.get("state") == "REJECTED"]
                 result = self._begin_compensation(group, rejected_legs)
                 if result == "compensation_failed":
                     events.append("compensation_failed")
@@ -576,7 +641,10 @@ class MT5TradeGroupExecutor:
 
         # --- netting: candidate-triggered partial closes (ТЗ §15/§14) --------
         if driver.account_mode == "netting" and state in (
-                GroupState.OPENED, GroupState.BE_CONFIRMED, GroupState.TP2_FILLED):
+            GroupState.OPENED,
+            GroupState.BE_CONFIRMED,
+            GroupState.TP2_FILLED,
+        ):
             try:
                 tick = ctx.symbol_snapshot(spec.broker_symbol)
             except BrokerUnavailable:
@@ -587,13 +655,11 @@ class MT5TradeGroupExecutor:
                 if self._netting_close_leg(group, 1, "CLOSE-TP1"):
                     events.append("tp1_filled")
                     state = GroupState.TP1_FILLED
-            elif state == GroupState.BE_CONFIRMED and \
-                    direction * (price - spec.geometry.tp2) >= 0.0:
+            elif state == GroupState.BE_CONFIRMED and direction * (price - spec.geometry.tp2) >= 0.0:
                 if self._netting_close_leg(group, 2, "CLOSE-TP2"):
                     events.append("tp2_filled")
                     state = GroupState.TP2_FILLED
-            elif state == GroupState.TP2_FILLED and \
-                    direction * (price - spec.geometry.tp3) >= 0.0:
+            elif state == GroupState.TP2_FILLED and direction * (price - spec.geometry.tp3) >= 0.0:
                 if self._netting_close_leg(group, 3, "CLOSE-TP3"):
                     events.append("tp3_filled")
                     state = GroupState.RECONCILED
@@ -620,8 +686,7 @@ class MT5TradeGroupExecutor:
                 state = GroupState.FAILED
 
         # --- orphan detection (ТЗ §28) ---------------------------------------
-        detect_orphan_positions(driver, self.db_path,
-                                ledger_db_path=self.ledger_db_path)
+        detect_orphan_positions(driver, self.db_path, ledger_db_path=self.ledger_db_path)
         return events
 
     # ------------------------------------------------------------------
@@ -638,11 +703,9 @@ class MT5TradeGroupExecutor:
         persist every state change, so no extra write path is introduced.
         """
         if getattr(self, "_shutdown_done", False):
-            return {"already_shutdown": True,
-                    "events": list(getattr(self, "_shutdown_events", []))}
+            return {"already_shutdown": True, "events": list(getattr(self, "_shutdown_events", []))}
         self._shutdown_done = True
-        summary: dict[str, Any] = {"already_shutdown": False, "events": [],
-                                   "final_poll_ok": False}
+        summary: dict[str, Any] = {"already_shutdown": False, "events": [], "final_poll_ok": False}
         logger.info("Graceful shutdown: running final poll")
         try:
             events = self.poll_once()
@@ -657,11 +720,14 @@ class MT5TradeGroupExecutor:
         # auditable (no spec mutation).
         try:
             append_trading_event(
-                self.ledger_db_path, event_type="system_shutdown",
-                signal_id="-", asset_key="-", strategy_version="-",
-                config_hash="-", actor="mt5_trade_group_executor",
-                payload={"final_poll_ok": summary["final_poll_ok"],
-                         "events": summary["events"]},
+                self.ledger_db_path,
+                event_type="system_shutdown",
+                signal_id="-",
+                asset_key="-",
+                strategy_version="-",
+                config_hash="-",
+                actor="mt5_trade_group_executor",
+                payload={"final_poll_ok": summary["final_poll_ok"], "events": summary["events"]},
             )
             summary["state_persisted"] = True
         except Exception as exc:  # noqa: BLE001
@@ -669,9 +735,7 @@ class MT5TradeGroupExecutor:
             summary["state_persisted"] = False
         if self.notifier:
             try:
-                self.notifier(
-                    "⚠️ SYSTEM SHUTDOWN — positions may be unmanaged until restart"
-                )
+                self.notifier("⚠️ SYSTEM SHUTDOWN — positions may be unmanaged until restart")
                 summary["notified"] = True
             except Exception as exc:  # noqa: BLE001
                 logger.error("Shutdown notification failed: %s", exc)
@@ -712,16 +776,14 @@ class MT5TradeGroupExecutor:
                 # hedging: manage the leg by its ACTUAL filled volume (§18)
                 filled = float(item.get("broker", {}).get("filled_volume") or 0.0)
                 item["filled_volume"] = round(filled, 8)
-                item["remaining_volume"] = round(
-                    filled - float(item.get("closed_volume") or 0.0), 8)
+                item["remaining_volume"] = round(filled - float(item.get("closed_volume") or 0.0), 8)
                 continue
             if item.get("state") == "SUBMITTED":
                 item["state"] = "OPEN"
                 filled = float(item.get("broker", {}).get("filled_volume") or 0.0)
                 if filled > 0.0:
                     item["filled_volume"] = round(filled, 8)
-                    item["remaining_volume"] = round(
-                        filled - float(item.get("closed_volume") or 0.0), 8)
+                    item["remaining_volume"] = round(filled - float(item.get("closed_volume") or 0.0), 8)
         # P1.5.1 §12: for netting the broker's ACTUAL aggregate volume is the
         # source of truth for every later close computation.
         if driver.account_mode == "netting":
@@ -729,45 +791,54 @@ class MT5TradeGroupExecutor:
             if pos is not None:
                 volume["total_filled"] = round(float(pos["volume"]), 8)
                 volume["total_remaining"] = round(
-                    float(volume.get("total_filled") or 0.0)
-                    - float(volume.get("total_closed") or 0.0), 8)
+                    float(volume.get("total_filled") or 0.0) - float(volume.get("total_closed") or 0.0), 8
+                )
         if fill_price is not None and spec.entry.actual_fill is None:
             # P0-4: log noticeable slippage between reference and executed VWAP
             # (accepted within the hard deviation gate, but worth surfacing).
             drift = abs(spec.entry.reference - fill_price) / spec.entry.reference
             if drift > FILL_DRIFT_WARN_RATIO:
                 logger.warning(
-                    "group %s fill drifted %.4f%% from reference: "
-                    "reference=%.6g vwap=%.6g volume=%.6g",
-                    group_id, drift * 100.0, spec.entry.reference,
-                    fill_price, volume_total,
+                    "group %s fill drifted %.4f%% from reference: reference=%.6g vwap=%.6g volume=%.6g",
+                    group_id,
+                    drift * 100.0,
+                    spec.entry.reference,
+                    fill_price,
+                    volume_total,
                 )
             spec = spec.with_actual_fill(fill_price)
-        update_group_state(self.db_path, group_id, GroupState.OPENED, legs=legs,
-                           volume=volume)
-        save_group(self.db_path, spec, state=GroupState.OPENED, legs=legs,
-                   broker_ids=group.get("broker_ids", {}), submitted=True,
-                   be_state=group.get("be_state"),
-                   intent_json=group.get("intent_json"),
-                   account_mode=group.get("account_mode"),
-                   volume=volume)
+        update_group_state(self.db_path, group_id, GroupState.OPENED, legs=legs, volume=volume)
+        save_group(
+            self.db_path,
+            spec,
+            state=GroupState.OPENED,
+            legs=legs,
+            broker_ids=group.get("broker_ids", {}),
+            submitted=True,
+            be_state=group.get("be_state"),
+            intent_json=group.get("intent_json"),
+            account_mode=group.get("account_mode"),
+            volume=volume,
+        )
         append_trading_event(
-            self.ledger_db_path, event_type="group_opened",
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+            self.ledger_db_path,
+            event_type="group_opened",
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
             group_id=group_id,
             payload={"actual_fill": spec.entry.actual_fill, "mode": spec.mode},
         )
         if self.notifier:
             self.notifier(self._opened_message(spec))
 
-    def _tp1_filled(self, group: dict[str, Any], fill_price: float,
-                    broker_closed: bool = False) -> None:
+    def _tp1_filled(self, group: dict[str, Any], fill_price: float, broker_closed: bool = False) -> None:
         tp_transitions.tp1_filled(self, group, fill_price, broker_closed)
 
-    def _netting_close_leg(self, group: dict[str, Any], leg: int,
-                           action_id: str) -> bool:
+    def _netting_close_leg(self, group: dict[str, Any], leg: int, action_id: str) -> bool:
         return netting.netting_close_leg(self, group, leg, action_id)
 
     def _floor_to_step(self, value: float, step: float) -> float:
@@ -776,16 +847,14 @@ class MT5TradeGroupExecutor:
     def _netting_close_volume(self, group: dict[str, Any], leg: int) -> float:
         return netting.netting_close_volume(self, group, leg)
 
-    def _update_volume_after_close(self, group: dict[str, Any], leg: int,
-                                   filled_close: float) -> None:
+    def _update_volume_after_close(self, group: dict[str, Any], leg: int, filled_close: float) -> None:
         netting.update_volume_after_close(self, group, leg, filled_close)
 
     # ------------------------------------------------------------------
     # P1.5.1 compensation flow (§2–§9): partial open -> close opened legs
     # ------------------------------------------------------------------
 
-    def _begin_compensation(self, group: dict[str, Any],
-                            rejected: list[dict[str, Any]]) -> str:
+    def _begin_compensation(self, group: dict[str, Any], rejected: list[dict[str, Any]]) -> str:
         return comp.begin_compensation(self, group, rejected)
 
     def _verify_compensation(self, group: dict[str, Any]) -> str:
@@ -794,26 +863,21 @@ class MT5TradeGroupExecutor:
     def _compensation_action_id(self, ref: str) -> str:
         return comp.compensation_action_id(ref)
 
-    def _compensation_ticket(self, group: dict[str, Any], driver,
-                             ref: str) -> str:
+    def _compensation_ticket(self, group: dict[str, Any], driver, ref: str) -> str:
         return comp.compensation_ticket(group, driver, ref)
 
-    def _consume_compensation_deals(self, group: dict[str, Any], driver,
-                                    comp_legs: dict[str, Any]) -> None:
+    def _consume_compensation_deals(self, group: dict[str, Any], driver, comp_legs: dict[str, Any]) -> None:
         comp.consume_compensation_deals(self, group, driver, comp_legs)
 
-    def _record_compensation_failure(self, spec: TradeGroupSpec,
-                                     comp_state: dict[str, Any],
-                                     open_refs: list[Any],
-                                     reason: str) -> None:
+    def _record_compensation_failure(
+        self, spec: TradeGroupSpec, comp_state: dict[str, Any], open_refs: list[Any], reason: str
+    ) -> None:
         comp.record_compensation_failure(self, spec, comp_state, open_refs, reason)
 
-    def _tp2_filled(self, group: dict[str, Any], fill_price: float,
-                    broker_closed: bool = False) -> None:
+    def _tp2_filled(self, group: dict[str, Any], fill_price: float, broker_closed: bool = False) -> None:
         tp_transitions.tp2_filled(self, group, fill_price, broker_closed)
 
-    def _tp3_filled(self, group: dict[str, Any], fill_price: float,
-                    broker_closed: bool = False) -> None:
+    def _tp3_filled(self, group: dict[str, Any], fill_price: float, broker_closed: bool = False) -> None:
         tp_transitions.tp3_filled(self, group, fill_price, broker_closed)
 
     def _stop_group(self, group: dict[str, Any], stop_price: float) -> str:
@@ -834,8 +898,7 @@ class MT5TradeGroupExecutor:
     def _be_ref(self, group: dict[str, Any], leg: int, driver) -> str | None:
         return be_flow.be_ref(group, leg, driver)
 
-    def _be_retry(self, group: dict[str, Any], be_state: dict[str, Any],
-                  error: str) -> str:
+    def _be_retry(self, group: dict[str, Any], be_state: dict[str, Any], error: str) -> str:
         return be_flow.be_retry(self, group, be_state, error)
 
     # ------------------------------------------------------------------
@@ -853,15 +916,23 @@ class MT5TradeGroupExecutor:
         driver = self._resolve_driver(spec)
         inspection = inspect_group(driver, group)
         append_trading_event(
-            self.ledger_db_path, event_type="group_reconciled",
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
-            reason="restart_recovery", group_id=group_id,
-            payload={"state": group["state"].value,
-                     "submitted": group["submitted"], "mode": spec.mode,
-                     "positions_found": len(inspection.positions),
-                     "out_deals": len(inspection.closed_out_deals)},
+            self.ledger_db_path,
+            event_type="group_reconciled",
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
+            reason="restart_recovery",
+            group_id=group_id,
+            payload={
+                "state": group["state"].value,
+                "submitted": group["submitted"],
+                "mode": spec.mode,
+                "positions_found": len(inspection.positions),
+                "out_deals": len(inspection.closed_out_deals),
+            },
         )
         return group
 
@@ -886,13 +957,12 @@ class MT5TradeGroupExecutor:
     def _stopped_message(self, spec: TradeGroupSpec) -> str:
         return tf.format_stopped(spec)
 
-    def _partial_submission_message(self, spec: TradeGroupSpec,
-                                    opened_legs: list[int],
-                                    rejected_legs: list[int]) -> str:
+    def _partial_submission_message(
+        self, spec: TradeGroupSpec, opened_legs: list[int], rejected_legs: list[int]
+    ) -> str:
         return tf.format_partial_submission(spec, opened_legs, rejected_legs)
 
-    def _failed_after_compensation_message(self, spec: TradeGroupSpec,
-                                           reason: str) -> str:
+    def _failed_after_compensation_message(self, spec: TradeGroupSpec, reason: str) -> str:
         return tf.format_failed_after_compensation(spec, reason)
 
     def _open_risk_message(self, spec: TradeGroupSpec, open_refs: list[Any]) -> str:

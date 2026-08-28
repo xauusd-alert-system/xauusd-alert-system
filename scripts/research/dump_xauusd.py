@@ -37,7 +37,11 @@ if len(bad) > 0:
     print(bad[["ticket", "entry_time", "close_time", "pnl"]].to_string(index=False))
 
 print(f"\nВалидные сделки ({len(valid)}):")
-print(valid[["ticket", "entry_time", "close_time", "bias", "entry_price", "close_price", "pnl", "duration_min"]].to_string(index=False))
+print(
+    valid[
+        ["ticket", "entry_time", "close_time", "bias", "entry_price", "close_price", "pnl", "duration_min"]
+    ].to_string(index=False)
+)
 
 if len(valid) > 0:
     wins = valid[valid["pnl"] > 0]
@@ -52,6 +56,6 @@ if len(valid) > 0:
     print(f"  WR = {wr:.1f}%")
     print(f"  PF = {pf:.2f}")
     print(f"  Средняя длительность = {valid['duration_min'].mean():.1f} мин")
-    print(f"  Long/Short = {(valid['bias']=='long').sum()} / {(valid['bias']=='short').sum()}")
+    print(f"  Long/Short = {(valid['bias'] == 'long').sum()} / {(valid['bias'] == 'short').sum()}")
 else:
     print("\nВалидных закрытых сделок нет.")

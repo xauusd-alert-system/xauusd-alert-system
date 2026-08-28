@@ -2,9 +2,7 @@ import sqlite3
 
 con = sqlite3.connect("data/market_data_mt5.sqlite")
 
-tables = [r[0] for r in con.execute(
-    "SELECT name FROM sqlite_master WHERE type='table'"
-)]
+tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
 print("TABLES:", tables)
 
 for t in tables:

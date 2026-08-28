@@ -43,6 +43,7 @@ Example::
     if not ok:
         logger.warning("blocked: %s", reason)
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,21 +64,25 @@ _NO_ENTRY_DD = -0.08
 class RiskEngine:
     """Facade aggregating all risk gates behind ``can_open``/``can_trade``."""
 
-    def __init__(self, cfg: dict, magic: Optional[int] = None,
-                 state: Optional[RiskState] = None,
-                 state_path: str = "logs/risk_state.json",
-                 rate_throttle: Optional[RateThrottle] = None,
-                 legacy_throttle=None):
+    def __init__(
+        self,
+        cfg: dict,
+        magic: Optional[int] = None,
+        state: Optional[RiskState] = None,
+        state_path: str = "logs/risk_state.json",
+        rate_throttle: Optional[RateThrottle] = None,
+        legacy_throttle=None,
+    ):
         self.cfg = cfg
         self.state = state if state is not None else RiskState(state_path)
         self.limits = RiskLimits(cfg, magic=magic, state=self.state)
-        self.rate_throttle = rate_throttle if rate_throttle is not None \
-            else RateThrottle(cfg)
+        self.rate_throttle = rate_throttle if rate_throttle is not None else RateThrottle(cfg)
         # Legacy loss-streak throttle (deprecated execution shim). Optional:
         # pass None explicitly to run the engine without it (pure unit tests).
         if legacy_throttle is None:
             try:  # pragma: no cover - exercised via integration paths
                 from execution.trade_throttle import TradeThrottle
+
                 legacy_throttle = TradeThrottle(cfg)
             except Exception:
                 legacy_throttle = None
@@ -103,44 +108,51 @@ class RiskEngine:
         dd = equity / prev_hwm - 1.0
         mult = drawdown_throttle(dd)
         if mult <= 0.0 or dd <= _NO_ENTRY_DD:
-            return False, (
-                f"drawdown_throttle: DD from HWM {dd:.2%} -> no new entries "
-                f"(risk multiplier {mult:.2f})")
+            return False, (f"drawdown_throttle: DD from HWM {dd:.2%} -> no new entries (risk multiplier {mult:.2f})")
         return True, "OK"
 
-    def _check_cluster_exposure(self, cluster: str, add_risk_pct: float,
-                                current_risk_by_cluster: Optional[dict],
-                                cluster_cap: float,
-                                total_cap: float) -> tuple[bool, str]:
+    def _check_cluster_exposure(
+        self,
+        cluster: str,
+        add_risk_pct: float,
+        current_risk_by_cluster: Optional[dict],
+        cluster_cap: float,
+        total_cap: float,
+    ) -> tuple[bool, str]:
         """P1-4: cluster/total stop-risk caps with REQUIRED cap parameters."""
         if add_risk_pct is None:
             return True, "OK"
         if cluster_cap is None or total_cap is None:
-            raise TypeError(
-                "cluster_cap and total_cap are required (P1-4: no defaults)")
+            raise TypeError("cluster_cap and total_cap are required (P1-4: no defaults)")
         if current_risk_by_cluster is None:
             current_risk_by_cluster = {}
         check = cluster_exposure_ok(
-            current_risk_by_cluster, cluster, add_risk_pct,
-            cluster_cap=cluster_cap, total_cap=total_cap)
+            current_risk_by_cluster, cluster, add_risk_pct, cluster_cap=cluster_cap, total_cap=total_cap
+        )
         if not check["ok"]:
             return False, (
                 f"cluster_exposure_exceeded: cluster {cluster} would reach "
                 f"{check['cluster_sum']:.4f} (cap {check['cluster_cap']:.4f}), "
-                f"total {check['total_sum']:.4f} (cap {check['total_cap']:.4f})")
+                f"total {check['total_sum']:.4f} (cap {check['total_cap']:.4f})"
+            )
         return True, "OK"
 
     # ------------------------------------------------------------- public
-    def can_open(self, asset_key: str, equity: float = 0.0,
-                 balance: Optional[float] = None, side: Optional[str] = None,
-                 groups_by_asset: Optional[dict] = None,
-                 singles_by_asset: Optional[dict] = None,
-                 current_risk_by_cluster: Optional[dict] = None,
-                 cluster: Optional[str] = None,
-                 add_risk_pct: Optional[float] = None,
-                 cluster_cap: Optional[float] = None,
-                 total_cap: Optional[float] = None,
-                 use_legacy_throttle: bool = True) -> tuple[bool, str]:
+    def can_open(
+        self,
+        asset_key: str,
+        equity: float = 0.0,
+        balance: Optional[float] = None,
+        side: Optional[str] = None,
+        groups_by_asset: Optional[dict] = None,
+        singles_by_asset: Optional[dict] = None,
+        current_risk_by_cluster: Optional[dict] = None,
+        cluster: Optional[str] = None,
+        add_risk_pct: Optional[float] = None,
+        cluster_cap: Optional[float] = None,
+        total_cap: Optional[float] = None,
+        use_legacy_throttle: bool = True,
+    ) -> tuple[bool, str]:
         """Single pre-trade gate. Returns ``(allowed, reason)``.
 
         Gates are evaluated in the documented order; any gate returning False
@@ -169,20 +181,17 @@ class RiskEngine:
         # directly; otherwise limits.can_trade reads MT5 itself.
         if equity and equity > 0:
             account_balance = balance if balance is not None else equity
-            ok, reason = self.limits.check_circuit_breaker(
-                equity, account_balance)
+            ok, reason = self.limits.check_circuit_breaker(equity, account_balance)
             if not ok:
                 return False, reason
-            ok, reason = self.limits.check_concurrency(
-                asset_key, groups_by_asset, singles_by_asset)
+            ok, reason = self.limits.check_concurrency(asset_key, groups_by_asset, singles_by_asset)
             if not ok:
                 return False, reason
             ok, reason = self.limits.check_daily_trades(asset_key)
             if not ok:
                 return False, reason
         else:
-            ok, reason = self.limits.can_trade(
-                asset_key, groups_by_asset, singles_by_asset)
+            ok, reason = self.limits.can_trade(asset_key, groups_by_asset, singles_by_asset)
             if not ok:
                 return False, reason
 
@@ -200,8 +209,8 @@ class RiskEngine:
         # 6. Cluster exposure caps (P1-4: caps required).
         if add_risk_pct is not None:
             ok, reason = self._check_cluster_exposure(
-                cluster or asset_key, add_risk_pct, current_risk_by_cluster,
-                cluster_cap, total_cap)
+                cluster or asset_key, add_risk_pct, current_risk_by_cluster, cluster_cap, total_cap
+            )
             if not ok:
                 return False, reason
 
@@ -230,12 +239,10 @@ class RiskEngine:
         """Diagnostic snapshot of the aggregated risk state."""
         return {
             "circuit_breaker_tripped": self.state.circuit_breaker_tripped,
-            "current_day": self.state.current_day.isoformat()
-            if self.state.current_day else None,
+            "current_day": self.state.current_day.isoformat() if self.state.current_day else None,
             "starting_equity_today": self.state.starting_equity_today,
             "starting_balance_today": self.state.starting_balance_today,
             "hwm": self.state.hwm,
             "daily_trades_count": dict(self.state.daily_trades_count),
-            "rate_orders_per_asset": {
-                k: len(v) for k, v in self.rate_throttle._orders.items()},
+            "rate_orders_per_asset": {k: len(v) for k, v in self.rate_throttle._orders.items()},
         }

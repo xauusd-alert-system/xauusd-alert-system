@@ -6,6 +6,7 @@ P2-4: pure extraction of the ``_*_message`` helpers from
 event texts and depend on nothing but the immutable ``TradeGroupSpec`` (plus
 explicit data arguments). No I/O, no broker access, trivially testable.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -50,19 +51,14 @@ def format_tp_filled(spec: TradeGroupSpec, label: str, header: str) -> str:
 
 
 def format_be_confirmed(spec: TradeGroupSpec, sl_price: float) -> str:
-    return (
-        f"🟢 BE CONFIRMED\nGroup: {spec.group_id}\n\n"
-        f"SL remaining legs: {sl_price}\nMode: DEMO"
-    )
+    return f"🟢 BE CONFIRMED\nGroup: {spec.group_id}\n\nSL remaining legs: {sl_price}\nMode: DEMO"
 
 
 def format_stopped(spec: TradeGroupSpec) -> str:
     return f"🛑 STOPPED\nGroup: {spec.group_id}\nMode: DEMO"
 
 
-def format_partial_submission(spec: TradeGroupSpec,
-                              opened_legs: list[int],
-                              rejected_legs: list[int]) -> str:
+def format_partial_submission(spec: TradeGroupSpec, opened_legs: list[int], rejected_legs: list[int]) -> str:
     return (
         f"⚠️ TRADE GROUP PARTIAL SUBMISSION\nGroup: {spec.group_id}\n"
         f"Opened legs: {', '.join(str(l) for l in opened_legs) or '-'}\n"
@@ -71,8 +67,7 @@ def format_partial_submission(spec: TradeGroupSpec,
     )
 
 
-def format_failed_after_compensation(spec: TradeGroupSpec,
-                                     reason: str) -> str:
+def format_failed_after_compensation(spec: TradeGroupSpec, reason: str) -> str:
     return (
         f"🛑 TRADE GROUP FAILED\nGroup: {spec.group_id}\n"
         f"Reason: {reason}\nCompensation: CONFIRMED\nOpen risk: 0\nMode: DEMO"

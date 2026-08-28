@@ -31,6 +31,7 @@ Example::
         place_order(...)
         rt.record_order("XAUUSD")
 """
+
 from __future__ import annotations
 
 import threading
@@ -46,12 +47,10 @@ class RateThrottle:
     """Sliding-window rate limiter: at most ``max_orders_per_minute`` orders
     per asset (P2-10: frequency only — no daily limits here)."""
 
-    def __init__(self, cfg: Optional[dict] = None,
-                 max_orders_per_minute: Optional[int] = None):
+    def __init__(self, cfg: Optional[dict] = None, max_orders_per_minute: Optional[int] = None):
         tc = (cfg or {}).get("risk_throttle", {}) or {}
         if max_orders_per_minute is None:
-            max_orders_per_minute = int(
-                tc.get("max_orders_per_minute", _DEFAULT_MAX_ORDERS_PER_MINUTE))
+            max_orders_per_minute = int(tc.get("max_orders_per_minute", _DEFAULT_MAX_ORDERS_PER_MINUTE))
         self.max_orders_per_minute = int(max_orders_per_minute)
         self.window_seconds = float(tc.get("rate_window_seconds", _WINDOW_SECONDS))
         self._lock = threading.Lock()
@@ -73,7 +72,8 @@ class RateThrottle:
                     f"rate_throttled: {len(window)}/"
                     f"{self.max_orders_per_minute} orders in the last "
                     f"{int(self.window_seconds)}s for {asset_key}; "
-                    f"wait {wait}s")
+                    f"wait {wait}s"
+                )
             return True, "OK"
 
     def record_order(self, asset_key: str) -> None:

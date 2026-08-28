@@ -6,6 +6,7 @@ checks are therefore exercised with explicit overrides (no env dependence),
 and the env-based path is covered by clearing the variables via monkeypatch
 before any check runs.
 """
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

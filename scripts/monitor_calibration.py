@@ -21,6 +21,7 @@ n_bin/N * |mean_pred_bin - mean_outcome_bin|.
 
 Brier definition: mean((pred - outcome)^2).
 """
+
 import argparse
 import csv
 import json
@@ -69,13 +70,15 @@ def _ece(
         mean_pred = bin_sums_pred[b] / bin_counts[b]
         mean_out = bin_sums_out[b] / bin_counts[b]
         ece += (bin_counts[b] / n) * abs(mean_pred - mean_out)
-        reliability.append({
-            "bin_low": b / n_bins,
-            "bin_high": (b + 1) / n_bins,
-            "n": bin_counts[b],
-            "mean_pred": mean_pred,
-            "mean_outcome": mean_out,
-        })
+        reliability.append(
+            {
+                "bin_low": b / n_bins,
+                "bin_high": (b + 1) / n_bins,
+                "n": bin_counts[b],
+                "mean_pred": mean_pred,
+                "mean_outcome": mean_out,
+            }
+        )
     return float(ece), reliability
 
 
@@ -97,9 +100,7 @@ def check_calibration(
         }
     """
     if len(predictions) != len(outcomes):
-        raise ValueError(
-            f"predictions/outcomes length mismatch: {len(predictions)} vs {len(outcomes)}"
-        )
+        raise ValueError(f"predictions/outcomes length mismatch: {len(predictions)} vs {len(outcomes)}")
     predictions = [float(p) for p in predictions]
     outcomes = [int(y) for y in outcomes]
     if any(y not in (0, 1) for y in outcomes):
@@ -141,15 +142,16 @@ def _load_records(path: str) -> tuple:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Brier + ECE calibration check on predictions vs outcomes."
-    )
+    parser = argparse.ArgumentParser(description="Brier + ECE calibration check on predictions vs outcomes.")
     parser.add_argument(
-        "--input", required=True,
+        "--input",
+        required=True,
         help="jsonl/csv file with columns pred,outcome",
     )
     parser.add_argument(
-        "--ece-threshold", type=float, default=ECE_WARNING_THRESHOLD,
+        "--ece-threshold",
+        type=float,
+        default=ECE_WARNING_THRESHOLD,
         help=f"ECE above which the report flags miscalibration (default {ECE_WARNING_THRESHOLD})",
     )
     parser.add_argument("--json", action="store_true", help="Emit the report as JSON")
@@ -169,7 +171,8 @@ def main(argv=None) -> int:
         if not report["is_calibrated"]:
             logger.warning(
                 "CALIBRATION WARNING: ECE %.4f > threshold %.2f",
-                report["ece"], args.ece_threshold,
+                report["ece"],
+                args.ece_threshold,
             )
     return 0
 

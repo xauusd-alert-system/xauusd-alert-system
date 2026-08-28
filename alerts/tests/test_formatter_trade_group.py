@@ -1,4 +1,5 @@
 """Telegram formatter tests for the TradeGroupSpec v1 authoritative path (ТЗ §19–§22)."""
+
 from __future__ import annotations
 
 import pytest
@@ -22,24 +23,33 @@ SPEC_DICT = {
     "mode": "paper",
     "side": "long",
     "entry": {"low": 4159.10, "high": 4159.50, "reference": 4159.30},
-    "geometry": {"version": "xau_m15_intraday_v1", "unit": "price",
-                 "step_price": 4.30, "tp1": 4163.60, "tp2": 4167.70,
-                 "tp3": 4171.20, "sl": 4140.30},
+    "geometry": {
+        "version": "xau_m15_intraday_v1",
+        "unit": "price",
+        "step_price": 4.30,
+        "tp1": 4163.60,
+        "tp2": 4167.70,
+        "tp3": 4171.20,
+        "sl": 4140.30,
+    },
     "targets": [
         {"leg": 1, "price": 4163.60, "allocation": 0.333333},
         {"leg": 2, "price": 4167.70, "allocation": 0.333333},
         {"leg": 3, "price": 4171.20, "allocation": 0.333334},
     ],
-    "break_even": {"trigger": "tp1_filled",
-                   "raw_price_policy": "actual_fill",
-                   "protected_price_policy": "actual_fill_plus_cost_buffer",
-                   "apply_to": [2, 3]},
-    "risk": {"currency": "USD", "max_cash": 25.0, "max_pct": 0.50,
-             "estimated_loss_at_sl": 24.73, "total_volume": 0.03},
+    "break_even": {
+        "trigger": "tp1_filled",
+        "raw_price_policy": "actual_fill",
+        "protected_price_policy": "actual_fill_plus_cost_buffer",
+        "apply_to": [2, 3],
+    },
+    "risk": {"currency": "USD", "max_cash": 25.0, "max_pct": 0.50, "estimated_loss_at_sl": 24.73, "total_volume": 0.03},
     "profile_id": "xau_m15_intraday_v1",
-    "model_version": "v3", "model_hash": "m" * 64, "config_hash": "c" * 64,
+    "model_version": "v3",
+    "model_hash": "m" * 64,
+    "config_hash": "c" * 64,
     "strategy_version": "s3",
-    "expires_at_utc_ms": 1_760_000_000_000,   # 2025-10-08-ish; only HH:MM shown
+    "expires_at_utc_ms": 1_760_000_000_000,  # 2025-10-08-ish; only HH:MM shown
     "created_at_utc_ms": 1_700_000_000_000,
 }
 
@@ -64,9 +74,15 @@ def test_short_spec_uses_red_emoji():
     short = dict(SPEC_DICT)
     short["side"] = "short"
     short["entry"] = {"low": 4159.10, "high": 4159.50, "reference": 4159.30}
-    short["geometry"] = {"version": "xau_m15_intraday_v1", "unit": "price",
-                         "step_price": 4.30, "tp1": 4155.00, "tp2": 4150.70,
-                         "tp3": 4146.40, "sl": 4179.30}
+    short["geometry"] = {
+        "version": "xau_m15_intraday_v1",
+        "unit": "price",
+        "step_price": 4.30,
+        "tp1": 4155.00,
+        "tp2": 4150.70,
+        "tp3": 4146.40,
+        "sl": 4179.30,
+    }
     short["targets"] = [
         {"leg": 1, "price": 4155.00, "allocation": 0.333333},
         {"leg": 2, "price": 4150.70, "allocation": 0.333333},
@@ -81,13 +97,15 @@ def test_no_recomputation_for_trade_group_v1():
     """ТЗ §19/§28.3: for trade-group.v1 the formatter must render the FINAL
     geometry even when the payload also carries conflicting legacy fields."""
     conflicting = dict(SPEC_DICT)
-    conflicting.update({
-        "step": 99.0,                      # would change levels if recomputed
-        "atr": 50.0,
-        "entry_zone": [100.0, 101.0],      # would change entry if recomputed
-        "invalidation": 1000.0,            # would change SL if recomputed
-        "confidence": 0.99,
-    })
+    conflicting.update(
+        {
+            "step": 99.0,  # would change levels if recomputed
+            "atr": 50.0,
+            "entry_zone": [100.0, 101.0],  # would change entry if recomputed
+            "invalidation": 1000.0,  # would change SL if recomputed
+            "confidence": 0.99,
+        }
+    )
     msg = format_clean_signal_message(conflicting, asset_key="XAUUSD")
     assert "TP1: 4163.6" in msg
     assert "TP2: 4167.7" in msg
@@ -115,21 +133,26 @@ def test_group_spec_embedded_dict_route():
 def test_legacy_fallback_still_works():
     """Legacy equal-step fallback (only for signals WITHOUT trade-group.v1)."""
     legacy = {
-        "bias": "long", "confidence": 0.7, "regime": "trend_up",
-        "session": "london", "entry_zone": [4159.10, 4159.50],
-        "step": 4.30, "invalidation": 4140.30,
+        "bias": "long",
+        "confidence": 0.7,
+        "regime": "trend_up",
+        "session": "london",
+        "entry_zone": [4159.10, 4159.50],
+        "step": 4.30,
+        "invalidation": 4140.30,
     }
     msg = format_signal_message(legacy, asset_key="XAUUSD")
-    assert "TP1: 4163.6" in msg     # 4159.3 + 4.3
-    assert "TP2: 4167.9" in msg     # 4159.3 + 2*4.3
+    assert "TP1: 4163.6" in msg  # 4159.3 + 4.3
+    assert "TP2: 4167.9" in msg  # 4159.3 + 2*4.3
     # legacy equal-step fallback uses 3*step stop when no target legs supplied
-    assert "Стоп: 4146.4" in msg    # 4159.3 - 3*4.3
+    assert "Стоп: 4146.4" in msg  # 4159.3 - 3*4.3
 
 
 def test_legacy_path_never_extends_supplied_legs():
     """ТЗ §28.3 regression: supplied target legs are authoritative in legacy too."""
     signal = {
-        "bias": "short", "entry_zone": [4200.0, 4201.0],
+        "bias": "short",
+        "entry_zone": [4200.0, 4201.0],
         "target_legs": [{"price": 4196.0}, {"price": 4192.0}, {"price": 4188.0}],
         "invalidation": 4212.0,
     }
@@ -178,23 +201,34 @@ SHORT_100 = {
     "mode": "paper",
     "side": "short",
     "entry": {"low": 99.0, "high": 101.0, "reference": 100.0},
-    "geometry": {"version": "dir_v1", "unit": "price", "step_price": 4.0,
-                 "tp1": 96.0, "tp2": 92.0, "tp3": 88.0, "sl": 110.0},
+    "geometry": {
+        "version": "dir_v1",
+        "unit": "price",
+        "step_price": 4.0,
+        "tp1": 96.0,
+        "tp2": 92.0,
+        "tp3": 88.0,
+        "sl": 110.0,
+    },
     "targets": [
         {"leg": 1, "price": 96.0, "allocation": 0.333333},
         {"leg": 2, "price": 92.0, "allocation": 0.333333},
         {"leg": 3, "price": 88.0, "allocation": 0.333334},
     ],
-    "break_even": {"trigger": "tp1_filled",
-                   "raw_price_policy": "actual_fill",
-                   "protected_price_policy": "actual_fill_plus_cost_buffer",
-                   "apply_to": [2, 3]},
-    "risk": {"currency": "USD", "max_cash": 25.0, "max_pct": 0.5,
-             "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
+    "break_even": {
+        "trigger": "tp1_filled",
+        "raw_price_policy": "actual_fill",
+        "protected_price_policy": "actual_fill_plus_cost_buffer",
+        "apply_to": [2, 3],
+    },
+    "risk": {"currency": "USD", "max_cash": 25.0, "max_pct": 0.5, "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
     "profile_id": "dir_v1",
-    "model_version": "v3", "model_hash": "m" * 64, "config_hash": "c" * 64,
+    "model_version": "v3",
+    "model_hash": "m" * 64,
+    "config_hash": "c" * 64,
     "strategy_version": "s3",
-    "expires_at_utc_ms": 1_800_000_000_000, "created_at_utc_ms": 1_700_000_000_000,
+    "expires_at_utc_ms": 1_800_000_000_000,
+    "created_at_utc_ms": 1_700_000_000_000,
 }
 
 
@@ -220,6 +254,7 @@ def test_short_parity_full_layout():
 # Follow-up ТЗ §14: every missing final-geometry field -> formatter_error
 # ==========================================================================
 
+
 @pytest.mark.parametrize("field", ["tp1", "tp2", "tp3", "sl", "entry.reference"])
 def test_missing_geometry_field_is_formatter_error(field):
     broken = dict(SHORT_100)
@@ -239,6 +274,7 @@ def test_missing_geometry_field_is_formatter_error(field):
 # P2-21 / TZ Часть 7 п.7.2: single formatting path through the trade group
 # builder. The v1 path is PRIMARY (no deprecation); the legacy recomputation
 # path is deprecated and must warn.
+
 
 def test_formatter_uses_geometry_payload():
     """P2-21: the trade-group.v1 path reads levels straight from
@@ -272,5 +308,5 @@ def test_legacy_path_warns():
     }
     with pytest.warns(DeprecationWarning, match="legacy signal formatting"):
         msg = format_signal_message(legacy, asset_key="XAUUSD")
-    assert "TP1: 4163.6" in msg      # legacy rendering still works
-    assert "Group:" not in msg       # ...but it is NOT the trade-group path
+    assert "TP1: 4163.6" in msg  # legacy rendering still works
+    assert "Group:" not in msg  # ...but it is NOT the trade-group path

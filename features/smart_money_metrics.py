@@ -14,6 +14,7 @@ institutional participation. ``SOURCE_KIND = "ohlcv_proxy"`` is attached to
 every parameter result so no downstream consumer can mistake the proxy for a
 real-flow source.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -79,15 +80,15 @@ def calculate_manipulation_index(df: pd.DataFrame, window: int = 20) -> tuple[in
     fakeout_count = (swept_high | swept_low).sum()
 
     # Score calculation (1 to 10)
-    raw_score = (
-        (mean_wick * 4.0) +
-        (absorption_bars * 1.2) +
-        (fakeout_count * 1.5)
-    )
+    raw_score = (mean_wick * 4.0) + (absorption_bars * 1.2) + (fakeout_count * 1.5)
     score = int(np.clip(round(raw_score), 1, 10))
 
     if score >= 7:
-        text = "высокий уровень манипулятивного паттерна по свечному прокси (фитили/ложные пробои). Контекст-скор, не подтверждение реального потока."
+        text = (
+            "высокий уровень манипулятивного паттерна по свечному прокси "
+            "(фитили/ложные пробои). Контекст-скор, не подтверждение "
+            "реального потока."
+        )
     elif score >= 5:
         text = "умеренная манипулятивная активность на локальных уровнях."
     else:
@@ -143,7 +144,11 @@ def calculate_zone_strength(df: pd.DataFrame, window: int = 50) -> tuple[int, st
     elif strength <= 60:
         text = "зона умеренной силы. Возможна локальная консолидация перед импульсом."
     else:
-        text = "сильная структурная зона по свечному прокси (частые касания уровня, объём у уровня). Прокси-скор, не подтверждение ликвидности."
+        text = (
+            "сильная структурная зона по свечному прокси (частые касания "
+            "уровня, объём у уровня). Прокси-скор, не подтверждение "
+            "ликвидности."
+        )
 
     return strength, text
 
@@ -180,7 +185,11 @@ def calculate_smf_ratio(df: pd.DataFrame, window: int = 30) -> tuple[float, str]
     dir_word = "вниз" if recent_delta <= 0 else "вверх"
 
     if ratio >= 2.0:
-        text = f"объёмный прокси направленного потока с коэффициентом {ratio:.1f} к 1 (крупные бары vs мелкие). Не является реальным торговым потоком."
+        text = (
+            f"объёмный прокси направленного потока с коэффициентом "
+            f"{ratio:.1f} к 1 (крупные бары vs мелкие). Не является "
+            f"реальным торговым потоком."
+        )
     elif ratio >= 1.2:
         text = f"преобладание крупно-объёмного прокси ({ratio:.2f}x). Прокси-оценка, не реальный поток."
     else:
@@ -220,7 +229,11 @@ def calculate_liquidity_grab(df: pd.DataFrame, window: int = 30) -> tuple[int, s
     score = int(np.clip(round(sweep_count * 2.0 + wick_atr_ratio * 3.0 + 2), 1, 10))
 
     if score >= 7:
-        text = "активный паттерн прокси-свипа локальных уровней (фитиль за экстремум с возвратом). Паттерн-скор, не подтверждение ликвидности."
+        text = (
+            "активный паттерн прокси-свипа локальных уровней (фитиль за "
+            "экстремум с возвратом). Паттерн-скор, не подтверждение "
+            "ликвидности."
+        )
     elif score >= 4:
         text = "локальные сборы стопов вблизи ключевых экстремумов."
     else:
@@ -284,8 +297,7 @@ def _provenance_keys(name: str, n_bars: int) -> Dict[str, Any]:
     return {
         "source_kind": SOURCE_KIND,
         "lookback": int(meta["lookback"]),
-        "data_status": "sufficient" if n_bars >= int(meta["min_bars"])
-        else "insufficient",
+        "data_status": "sufficient" if n_bars >= int(meta["min_bars"]) else "insufficient",
     }
 
 
@@ -340,8 +352,7 @@ def compute_institutional_metrics(df: pd.DataFrame) -> Dict[str, Any]:
         },
         "source_provenance": {
             "source_kind": SOURCE_KIND,
-            "lookbacks": {name: meta["lookback"]
-                          for name, meta in PARAMETER_META.items()},
+            "lookbacks": {name: meta["lookback"] for name, meta in PARAMETER_META.items()},
             "note": "OHLCV proxy only; NOT real trade flow / L2 / MBO / on-chain",
         },
     }
@@ -361,5 +372,7 @@ def format_institutional_metrics_report(metrics: Dict[str, Any]) -> str:
         f"**SMF Ratio: {m['smf_ratio']['display']}** — {m['smf_ratio']['text']}\n\n"
         f"**Liquidity Grab: {m['liquidity_grab']['display']}** — {m['liquidity_grab']['text']}\n\n"
         f"**Delta Confidence: {m['delta_confidence']['display']}** — {m['delta_confidence']['text']}\n\n"
-        "_Источник: OHLCV-прокси (не реальный торговый поток / L2 / MBO / on-chain). Прокси-паттерн, не подтверждение институционального участия._"
+        "_Источник: OHLCV-прокси (не реальный торговый поток / L2 / MBO / "
+        "on-chain). Прокси-паттерн, не подтверждение институционального "
+        "участия._"
     )

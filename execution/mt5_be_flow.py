@@ -10,6 +10,7 @@ Behavior is unchanged: every broker action stays idempotent via
 ``mark_action``, the broker SL is queried BEFORE any modify (restart-safe,
 ТЗ §29) and a rejected modify is never marked as completed (ТЗ §20).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -32,33 +33,41 @@ def request_be(executor, group: dict[str, Any]) -> str:
     spec: TradeGroupSpec = group["spec"]
     require_transition(group["state"], GroupState.BE_REQUESTED)
     if spec.entry.actual_fill is None:
-        raise ExecutionForbidden(
-            "break-even requires a confirmed actual fill"
-        )
-    be = compute_break_even(side=spec.side, actual_fill=spec.entry.actual_fill,
-                            cost=executor.cost,
-                            broker=MT5BrokerContext(executor.mt5, magic=executor.magic)
-                            .broker_snapshot(spec.broker_symbol))
+        raise ExecutionForbidden("break-even requires a confirmed actual fill")
+    be = compute_break_even(
+        side=spec.side,
+        actual_fill=spec.entry.actual_fill,
+        cost=executor.cost,
+        broker=MT5BrokerContext(executor.mt5, magic=executor.magic).broker_snapshot(spec.broker_symbol),
+    )
     be_state = dict(group.get("be_state") or {})
-    be_state.update({
-        "status": BeStatus.BE_REQUESTED.value,
-        "raw_price": be["raw_price"],
-        "protected_price": be["protected_price"],
-        "requested_price": be["protected_price"],
-        "retries": int(be_state.get("retries", 0)),
-    })
-    update_group_state(executor.db_path, group_id, GroupState.BE_REQUESTED,
-                       be_state=be_state)
+    be_state.update(
+        {
+            "status": BeStatus.BE_REQUESTED.value,
+            "raw_price": be["raw_price"],
+            "protected_price": be["protected_price"],
+            "requested_price": be["protected_price"],
+            "retries": int(be_state.get("retries", 0)),
+        }
+    )
+    update_group_state(executor.db_path, group_id, GroupState.BE_REQUESTED, be_state=be_state)
     append_trading_event(
-        executor.ledger_db_path, event_type="be_requested",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+        executor.ledger_db_path,
+        event_type="be_requested",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
         group_id=group_id,
-        payload={"raw_price": be["raw_price"],
-                 "protected_price": be["protected_price"],
-                 "requested_price": be["protected_price"],
-                 "apply_to": spec.break_even.apply_to, "mode": spec.mode},
+        payload={
+            "raw_price": be["raw_price"],
+            "protected_price": be["protected_price"],
+            "requested_price": be["protected_price"],
+            "apply_to": spec.break_even.apply_to,
+            "mode": spec.mode,
+        },
     )
     return "be_requested"
 
@@ -81,15 +90,13 @@ def verify_be(executor, group: dict[str, Any]) -> str:
     refs = [be_ref(group, leg, driver) for leg in spec.break_even.apply_to]
     for leg, ref in zip(spec.break_even.apply_to, refs):
         if ref is None:
-            return be_retry(executor, group, be_state,
-                            f"leg {leg} has no broker position to protect")
+            return be_retry(executor, group, be_state, f"leg {leg} has no broker position to protect")
         action_id = f"BE-L{leg}" if driver.account_mode == "hedging" else "BE"
         observed = driver.query_sl(ref)
         if observed is not None and abs(observed - requested) <= 1e-9:
             # broker already protects this leg (this poll or a previous
             # process) -> record completion, never re-modify (ТЗ §29)
-            mark_action(executor.db_path, group_id, action_id,
-                        {"leg": leg, "sl": requested})
+            mark_action(executor.db_path, group_id, action_id, {"leg": leg, "sl": requested})
             continue
         accepted, comment = driver.modify_sl(ref, requested)
         if not accepted:
@@ -99,30 +106,33 @@ def verify_be(executor, group: dict[str, Any]) -> str:
             return be_retry(executor, group, be_state, comment)
         # success recorded BEFORE the verification pass so a lagging
         # broker query can never cause a duplicate SL modify
-        mark_action(executor.db_path, group_id, action_id,
-                    {"leg": leg, "sl": requested})
+        mark_action(executor.db_path, group_id, action_id, {"leg": leg, "sl": requested})
     # verify ALL required refs via broker query
     for ref in refs:
         observed = driver.query_sl(ref)
         if observed is None or abs(observed - requested) > 1e-9:
-            return be_retry(
-                executor, group, be_state, f"SL query mismatch observed={observed}"
-            )
-    be_state.update({"status": BeStatus.BE_CONFIRMED.value,
-                     "confirmed_price": requested, "last_error": None})
-    update_group_state(executor.db_path, group_id, GroupState.BE_CONFIRMED,
-                       be_state=be_state)
+            return be_retry(executor, group, be_state, f"SL query mismatch observed={observed}")
+    be_state.update({"status": BeStatus.BE_CONFIRMED.value, "confirmed_price": requested, "last_error": None})
+    update_group_state(executor.db_path, group_id, GroupState.BE_CONFIRMED, be_state=be_state)
     append_trading_event(
-        executor.ledger_db_path, event_type="be_confirmed",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+        executor.ledger_db_path,
+        event_type="be_confirmed",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
         group_id=group_id,
-        source="mt5", source_type="position",
+        source="mt5",
+        source_type="position",
         source_id=f"POSITION:{spec.group_id}:{int(requested * 1000)}",
-        payload={"confirmed_price": requested, "raw_price": be_state.get("raw_price"),
-                 "mode": spec.mode,
-                 "evidence": "broker_position_query"},
+        payload={
+            "confirmed_price": requested,
+            "raw_price": be_state.get("raw_price"),
+            "mode": spec.mode,
+            "evidence": "broker_position_query",
+        },
     )
     if executor.notifier:
         executor.notifier(executor._be_message(spec, requested))
@@ -141,33 +151,39 @@ def be_ref(group: dict[str, Any], leg: int, driver) -> str | None:
     return new_leg_id(group["group_id"], leg)
 
 
-def be_retry(executor, group: dict[str, Any], be_state: dict[str, Any],
-             error: str) -> str:
+def be_retry(executor, group: dict[str, Any], be_state: dict[str, Any], error: str) -> str:
     group_id = group["group_id"]
     spec: TradeGroupSpec = group["spec"]
     retries = int(be_state.get("retries", 0)) + 1
-    be_state.update({"status": BeStatus.BE_RETRY.value, "retries": retries,
-                     "last_error": error})
+    be_state.update({"status": BeStatus.BE_RETRY.value, "retries": retries, "last_error": error})
     if retries >= executor.max_be_retries:
-        update_group_state(executor.db_path, group_id, GroupState.FAILED,
-                           be_state=be_state)
+        update_group_state(executor.db_path, group_id, GroupState.FAILED, be_state=be_state)
         append_trading_event(
-            executor.ledger_db_path, event_type="execution_error",
-            signal_id=spec.signal_id, asset_key=spec.asset_key,
-            strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-            model_hash=spec.model_hash, actor="mt5_trade_group_executor",
-            reason="BE retries exhausted", group_id=group_id,
+            executor.ledger_db_path,
+            event_type="execution_error",
+            signal_id=spec.signal_id,
+            asset_key=spec.asset_key,
+            strategy_version=spec.strategy_version,
+            config_hash=spec.config_hash,
+            model_hash=spec.model_hash,
+            actor="mt5_trade_group_executor",
+            reason="BE retries exhausted",
+            group_id=group_id,
             payload={"retries": retries, "last_error": error, "mode": spec.mode},
         )
         return "failed"
-    update_group_state(executor.db_path, group_id, GroupState.BE_RETRY,
-                       be_state=be_state)
+    update_group_state(executor.db_path, group_id, GroupState.BE_RETRY, be_state=be_state)
     append_trading_event(
-        executor.ledger_db_path, event_type="be_retry",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
-        reason=error, group_id=group_id,
+        executor.ledger_db_path,
+        event_type="be_retry",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
+        reason=error,
+        group_id=group_id,
         payload={"retries": retries, "mode": spec.mode},
     )
     return "retry"

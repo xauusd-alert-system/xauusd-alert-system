@@ -35,6 +35,7 @@ Commands
 /resume  — set trader.dry_run = False
 /closeall — market-close every open position (emergency stop)
 """
+
 from __future__ import annotations
 
 import logging
@@ -77,26 +78,22 @@ def parse_admin_ids(raw: str | None) -> frozenset[str]:
 class TelegramControlBot:
     """Long-polling Telegram bot that controls a running MultiAssetMT5Trader."""
 
-    POLL_TIMEOUT = 30          # seconds for long-poll
-    RETRY_SLEEP  = 5           # seconds between retries on network error
-    MAX_BACKOFF  = 60          # audit B: cap for exponential poll backoff
-    STALE_UPDATE_SECONDS = 600 # audit C: ignore updates older than this
+    POLL_TIMEOUT = 30  # seconds for long-poll
+    RETRY_SLEEP = 5  # seconds between retries on network error
+    MAX_BACKOFF = 60  # audit B: cap for exponential poll backoff
+    STALE_UPDATE_SECONDS = 600  # audit C: ignore updates older than this
 
     def __init__(self, trader: "MultiAssetMT5Trader") -> None:
         self.trader = trader
         self.token: str = get_env("TELEGRAM_BOT_TOKEN", required=True)
         # Admin chat ID: only this chat can issue mutating commands.
         self.admin_id: str = str(
-            get_env("TELEGRAM_ADMIN_CHAT_ID", required=False)
-            or get_env("TELEGRAM_CHAT_ID", required=False)
-            or ""
+            get_env("TELEGRAM_ADMIN_CHAT_ID", required=False) or get_env("TELEGRAM_CHAT_ID", required=False) or ""
         )
         # ТЗ 10.3: additional admin whitelist (comma-separated ids). The
         # single admin chat above stays authoritative; the whitelist only
         # EXTENDS access, never relaxes the fail-closed no-config refusal.
-        self.admin_ids: frozenset[str] = parse_admin_ids(
-            get_env("TELEGRAM_ADMIN_IDS", required=False)
-        )
+        self.admin_ids: frozenset[str] = parse_admin_ids(get_env("TELEGRAM_ADMIN_IDS", required=False))
         self._base = f"https://api.telegram.org/bot{self.token}"
         self._offset: int = 0
         self._stop = threading.Event()
@@ -189,7 +186,7 @@ class TelegramControlBot:
         if not text.startswith("/"):
             return
         parts = text.split()
-        cmd = parts[0].lower().split("@")[0]   # strip /cmd@botname
+        cmd = parts[0].lower().split("@")[0]  # strip /cmd@botname
         args = tuple(parts[1:])
         logger.info("Command '%s' (args=%s) from chat_id=%s", cmd, args, chat_id)
         try:
@@ -206,38 +203,51 @@ class TelegramControlBot:
     # Commands exposing account/position data — admin-only (same chat the
     # alerts go to). Mutating commands were already admin-only; this extends
     # the same fail-closed guard to read-outs of sensitive data.
-    ADMIN_COMMANDS = frozenset({
-        "/status", "/positions", "/metrics", "/why", "/account", "/paper",
-        "/pause", "/resume", "/closeall",
-        # challenge (HashHedge manual system) commands
-        "/day", "/journal", "/scan", "/alert", "/stats",
-        # forex: pairs analysis (pairs_analysis module)
-        "/pairs",
-        # news: economic calendar
-        "/news",
-    })
+    ADMIN_COMMANDS = frozenset(
+        {
+            "/status",
+            "/positions",
+            "/metrics",
+            "/why",
+            "/account",
+            "/paper",
+            "/pause",
+            "/resume",
+            "/closeall",
+            # challenge (HashHedge manual system) commands
+            "/day",
+            "/journal",
+            "/scan",
+            "/alert",
+            "/stats",
+            # forex: pairs analysis (pairs_analysis module)
+            "/pairs",
+            # news: economic calendar
+            "/news",
+        }
+    )
 
     def _dispatch(self, cmd: str, chat_id: str, args: tuple = ()) -> None:
         handlers = {
-            "/start":     self._cmd_start,
-            "/help":      self._cmd_help,
-            "/status":    self._cmd_status,
-            "/metrics":   self._cmd_metrics,
+            "/start": self._cmd_start,
+            "/help": self._cmd_help,
+            "/status": self._cmd_status,
+            "/metrics": self._cmd_metrics,
             "/positions": self._cmd_positions,
-            "/why":       self._cmd_why,
-            "/account":   self._cmd_account,
-            "/paper":     self._cmd_paper,
-            "/pause":     self._cmd_pause,
-            "/resume":    self._cmd_resume,
-            "/closeall":  self._cmd_closeall,
+            "/why": self._cmd_why,
+            "/account": self._cmd_account,
+            "/paper": self._cmd_paper,
+            "/pause": self._cmd_pause,
+            "/resume": self._cmd_resume,
+            "/closeall": self._cmd_closeall,
             # challenge (HashHedge manual system) commands — one bot, two systems
-            "/day":       self._cmd_challenge_day,
-            "/journal":   self._cmd_challenge_journal,
-            "/scan":      self._cmd_challenge_scan,
-            "/alert":     self._cmd_challenge_alert,
-            "/stats":     self._cmd_challenge_stats,
-            "/pairs":     self._cmd_challenge_pairs,
-            "/news":      self._cmd_news,
+            "/day": self._cmd_challenge_day,
+            "/journal": self._cmd_challenge_journal,
+            "/scan": self._cmd_challenge_scan,
+            "/alert": self._cmd_challenge_alert,
+            "/stats": self._cmd_challenge_stats,
+            "/pairs": self._cmd_challenge_pairs,
+            "/news": self._cmd_news,
         }
         fn = handlers.get(cmd)
         if fn is None:
@@ -266,8 +276,8 @@ class TelegramControlBot:
             return True
         if self.admin_ids:
             logger.warning(
-                "Unauthorized Telegram command from chat_id=%s (not in TELEGRAM_ADMIN_IDS "
-                "and not the admin chat)", chat_id,
+                "Unauthorized Telegram command from chat_id=%s (not in TELEGRAM_ADMIN_IDS and not the admin chat)",
+                chat_id,
             )
         return False
 
@@ -285,14 +295,16 @@ class TelegramControlBot:
         return True
 
     def _cmd_start(self, chat_id: str, args: tuple = ()) -> None:
-        self._send(chat_id,
+        self._send(
+            chat_id,
             "🤖 *Control Panel — XAUUSD AutoTrader + HashHedge Challenge*\n\n"
             "Один бот, две системы. Use /help to see available commands.",
             parse_mode="Markdown",
         )
 
     def _cmd_help(self, chat_id: str, args: tuple = ()) -> None:
-        self._send(chat_id,
+        self._send(
+            chat_id,
             "📖 *Available commands:*\n"
             "— XAUUSD (forex-система) —\n"
             "/status — trader state + open positions (P&L в $ и в R)\n"
@@ -330,6 +342,7 @@ class TelegramControlBot:
             return
         try:
             from alerts import challenge_commands as cc
+
             cc.cmd_day(self._send, chat_id, args)
         except Exception as exc:
             logger.exception("/day failed")
@@ -340,6 +353,7 @@ class TelegramControlBot:
             return
         try:
             from alerts import challenge_commands as cc
+
             cc.cmd_journal(self._send, chat_id, args)
         except Exception as exc:
             logger.exception("/journal failed")
@@ -348,15 +362,18 @@ class TelegramControlBot:
     def _cmd_challenge_scan(self, chat_id: str, args: tuple = ()) -> None:
         if not self._require_admin(chat_id):
             return
+
         # Run the scan in a background thread so the polling loop (and with it
         # the trader's only command channel) never blocks on API round-trips.
         def _worker():
             try:
                 from alerts import challenge_commands as cc
+
                 cc.cmd_scan(self._send, chat_id, args)
             except Exception as exc:
                 logger.exception("/scan failed")
                 self._send(chat_id, f"❌ Scan error: {exc}")
+
         threading.Thread(target=_worker, name="tg-challenge-scan", daemon=True).start()
 
     def _cmd_challenge_alert(self, chat_id: str, args: tuple = ()) -> None:
@@ -364,6 +381,7 @@ class TelegramControlBot:
             return
         try:
             from alerts import challenge_commands as cc
+
             cc.cmd_alert(self._send, chat_id, args)
         except Exception as exc:
             logger.exception("/alert failed")
@@ -374,13 +392,14 @@ class TelegramControlBot:
             return
         try:
             from alerts import challenge_commands as cc
+
             cc.cmd_stats(self._send, chat_id, args)
         except Exception as exc:
             logger.exception("/stats failed")
             self._send(chat_id, f"❌ Stats error: {exc}")
 
     def _cmd_news(self, chat_id: str, args: tuple = ()) -> None:
-        "/news — upcoming high-impact events + news guard status."""
+        "/news — upcoming high-impact events + news guard status."
         if not self._require_admin(chat_id):
             return
         try:
@@ -394,7 +413,10 @@ class TelegramControlBot:
             # Determine asset context from args
             asset_key = str(args[0]).upper() if args else None
             if asset_key and asset_key not in ("XAUUSD", "XAGUSD", "BTCUSD", "EURUSD", "GBPUSD", "ALL"):
-                self._send(chat_id, f"❓ Неизвестный актив: {asset_key}. Доступные: XAUUSD, XAGUSD, BTCUSD, EURUSD, GBPUSD, ALL")
+                self._send(
+                    chat_id,
+                    f"❓ Неизвестный актив: {asset_key}. Доступные: XAUUSD, XAGUSD, BTCUSD, EURUSD, GBPUSD, ALL",
+                )
                 return
 
             hours = 48.0
@@ -412,6 +434,7 @@ class TelegramControlBot:
             currencies = None
             if asset_key and asset_key != "ALL":
                 from news.guard import ASSET_CURRENCIES
+
                 currencies = ASSET_CURRENCIES.get(asset_key)
 
             events_text = feed.format_upcoming(hours=hours)
@@ -432,6 +455,7 @@ class TelegramControlBot:
                 msg = self._pair_monitor.query_all()
             else:
                 from alerts.pair_monitor import PairMonitor
+
                 pm = PairMonitor(send_fn=self._send, admin_chat_id=chat_id)
                 msg = pm.query_all()
             self._send(chat_id, msg)
@@ -457,6 +481,7 @@ class TelegramControlBot:
                 compute_institutional_metrics,
                 format_institutional_metrics_report,
             )
+
             candles = None
             source = "synthetic"
             # Prefer REAL candles from the running trader's pipeline (any enabled
@@ -498,6 +523,7 @@ class TelegramControlBot:
             return
         try:
             from alerts import status_commands as sc
+
             if not sc.ensure_mt5_connection():
                 self._send(chat_id, "⚠️ MT5 терминал недоступен — статус получить нельзя.")
                 return
@@ -510,7 +536,10 @@ class TelegramControlBot:
             contexts = sc.load_position_contexts()
             cfg = getattr(self.trader, "cfg", {})
             msg = sc.format_status_report(
-                info, positions, contexts, cfg,
+                info,
+                positions,
+                contexts,
+                cfg,
                 dry_run=bool(getattr(self.trader, "dry_run", False)),
                 n_assets=len(getattr(self.trader, "pipelines", {}) or {}),
             )
@@ -529,11 +558,14 @@ class TelegramControlBot:
             return
         if not args:
             known = ", ".join(sorted((getattr(self.trader, "cfg", {}) or {}).get("assets", {}).keys()))
-            self._send(chat_id, f"❓ Использование: /why <ASSET>  (например: /why XAUUSD)\nИзвестные активы: {known or 'n/a'}")
+            self._send(
+                chat_id, f"❓ Использование: /why <ASSET>  (например: /why XAUUSD)\nИзвестные активы: {known or 'n/a'}"
+            )
             return
         asset_key = str(args[0]).upper()
         try:
             from alerts import status_commands as sc
+
             cfg = getattr(self.trader, "cfg", {}) or {}
             asset_cfg = cfg.get("assets", {}).get(asset_key)
             if not asset_cfg:
@@ -548,8 +580,12 @@ class TelegramControlBot:
             positions = list(m.positions_get(symbol=mt5_symbol) or [])
             position = positions[0] if positions else None
             if len(positions) > 1:
-                logger.warning("/why %s: %d open positions; explaining #%s",
-                               asset_key, len(positions), getattr(position, "ticket", "?"))
+                logger.warning(
+                    "/why %s: %d open positions; explaining #%s",
+                    asset_key,
+                    len(positions),
+                    getattr(position, "ticket", "?"),
+                )
             contexts = sc.load_position_contexts()
             context = contexts.get(str(getattr(position, "ticket", ""))) if position else None
             msg = sc.format_why_report(asset_key, mt5_symbol, position, context)
@@ -567,6 +603,7 @@ class TelegramControlBot:
             return
         try:
             from alerts import status_commands as sc
+
             if not sc.ensure_mt5_connection():
                 self._send(chat_id, "⚠️ MT5 терминал недоступен — метрики получить нельзя.")
                 return
@@ -612,6 +649,7 @@ class TelegramControlBot:
             return
         try:
             from alerts import status_commands as sc
+
             if not sc.ensure_mt5_connection():
                 self._send(chat_id, "⚠️ MT5 терминал недоступен — данные счёта получить нельзя.")
                 return
@@ -627,6 +665,7 @@ class TelegramControlBot:
     def _cmd_positions(self, chat_id: str, args: tuple = ()) -> None:
         try:
             import MetaTrader5 as mt5
+
             positions = mt5.positions_get(magic=self.trader.magic_number) or []
             if not positions:
                 self._send(chat_id, "🟢 No open positions.")
@@ -646,7 +685,9 @@ class TelegramControlBot:
     def _cmd_pause(self, chat_id: str, args: tuple = ()) -> None:
         self.trader.dry_run = True
         logger.info("Trader PAUSED via Telegram (dry_run=True)")
-        self._send(chat_id, "⏸ Trader *paused*. No new orders will be sent. Use /resume to re-enable.", parse_mode="Markdown")
+        self._send(
+            chat_id, "⏸ Trader *paused*. No new orders will be sent. Use /resume to re-enable.", parse_mode="Markdown"
+        )
 
     def _cmd_resume(self, chat_id: str, args: tuple = ()) -> None:
         self.trader.dry_run = False
@@ -656,6 +697,7 @@ class TelegramControlBot:
     def _cmd_closeall(self, chat_id: str, args: tuple = ()) -> None:
         try:
             import MetaTrader5 as mt5
+
             positions = mt5.positions_get(magic=self.trader.magic_number) or []
             if not positions:
                 self._send(chat_id, "🟢 No open positions to close.")
@@ -711,7 +753,6 @@ class TelegramControlBot:
                 params.pop("parse_mode")
                 resp = requests.post(f"{self._base}/sendMessage", data=params, timeout=10)
             if not resp.ok:
-                logger.warning("sendMessage to %s failed: %s %s",
-                               chat_id, resp.status_code, resp.text[:200])
+                logger.warning("sendMessage to %s failed: %s %s", chat_id, resp.status_code, resp.text[:200])
         except Exception as exc:
             logger.warning("Send failed: %s", exc)

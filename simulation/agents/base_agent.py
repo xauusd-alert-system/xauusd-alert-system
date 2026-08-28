@@ -4,6 +4,7 @@ Base agent interface for the virtual market simulation.
 Every simulated participant subclasses BaseAgent and implements act(),
 returning an Order (or None when the agent stays quiet on that tick).
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

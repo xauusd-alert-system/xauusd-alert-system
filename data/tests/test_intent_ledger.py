@@ -1,4 +1,5 @@
 """Tests for data/intent_ledger.py (immutable SignalIntent store)."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -11,10 +12,19 @@ from data.intent_ledger import append_signal_intent, read_signal_intent
 
 def _intent(intent_id: str = "ab" * 16):
     return build_signal_intent(
-        asset_key="XAUUSD", broker_symbol="GOLD", side="long",
-        requested_volume=0.1, entry_price=4250.0, sl_price=4240.0, tp_price=4270.0,
-        model_version="v3", config_hash="c" * 64, mode="demo_systematic",
-        magic_number=777111, signal_id="sig-1", created_at_utc_ms=1_700_000_000_000,
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        side="long",
+        requested_volume=0.1,
+        entry_price=4250.0,
+        sl_price=4240.0,
+        tp_price=4270.0,
+        model_version="v3",
+        config_hash="c" * 64,
+        mode="demo_systematic",
+        magic_number=777111,
+        signal_id="sig-1",
+        created_at_utc_ms=1_700_000_000_000,
         intent_id=intent_id,
     )
 

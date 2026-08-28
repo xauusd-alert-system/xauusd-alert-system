@@ -7,6 +7,7 @@ correlation-safe short id in the order comment). The table is append-only and
 idempotent by ``intent_id``; the same intent delivered twice (restart, retry)
 never creates a second row.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ TABLE = "ledger_intents"
 
 def init_intent_ledger(db_path: str) -> None:
     from data.storage import get_connection
+
     conn = get_connection(db_path)
     try:
         conn.execute(f"""CREATE TABLE IF NOT EXISTS {TABLE} (
@@ -42,8 +44,7 @@ def init_intent_ledger(db_path: str) -> None:
             intent_hash TEXT NOT NULL,
             payload_json TEXT NOT NULL
         )""")
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_asset "
-                     f"ON {TABLE}(asset_key, created_at_utc_ms)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_asset ON {TABLE}(asset_key, created_at_utc_ms)")
         for action in ("UPDATE", "DELETE"):
             conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{TABLE}_{action.lower()}
                 BEFORE {action} ON {TABLE} BEGIN
@@ -56,21 +57,33 @@ def init_intent_ledger(db_path: str) -> None:
 def append_signal_intent(db_path: str, intent: SignalIntent) -> str:
     """Persist an intent idempotently; returns its intent_id."""
     init_intent_ledger(db_path)
-    payload_json = json.dumps(
-        intent.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str
-    )
+    payload_json = json.dumps(intent.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str)
     from data.storage import get_connection
+
     conn = get_connection(db_path)
     try:
         conn.execute(
             f"""INSERT OR IGNORE INTO {TABLE} VALUES ({",".join("?" for _ in range(19))})""",
             (
-                intent.intent_id, intent.schema_version, intent.asset_key,
-                intent.broker_symbol, intent.side, intent.requested_volume,
-                intent.entry_price, intent.sl_price, intent.tp_price,
-                intent.model_version, intent.feature_manifest_hash, intent.config_hash,
-                intent.mode, intent.magic_number, intent.source, intent.signal_id,
-                intent.created_at_utc_ms, intent.canonical_hash(), payload_json,
+                intent.intent_id,
+                intent.schema_version,
+                intent.asset_key,
+                intent.broker_symbol,
+                intent.side,
+                intent.requested_volume,
+                intent.entry_price,
+                intent.sl_price,
+                intent.tp_price,
+                intent.model_version,
+                intent.feature_manifest_hash,
+                intent.config_hash,
+                intent.mode,
+                intent.magic_number,
+                intent.source,
+                intent.signal_id,
+                intent.created_at_utc_ms,
+                intent.canonical_hash(),
+                payload_json,
             ),
         )
         conn.commit()
@@ -82,11 +95,10 @@ def append_signal_intent(db_path: str, intent: SignalIntent) -> str:
 def read_signal_intent(db_path: str, intent_id: str) -> dict | None:
     init_intent_ledger(db_path)
     from data.storage import get_connection
+
     conn = get_connection(db_path)
     try:
-        row = conn.execute(
-            f"SELECT * FROM {TABLE} WHERE intent_id = ?", (intent_id,)
-        ).fetchone()
+        row = conn.execute(f"SELECT * FROM {TABLE} WHERE intent_id = ?", (intent_id,)).fetchone()
         if row is None:
             return None
         columns = [c[1] for c in conn.execute(f"PRAGMA table_info({TABLE})").fetchall()]

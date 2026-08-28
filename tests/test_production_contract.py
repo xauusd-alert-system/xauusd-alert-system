@@ -20,10 +20,12 @@ def test_effective_asset_config_merges_target_and_model_without_mutating_source(
     cfg = {
         "labeling": {"event": "barrier", "horizon_candles_n": 36},
         "model": {"include_zero_class": False},
-        "assets": {"XAUUSD": {
-            "labeling": {"event": "traded"},
-            "model": {"sample_weight_mode": "uniqueness"},
-        }},
+        "assets": {
+            "XAUUSD": {
+                "labeling": {"event": "traded"},
+                "model": {"sample_weight_mode": "uniqueness"},
+            }
+        },
     }
     effective = effective_asset_config(cfg, "XAUUSD")
     assert effective["labeling"] == {"event": "traded", "horizon_candles_n": 36}
@@ -44,8 +46,7 @@ def test_production_build_full_df_passes_asset_key_to_label_contract(monkeypatch
         "signal_grid": {},
         "assets": {"XAUUSD": {"labeling": {"event": "traded"}}},
     }
-    for name in ("build_all_indicators", "add_order_flow_features", "candle_anatomy",
-                 "add_regime_indicators"):
+    for name in ("build_all_indicators", "add_order_flow_features", "candle_anatomy", "add_regime_indicators"):
         monkeypatch.setattr(train_mt5, name, lambda df, *args, **kwargs: df)
     monkeypatch.setattr(train_mt5, "detect_structure", lambda df, **kwargs: df)
     monkeypatch.setattr(train_mt5, "classify_regime_series", lambda df, cfg: pd.Series(["range"] * len(df)))
@@ -64,13 +65,15 @@ def test_production_build_full_df_passes_asset_key_to_label_contract(monkeypatch
 
 
 def test_train_mt5_cutoff_is_applied_to_raw_candles_before_features():
-    raw = pd.DataFrame({
-        "timestamp_utc": [
-            int(pd.Timestamp("2026-08-07T23:45:00Z").timestamp()),
-            int(pd.Timestamp("2026-08-08T00:00:00Z").timestamp()),
-        ],
-        "close": [1.0, 2.0],
-    })
+    raw = pd.DataFrame(
+        {
+            "timestamp_utc": [
+                int(pd.Timestamp("2026-08-07T23:45:00Z").timestamp()),
+                int(pd.Timestamp("2026-08-08T00:00:00Z").timestamp()),
+            ],
+            "close": [1.0, 2.0],
+        }
+    )
     got = train_mt5.truncate_raw_before(raw, "2026-08-08", "XAUUSD")
     assert got["close"].tolist() == [1.0]
 
@@ -78,6 +81,7 @@ def test_train_mt5_cutoff_is_applied_to_raw_candles_before_features():
 def test_purged_oos_calibration_report_is_embeddable():
     class Dummy:
         classes_ = np.array([0, 1])
+
         def predict_proba(self, X):
             p = np.linspace(0.2, 0.8, len(X))
             return np.column_stack([1.0 - p, p])
@@ -111,8 +115,12 @@ def test_uniqueness_weights_align_after_rows_are_dropped():
 
 def _candles(with_optional=True):
     data = {
-        "timestamp_utc": [1, 2], "open": [10, 11], "high": [12, 13],
-        "low": [9, 10], "close": [11, 12], "volume": [100, 110],
+        "timestamp_utc": [1, 2],
+        "open": [10, 11],
+        "high": [12, 13],
+        "low": [9, 10],
+        "close": [11, 12],
+        "volume": [100, 110],
         "session": ["london", "london"],
     }
     if with_optional:
@@ -148,15 +156,32 @@ def test_storage_migrates_and_round_trips_broker_market_fields(tmp_path):
 def test_execution_ledger_reports_fills_rejections_latency_and_slippage(tmp_path):
     path = str(tmp_path / "fills.sqlite")
     log_execution_attempt(
-        path, asset_key="XAUUSD", broker_symbol="GOLD", action="open", side="buy",
-        requested_at_ms=1000, completed_at_ms=1012, requested_price=2000.0,
-        filled_price=2000.2, volume_requested=0.1, volume_filled=0.1,
-        status="filled", retcode=10009,
+        path,
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        action="open",
+        side="buy",
+        requested_at_ms=1000,
+        completed_at_ms=1012,
+        requested_price=2000.0,
+        filled_price=2000.2,
+        volume_requested=0.1,
+        volume_filled=0.1,
+        status="filled",
+        retcode=10009,
     )
     log_execution_attempt(
-        path, asset_key="XAUUSD", broker_symbol="GOLD", action="open", side="sell",
-        requested_at_ms=2000, completed_at_ms=2020, requested_price=2001.0,
-        status="rejected", retcode=10004, rejection_reason="requote",
+        path,
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        action="open",
+        side="sell",
+        requested_at_ms=2000,
+        completed_at_ms=2020,
+        requested_price=2001.0,
+        status="rejected",
+        retcode=10004,
+        rejection_reason="requote",
     )
     report = execution_cost_report(path, "XAUUSD")
     assert report["attempts"] == 2

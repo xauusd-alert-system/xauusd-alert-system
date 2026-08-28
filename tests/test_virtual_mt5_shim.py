@@ -451,6 +451,7 @@ def test_unwarmed_simulator_returns_none_for_rates(world):
 # Regression tests: run_simulation / run_bot wiring (live-loop integration)
 # ----------------------------------------------------------------------
 
+
 def test_run_simulation_imports_plain_mt5_module():
     """The entry points must inject state into the SAME module object that
     `import MetaTrader5 as mt5` in execution/data resolves to. A dotted
@@ -458,6 +459,7 @@ def test_run_simulation_imports_plain_mt5_module():
     object and _inject() would be invisible to the protected modules
     (run_loop would never see new bars -> no trades at all)."""
     import scripts.run_simulation as rs
+
     assert rs.mt5 is mt5  # mt5 here is the plain top-level MetaTrader5 shim
 
 
@@ -472,6 +474,7 @@ def test_build_virtual_cfg_registers_mt5_symbol_names():
     """
     from config.loader import load_config
     from scripts.run_simulation import build_virtual_cfg
+
     cfg = build_virtual_cfg()
     overrides = cfg["symbol_overrides"]
     for asset_key, a_cfg in load_config()["assets"].items():
@@ -483,9 +486,7 @@ def test_build_virtual_cfg_registers_mt5_symbol_names():
         else:
             assert sym not in overrides, f"disabled {asset_key} -> {sym} must be absent"
     # MT5 name inherits the asset-key params (e.g. gold contract size 100).
-    assert overrides["GOLD"].get("trade_contract_size") == overrides.get("XAUUSD", {}).get(
-        "trade_contract_size", 100.0
-    )
+    assert overrides["GOLD"].get("trade_contract_size") == overrides.get("XAUUSD", {}).get("trade_contract_size", 100.0)
 
 
 def test_circuit_breaker_anchor_rolls_on_bar_close(cfg):
@@ -506,6 +507,7 @@ def test_positions_get_rejects_magic_like_real_api():
     live terminal, so production code can't silently regress to the old call.
     """
     import MetaTrader5 as mt5_real
+
     with pytest.raises(TypeError):
         mt5_real.positions_get(symbol="XAUUSD", magic=777111)
 
@@ -515,6 +517,9 @@ def test_positions_get_by_magic_filters_in_python():
     Python (no magic= kwarg), so it works against both the shim and the real API.
     """
     from execution.mt5_trader import positions_get_by_magic
+
     # No state initialized -> returns None (mirrors real API "no positions").
-    assert positions_get_by_magic(symbol="XAUUSD", magic=777111) is None or \
-        positions_get_by_magic(symbol="XAUUSD", magic=777111) == []
+    assert (
+        positions_get_by_magic(symbol="XAUUSD", magic=777111) is None
+        or positions_get_by_magic(symbol="XAUUSD", magic=777111) == []
+    )

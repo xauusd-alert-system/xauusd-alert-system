@@ -5,6 +5,7 @@ Uses sortedcontainers.SortedList for O(log n) ordered price levels on both
 the bid (BUY) and ask (SELL) side. Price-time priority is enforced by
 ordering entries by (price, sequence).
 """
+
 from __future__ import annotations
 
 from sortedcontainers import SortedList
@@ -19,8 +20,8 @@ class OrderBook:
         # Entries stored as (price, seq, order) tuples.
         # Bids: descending price priority -> store negative price for sortability.
         # Asks: ascending price priority -> store price directly.
-        self.bids: SortedList = SortedList()   #  ( -price, seq, order )
-        self.asks: SortedList = SortedList()   #  (  price, seq, order )
+        self.bids: SortedList = SortedList()  #  ( -price, seq, order )
+        self.asks: SortedList = SortedList()  #  (  price, seq, order )
         self._seq: int = 0
         self._orders: dict[str, "tuple"] = {}  # order_id -> book entry tuple
         self._price_bids: dict[float, float] = {}

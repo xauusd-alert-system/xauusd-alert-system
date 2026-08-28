@@ -5,6 +5,7 @@ rollback, integrity verification (corruption detection), history ordering,
 and the pipeline integrations (train_all_assets registers non-fatally;
 deploy_guard blocks unregistered / corrupted candidates).
 """
+
 import os
 import sys
 
@@ -99,7 +100,9 @@ def test_register_trained_model_reads_metadata(tmp_path, registry):
     p = tmp_path / "b" / "EURUSD.joblib"
     p.parent.mkdir(parents=True)
     save_model(
-        _PicklableModel(0.7), ["f"], str(p),
+        _PicklableModel(0.7),
+        ["f"],
+        str(p),
         metadata={"model_hash": "0" * 64, "trained_at_utc": "2026-01-01T00:00:00+00:00"},
     )
     # Stored self-hash does not match the actual content -> mismatch.
@@ -250,6 +253,7 @@ def test_train_all_assets_registers(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(taa, "load_config", lambda: cfg)
 
     calls = []
+
     def fake_run(cmd, check=True):
         calls.append(cmd)
         return None
@@ -259,6 +263,7 @@ def test_train_all_assets_registers(tmp_path, monkeypatch, capsys):
     # train_all_assets uses register_trained_model -> ModelRegistry(root=None)
     # so route it to the tmp registry via the env-style default override:
     import model.registry as mr
+
     monkeypatch.setattr(mr, "default_registry_root", lambda: tmp_path / "registry")
 
     taa.main()
@@ -272,6 +277,7 @@ def test_train_all_assets_registers(tmp_path, monkeypatch, capsys):
     # Non-fatal: a registry blow-up mid-pipeline does not abort training.
     def boom(*a, **k):
         raise RuntimeError("registry down")
+
     monkeypatch.setattr(taa, "register_in_registry", boom)
     taa.main()
     out2 = capsys.readouterr().out
@@ -293,19 +299,33 @@ def test_deploy_guard_blocks_unregistered(tmp_path, monkeypatch):
 
     reg = ModelRegistry(tmp_path / "registry")
     cfg = {
-        "deploy_guard": {"enabled": True, "primary_metric": "expectancy",
-                         "fallback_metrics": ["sharpe_ratio", "win_rate", "total_pnl"],
-                         "min_trades": 20, "tolerance": 0.0,
-                         "backup_suffix": ".deploy_guard.bak"},
+        "deploy_guard": {
+            "enabled": True,
+            "primary_metric": "expectancy",
+            "fallback_metrics": ["sharpe_ratio", "win_rate", "total_pnl"],
+            "min_trades": 20,
+            "tolerance": 0.0,
+            "backup_suffix": ".deploy_guard.bak",
+        },
         "general": {"db_path": str(tmp_path / "db.sqlite")},
         "market_data": {"timeframe": "M5"},
-        "backtest": {"walk_forward": {"train_window_days": 300,
-                                      "test_window_days": 50, "step_days": 50}},
+        "backtest": {"walk_forward": {"train_window_days": 300, "test_window_days": 50, "step_days": 50}},
         "assets": {"XAUUSD": {"enabled": True, "model_path": str(mp)}},
     }
-    monkeypatch.setattr(dg, "guard_asset", lambda cfg, asset, path: {
-        "asset": asset, "deploy": True, "metric": None, "deployed_value": None,
-        "candidate_value": None, "reason": "ok", "tolerance": 0.0, "min_trades": 20})
+    monkeypatch.setattr(
+        dg,
+        "guard_asset",
+        lambda cfg, asset, path: {
+            "asset": asset,
+            "deploy": True,
+            "metric": None,
+            "deployed_value": None,
+            "candidate_value": None,
+            "reason": "ok",
+            "tolerance": 0.0,
+            "min_trades": 20,
+        },
+    )
 
     # 1. Unregistered candidate -> the deploy is blocked (rolled back from bak).
     decisions, failed = dg.validate_and_deploy(cfg, registry=reg)
@@ -348,8 +368,7 @@ def test_deploy_guard_registry_preflight_unit(tmp_path):
     reg = ModelRegistry(tmp_path / "reg")
 
     # Missing file -> ok (nothing to deploy; other guards handle it).
-    assert dg.registry_preflight_check({}, "XAUUSD", str(tmp_path / "nope.joblib"),
-                                       registry=reg)["ok"] is True
+    assert dg.registry_preflight_check({}, "XAUUSD", str(tmp_path / "nope.joblib"), registry=reg)["ok"] is True
     # Unregistered -> blocked.
     pre = dg.registry_preflight_check({}, "XAUUSD", str(mp), registry=reg)
     assert pre["ok"] is False and "model_not_registered" in pre["reason"]

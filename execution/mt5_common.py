@@ -14,6 +14,7 @@ Responsibilities:
 * ``build_comment()`` — broker comment ``TG:<groupId>|L:<legId>|<asset>``,
   truncated to the broker comment limit; full ids always live in the ledger.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -153,8 +154,7 @@ class MT5BrokerContext:
         snapshot = self.symbol_snapshot(symbol)
         tick = snapshot["tick_size"]
         if tick <= 0.0:
-            raise GeometryRejected(ORDER_GEOMETRY_INVALID,
-                                   f"non-positive tick_size {tick} for {symbol}")
+            raise GeometryRejected(ORDER_GEOMETRY_INVALID, f"non-positive tick_size {tick} for {symbol}")
         levels = {
             "tp1": _align(spec.geometry.tp1, tick),
             "tp2": _align(spec.geometry.tp2, tick),
@@ -163,10 +163,7 @@ class MT5BrokerContext:
         }
         for name, price in levels.items():
             if not is_tick_aligned(price, tick):
-                raise GeometryRejected(
-                    ORDER_GEOMETRY_INVALID,
-                    f"{name}={price} not aligned to tick_size={tick}"
-                )
+                raise GeometryRejected(ORDER_GEOMETRY_INVALID, f"{name}={price} not aligned to tick_size={tick}")
         return levels
 
     def validate_geometry(self, spec: TradeGroupSpec, symbol: str) -> dict[str, float]:
@@ -179,35 +176,27 @@ class MT5BrokerContext:
         levels = self.normalize_geometry(spec, symbol)
         snapshot = self.symbol_snapshot(symbol)
         min_stop = (
-            max(snapshot["trade_stops_level"], snapshot["trade_freeze_level"])
-            * snapshot["point"] + snapshot["spread"]
+            max(snapshot["trade_stops_level"], snapshot["trade_freeze_level"]) * snapshot["point"] + snapshot["spread"]
         )
         side = 1.0 if spec.side == "long" else -1.0
         sl_distance = abs(levels["sl"] - spec.entry.reference)
         if sl_distance < min_stop - 1e-9:
             raise GeometryRejected(
-                ORDER_GEOMETRY_INVALID,
-                f"SL distance {sl_distance:.6g} < broker minimum {min_stop:.6g}"
+                ORDER_GEOMETRY_INVALID, f"SL distance {sl_distance:.6g} < broker minimum {min_stop:.6g}"
             )
         tp1_distance = abs(levels["tp1"] - spec.entry.reference)
         if tp1_distance <= snapshot["spread"] + 1e-9:
             raise GeometryRejected(
-                ORDER_GEOMETRY_INVALID,
-                f"TP1 distance {tp1_distance:.6g} <= spread {snapshot['spread']:.6g}"
+                ORDER_GEOMETRY_INVALID, f"TP1 distance {tp1_distance:.6g} <= spread {snapshot['spread']:.6g}"
             )
-        for leg, volume in zip((1, 2, 3), [round(spec.risk.total_volume * t.allocation, 8)
-                                           for t in spec.targets]):
+        for leg, volume in zip((1, 2, 3), [round(spec.risk.total_volume * t.allocation, 8) for t in spec.targets]):
             step = snapshot["volume_step"]
             minimum = snapshot["volume_min"]
             if volume <= 0.0 or volume < minimum - 1e-9:
-                raise GeometryRejected(
-                    ORDER_GEOMETRY_INVALID,
-                    f"leg{leg} volume {volume} below volume_min {minimum}"
-                )
+                raise GeometryRejected(ORDER_GEOMETRY_INVALID, f"leg{leg} volume {volume} below volume_min {minimum}")
             if step > 0.0 and abs(round(volume / step) * step - volume) > 1e-6:
                 raise GeometryRejected(
-                    ORDER_GEOMETRY_INVALID,
-                    f"leg{leg} volume {volume} not a multiple of volume_step {step}"
+                    ORDER_GEOMETRY_INVALID, f"leg{leg} volume {volume} not a multiple of volume_step {step}"
                 )
         return levels
 

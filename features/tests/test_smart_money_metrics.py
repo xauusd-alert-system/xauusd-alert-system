@@ -3,6 +3,7 @@ Tests for Smart Money & Institutional Microstructure Metrics.
 Verifies calculation of Manipulation Index, Zone Strength, SMF Ratio,
 Liquidity Grab, Delta Confidence, and report formatting.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -29,13 +30,15 @@ def sample_market_df():
     open_p = (high + low) / 2.0
     vol = np.random.randint(100, 2000, size=n).astype(float)
 
-    return pd.DataFrame({
-        "open": open_p,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": vol,
-    })
+    return pd.DataFrame(
+        {
+            "open": open_p,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": vol,
+        }
+    )
 
 
 def test_manipulation_index(sample_market_df):
@@ -89,15 +92,18 @@ def test_delta_confidence_very_high_is_reachable():
     """N9: with a very strong, consistent delta the level must be VERY HIGH
     (previously unreachable because the looser HIGH branch ran first)."""
     import pandas as pd
+
     # 30 bars, consistently buying (close near high -> positive signed delta),
     # strong cumulative slope relative to volume.
     n = 30
-    df = pd.DataFrame({
-        "high": [100.0] * n,
-        "low": [99.0] * n,
-        "close": [99.9] * n,   # pos_in_bar ~ (99.9-99)/(100-99) = 0.9 -> positive
-        "volume": [1.0] * n,
-    })
+    df = pd.DataFrame(
+        {
+            "high": [100.0] * n,
+            "low": [99.0] * n,
+            "close": [99.9] * n,  # pos_in_bar ~ (99.9-99)/(100-99) = 0.9 -> positive
+            "volume": [1.0] * n,
+        }
+    )
     level, _ = calculate_delta_confidence(df)
     assert level == "VERY HIGH"
 
@@ -117,8 +123,7 @@ def test_report_text_never_claims_institutional_control_from_proxy(sample_market
     """§5/§12: OHLCV-proxy metrics must never be phrased as confirmed
     institutional activity / real flow. Any future rewording that reintroduces
     the forbidden claims fails here."""
-    report = format_institutional_metrics_report(
-        compute_institutional_metrics(sample_market_df))
+    report = format_institutional_metrics_report(compute_institutional_metrics(sample_market_df))
     lower = report.lower()
     for claim in FORBIDDEN_CLAIMS:
         assert claim.lower() not in lower, f"forbidden claim present: {claim}"
@@ -138,8 +143,7 @@ def test_every_parameter_carries_source_kind_ohlcv_proxy(sample_market_df):
         assert param["data_status"] in {"sufficient", "insufficient"}, name
     agg = metrics["source_provenance"]
     assert agg["source_kind"] == "ohlcv_proxy"
-    assert agg["lookbacks"] == {name: meta["lookback"]
-                                for name, meta in PARAMETER_META.items()}
+    assert agg["lookbacks"] == {name: meta["lookback"] for name, meta in PARAMETER_META.items()}
     assert "real trade flow" in agg["note"].lower() or "не реальный" in agg["note"]
 
 

@@ -10,13 +10,13 @@ P2-10 separation of responsibilities:
 The class is re-exported unchanged so existing imports and tests keep
 working without modification.
 """
+
 import warnings
 
 from risk.legacy_throttle import TradeThrottle  # noqa: F401
 
 warnings.warn(
-    "execution.trade_throttle is a deprecated shim; the new rate-based "
-    "throttle lives in 'risk.throttle' (P2-10)",
+    "execution.trade_throttle is a deprecated shim; the new rate-based throttle lives in 'risk.throttle' (P2-10)",
     DeprecationWarning,
     stacklevel=2,
 )

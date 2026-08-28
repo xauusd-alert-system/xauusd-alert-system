@@ -2,6 +2,7 @@
 Order Flow, Cumulative Volume Delta (CVD), and Microstructure features.
 Strictly causal: all rolling windows and aggregations read only historical bars.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -59,9 +60,7 @@ def order_flow_imbalance(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return imbalance.fillna(0.0).clip(-1.0, 1.0)
 
 
-def volume_weighted_average_price(
-    df: pd.DataFrame, period: int = 72
-) -> tuple[pd.Series, pd.Series, pd.Series]:
+def volume_weighted_average_price(df: pd.DataFrame, period: int = 72) -> tuple[pd.Series, pd.Series, pd.Series]:
     """
     Calculates rolling causal VWAP and +/- 2 standard deviation bands.
     Typical price = (High + Low + Close) / 3.
@@ -78,9 +77,7 @@ def volume_weighted_average_price(
     # Rolling price variance relative to VWAP
     diff_sq = (typical_price - vwap) ** 2
     weighted_diff_sq = diff_sq * vol
-    rolling_var = (
-        weighted_diff_sq.rolling(window=period, min_periods=1).sum() / rolling_vol
-    ).fillna(0.0)
+    rolling_var = (weighted_diff_sq.rolling(window=period, min_periods=1).sum() / rolling_vol).fillna(0.0)
     vwap_std = np.sqrt(np.maximum(rolling_var, 0.0))
 
     vwap_upper = vwap + 2.0 * vwap_std

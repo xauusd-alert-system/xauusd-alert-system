@@ -20,6 +20,7 @@ CLI::
 ``--dry-run`` never changes any data (no migrations applied, no records
 written). Non-zero exit code on any error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,6 +39,7 @@ logger = logging.getLogger("migrate_all")
 # Known database paths (project conventions)
 # --------------------------------------------------------------------------
 
+
 def default_db_paths() -> list[str]:
     """All known SQLite paths per project conventions (config + env)."""
     paths: list[str] = []
@@ -46,11 +48,7 @@ def default_db_paths() -> list[str]:
     try:
         from config.loader import load_config
 
-        paths.append(str(
-            load_config().get("general", {}).get(
-                "db_path", "data/market_data_mt5.sqlite"
-            )
-        ))
+        paths.append(str(load_config().get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
     except Exception:
         paths.append("data/market_data_mt5.sqlite")
 
@@ -83,6 +81,7 @@ def default_db_paths() -> list[str]:
 # Registry check
 # --------------------------------------------------------------------------
 
+
 @dataclass
 class RegistryCheckResult:
     db_path: str
@@ -109,28 +108,18 @@ def registry_check(db_path: str) -> RegistryCheckResult:
 
     conn = sqlite3.connect(db_path)
     try:
-        tables = {
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "trade_groups" in tables:
-            rows = conn.execute(
-                "SELECT group_id, spec_json FROM trade_groups"
-            ).fetchall()
+            rows = conn.execute("SELECT group_id, spec_json FROM trade_groups").fetchall()
             for group_id, spec_json in rows:
                 result.specs_checked += 1
                 try:
                     payload = json.loads(spec_json or "{}")
                     deserialize_spec(payload)
                 except Exception as exc:
-                    result.errors.append(
-                        f"{db_path}: trade_groups[{group_id}]: {exc}"
-                    )
+                    result.errors.append(f"{db_path}: trade_groups[{group_id}]: {exc}")
         if "ledger_intents" in tables:
-            rows = conn.execute(
-                "SELECT intent_id, payload_json FROM ledger_intents"
-            ).fetchall()
+            rows = conn.execute("SELECT intent_id, payload_json FROM ledger_intents").fetchall()
             for intent_id, payload_json in rows:
                 result.intents_checked += 1
                 try:
@@ -141,13 +130,9 @@ def registry_check(db_path: str) -> RegistryCheckResult:
                     # payload's schema_version is a known intent version.
                     version = payload.get("schema_version")
                     if version is not None and not isinstance(version, (str, int)):
-                        raise ValueError(
-                            f"invalid schema_version type: {type(version)!r}"
-                        )
+                        raise ValueError(f"invalid schema_version type: {type(version)!r}")
                 except Exception as exc:
-                    result.errors.append(
-                        f"{db_path}: ledger_intents[{intent_id}]: {exc}"
-                    )
+                    result.errors.append(f"{db_path}: ledger_intents[{intent_id}]: {exc}")
     finally:
         conn.close()
     return result
@@ -156,6 +141,7 @@ def registry_check(db_path: str) -> RegistryCheckResult:
 # --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
+
 
 def run_migrate_all(
     db_paths: Sequence[str] | None = None,
@@ -175,10 +161,7 @@ def run_migrate_all(
         try:
             if dry_run:
                 pending = pending_migrations(db_path)
-                summary = (
-                    f"dry-run: would apply {len(pending)} migration(s) "
-                    f"to {db_path}"
-                )
+                summary = f"dry-run: would apply {len(pending)} migration(s) to {db_path}"
                 for migration in pending:
                     summary += f"\n  {migration.version:>4}  {migration.name}"
                 results.append((db_path, True, summary))
@@ -194,11 +177,13 @@ def run_migrate_all(
         try:
             check = registry_check(db_path)
             if check.ok:
-                results.append((
-                    db_path, True,
-                    f"registry check ok: {check.specs_checked} spec(s), "
-                    f"{check.intents_checked} intent(s)",
-                ))
+                results.append(
+                    (
+                        db_path,
+                        True,
+                        f"registry check ok: {check.specs_checked} spec(s), {check.intents_checked} intent(s)",
+                    )
+                )
             else:
                 for error in check.errors:
                     results.append((db_path, False, f"registry check: {error}"))
@@ -209,18 +194,20 @@ def run_migrate_all(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     parser = argparse.ArgumentParser(
         prog="python -m scripts.migrate_all",
         description="Unified DB migration + schema registry check (ТЗ 9.11).",
     )
     parser.add_argument(
-        "--db", action="append", default=None,
+        "--db",
+        action="append",
+        default=None,
         help="explicit database path (repeatable); default: all known paths",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="report what would be applied without changing any data",
     )
     args = parser.parse_args(argv)

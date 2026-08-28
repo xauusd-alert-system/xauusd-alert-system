@@ -11,6 +11,7 @@
   ``age_ok`` осмыслен ТОЛЬКО когда TTL задан в конфиге; без конфига
   ``age_ok=True`` (проверка не настроена — не фейлим аудит).
 """
+
 from __future__ import annotations
 
 import time

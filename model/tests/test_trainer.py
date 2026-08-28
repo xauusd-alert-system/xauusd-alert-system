@@ -2,6 +2,7 @@
 Unit tests for model/trainer.py and model/predictor.py.
 Run with: pytest model/tests/test_trainer.py -v
 """
+
 import os
 import sys
 
@@ -37,12 +38,14 @@ CFG = copy.deepcopy(CFG)
 CFG["labeling"]["target_pips_x"] = 3.0
 CFG["labeling"]["stop_pips_y"] = 2.0
 
+
 def _full_featured_labeled_df(n=3000, seed=55):
     df = fetch_mock_candles("M15", n_candles=n, sessions_config=SESSIONS, seed=seed)
     df = build_all_indicators(df, CFG)
     df = candle_anatomy(df)
     df = add_regime_indicators(df, CFG)
-    df["mtf_confluence_score"] = 0.0  # placeholder in isolated test - real value comes from mtf_confluence.py in the full pipeline
+    df["mtf_confluence_score"] = 0.0  # placeholder in isolated test - real
+    # value comes from mtf_confluence.py in the full pipeline
     labels = generate_labels_from_config(df, CFG)
     df["label"] = labels
     return df
@@ -83,6 +86,7 @@ def test_build_training_matrix_three_class_keeps_zero_label():
     df.loc[valid_idx, "label"] = pattern[: len(valid_idx)]
 
     import copy
+
     three_cfg = copy.deepcopy(CFG)
     three_cfg["model"] = dict(three_cfg.get("model", {}))
     three_cfg["model"]["include_zero_class"] = True
@@ -373,13 +377,11 @@ from model.trainer import (  # noqa: E402
 )
 
 THREE_CLASS_CFG = {
-    "model": {"include_zero_class": True, "type": "xgboost",
-              "calibration_method": "sigmoid", "random_seed": 42},
+    "model": {"include_zero_class": True, "type": "xgboost", "calibration_method": "sigmoid", "random_seed": 42},
     "labeling": {"horizon_candles_n": 36},
 }
 BINARY_CFG = {
-    "model": {"include_zero_class": False, "type": "xgboost",
-              "calibration_method": "sigmoid", "random_seed": 42},
+    "model": {"include_zero_class": False, "type": "xgboost", "calibration_method": "sigmoid", "random_seed": 42},
     "labeling": {"horizon_candles_n": 36},
 }
 
@@ -388,8 +390,9 @@ def _directional_xy(n=600, seed=7):
     """Feature 'a' fully determines the direction, so p_long must track it."""
     rng = np.random.default_rng(seed)
     a = rng.normal(size=n)
-    X = pd.DataFrame({"ema_9": a, "rsi": rng.normal(size=n),
-                      "atr": rng.normal(size=n), "macd_line": rng.normal(size=n)})
+    X = pd.DataFrame(
+        {"ema_9": a, "rsi": rng.normal(size=n), "atr": rng.normal(size=n), "macd_line": rng.normal(size=n)}
+    )
     return a, X
 
 
@@ -439,7 +442,7 @@ def test_three_class_window_without_no_trade_trains_and_keeps_direction(tmp_path
     y = pd.Series(np.where(a > 0, 2, 0), index=X.index)  # {0, 2}: no no_trade
     assert sorted(y.unique()) == [0, 2]
 
-    base = train_model(X, y, THREE_CLASS_CFG)          # used to raise ValueError
+    base = train_model(X, y, THREE_CLASS_CFG)  # used to raise ValueError
     assert list(base.classes_) == [0, 1]
     assert base._label_space_no_trade_absent is True
 

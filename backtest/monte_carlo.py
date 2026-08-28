@@ -3,6 +3,7 @@ Monte Carlo Simulation & Portfolio Stress Testing Engine.
 Computes Value at Risk (VaR), Conditional Value at Risk (CVaR/Expected Shortfall),
 Risk of Ruin, and Drawdown Distributions over thousands of resampled equity paths.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -47,10 +48,12 @@ class MonteCarloSimulator:
         )
 
         # Cumulative PnL paths: shape (n_simulations, horizon_trades + 1)
-        cum_pnl = np.hstack([
-            np.zeros((self.n_simulations, 1)),
-            np.cumsum(sampled_trades, axis=1),
-        ])
+        cum_pnl = np.hstack(
+            [
+                np.zeros((self.n_simulations, 1)),
+                np.cumsum(sampled_trades, axis=1),
+            ]
+        )
         equity_paths = self.initial_balance + cum_pnl
 
         # Calculate drawdowns for each path

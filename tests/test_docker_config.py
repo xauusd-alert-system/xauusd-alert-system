@@ -15,6 +15,7 @@ Pure lint checks — no docker daemon is required (CI has no docker):
 These tests intentionally re-parse the files instead of invoking docker so
 they run in every environment.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -34,28 +35,38 @@ REQUIREMENTS = REPO_ROOT / "requirements.txt"
 
 # ------------------------------------------------------------------ Dockerfile
 
+
 def test_dockerfile_exists_and_targets_python_312_slim():
     assert DOCKERFILE.exists(), "Dockerfile missing from repository root"
     text = DOCKERFILE.read_text(encoding="utf-8")
-    assert re.search(r"^FROM\s+python:3\.12-slim", text, re.MULTILINE), (
-        "Dockerfile must be based on python:3.12-slim"
-    )
+    assert re.search(r"^FROM\s+python:3\.12-slim", text, re.MULTILINE), "Dockerfile must be based on python:3.12-slim"
 
 
 def test_dockerfile_entrypoint_is_paper_bot():
     text = DOCKERFILE.read_text(encoding="utf-8")
     assert re.search(
         r'^CMD\s+\["python",\s*"-m",\s*"scripts\.run_bot"\]',
-        text, re.MULTILINE,
+        text,
+        re.MULTILINE,
     ), "CMD must launch the paper/alerts bot entrypoint"
     assert "WORKDIR /app" in text
 
 
 # ---------------------------------------------------------------- .dockerignore
 
-@pytest.mark.parametrize("pattern", [
-    ".env", "*.sqlite", "logs/", "backups/", ".git", ".pytest_cache", "models/",
-])
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        ".env",
+        "*.sqlite",
+        "logs/",
+        "backups/",
+        ".git",
+        ".pytest_cache",
+        "models/",
+    ],
+)
 def test_dockerignore_excludes_secrets_and_state(pattern):
     assert DOCKERIGNORE.exists(), ".dockerignore missing"
     lines = [ln.strip() for ln in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()]
@@ -63,6 +74,7 @@ def test_dockerignore_excludes_secrets_and_state(pattern):
 
 
 # ------------------------------------------------------------ docker-compose
+
 
 def test_docker_compose_is_valid_yaml_with_bot_service():
     assert COMPOSE_FILE.exists(), "docker-compose.yml missing"
@@ -100,11 +112,11 @@ def test_docker_compose_healthchecks_reference_correct_endpoints():
 
 # ------------------------------------------------------------- requirements
 
+
 def test_metatrader5_is_windows_only_in_requirements():
     """The Linux image / CI must be able to install requirements.txt."""
     text = REQUIREMENTS.read_text(encoding="utf-8")
-    mt5_lines = [ln for ln in text.splitlines()
-                 if ln.strip().lower().startswith("metatrader5")]
+    mt5_lines = [ln for ln in text.splitlines() if ln.strip().lower().startswith("metatrader5")]
     assert mt5_lines, "MetaTrader5 pin missing from requirements.txt"
     for ln in mt5_lines:
         assert 'platform_system == "Windows"' in ln, (

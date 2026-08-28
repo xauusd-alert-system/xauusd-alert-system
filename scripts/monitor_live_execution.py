@@ -44,8 +44,8 @@ BASELINE = {
         "expected_pf": 0.99,
         "expected_pnl_per_trade": -0.33,  # -244.2 / 747
         "min_trades_for_alert": 10,
-        "warning_pf_below": 0.70,   # alert if live PF is far below backtest
-        "warning_wr_below": 55.0,   # alert if WR collapses well below 66%
+        "warning_pf_below": 0.70,  # alert if live PF is far below backtest
+        "warning_wr_below": 55.0,  # alert if WR collapses well below 66%
     },
 }
 
@@ -112,9 +112,7 @@ def _daily_metrics(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     df = df.copy()
-    df["close_date"] = pd.to_datetime(
-        df["close_time"], unit="s", utc=True, errors="coerce"
-    ).dt.date
+    df["close_date"] = pd.to_datetime(df["close_time"], unit="s", utc=True, errors="coerce").dt.date
     rows = []
     for date, group in df.groupby("close_date"):
         m = compute_live_metrics(group)
@@ -126,8 +124,9 @@ def _daily_metrics(df: pd.DataFrame) -> pd.DataFrame:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Monitor live execution quality from the executed_trades log.")
     parser.add_argument("--asset", required=True, help="Asset key, e.g. BTCUSD")
-    parser.add_argument("--db-path", default=None,
-                        help="SQLite DB with executed_trades (default: config general.db_path)")
+    parser.add_argument(
+        "--db-path", default=None, help="SQLite DB with executed_trades (default: config general.db_path)"
+    )
     parser.add_argument("--out-dir", default="logs", help="Directory for the summary CSV")
     args = parser.parse_args(argv)
 
@@ -163,8 +162,7 @@ def main(argv: list[str] | None = None) -> None:
             )
         if metrics["win_rate"] < baseline["warning_wr_below"]:
             warnings.append(
-                f"WR {metrics['win_rate']}% < {baseline['warning_wr_below']}% "
-                f"(backtest WR {baseline['expected_wr']}%)"
+                f"WR {metrics['win_rate']}% < {baseline['warning_wr_below']}% (backtest WR {baseline['expected_wr']}%)"
             )
         if warnings:
             print("\n⚠️  Divergence from backtest baseline detected:")
@@ -174,8 +172,10 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print("\n✔ Live metrics are within the expected range of the pre-lock baseline.")
     elif baseline is not None:
-        print(f"\nNot enough valid trades for comparison yet "
-              f"({metrics['n_trades']} < {baseline['min_trades_for_alert']}).")
+        print(
+            f"\nNot enough valid trades for comparison yet "
+            f"({metrics['n_trades']} < {baseline['min_trades_for_alert']})."
+        )
     else:
         print("\nNo baseline configured for this asset; printing metrics only.")
 

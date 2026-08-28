@@ -1,4 +1,5 @@
 """Tests for provenance/store.py + migration 003 (ТЗ 8.7)."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -40,9 +41,7 @@ def test_upsert_semantics(store):
     assert loaded.cost_snapshot == {"cost_snapshot_id": "COST:2"}
     conn = sqlite3.connect(store.db_path)
     try:
-        count = conn.execute(
-            f"SELECT COUNT(*) FROM {PROVENANCE_RECORDS_TABLE}"
-        ).fetchone()[0]
+        count = conn.execute(f"SELECT COUNT(*) FROM {PROVENANCE_RECORDS_TABLE}").fetchone()[0]
     finally:
         conn.close()
     assert count == 1
@@ -50,9 +49,7 @@ def test_upsert_semantics(store):
 
 def test_get_range_orders_and_filters(store):
     for i in (3, 1, 2):
-        store.save(make_record(group_id=f"TG-{i}",
-                               signal_id=f"SGL-{i}",
-                               as_of_utc_ms=NOW_MS + i * 1000))
+        store.save(make_record(group_id=f"TG-{i}", signal_id=f"SGL-{i}", as_of_utc_ms=NOW_MS + i * 1000))
     records = store.get_range(NOW_MS + 1000, NOW_MS + 2000)
     assert [r.group_id for r in records] == ["TG-1", "TG-2"]
     assert store.get_range(NOW_MS + 10_000, NOW_MS + 20_000) == []
@@ -63,14 +60,11 @@ def test_migration_003_creates_tables(tmp_path):
     applied = apply_migrations(db_path)
     versions = [m.version for m in applied]
     assert 3 in versions
-    assert current_version(db_path) == max(load_builtin_migrations(),
-                                           key=lambda m: m.version).version
+    assert current_version(db_path) == max(load_builtin_migrations(), key=lambda m: m.version).version
     conn = sqlite3.connect(db_path)
     try:
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        indexes = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'")}
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     finally:
         conn.close()
     assert PROVENANCE_RECORDS_TABLE in tables
@@ -85,8 +79,8 @@ def test_migration_and_store_use_identical_ddl(tmp_path):
     conn = sqlite3.connect(db_path)
     try:
         sql_migration = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
-            (PROVENANCE_RECORDS_TABLE,)).fetchone()[0]
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (PROVENANCE_RECORDS_TABLE,)
+        ).fetchone()[0]
     finally:
         conn.close()
     # store on the same DB must not alter or recreate the table differently
@@ -95,8 +89,8 @@ def test_migration_and_store_use_identical_ddl(tmp_path):
     conn = sqlite3.connect(db_path)
     try:
         sql_after = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
-            (PROVENANCE_RECORDS_TABLE,)).fetchone()[0]
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (PROVENANCE_RECORDS_TABLE,)
+        ).fetchone()[0]
     finally:
         conn.close()
     assert sql_migration == sql_after
@@ -113,6 +107,4 @@ def test_resolve_store_db_path_priority(monkeypatch, tmp_path):
     assert resolve_store_db_path(cfg) == "env/prov.sqlite"
     monkeypatch.delenv("PROVENANCE_STORE_DB_PATH")
     assert resolve_store_db_path({}) == "data/market_data_mt5.sqlite"
-    assert resolve_store_db_path(
-        {"general": {"db_path": str(tmp_path / "g.sqlite")}}
-    ) == str(tmp_path / "g.sqlite")
+    assert resolve_store_db_path({"general": {"db_path": str(tmp_path / "g.sqlite")}}) == str(tmp_path / "g.sqlite")

@@ -151,62 +151,93 @@ GENERIC_VARIANTS: dict = {
 GBP_VARIANTS: dict = {
     "current": {},  # = v4 (post-sync config): stop 3.0, BE 1.0, tp2 2.5, tp3 3.0, conf 0.80, h36
     "v3_early_be": {  # pre-v4 (EUR-style early-BE package)
-        "signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
-                        "tp2_mult": 2.0, "tp3_mult": 3.0},
+        "signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5, "tp2_mult": 2.0, "tp3_mult": 3.0},
         "ensemble": {"min_confidence_to_alert": 0.85},
         "labeling": {"horizon_candles_n": 48},
     },
     "v4a": {  # commented candidate in the old config: tp3 4.0 + conf 0.85
-        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.5, "tp3_mult": 4.0},
+        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0, "tp2_mult": 2.5, "tp3_mult": 4.0},
         "ensemble": {"min_confidence_to_alert": 0.85},
         "labeling": {"horizon_candles_n": 48},
     },
     "v4b_trailing": {  # trailing-runner candidate (engine code path exists)
-        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.5, "tp3_mult": 3.0, "trailing_atr_mult": 2.0},
+        "signal_grid": {
+            "stop_mult": 3.0,
+            "breakeven_trigger_atr": 1.0,
+            "tp2_mult": 2.5,
+            "tp3_mult": 3.0,
+            "trailing_atr_mult": 2.0,
+        },
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
     "progress_stop": {  # Task 6: progress-stop candidate
-        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.5, "tp3_mult": 3.0,
-                        "progress_stop_enabled": True, "progress_stop_ratio": 0.5,
-                        "progress_stop_atr": 0.3},
+        "signal_grid": {
+            "stop_mult": 3.0,
+            "breakeven_trigger_atr": 1.0,
+            "tp2_mult": 2.5,
+            "tp3_mult": 3.0,
+            "progress_stop_enabled": True,
+            "progress_stop_ratio": 0.5,
+            "progress_stop_atr": 0.3,
+        },
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
     "legacy": {  # Phase-0+1 global defaults; regime_overrides: None strips the
         # shipped per-regime policy so the comparison stays honest (patch-value
         # None = key removal, see _apply_variant).
-        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.0, "tp3_mult": 3.0,
-                        "regime_overrides": None},
+        "signal_grid": {
+            "stop_mult": 3.0,
+            "breakeven_trigger_atr": 1.0,
+            "tp2_mult": 2.0,
+            "tp3_mult": 3.0,
+            "regime_overrides": None,
+        },
         "ensemble": {"min_confidence_to_alert": 0.60},
         "labeling": {"horizon_candles_n": 36},
     },
     "regime_wide": {  # audit action 4 pre-registered: trend->wide, range->fast
-        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 1.0,
-                        "tp2_mult": 2.5, "tp3_mult": 3.0,
-                        "regime_overrides": {
-                            "trend_up": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
-                                         "tp2_mult": 2.5, "tp3_mult": 4.0,
-                                         "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
-                            "trend_down": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
-                                           "tp2_mult": 2.5, "tp3_mult": 4.0,
-                                           "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
-                            "range": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
-                                      "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4}},
-                        }},
+        "signal_grid": {
+            "stop_mult": 3.0,
+            "breakeven_trigger_atr": 1.0,
+            "tp2_mult": 2.5,
+            "tp3_mult": 3.0,
+            "regime_overrides": {
+                "trend_up": {
+                    "stop_mult": 4.0,
+                    "breakeven_trigger_atr": 1.0,
+                    "tp2_mult": 2.5,
+                    "tp3_mult": 4.0,
+                    "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3},
+                },
+                "trend_down": {
+                    "stop_mult": 4.0,
+                    "breakeven_trigger_atr": 1.0,
+                    "tp2_mult": 2.5,
+                    "tp3_mult": 4.0,
+                    "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3},
+                },
+                "range": {
+                    "stop_mult": 2.0,
+                    "breakeven_trigger_atr": 0.5,
+                    "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4},
+                },
+            },
+        },
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
     "regime_fast": {  # audit action 4 pre-registered: early-BE everywhere;
         # regime_overrides: None cancels the shipped overrides (they made
         # regime_fast identical to current in the 2026-08-07 run).
-        "signal_grid": {"stop_mult": 3.0, "breakeven_trigger_atr": 0.5,
-                        "tp2_mult": 2.5, "tp3_mult": 3.0,
-                        "regime_overrides": None},
+        "signal_grid": {
+            "stop_mult": 3.0,
+            "breakeven_trigger_atr": 0.5,
+            "tp2_mult": 2.5,
+            "tp3_mult": 3.0,
+            "regime_overrides": None,
+        },
         "ensemble": {"min_confidence_to_alert": 0.80},
         "labeling": {"horizon_candles_n": 36},
     },
@@ -247,6 +278,7 @@ _SYNTH_DEFAULTS: dict = {
 # Synthetic demo data (tests / no-DB fallback) — NEVER used on real data.
 # ---------------------------------------------------------------------------
 
+
 def _make_synthetic_wf_df(n: int, price: float, atr: float, freq: str, seed: int = 123) -> pd.DataFrame:
     """Long synthetic OHLC series that produces walk-forward folds.
 
@@ -264,19 +296,21 @@ def _make_synthetic_wf_df(n: int, price: float, atr: float, freq: str, seed: int
     opens = closes + np.random.randn(n) * noise_scale * 0.3
     highs = np.maximum(opens, closes) + np.abs(np.random.randn(n)) * noise_scale * 0.55
     lows = np.minimum(opens, closes) - np.abs(np.random.randn(n)) * noise_scale * 0.55
-    return pd.DataFrame({
-        "timestamp_utc": to_epoch_seconds(idx),
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": (1000 + np.random.randint(-300, 300, n)).astype(float),
-        "session": np.random.choice(["london", "newyork", "asia"], n, p=[0.45, 0.35, 0.20]),
-        "regime": np.random.choice(
-            ["trend_up", "trend_down", "range", "compression"], n,
-            p=[0.30, 0.30, 0.30, 0.10]),
-        "atr": atr,
-    })
+    return pd.DataFrame(
+        {
+            "timestamp_utc": to_epoch_seconds(idx),
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": (1000 + np.random.randint(-300, 300, n)).astype(float),
+            "session": np.random.choice(["london", "newyork", "asia"], n, p=[0.45, 0.35, 0.20]),
+            "regime": np.random.choice(
+                ["trend_up", "trend_down", "range", "compression"], n, p=[0.30, 0.30, 0.30, 0.10]
+            ),
+            "atr": atr,
+        }
+    )
 
 
 def _inject_biased_probs(df: pd.DataFrame, strength: float = 0.30, seed: int = 7) -> pd.DataFrame:
@@ -320,6 +354,7 @@ def _prepare_fold_frame(fdf: pd.DataFrame, name: str, fold_i: int, random_seed: 
 # ---------------------------------------------------------------------------
 # Variant plumbing
 # ---------------------------------------------------------------------------
+
 
 def _variants_for(asset_key: str) -> dict:
     if asset_key == "GBPUSD":
@@ -383,9 +418,9 @@ def _apply_cost_mult(cfg: dict, asset_key: str, mult: float) -> dict:
     return cfg_v
 
 
-def _cost_stress_for_variant(cfg: dict, asset_key: str, frames: list, name: str,
-                             overrides: dict | None, random_seed: int,
-                             cost_mult: float = 1.5) -> dict:
+def _cost_stress_for_variant(
+    cfg: dict, asset_key: str, frames: list, name: str, overrides: dict | None, random_seed: int, cost_mult: float = 1.5
+) -> dict:
     """Rerun ONE variant's folds with spread/slippage/commission x cost_mult.
 
     Originally this only ran for `current` (audit gate condition 4). Extended
@@ -438,8 +473,8 @@ def _cost_stress_for_variant(cfg: dict, asset_key: str, frames: list, name: str,
 # Per-fold model scoring (real data only; MUST match run_backtest.strategy_fn)
 # ---------------------------------------------------------------------------
 
-def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
-                asset_key: str) -> pd.DataFrame:
+
+def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict, asset_key: str) -> pd.DataFrame:
     """Train an XGBoost on the train window ONLY (temp-file model, never the
     production file) and return the test frame augmented with ml_p_*.
 
@@ -480,9 +515,7 @@ def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
         # weights handle the residual overlap among the survivors.
         horizon = int(cfg_inner.get("labeling", {}).get("horizon_candles_n", 36))
         try:
-            sw = aligned_uniqueness_weights(
-                train_df.index, X_train.index, horizon=max(1, horizon)
-            )
+            sw = aligned_uniqueness_weights(train_df.index, X_train.index, horizon=max(1, horizon))
         except Exception:
             sw = None
         try:
@@ -510,8 +543,9 @@ def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
         # instead of being filled with 0.0, matching both the live trader and
         # run_backtest.strategy_fn.
         feat_cols = [c for c in cols if c in test_df_eval.columns]
-        complete = test_df_eval[feat_cols].notna().all(axis=1) if feat_cols \
-            else pd.Series(True, index=test_df_eval.index)
+        complete = (
+            test_df_eval[feat_cols].notna().all(axis=1) if feat_cols else pd.Series(True, index=test_df_eval.index)
+        )
         if complete.any():
             preds = predictor.predict_proba(test_df_eval[complete])
             test_df_eval.loc[complete, "ml_p_long"] = preds["p_long"].values
@@ -522,8 +556,7 @@ def _score_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: dict,
     return test_df_eval
 
 
-def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
-                       max_folds: int | None) -> tuple[list, list]:
+def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str, max_folds: int | None) -> tuple[list, list]:
     """Slice walk-forward windows with the SHARED honest splitter and score them
     with per-fold models unless the frame already carries injected ml_p_*
     (synthetic demo).
@@ -535,8 +568,7 @@ def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
     re-open the very divergence this commit closes.)
     """
     wf_cfg = cfg["backtest"]["walk_forward"]
-    windows = generate_windows(
-        df, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"])
+    windows = generate_windows(df, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"])
     if max_folds is not None and len(windows) > max_folds:
         windows = windows[:max_folds]
     secs = bar_seconds(df)
@@ -555,22 +587,46 @@ def _build_fold_frames(df: pd.DataFrame, cfg: dict, asset_key: str,
 # Analysis
 # ---------------------------------------------------------------------------
 
-def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
-                     historical_trials: int, n_variants: int,
-                     trades_per_year: float, n_eff_historical: float,
-                     trade_r: list[float] | None = None,
-                     horizon_bars: int = 36) -> dict:
+
+def _summarize_trial(
+    name: str,
+    fold_trades: list[np.ndarray],
+    n_folds: int,
+    historical_trials: int,
+    n_variants: int,
+    trades_per_year: float,
+    n_eff_historical: float,
+    trade_r: list[float] | None = None,
+    horizon_bars: int = 36,
+) -> dict:
     """One row of the DSR report for a single config variant."""
     if not fold_trades:
-        return {"variant": name, "n_trades": 0, "t_eff": 0.0, "n_folds": n_folds,
-                "traded_folds": 0, "valid_folds": 0, "pos_folds": 0,
-                "median_fold_pnl": 0.0, "best_fold_pnl": 0.0,
-                "total_pnl_ex_best": 0.0, "t_block": float("nan"),
-                "total_pnl": 0.0, "expectancy": 0.0, "win_rate": 0.0,
-                "profit_factor": 0.0, "median_fold_pf": 0.0, "sharpe": 0.0,
-                "skew": 0.0, "kurtosis_excess": 0.0, "psr_0": float("nan"),
-                "dsr_trials": float("nan"), "dsr_historical": float("nan"),
-                "min_trl_trades": float("inf"), "min_trl_years": float("inf")}
+        return {
+            "variant": name,
+            "n_trades": 0,
+            "t_eff": 0.0,
+            "n_folds": n_folds,
+            "traded_folds": 0,
+            "valid_folds": 0,
+            "pos_folds": 0,
+            "median_fold_pnl": 0.0,
+            "best_fold_pnl": 0.0,
+            "total_pnl_ex_best": 0.0,
+            "t_block": float("nan"),
+            "total_pnl": 0.0,
+            "expectancy": 0.0,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "median_fold_pf": 0.0,
+            "sharpe": 0.0,
+            "skew": 0.0,
+            "kurtosis_excess": 0.0,
+            "psr_0": float("nan"),
+            "dsr_trials": float("nan"),
+            "dsr_historical": float("nan"),
+            "min_trl_trades": float("inf"),
+            "min_trl_years": float("inf"),
+        }
     arr = np.concatenate(fold_trades).astype(float)
     wins = arr[arr > 0]
     losses = arr[arr <= 0]
@@ -644,17 +700,22 @@ def _summarize_trial(name: str, fold_trades: list[np.ndarray], n_folds: int,
         "dsr_historical": round(float(d_hist["dsr"]), 4),
         "min_trl_trades": round(float(mtrl["min_trl_trades"]), 1),
         "min_trl_years": round(float(mtrl["min_trl_trades"] / trades_per_year), 2)
-        if trades_per_year > 0 else float("inf"),
+        if trades_per_year > 0
+        else float("inf"),
     }
 
 
-def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                 variants: dict | None = None,
-                 historical_trials: int = 729,
-                 n_splits: int | None = None,
-                 max_folds: int | None = None,
-                 random_seed: int = 42,
-                 cost_stress: bool = True) -> dict:
+def run_analysis(
+    cfg: dict,
+    asset_key: str,
+    df_full: pd.DataFrame,
+    variants: dict | None = None,
+    historical_trials: int = 729,
+    n_splits: int | None = None,
+    max_folds: int | None = None,
+    random_seed: int = 42,
+    cost_stress: bool = True,
+) -> dict:
     """Run the walk-forward family comparison + DSR/CSCV for one asset.
 
     Returns a plain-python dict (JSON-serializable) with per-trial rows and
@@ -668,7 +729,8 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         raise ValueError(
             f"No walk-forward folds produced for {asset_key} "
             f"({len(df_full)} rows). Need >= train+test span "
-            f"({cfg['backtest']['walk_forward']['train_window_days'] + cfg['backtest']['walk_forward']['test_window_days']} days).")
+            f"({cfg['backtest']['walk_forward']['train_window_days'] + cfg['backtest']['walk_forward']['test_window_days']} days)."
+        )
 
     span_secs = float(df_full["timestamp_utc"].max() - df_full["timestamp_utc"].min())
     years = span_secs / (86400.0 * 365.25) if span_secs > 0 else 1.0
@@ -708,13 +770,18 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         trades_per_year = n_total / years if years > 0 else 0.0
         variant_r_by_name[name] = variant_r
         trial = _summarize_trial(
-            name, fold_trades, len(windows), historical_trials,
-            n_variants=len(variants), trades_per_year=trades_per_year,
-            n_eff_historical=n_eff_historical, trade_r=variant_r,
-            horizon_bars=int(merged_lab.get("horizon_candles_n", 36)))
+            name,
+            fold_trades,
+            len(windows),
+            historical_trials,
+            n_variants=len(variants),
+            trades_per_year=trades_per_year,
+            n_eff_historical=n_eff_historical,
+            trade_r=variant_r,
+            horizon_bars=int(merged_lab.get("horizon_candles_n", 36)),
+        )
         if cost_stress:
-            trial.update(_cost_stress_for_variant(
-                cfg, asset_key, frames, name, overrides, random_seed, cost_mult=1.5))
+            trial.update(_cost_stress_for_variant(cfg, asset_key, frames, name, overrides, random_seed, cost_mult=1.5))
         trials.append(trial)
         fold_matrix.append([float(ft.sum()) if len(ft) else 0.0 for ft in fold_trades])
 
@@ -792,6 +859,7 @@ def run_analysis(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 # Report + CLI
 # ---------------------------------------------------------------------------
 
+
 def _fmt(x, width: int = 9, digits: int = 2) -> str:
     if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
         return "n/a".rjust(width)
@@ -822,11 +890,19 @@ def fold_health(cur: dict | None) -> dict:
     exist.
     """
     if cur is None:
-        return {"total_pnl": 0.0, "total_pnl_positive": False,
-                "total_pnl_ex_best": 0.0, "ex_best_positive": False,
-                "best_fold_pnl": 0.0, "median_fold_pnl": 0.0,
-                "pos_folds": 0, "valid_folds": 0, "positive_share": 0.0,
-                "positive_share_ok": False, "passed": False}
+        return {
+            "total_pnl": 0.0,
+            "total_pnl_positive": False,
+            "total_pnl_ex_best": 0.0,
+            "ex_best_positive": False,
+            "best_fold_pnl": 0.0,
+            "median_fold_pnl": 0.0,
+            "pos_folds": 0,
+            "valid_folds": 0,
+            "positive_share": 0.0,
+            "positive_share_ok": False,
+            "passed": False,
+        }
     total = float(cur.get("total_pnl", 0.0))
     ex_best = float(cur.get("total_pnl_ex_best", 0.0))
     valid = int(cur.get("valid_folds", 0))
@@ -884,10 +960,12 @@ def decision_gate(res: dict) -> dict:
         "IS->OOS informativeness": bool(
             cscv.get("is_oos_slope") is None
             or (np.isfinite(cscv.get("is_oos_slope", float("nan"))) and cscv["is_oos_slope"] >= 0.5)
-            or (cscv.get("oos_prob_loss") is not None
+            or (
+                cscv.get("oos_prob_loss") is not None
                 and cscv.get("oos_prob_loss") <= 0.05
                 and cscv.get("median_lambda") is not None
-                and cscv.get("median_lambda") > 2.0)
+                and cscv.get("median_lambda") > 2.0
+            )
         ),
         "locked hold-out confirms": None,  # organizational, set by the user
     }
@@ -898,58 +976,76 @@ def decision_gate(res: dict) -> dict:
 def print_report(res: dict) -> None:
     a = res["asset"]
     print(f"\n=== Deflated Sharpe / CSCV: {a} ===")
-    print(f"Walk-forward: {res['n_folds']} folds over ~{res['years']} years | "
-          f"trials in family: {res['n_trials']} | historical trials (deflation): "
-          f"{res['historical_trials']}")
+    print(
+        f"Walk-forward: {res['n_folds']} folds over ~{res['years']} years | "
+        f"trials in family: {res['n_trials']} | historical trials (deflation): "
+        f"{res['historical_trials']}"
+    )
     if res.get("end_date"):
         print(f"Sample truncated at {res['end_date']} (locked hold-out NOT touched)")
     cc = res["current_config"]
-    print("Current config: grid=" + str({k: v for k, v in cc["signal_grid"].items()
-                                         if v is not None}) +
-          f" | conf={cc['ensemble']['min_confidence_to_alert']} | "
-          f"h={cc['labeling']['horizon_candles_n']}")
+    print(
+        "Current config: grid="
+        + str({k: v for k, v in cc["signal_grid"].items() if v is not None})
+        + f" | conf={cc['ensemble']['min_confidence_to_alert']} | "
+        f"h={cc['labeling']['horizon_candles_n']}"
+    )
 
     neff = res.get("n_eff", {})
     rho = neff.get("family_rho_bar")
     rho_s = f"{rho:.2f}" if rho is not None else "n/a"
-    print(f"Trial correlation: rho_bar={rho_s} -> N_eff({res['historical_trials']}) = "
-          f"{neff.get('n_eff_historical', 'n/a')} (participation ratio "
-          f"{neff.get('family_participation_ratio', 'n/a')})")
-    print(f"+folds = valid folds with positive PnL / valid folds "
-          f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades); "
-          f"exBest = total PnL minus the single best fold")
-    print("t_block = block-bootstrap t-stat on per-trade R-multiples; "
-          "x1.5PnL/x1.5PF = cost-stress rerun at 1.5x spread/slippage/commission "
-          "(gate conditions 1 & 4, now computed for EVERY variant, not just 'current')")
+    print(
+        f"Trial correlation: rho_bar={rho_s} -> N_eff({res['historical_trials']}) = "
+        f"{neff.get('n_eff_historical', 'n/a')} (participation ratio "
+        f"{neff.get('family_participation_ratio', 'n/a')})"
+    )
+    print(
+        f"+folds = valid folds with positive PnL / valid folds "
+        f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades); "
+        f"exBest = total PnL minus the single best fold"
+    )
+    print(
+        "t_block = block-bootstrap t-stat on per-trade R-multiples; "
+        "x1.5PnL/x1.5PF = cost-stress rerun at 1.5x spread/slippage/commission "
+        "(gate conditions 1 & 4, now computed for EVERY variant, not just 'current')"
+    )
 
     dsr_label = f"DSR({res['historical_trials']})"
     neff_label = "DSR(Nef)"
-    hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'exBest':>9}{'WR%':>6}{'PF':>6}"
-           f"{'medPF':>7}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
-           f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}"
-           f"{'t_block':>9}{'x1.5PnL':>9}{'x1.5PF':>8}")
+    hdr = (
+        f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'exBest':>9}{'WR%':>6}{'PF':>6}"
+        f"{'medPF':>7}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
+        f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}"
+        f"{'t_block':>9}{'x1.5PnL':>9}{'x1.5PF':>8}"
+    )
     print(hdr)
     print("-" * len(hdr))
     for t in res["trials"]:
-        print(f"{t['variant']:<14}{t['n_trades']:>6}{t['total_pnl']:>9.1f}"
-              f"{t.get('total_pnl_ex_best', 0.0):>9.1f}"
-              f"{t['win_rate']:>6.1f}{t['profit_factor']:>6.2f}{t['median_fold_pf']:>7.2f}"
-              f"{t['sharpe']:>8.2f}{_fmt(t['psr_0'], 8):>8}{_fmt(t['dsr_trials'], 8):>8}"
-              f"{_fmt(t['dsr_neff'], 8):>8}"
-              f"{_fmt(t['dsr_historical'], 9):>9}{_fmt(t['min_trl_years'], 9):>9}"
-              f"{str(t['pos_folds']) + '/' + str(t.get('valid_folds', 0)):>8}"
-              f"{_fmt(t.get('t_block', float('nan')), 9):>9}"
-              f"{_fmt(t.get('cost_x1_5_pnl', float('nan')), 9, 1):>9}"
-              f"{_fmt(t.get('cost_x1_5_pf', float('nan')), 8):>8}")
+        print(
+            f"{t['variant']:<14}{t['n_trades']:>6}{t['total_pnl']:>9.1f}"
+            f"{t.get('total_pnl_ex_best', 0.0):>9.1f}"
+            f"{t['win_rate']:>6.1f}{t['profit_factor']:>6.2f}{t['median_fold_pf']:>7.2f}"
+            f"{t['sharpe']:>8.2f}{_fmt(t['psr_0'], 8):>8}{_fmt(t['dsr_trials'], 8):>8}"
+            f"{_fmt(t['dsr_neff'], 8):>8}"
+            f"{_fmt(t['dsr_historical'], 9):>9}{_fmt(t['min_trl_years'], 9):>9}"
+            f"{str(t['pos_folds']) + '/' + str(t.get('valid_folds', 0)):>8}"
+            f"{_fmt(t.get('t_block', float('nan')), 9):>9}"
+            f"{_fmt(t.get('cost_x1_5_pnl', float('nan')), 9, 1):>9}"
+            f"{_fmt(t.get('cost_x1_5_pf', float('nan')), 8):>8}"
+        )
 
     c = res["cscv"]
     print("\nCSCV (Probability of Backtest Overfitting):")
-    print(f"  splits={c['n_splits']} (blocks of {c['n_observations'] // c['n_splits']} folds), "
-          f"combinations={c['n_combinations']} (of {c['total_combinations']})")
-    print(f"  PBO = {c['pbo']:.3f} | mean lambda = {c['mean_lambda']:+.3f} | "
-          f"median lambda = {c['median_lambda']:+.3f} | frac lambda>0 = "
-          f"{c['frac_lambda_positive']:.3f} | OOS prob loss = {c['oos_prob_loss']:.3f} | "
-          f"IS->OOS degradation = {c['is_oos_degradation']:+.2%}")
+    print(
+        f"  splits={c['n_splits']} (blocks of {c['n_observations'] // c['n_splits']} folds), "
+        f"combinations={c['n_combinations']} (of {c['total_combinations']})"
+    )
+    print(
+        f"  PBO = {c['pbo']:.3f} | mean lambda = {c['mean_lambda']:+.3f} | "
+        f"median lambda = {c['median_lambda']:+.3f} | frac lambda>0 = "
+        f"{c['frac_lambda_positive']:.3f} | OOS prob loss = {c['oos_prob_loss']:.3f} | "
+        f"IS->OOS degradation = {c['is_oos_degradation']:+.2%}"
+    )
     if c["pbo"] <= 0.10:
         verdict = "LOW overfit risk: the IS-best config usually wins OOS."
     elif c["pbo"] <= 0.20:
@@ -964,10 +1060,12 @@ def print_report(res: dict) -> None:
     # Cost stress + decision gate
     st = res.get("cost_stress")
     if st:
-        print(f"\nCost stress x{st['cost_mult']} (current variant): n={st['n_trades']} "
-              f"PnL={st['total_pnl']} PF={st['profit_factor']} "
-              f"median fold PF={st['median_fold_pf']} "
-              f"({'PASS' if st['profit_factor'] > 1.1 else 'FAIL'} PF>1.1)")
+        print(
+            f"\nCost stress x{st['cost_mult']} (current variant): n={st['n_trades']} "
+            f"PnL={st['total_pnl']} PF={st['profit_factor']} "
+            f"median fold PF={st['median_fold_pf']} "
+            f"({'PASS' if st['profit_factor'] > 1.1 else 'FAIL'} PF>1.1)"
+        )
         print("  (per-variant cost-stress and block-bootstrap t are in the table above)")
     gate = decision_gate(res)
     print("\nDecision gate (all conditions simultaneously, evaluated for 'current' only):")
@@ -978,15 +1076,17 @@ def print_report(res: dict) -> None:
             print(f"  [{'x' if ok else ' '}] {cond}")
         if cond == FOLD_CONDITION:
             fh = gate["fold_health"]
-            print(f"        total PnL {fh['total_pnl']:+.1f} "
-                  f"[{'ok' if fh['total_pnl_positive'] else 'FAIL'}] | "
-                  f"ex-best {fh['total_pnl_ex_best']:+.1f} "
-                  f"(best fold {fh['best_fold_pnl']:+.1f}) "
-                  f"[{'ok' if fh['ex_best_positive'] else 'FAIL'}] | "
-                  f"{fh['pos_folds']}/{fh['valid_folds']} positive "
-                  f"({100.0 * fh['positive_share']:.1f}%, need "
-                  f"{100.0 * POS_FOLD_SHARE_MIN:.0f}%) "
-                  f"[{'ok' if fh['positive_share_ok'] else 'FAIL'}]")
+            print(
+                f"        total PnL {fh['total_pnl']:+.1f} "
+                f"[{'ok' if fh['total_pnl_positive'] else 'FAIL'}] | "
+                f"ex-best {fh['total_pnl_ex_best']:+.1f} "
+                f"(best fold {fh['best_fold_pnl']:+.1f}) "
+                f"[{'ok' if fh['ex_best_positive'] else 'FAIL'}] | "
+                f"{fh['pos_folds']}/{fh['valid_folds']} positive "
+                f"({100.0 * fh['positive_share']:.1f}%, need "
+                f"{100.0 * POS_FOLD_SHARE_MIN:.0f}%) "
+                f"[{'ok' if fh['positive_share_ok'] else 'FAIL'}]"
+            )
     print(f"  => {'PASS -> capital' if gate['passed_all'] else 'FAIL -> paper/shadow only'}")
 
     cur = next((t for t in res["trials"] if t["variant"] == "current"), None)
@@ -1004,29 +1104,34 @@ def print_report(res: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Deflated Sharpe / CSCV assessment for one asset's config family.")
+    parser = argparse.ArgumentParser(description="Deflated Sharpe / CSCV assessment for one asset's config family.")
     parser.add_argument("--asset", required=True, help="Internal asset key (XAUUSD, ...)")
     parser.add_argument("--timeframe", default=None, help="Override timeframe (default: per-asset)")
     parser.add_argument("--db-path", default=None, help="SQLite DB (default: config general.db_path)")
-    parser.add_argument("--variants", default=None,
-                        help="Comma-separated variant subset (default: full family)")
-    parser.add_argument("--historical-trials", type=int, default=None,
-                        help="Total trials ever tried on this asset's data (deflation N); "
-                             "default: max(trial-journal count, 729)")
+    parser.add_argument("--variants", default=None, help="Comma-separated variant subset (default: full family)")
+    parser.add_argument(
+        "--historical-trials",
+        type=int,
+        default=None,
+        help="Total trials ever tried on this asset's data (deflation N); default: max(trial-journal count, 729)",
+    )
     parser.add_argument("--n-splits", type=int, default=None, help="CSCV split count (default: auto)")
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds (quick runs/tests)")
-    parser.add_argument("--no-cost-stress", action="store_true",
-                        help="Skip the 1.5x-cost stress rerun (now per variant)")
-    parser.add_argument("--no-journal", action="store_true",
-                        help="Do not append this run to logs/trial_journal.csv")
-    parser.add_argument("--allow-locked", action="store_true",
-                        help="Allow test windows overlapping the locked hold-out")
-    parser.add_argument("--end-date", default=None,
-                        help="Drop candles at or after this UTC date (YYYY-MM-DD) before "
-                             "building features, so the gate can be computed without "
-                             "burning the locked hold-out. Same semantics as "
-                             "scripts/run_backtest.py --end-date.")
+    parser.add_argument(
+        "--no-cost-stress", action="store_true", help="Skip the 1.5x-cost stress rerun (now per variant)"
+    )
+    parser.add_argument("--no-journal", action="store_true", help="Do not append this run to logs/trial_journal.csv")
+    parser.add_argument(
+        "--allow-locked", action="store_true", help="Allow test windows overlapping the locked hold-out"
+    )
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Drop candles at or after this UTC date (YYYY-MM-DD) before "
+        "building features, so the gate can be computed without "
+        "burning the locked hold-out. Same semantics as "
+        "scripts/run_backtest.py --end-date.",
+    )
     parser.add_argument("--out", default=None, help="Output CSV path (default: logs/deflated_sharpe_<asset>.csv)")
     args = parser.parse_args(argv)
 
@@ -1066,22 +1171,32 @@ def main(argv: list[str] | None = None) -> None:
         enforce_locked_holdout,
         log_trial,
     )
+
     if args.historical_trials is None:
         args.historical_trials = default_historical_trials(args.asset)
 
     from backtest.walk_forward import generate_windows
+
     windows_probe = generate_windows(
-        df, cfg["backtest"]["walk_forward"]["train_window_days"],
+        df,
+        cfg["backtest"]["walk_forward"]["train_window_days"],
         cfg["backtest"]["walk_forward"]["test_window_days"],
-        cfg["backtest"]["walk_forward"]["step_days"])
+        cfg["backtest"]["walk_forward"]["step_days"],
+    )
     enforce_locked_holdout(cfg, windows_probe, "deflated_sharpe", allow=args.allow_locked)
 
     variants = _select_variants(args.asset, args.variants)
     try:
-        res = run_analysis(cfg, args.asset, df, variants=variants,
-                           historical_trials=args.historical_trials,
-                           n_splits=args.n_splits, max_folds=args.max_folds,
-                           cost_stress=not args.no_cost_stress)
+        res = run_analysis(
+            cfg,
+            args.asset,
+            df,
+            variants=variants,
+            historical_trials=args.historical_trials,
+            n_splits=args.n_splits,
+            max_folds=args.max_folds,
+            cost_stress=not args.no_cost_stress,
+        )
     except ValueError as exc:
         raise SystemExit(f"[dsr] {exc}")
 
@@ -1098,13 +1213,17 @@ def main(argv: list[str] | None = None) -> None:
         log_trial(
             experiment="deflated_sharpe",
             asset=args.asset,
-            params={"variants": args.variants or "all",
-                    "historical_trials": args.historical_trials,
-                    "end_date": args.end_date},
-            metrics={"dsr_historical": next((t["dsr_historical"] for t in res["trials"]
-                                             if t["variant"] == "current"), None),
-                     "pbo": res["cscv"]["pbo"],
-                     "n_eff": res["n_eff"]["n_eff_historical"]})
+            params={
+                "variants": args.variants or "all",
+                "historical_trials": args.historical_trials,
+                "end_date": args.end_date,
+            },
+            metrics={
+                "dsr_historical": next((t["dsr_historical"] for t in res["trials"] if t["variant"] == "current"), None),
+                "pbo": res["cscv"]["pbo"],
+                "n_eff": res["n_eff"]["n_eff_historical"],
+            },
+        )
     out_json = out_csv.replace(".csv", ".json")
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=2, default=str)

@@ -24,6 +24,7 @@ Telegram commands once running
     /resume      switch back to live
     /closeall    emergency close all positions
 """
+
 import logging
 import os
 import signal
@@ -61,6 +62,7 @@ def _install_shutdown_handlers(executor, logger_):  # pragma: no cover - wiring
     covers the common console case. Handlers are installed best-effort:
     a platform without a given signal is skipped, never fatal.
     """
+
     def _handle(signum, frame):
         logger_.info("Received signal %s — graceful shutdown", signum)
         try:
@@ -84,11 +86,7 @@ def _resolve_db_path() -> str:
     try:
         from config.loader import load_config
 
-        return str(
-            load_config().get("general", {}).get(
-                "db_path", "data/market_data_mt5.sqlite"
-            )
-        )
+        return str(load_config().get("general", {}).get("db_path", "data/market_data_mt5.sqlite"))
     except Exception:
         return "data/market_data_mt5.sqlite"
 
@@ -126,6 +124,7 @@ def main() -> None:
 
     # 3. Build the real trader.
     from execution.mt5_trader import MultiAssetMT5Trader
+
     trader = MultiAssetMT5Trader()
 
     # 4. Start the Telegram control bot in a daemon thread.
@@ -167,8 +166,13 @@ def main() -> None:
     if account is not None:
         profit = account.equity - cfg.get("virtual_balance", 10000.0)
         logger.info("=" * 50)
-        logger.info("FINAL: balance=%.2f equity=%.2f profit=%+.2f mid=%.2f",
-                    account.balance, account.equity, profit, sim.current_mid_price)
+        logger.info(
+            "FINAL: balance=%.2f equity=%.2f profit=%+.2f mid=%.2f",
+            account.balance,
+            account.equity,
+            profit,
+            sim.current_mid_price,
+        )
         logger.info("=" * 50)
 
 

@@ -103,20 +103,19 @@ def main() -> None:
         print("\n--- Model AS-IS vs FADE-THE-REGIME (same trade universe) ---")
         hdr = f"{'':18s} {'n':>5} {'sumR':>8} {'WR%':>6} {'PF':>5}"
         print(hdr)
-        for label, key in [("model as-is (all)", "model"),
-                           ("fade-the-regime (all)", "fade_all"),
-                           ("model (trend regimes only)", "model_trend"),
-                           ("fade (trend regimes only)", "fade_trend")]:
+        for label, key in [
+            ("model as-is (all)", "model"),
+            ("fade-the-regime (all)", "fade_all"),
+            ("model (trend regimes only)", "model_trend"),
+            ("fade (trend regimes only)", "fade_trend"),
+        ]:
             m = rows[-1][key]
             print(f"{label:18s} {m['n']:>5} {m['sumR']:>+8.2f} {m['WR%']:>5.1f}% {m['PF']:>5.2f}")
 
         fl = rows[-1]
-        print(f"\n--- On the {fl['n_flipped']} trades where model went WITH the regime "
-              f"(fade flips the side) ---")
-        print(f"  model keeps  : {fl['model_on_flipped']['sumR']:+.2f}R "
-              f"(WR {fl['model_on_flipped']['WR%']}%)")
-        print(f"  fade flips   : {fl['fade_on_flipped']['sumR']:+.2f}R "
-              f"(WR {fl['fade_on_flipped']['WR%']}%)")
+        print(f"\n--- On the {fl['n_flipped']} trades where model went WITH the regime (fade flips the side) ---")
+        print(f"  model keeps  : {fl['model_on_flipped']['sumR']:+.2f}R (WR {fl['model_on_flipped']['WR%']}%)")
+        print(f"  fade flips   : {fl['fade_on_flipped']['sumR']:+.2f}R (WR {fl['fade_on_flipped']['WR%']}%)")
 
         # Direction x regime cells with multiple-testing correction.
         sc = SubsetScanner(df, r_col="R", min_trades=5)
@@ -124,23 +123,34 @@ def main() -> None:
         res = sc.scan()
         print("\n--- Direction x regime cells (Bonferroni/DSR on ACTUAL R) ---")
         for r in res:
-            if r.label in ("ALL", "direction=long", "direction=short",
-                           "regime=trend_up", "regime=trend_down", "regime=range"):
+            if r.label in (
+                "ALL",
+                "direction=long",
+                "direction=short",
+                "regime=trend_up",
+                "regime=trend_down",
+                "regime=range",
+            ):
                 continue
-            print(f"  {r.verdict:>8s} {r.label:40s} n={r.n:4d} "
-                  f"sumR={r.sum_R:+7.2f} p_bonf={r.p_value_bonf:.3f} DSR={r.dsr:.2f}")
+            print(
+                f"  {r.verdict:>8s} {r.label:40s} n={r.n:4d} "
+                f"sumR={r.sum_R:+7.2f} p_bonf={r.p_value_bonf:.3f} DSR={r.dsr:.2f}"
+            )
 
     print("\n\n========== CROSS-ASSET SUMMARY ==========")
-    cols = ["asset", "model n", "model sumR", "model WR%", "model PF",
-            "fade sumR", "fade WR%", "fade PF", "flip ΔR"]
-    print(f"{'asset':8s} {'n':>5} {'model sumR':>10} {'model WR':>8} {'model PF':>7} "
-          f"{'fade sumR':>9} {'fade WR':>7} {'fade PF':>7} {'flip gain':>9}")
+    cols = ["asset", "model n", "model sumR", "model WR%", "model PF", "fade sumR", "fade WR%", "fade PF", "flip ΔR"]
+    print(
+        f"{'asset':8s} {'n':>5} {'model sumR':>10} {'model WR':>8} {'model PF':>7} "
+        f"{'fade sumR':>9} {'fade WR':>7} {'fade PF':>7} {'flip gain':>9}"
+    )
     for r in rows:
         m, f, fl = r["model"], r["fade_all"], r["fade_on_flipped"]
         gain = f["sumR"] - m["sumR"]
-        print(f"{r['asset']:8s} {m['n']:>5} {m['sumR']:>+10.2f} {m['WR%']:>7.1f}% "
-              f"{m['PF']:>7.2f} {f['sumR']:>+9.2f} {f['WR%']:>6.1f}% {f['PF']:>7.2f} "
-              f"{gain:>+9.2f}")
+        print(
+            f"{r['asset']:8s} {m['n']:>5} {m['sumR']:>+10.2f} {m['WR%']:>7.1f}% "
+            f"{m['PF']:>7.2f} {f['sumR']:>+9.2f} {f['WR%']:>6.1f}% {f['PF']:>7.2f} "
+            f"{gain:>+9.2f}"
+        )
 
 
 if __name__ == "__main__":

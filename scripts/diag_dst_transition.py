@@ -63,8 +63,7 @@ def _patch_tick(offset_hours: float):
 def main() -> int:
     cfg = load_config()
     sessions = cfg["sessions"]
-    print(f"today (UTC): {datetime.now(UTC).isoformat()}  "
-          f"weekday={datetime.now(UTC).weekday()}")
+    print(f"today (UTC): {datetime.now(UTC).isoformat()}  weekday={datetime.now(UTC).weekday()}")
 
     print("\n[1] offset detection flip")
     # Ensure the weekend guard is inert on this run (weekday 0-4).
@@ -73,8 +72,10 @@ def main() -> int:
         _patch_tick(off)
         got, info = mp.detect_server_offset_hours_detailed(fallback=3.0)
         status = "OK" if (got == off and info["mode"] == "detected") else "FAIL"
-        print(f"  {label:16s} tick_delta_hours={info.get('delta_hours'):+.4f} "
-              f"-> detected {got:.1f}  mode={info['mode']}  [{status}]")
+        print(
+            f"  {label:16s} tick_delta_hours={info.get('delta_hours'):+.4f} "
+            f"-> detected {got:.1f}  mode={info['mode']}  [{status}]"
+        )
         if status == "FAIL":
             return 1
 
@@ -89,13 +90,11 @@ def main() -> int:
             server_ts = base + pd.Timedelta(hours=server_hour)
             utc_ts = server_ts - pd.Timedelta(hours=offset)  # _normalize_rates shift
             tag = tag_session_with_weekend(utc_ts, sessions)
-            rows.append({"period": period, "server_hour": server_hour,
-                         "utc_hour": utc_ts.hour, "tag": tag})
+            rows.append({"period": period, "server_hour": server_hour, "utc_hour": utc_ts.hour, "tag": tag})
     df = pd.DataFrame(rows)
 
     # The invariant: for a FIXED true-UTC hour, both periods produce the same tag.
-    pivot = df.pivot_table(index="utc_hour", columns="period", values="tag",
-                           aggfunc=lambda s: s.iloc[0])
+    pivot = df.pivot_table(index="utc_hour", columns="period", values="tag", aggfunc=lambda s: s.iloc[0])
     mism = pivot[pivot["EEST"] != pivot["EET"]]
     print(f"  utc-hours compared: {len(pivot)}  mismatches: {len(mism)}")
     if len(mism):
@@ -105,20 +104,22 @@ def main() -> int:
 
     # And the canonical windows are honored (weekday rows only for spot checks).
     checks = [
-        (2, "asia"), (10, "london"), (16, "newyork"), (23, "off_session"),
+        (2, "asia"),
+        (10, "london"),
+        (16, "newyork"),
+        (23, "off_session"),
     ]
     ok = True
     for hour, expect in checks:
-        tag = tag_session_with_weekend(pd.Timestamp("2026-10-26", tz="UTC")
-                                       + pd.Timedelta(hours=hour), sessions)
+        tag = tag_session_with_weekend(pd.Timestamp("2026-10-26", tz="UTC") + pd.Timedelta(hours=hour), sessions)
         good = (expect in tag) or (expect == "off_session" and tag == "off_session")
         ok &= good
-        print(f"  utc {hour:02d}:00 -> '{tag}'  (expect contains '{expect}') "
-              f"[{'OK' if good else 'FAIL'}]")
+        print(f"  utc {hour:02d}:00 -> '{tag}'  (expect contains '{expect}') [{'OK' if good else 'FAIL'}]")
     if not ok:
         return 1
 
     print("\n[3] weekend guard (Sat/Sun UTC -> fallback, never stale detection)")
+
     # Patch the module's now() so the detector sees Saturday, then confirm the
     # fallback path is used even with a fresh-looking tick. ``mp.datetime`` is
     # the ``datetime`` CLASS (``from datetime import datetime``), so we swap a
@@ -134,8 +135,7 @@ def main() -> int:
         _patch_tick(2.0)  # tick looks fresh but it's Saturday
         got, info = mp.detect_server_offset_hours_detailed(fallback=3.0)
         good = got == 3.0 and info["mode"] == "fallback"
-        print(f"  Sat: -> fallback {got:.1f} mode={info['mode']} reason={info['reason']} "
-              f"[{'OK' if good else 'FAIL'}]")
+        print(f"  Sat: -> fallback {got:.1f} mode={info['mode']} reason={info['reason']} [{'OK' if good else 'FAIL'}]")
         if not good:
             return 1
     finally:

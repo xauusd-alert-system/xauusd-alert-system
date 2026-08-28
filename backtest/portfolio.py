@@ -17,6 +17,7 @@ The audit's core corrections vs naive portfolio math:
 - scheme comparison (equal / inverse-vol / risk parity / cluster risk parity)
   with and without XAG, on portfolio Sharpe / max DD / Calmar / ENB.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -73,8 +74,7 @@ def effective_number_bets(daily_r: pd.DataFrame) -> float:
     return float(np.exp(-np.sum(p * np.log(p))))
 
 
-def cluster_risk_parity_weights(assets: list[str],
-                                clusters: dict[str, list[str]]) -> pd.Series:
+def cluster_risk_parity_weights(assets: list[str], clusters: dict[str, list[str]]) -> pd.Series:
     """Cluster risk parity: each cluster gets 1/|clusters| of the risk budget,
     split equally inside. Assets not in any cluster get their own singleton
     cluster. Returns normalized weights summing to 1."""
@@ -108,8 +108,7 @@ def portfolio_curve(daily_r: pd.DataFrame, weights: pd.Series) -> pd.Series:
     return daily_r @ w
 
 
-def portfolio_metrics(daily_r: pd.DataFrame, weights: pd.Series,
-                      periods_per_year: float = 250.0) -> dict:
+def portfolio_metrics(daily_r: pd.DataFrame, weights: pd.Series, periods_per_year: float = 250.0) -> dict:
     """Sharpe / annual vol / max DD / Calmar / ENB for one weighting scheme."""
     if len(daily_r) == 0:
         return {"sharpe": 0.0, "ann_vol": 0.0, "max_dd": 0.0, "calmar": 0.0, "enb": 1.0}
@@ -120,15 +119,16 @@ def portfolio_metrics(daily_r: pd.DataFrame, weights: pd.Series,
     cum = np.cumsum(r)
     dd = float((cum - np.maximum.accumulate(cum)).min())
     calmar = (mean * periods_per_year) / abs(dd) if dd < 0 else float("inf")
-    return {"sharpe": round(float(sharpe), 3),
-            "ann_vol": round(float(std * np.sqrt(periods_per_year)), 4),
-            "max_dd_r": round(dd, 3),
-            "calmar": round(calmar, 3) if np.isfinite(calmar) else None,
-            "enb": round(effective_number_bets(daily_r), 2)}
+    return {
+        "sharpe": round(float(sharpe), 3),
+        "ann_vol": round(float(std * np.sqrt(periods_per_year)), 4),
+        "max_dd_r": round(dd, 3),
+        "calmar": round(calmar, 3) if np.isfinite(calmar) else None,
+        "enb": round(effective_number_bets(daily_r), 2),
+    }
 
 
-def compare_schemes(daily_r: pd.DataFrame,
-                    clusters: dict[str, list[str]]) -> dict:
+def compare_schemes(daily_r: pd.DataFrame, clusters: dict[str, list[str]]) -> dict:
     """Equal / inverse-vol / risk parity / cluster risk parity, each with
     Sharpe/maxDD/Calmar/ENB. Returns dict keyed by scheme name."""
     assets = list(daily_r.columns)
@@ -139,7 +139,7 @@ def compare_schemes(daily_r: pd.DataFrame,
     eq = pd.Series(1.0 / len(assets), index=assets)
     out["equal_weight"] = {"weights": eq.to_dict(), **portfolio_metrics(daily_r, eq)}
     if vol.notna().all() and (vol > 0).all():
-        iv = (1.0 / vol)
+        iv = 1.0 / vol
         iv = iv / iv.sum()
         out["inverse_vol"] = {"weights": iv.to_dict(), **portfolio_metrics(daily_r, iv)}
     # naive risk parity via inverse-vol on pairwise cov diagonal dominance
@@ -152,8 +152,7 @@ def compare_schemes(daily_r: pd.DataFrame,
     return out
 
 
-def kill_switch_thresholds(daily_r: pd.DataFrame,
-                           rolling_trades: pd.DataFrame | None = None) -> dict:
+def kill_switch_thresholds(daily_r: pd.DataFrame, rolling_trades: pd.DataFrame | None = None) -> dict:
     """Kill-switch thresholds from the backtest distribution (audit question 6):
     daily 2-sigma, weekly 3-sigma, and the 60-trade rolling -3-sigma regime
     break. `rolling_trades` optional per-trade frame (asset -> trades) for the
@@ -167,13 +166,14 @@ def kill_switch_thresholds(daily_r: pd.DataFrame,
         "weekly_3sigma": round(-3.0 * weekly_std, 4),
         "n_days": int(len(port)),
         "note": "portfolio R thresholds; a daily sum below daily_2sigma or a "
-                "5-day sum below weekly_3sigma trips the kill-switch",
+        "5-day sum below weekly_3sigma trips the kill-switch",
     }
 
 
 # ---------------------------------------------------------------------------
 # Task 8: Signal Ranking & Queue Loss Analytics (Quant Audit Section 5.2B / Q4f)
 # ---------------------------------------------------------------------------
+
 
 def rank_concurrent_signals(
     signals: list[dict],
@@ -230,6 +230,7 @@ def calculate_queue_loss(
     warning_msg = None
     if is_critical:
         import logging
+
         logger = logging.getLogger("portfolio_queue")
         warning_msg = (
             f"CRITICAL QUEUE LOSS: Rejected signals E[R]={e_r_rejected:.4f} >= Taken signals E[R]={e_r_taken:.4f}. "

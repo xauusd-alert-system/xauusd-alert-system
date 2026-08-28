@@ -1,5 +1,6 @@
 """ТЗ 10.2 — secrets protection: gitignore hardening, secret scanning,
 file-permission audit, sqlite tracking."""
+
 import os
 import sys
 from pathlib import Path
@@ -39,9 +40,7 @@ def test_security_audit_detects_missing_env(tmp_path):
 
 def test_security_audit_detects_hardcoded_secret(tmp_path):
     (tmp_path / ".gitignore").write_text(".env\n", encoding="utf-8")
-    (tmp_path / "app.py").write_text(
-        'API_KEY = "abcd1234abcd1234abcd1234"\n', encoding="utf-8"
-    )
+    (tmp_path / "app.py").write_text('API_KEY = "abcd1234abcd1234abcd1234"\n', encoding="utf-8")
     findings = check_no_secrets_in_source(tmp_path)
     assert any("api_key_literal" in f for f in findings)
 
@@ -50,8 +49,7 @@ def test_security_audit_ignores_env_var_lookup(tmp_path):
     """Reading os.environ / get_env is NOT a hardcoded secret."""
     (tmp_path / ".gitignore").write_text(".env\n", encoding="utf-8")
     (tmp_path / "ok.py").write_text(
-        'import os\nTOKEN = os.environ.get("API_AUTH_TOKEN")\n'
-        'SECRET = get_env("LEDGER_INGEST_SECRET", default=None)\n',
+        'import os\nTOKEN = os.environ.get("API_AUTH_TOKEN")\nSECRET = get_env("LEDGER_INGEST_SECRET", default=None)\n',
         encoding="utf-8",
     )
     assert check_no_secrets_in_source(tmp_path) == []
@@ -81,18 +79,22 @@ def test_security_audit_detects_tracked_sqlite(tmp_path, monkeypatch):
     """A git repo with a tracked .sqlite is flagged."""
     (tmp_path / ".gitignore").write_text(".env\n", encoding="utf-8")
     (tmp_path / "data.sqlite").write_bytes(b"x")
+
     def _fake_tracked(repo):
         return ["data.sqlite"] if repo == tmp_path else []
+
     monkeypatch.setattr("scripts.security_audit._tracked_files", _fake_tracked)
     assert check_sqlite_not_tracked(tmp_path) == ["sqlite database tracked in git: data.sqlite"]
 
 
 def test_cli_exit_code(monkeypatch):
     from scripts import security_audit as mod
+
     monkeypatch.setattr(mod, "security_audit", lambda repo=REPO: {"findings": [], "clean": True})
     assert mod.main([]) == 0
     monkeypatch.setattr(
-        mod, "security_audit",
+        mod,
+        "security_audit",
         lambda repo=REPO: {"findings": ["demo finding"], "clean": False},
     )
     assert mod.main([]) == 1

@@ -5,6 +5,7 @@ works with :class:`mt5_adapter.client.MT5Client`, which translates raw MT5
 failures (``None`` returns, non-zero retcodes, terminal unavailability) into
 the typed exceptions below.
 """
+
 from __future__ import annotations
 
 
@@ -27,8 +28,7 @@ class MT5CallError(MT5AdapterError):
             trade-result ``comment`` field).
     """
 
-    def __init__(self, message: str = "MT5 call failed",
-                 retcode: int | None = None, comment: str | None = None):
+    def __init__(self, message: str = "MT5 call failed", retcode: int | None = None, comment: str | None = None):
         super().__init__(message)
         self.retcode = retcode
         self.comment = comment

@@ -3,6 +3,7 @@ Unit tests for alerts/formatter.py and alerts/telegram_bot.py gating logic.
 Network calls are mocked - no real Telegram API calls are made in tests.
 Run with: pytest alerts/tests/test_formatter.py -v
 """
+
 import os
 import sys
 import time
@@ -38,6 +39,7 @@ def _sample_signal(bias="long", confidence=0.8):
 # Clean signal format (equal-step TP/SL grid)
 # ---------------------------------------------------------------------------
 
+
 def test_format_no_trade_message():
     signal = _sample_signal(bias="no_trade", confidence=0.0)
     msg = format_signal_message(signal)
@@ -64,8 +66,10 @@ def test_versioned_target_legs_support_tp4_and_explicit_stop():
     signal = _sample_signal(bias="long")
     signal["step"] = 3.0
     signal["target_legs"] = [
-        {"price": 2403, "close_ratio": .4}, {"price": 2406, "close_ratio": .3},
-        {"price": 2409, "close_ratio": .2}, {"price": 2412, "close_ratio": .1},
+        {"price": 2403, "close_ratio": 0.4},
+        {"price": 2406, "close_ratio": 0.3},
+        {"price": 2409, "close_ratio": 0.2},
+        {"price": 2412, "close_ratio": 0.1},
     ]
     signal["invalidation"] = 2395
     msg = format_signal_message(signal)
@@ -117,9 +121,7 @@ def test_grid_invariants_exactly_2x_and_3x():
     levels = compute_levels(signal)
     assert levels["tp2"] - levels["tp1"] == pytest.approx(levels["tp1"] - levels["entry"])
     assert levels["tp3"] - levels["tp2"] == pytest.approx(levels["tp1"] - levels["entry"])
-    assert abs(levels["sl"] - levels["entry"]) == pytest.approx(
-        3.0 * (levels["tp1"] - levels["entry"])
-    )
+    assert abs(levels["sl"] - levels["entry"]) == pytest.approx(3.0 * (levels["tp1"] - levels["entry"]))
 
 
 def test_prices_strip_trailing_zeros():
@@ -168,6 +170,7 @@ def test_meta_footer_appended_when_enabled():
 # ---------------------------------------------------------------------------
 # Telegram bot gating logic
 # ---------------------------------------------------------------------------
+
 
 def test_bot_suppresses_no_trade_signal():
     bot = TelegramAlertBot(CFG, bot_token="fake_token", chat_id="fake_chat_id")

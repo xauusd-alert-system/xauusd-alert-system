@@ -10,6 +10,7 @@ Checks:
 CLI: ``python -m scripts.security_audit`` -> exit 1 on findings,
 exit 0 on a clean report. ``--json`` prints machine-readable output.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,27 +26,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # --- (b) hardcoded-secret heuristics -------------------------------------
 # Patterns that look like real credentials committed to source.
 SECRET_PATTERNS = [
-    ("telegram_bot_token_literal",
-     re.compile(r"TELEGRAM_BOT_TOKEN\s*=\s*['\"][0-9]{6,}:[A-Za-z0-9_-]{30,}['\"]")),
-    ("api_key_literal",
-     re.compile(r"\b(api_key|apikey|API_KEY)\s*=\s*['\"][A-Za-z0-9_-]{24,}['\"]")),
-    ("bearer_token_literal",
-     re.compile(r"\b(token|secret|password|passwd)\s*=\s*['\"][A-Za-z0-9_-]{24,}['\"]",
-                re.IGNORECASE)),
-    ("private_key_block",
-     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    ("aws_access_key",
-     re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("long_hex_secret",
-     re.compile(r"['\"][a-f0-9]{48,}['\"]")),
+    ("telegram_bot_token_literal", re.compile(r"TELEGRAM_BOT_TOKEN\s*=\s*['\"][0-9]{6,}:[A-Za-z0-9_-]{30,}['\"]")),
+    ("api_key_literal", re.compile(r"\b(api_key|apikey|API_KEY)\s*=\s*['\"][A-Za-z0-9_-]{24,}['\"]")),
+    (
+        "bearer_token_literal",
+        re.compile(r"\b(token|secret|password|passwd)\s*=\s*['\"][A-Za-z0-9_-]{24,}['\"]", re.IGNORECASE),
+    ),
+    ("private_key_block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("long_hex_secret", re.compile(r"['\"][a-f0-9]{48,}['\"]")),
 ]
 
 # Test fixtures legitimately contain fake tokens; scanning them would be
 # pure noise. Directories excluded from the source scan.
 SCAN_EXCLUDED_DIRS = {
-    ".git", ".pytest_cache", "__pycache__", "node_modules",
-    ".venv", "venv", "models", "output", "backup", "logs",
-    "UI 3.7 flsah updated v3", "data",
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    "models",
+    "output",
+    "backup",
+    "logs",
+    "UI 3.7 flsah updated v3",
+    "data",
 }
 
 # Files exempt because they contain only placeholder/example values
@@ -57,8 +63,12 @@ def _tracked_files(repo: Path) -> list[str]:
     """Files known to git (empty list when git is unavailable / not a repo)."""
     try:
         out = subprocess.run(
-            ["git", "ls-files"], cwd=str(repo), capture_output=True, text=True,
-            timeout=30, shell=False,
+            ["git", "ls-files"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            shell=False,
         )
         if out.returncode != 0:
             return []
@@ -121,8 +131,11 @@ def check_file_permissions(repo: Path) -> list[str]:
         if any(part in SCAN_EXCLUDED_DIRS for part in rel.parts[:-1]):
             continue
         name = path.name
-        if name.endswith((".key", ".pem")) or name in sensitive_names or \
-                name.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm")):
+        if (
+            name.endswith((".key", ".pem"))
+            or name in sensitive_names
+            or name.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm"))
+        ):
             if name in sensitive_names or name.endswith((".key", ".pem")):
                 if not path.exists():
                     continue
@@ -131,15 +144,11 @@ def check_file_permissions(repo: Path) -> list[str]:
                     if mode & 0o077:  # group/other bits set
                         try:
                             os.chmod(path, 0o600)
-                            findings.append(
-                                f"permissions tightened to 600: {rel.as_posix()} (was {oct(mode)})"
-                            )
+                            findings.append(f"permissions tightened to 600: {rel.as_posix()} (was {oct(mode)})")
                         except OSError as exc:
                             findings.append(f"chmod failed for {rel.as_posix()}: {exc}")
                 else:
-                    findings.append(
-                        f"sensitive file present (verify ACLs manually): {rel.as_posix()}"
-                    )
+                    findings.append(f"sensitive file present (verify ACLs manually): {rel.as_posix()}")
     return findings
 
 

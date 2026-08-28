@@ -6,6 +6,7 @@ Covers:
         (filtered by magic), not foreign/manual MT5 positions.
   - W10: daily circuit-breaker state is persisted and restored on restart.
 """
+
 import json
 import types
 
@@ -101,8 +102,7 @@ def test_group_aware_counting_three_legs_consume_one_slot(patched_mt5, state_pat
 def test_per_asset_group_cap_enforced(patched_mt5, state_path):
     """Audit 2026-08-19: max_open_positions_per_asset (was declared but never
     wired) now bounds groups per asset; other assets stay free."""
-    mgr = rm.InstitutionalRiskManager(
-        _cfg(max_concurrent_positions_global=6), magic=777111, state_path=state_path)
+    mgr = rm.InstitutionalRiskManager(_cfg(max_concurrent_positions_global=6), magic=777111, state_path=state_path)
 
     ok, reason = mgr.can_trade(
         "XAUUSD",
@@ -123,8 +123,7 @@ def test_per_asset_group_cap_enforced(patched_mt5, state_path):
 def test_unknown_tickets_count_as_single_positions(patched_mt5, state_path):
     """Positions unknown to active_trades (restart edge) consume one slot each
     — conservative, they cannot hide inside a group."""
-    mgr = rm.InstitutionalRiskManager(
-        _cfg(max_concurrent_positions_global=6), magic=777111, state_path=state_path)
+    mgr = rm.InstitutionalRiskManager(_cfg(max_concurrent_positions_global=6), magic=777111, state_path=state_path)
 
     ok, _ = mgr.can_trade(
         "XAUUSD",
@@ -205,6 +204,7 @@ def test_state_persisted_and_restored(patched_mt5, tmp_path):
 # P0-5: circuit breaker measures TRADING loss — swaps are excluded
 # ==========================================================================
 
+
 def test_circuit_breaker_ignores_swaps(patched_mt5, state_path):
     """P0-5: a -$50 overnight swap settling into `balance` must NOT trip the
     circuit breaker when the trading loss itself is below the limit.
@@ -278,12 +278,15 @@ def test_legacy_state_file_without_balance_field(patched_mt5, tmp_path):
     without error and falls back to the stored equity value."""
     state = str(tmp_path / "risk_state.json")
     with open(state, "w", encoding="utf-8") as f:
-        json.dump({
-            "current_day": rm.datetime.now(rm.timezone.utc).date().isoformat(),
-            "starting_equity_today": 1000.0,
-            "daily_trades_count": {},
-            "circuit_breaker_tripped": False,
-        }, f)
+        json.dump(
+            {
+                "current_day": rm.datetime.now(rm.timezone.utc).date().isoformat(),
+                "starting_equity_today": 1000.0,
+                "daily_trades_count": {},
+                "circuit_breaker_tripped": False,
+            },
+            f,
+        )
     mgr = rm.InstitutionalRiskManager(_cfg(), magic=777111, state_path=state)
     assert mgr.starting_balance_today == 1000.0
     ok, _ = mgr.can_trade("XAUUSD")

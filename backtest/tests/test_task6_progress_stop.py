@@ -8,19 +8,21 @@ from regime.classifier import RegimeLabel
 def _make_flat_df(n=50, price=1.2800, atr=0.0010):
     idx = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
     ts = [int(t.timestamp()) for t in idx]
-    return pd.DataFrame({
-        "timestamp_utc": ts,
-        "open": price,
-        "high": price + 0.0001,
-        "low": price - 0.0001,
-        "close": price,
-        "volume": 100.0,
-        "session": "london",
-        "regime": RegimeLabel.TREND_UP,
-        "atr": atr,
-        "ml_p_long": 0.90,
-        "ml_p_short": 0.10,
-    })
+    return pd.DataFrame(
+        {
+            "timestamp_utc": ts,
+            "open": price,
+            "high": price + 0.0001,
+            "low": price - 0.0001,
+            "close": price,
+            "volume": 100.0,
+            "session": "london",
+            "regime": RegimeLabel.TREND_UP,
+            "atr": atr,
+            "ml_p_long": 0.90,
+            "ml_p_short": 0.10,
+        }
+    )
 
 
 def test_task6_progress_stop_triggers_on_flat_price():
@@ -28,12 +30,18 @@ def test_task6_progress_stop_triggers_on_flat_price():
     progress-stop exits the trade early."""
     cfg = {
         "backtest": {
-            "spread_points": 0, "slippage_points": 0, "initial_balance": 100.0,
-            "risk_per_trade_pct": 2.0, "volume": 0.01,
+            "spread_points": 0,
+            "slippage_points": 0,
+            "initial_balance": 100.0,
+            "risk_per_trade_pct": 2.0,
+            "volume": 0.01,
         },
         "labeling": {"method": "atr_scaled", "horizon_candles_n": 20, "atr_column": "atr"},
         "signal_grid": {
-            "tp1_mult": 2.0, "tp2_mult": 3.0, "tp3_mult": 4.0, "stop_mult": 3.0,
+            "tp1_mult": 2.0,
+            "tp2_mult": 3.0,
+            "tp3_mult": 4.0,
+            "stop_mult": 3.0,
             "breakeven_trigger_atr": 1.0,
             "progress_stop_enabled": True,
             "progress_stop_ratio": 0.5,  # 10 bars
@@ -54,12 +62,18 @@ def test_task6_progress_stop_does_not_trigger_when_progress_achieved():
     progress-stop does not trigger and trade hits target/breakeven."""
     cfg = {
         "backtest": {
-            "spread_points": 0, "slippage_points": 0, "initial_balance": 100.0,
-            "risk_per_trade_pct": 2.0, "volume": 0.01,
+            "spread_points": 0,
+            "slippage_points": 0,
+            "initial_balance": 100.0,
+            "risk_per_trade_pct": 2.0,
+            "volume": 0.01,
         },
         "labeling": {"method": "atr_scaled", "horizon_candles_n": 20, "atr_column": "atr"},
         "signal_grid": {
-            "tp1_mult": 2.0, "tp2_mult": 3.0, "tp3_mult": 4.0, "stop_mult": 3.0,
+            "tp1_mult": 2.0,
+            "tp2_mult": 3.0,
+            "tp3_mult": 4.0,
+            "stop_mult": 3.0,
             "breakeven_trigger_atr": 1.0,
             "progress_stop_enabled": True,
             "progress_stop_ratio": 0.5,  # 10 bars

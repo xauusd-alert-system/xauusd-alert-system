@@ -4,6 +4,7 @@ Covers: auth_required_when_configured, health_stays_open,
 wrong_token_401, no_auth_mode_allows (backward compatibility),
 require_auth_without_token_fails_startup, ingest rate limiting.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -91,8 +92,6 @@ def test_ingest_rate_limiter_allows_burst_then_429():
 
 def test_ingest_rate_limit_returns_429(client, monkeypatch, tmp_path):
     monkeypatch.setenv("TRADE_LOG_DB_PATH", str(tmp_path / "ledger.sqlite"))
-    monkeypatch.setattr(
-        app_mod, "_INGEST_LIMITER", IngestRateLimiter(rate_per_sec=0.001, burst=1)
-    )
+    monkeypatch.setattr(app_mod, "_INGEST_LIMITER", IngestRateLimiter(rate_per_sec=0.001, burst=1))
     codes = [client.post("/api/ledger/ingest", json={}).status_code for _ in range(3)]
     assert 429 in codes

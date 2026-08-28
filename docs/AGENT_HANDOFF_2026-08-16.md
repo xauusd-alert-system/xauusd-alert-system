@@ -164,7 +164,7 @@ ingest с обязательными bearer + HMAC-SHA256.
 В `data/ledger_bridge.py` была завершающая запятая:
 
 ```python
-headers["X-Ledger-Signature"] = sign_envelope(envelope, secret),
+headers["X-Ledger-Signature"] = (sign_envelope(envelope, secret),)
 ```
 
 → tuple `("abc123",)` → `requests.exceptions.InvalidHeader` до отправки (outage

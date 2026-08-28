@@ -8,6 +8,7 @@ receives the client via DI — run without a Windows terminal.
 The doubles use the same ``types.SimpleNamespace``-style plain attributes the
 real namedtuples expose, so ``getattr(raw, "field", ...)`` access works.
 """
+
 from __future__ import annotations
 
 import threading
@@ -38,29 +39,87 @@ ACCOUNT_MARGIN_MODE_RETAIL_HEDGING = 2
 ACCOUNT_MARGIN_MODE_RETAIL_NETTING = 1
 ACCOUNT_TRADE_MODE_DEMO = 0
 
-_TickTuple = namedtuple("TickTuple", ["time", "bid", "ask", "last", "volume",
-                                      "time_msc", "flags", "volume_real"])
-_SymbolInfoTuple = namedtuple("SymbolInfoTuple", [
-    "name", "digits", "point", "trade_tick_size", "trade_stops_level",
-    "trade_freeze_level", "volume_min", "volume_max", "volume_step",
-    "trade_contract_size", "trade_exec_mode", "visible",
-])
-_AccountTuple = namedtuple("AccountTuple", [
-    "login", "balance", "equity", "margin", "margin_free", "currency",
-    "trade_mode", "margin_mode", "leverage",
-])
-_PositionTuple = namedtuple("PositionTuple", [
-    "ticket", "symbol", "type", "volume", "price_open", "price_current",
-    "sl", "tp", "profit", "magic", "comment", "time",
-])
-_OrderResultTuple = namedtuple("OrderResultTuple", [
-    "retcode", "deal", "order", "volume", "price", "comment", "request_id",
-    "retcode_external",
-])
-_DealTuple = namedtuple("DealTuple", [
-    "ticket", "order", "position_id", "symbol", "type", "entry", "volume",
-    "price", "profit", "commission", "swap", "magic", "comment", "time",
-])
+_TickTuple = namedtuple("_TickTuple", ["time", "bid", "ask", "last", "volume", "time_msc", "flags", "volume_real"])
+_SymbolInfoTuple = namedtuple(
+    "_SymbolInfoTuple",
+    [
+        "name",
+        "digits",
+        "point",
+        "trade_tick_size",
+        "trade_stops_level",
+        "trade_freeze_level",
+        "volume_min",
+        "volume_max",
+        "volume_step",
+        "trade_contract_size",
+        "trade_exec_mode",
+        "visible",
+    ],
+)
+_AccountTuple = namedtuple(
+    "_AccountTuple",
+    [
+        "login",
+        "balance",
+        "equity",
+        "margin",
+        "margin_free",
+        "currency",
+        "trade_mode",
+        "margin_mode",
+        "leverage",
+    ],
+)
+_PositionTuple = namedtuple(
+    "_PositionTuple",
+    [
+        "ticket",
+        "symbol",
+        "type",
+        "volume",
+        "price_open",
+        "price_current",
+        "sl",
+        "tp",
+        "profit",
+        "magic",
+        "comment",
+        "time",
+    ],
+)
+_OrderResultTuple = namedtuple(
+    "_OrderResultTuple",
+    [
+        "retcode",
+        "deal",
+        "order",
+        "volume",
+        "price",
+        "comment",
+        "request_id",
+        "retcode_external",
+    ],
+)
+_DealTuple = namedtuple(
+    "_DealTuple",
+    [
+        "ticket",
+        "order",
+        "position_id",
+        "symbol",
+        "type",
+        "entry",
+        "volume",
+        "price",
+        "profit",
+        "commission",
+        "swap",
+        "magic",
+        "comment",
+        "time",
+    ],
+)
 
 
 class MockMT5Module:
@@ -97,10 +156,15 @@ class MockMT5Module:
         client.initialize()
     """
 
-    def __init__(self, login: int = 12345, balance: float = 10000.0,
-                 equity: float = 10000.0, currency: str = "USD",
-                 margin_mode: int = ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
-                 trade_mode: int = ACCOUNT_TRADE_MODE_DEMO):
+    def __init__(
+        self,
+        login: int = 12345,
+        balance: float = 10000.0,
+        equity: float = 10000.0,
+        currency: str = "USD",
+        margin_mode: int = ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+        trade_mode: int = ACCOUNT_TRADE_MODE_DEMO,
+    ):
         self._lock = threading.Lock()
         self._initialized = False
         self._last_error = (0, "no error")
@@ -109,15 +173,22 @@ class MockMT5Module:
 
         # Configurable state (public attributes, tests mutate freely).
         self.account = _AccountTuple(
-            login=login, balance=balance, equity=equity, margin=0.0,
-            margin_free=equity, currency=currency, trade_mode=trade_mode,
-            margin_mode=margin_mode, leverage=100)
+            login=login,
+            balance=balance,
+            equity=equity,
+            margin=0.0,
+            margin_free=equity,
+            currency=currency,
+            trade_mode=trade_mode,
+            margin_mode=margin_mode,
+            leverage=100,
+        )
         self.ticks: dict[str, Any] = {}
         self.symbol_infos: dict[str, Any] = {}
         self.positions: list[Any] = []
         self.orders: list[Any] = []
-        self.deals: dict[int, list[Any]] = {}   # by position_id
-        self.rates: dict[str, Any] = {}         # by symbol
+        self.deals: dict[int, list[Any]] = {}  # by position_id
+        self.rates: dict[str, Any] = {}  # by symbol
         self.book: dict[str, list[Any]] = {}
         # order_send handler: return None => module failure; a result tuple is
         # passed through as-is (adapter checks the retcode).
@@ -127,16 +198,24 @@ class MockMT5Module:
     # Test configuration helpers
     # ------------------------------------------------------------------
 
-    def set_tick(self, symbol: str, bid: float, ask: float,
-                 time: int = 1_700_000_000, **extra: Any) -> None:
+    def set_tick(self, symbol: str, bid: float, ask: float, time: int = 1_700_000_000, **extra: Any) -> None:
         self.ticks[symbol] = _TickTuple(
-            time=time, bid=bid, ask=ask, last=(bid + ask) / 2, volume=0.0,
-            time_msc=time * 1000, flags=0, volume_real=0.0, **extra)
+            time=time,
+            bid=bid,
+            ask=ask,
+            last=(bid + ask) / 2,
+            volume=0.0,
+            time_msc=time * 1000,
+            flags=0,
+            volume_real=0.0,
+            **extra,
+        )
 
-    def set_symbol_info(self, symbol: str, digits: int = 2, point: float = 0.01,
-                        **extra: Any) -> None:
+    def set_symbol_info(self, symbol: str, digits: int = 2, point: float = 0.01, **extra: Any) -> None:
         self.symbol_infos[symbol] = _SymbolInfoTuple(
-            name=symbol, digits=digits, point=point,
+            name=symbol,
+            digits=digits,
+            point=point,
             trade_tick_size=extra.pop("trade_tick_size", point),
             trade_stops_level=extra.pop("trade_stops_level", 0),
             trade_freeze_level=extra.pop("trade_freeze_level", 0),
@@ -145,18 +224,37 @@ class MockMT5Module:
             volume_step=extra.pop("volume_step", 0.01),
             trade_contract_size=extra.pop("trade_contract_size", 100.0),
             trade_exec_mode=extra.pop("trade_exec_mode", 1),
-            visible=extra.pop("visible", True), **extra)
+            visible=extra.pop("visible", True),
+            **extra,
+        )
 
-    def add_position(self, symbol: str, ticket: int | None = None,
-                     type: int = 0, volume: float = 0.1,
-                     price_open: float = 2400.0, profit: float = 0.0,
-                     magic: int = 777111, sl: float = 0.0, tp: float = 0.0,
-                     comment: str = "") -> Any:
+    def add_position(
+        self,
+        symbol: str,
+        ticket: int | None = None,
+        type: int = 0,
+        volume: float = 0.1,
+        price_open: float = 2400.0,
+        profit: float = 0.0,
+        magic: int = 777111,
+        sl: float = 0.0,
+        tp: float = 0.0,
+        comment: str = "",
+    ) -> Any:
         pos = _PositionTuple(
-            ticket=ticket or self._next_ticket, symbol=symbol, type=type,
-            volume=volume, price_open=price_open,
-            price_current=price_open, sl=sl, tp=tp, profit=profit,
-            magic=magic, comment=comment, time=1_700_000_000)
+            ticket=ticket or self._next_ticket,
+            symbol=symbol,
+            type=type,
+            volume=volume,
+            price_open=price_open,
+            price_current=price_open,
+            sl=sl,
+            tp=tp,
+            profit=profit,
+            magic=magic,
+            comment=comment,
+            time=1_700_000_000,
+        )
         with self._lock:
             self._next_ticket += 1
             self.positions.append(pos)
@@ -216,11 +314,9 @@ class MockMT5Module:
         if not self._initialized:
             return None
         if "ticket" in kwargs:
-            return tuple(p for p in self.positions
-                         if p.ticket == kwargs["ticket"])
+            return tuple(p for p in self.positions if p.ticket == kwargs["ticket"])
         if "symbol" in kwargs:
-            return tuple(p for p in self.positions
-                         if p.symbol == kwargs["symbol"])
+            return tuple(p for p in self.positions if p.symbol == kwargs["symbol"])
         return tuple(self.positions)
 
     def orders_get(self, *args: Any, **kwargs: Any) -> Any:
@@ -237,16 +333,14 @@ class MockMT5Module:
             return tuple(self.deals.get(kwargs["position"], []))
         return tuple(d for ds in self.deals.values() for d in ds)
 
-    def copy_rates_from_pos(self, symbol: str, timeframe: int,
-                            start_pos: int, count: int) -> Any:
+    def copy_rates_from_pos(self, symbol: str, timeframe: int, start_pos: int, count: int) -> Any:
         self._log("copy_rates_from_pos", (symbol, timeframe, start_pos, count), {})
         rates = self.rates.get(symbol)
         if rates is None:
             return None
-        return rates[start_pos:start_pos + count]
+        return rates[start_pos : start_pos + count]
 
-    def copy_rates_range(self, symbol: str, timeframe: int,
-                         date_from: Any, date_to: Any) -> Any:
+    def copy_rates_range(self, symbol: str, timeframe: int, date_from: Any, date_to: Any) -> Any:
         self._log("copy_rates_range", (symbol, timeframe, date_from, date_to), {})
         return self.rates.get(symbol)
 
@@ -255,10 +349,15 @@ class MockMT5Module:
         if self.order_send_handler is not None:
             return self.order_send_handler(request)
         return _OrderResultTuple(
-            retcode=TRADE_RETCODE_DONE, deal=self._next_ticket,
-            order=self._next_ticket, volume=request.get("volume", 0.0),
-            price=request.get("price", 0.0), comment="",
-            request_id=self._next_ticket, retcode_external=0)
+            retcode=TRADE_RETCODE_DONE,
+            deal=self._next_ticket,
+            order=self._next_ticket,
+            volume=request.get("volume", 0.0),
+            price=request.get("price", 0.0),
+            comment="",
+            request_id=self._next_ticket,
+            retcode_external=0,
+        )
 
     def order_check(self, request: dict) -> Any:
         self._log("order_check", (dict(request),), {})

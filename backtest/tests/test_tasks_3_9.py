@@ -11,11 +11,13 @@ def test_task3_pnl_concentration_report():
     folds = ["fold_1"] * 5 + ["fold_2"] * 5 + ["fold_3"] * 5 + ["fold_4"] * 5
     dates = pd.date_range("2024-01-01", periods=20, freq="D")
 
-    df = pd.DataFrame({
-        "pnl": pnls,
-        "fold_id": folds,
-        "date": dates.astype(str),
-    })
+    df = pd.DataFrame(
+        {
+            "pnl": pnls,
+            "fold_id": folds,
+            "date": dates.astype(str),
+        }
+    )
 
     rep = pnl_concentration_report(df, top5_threshold=0.35, fold_threshold=0.30)
 

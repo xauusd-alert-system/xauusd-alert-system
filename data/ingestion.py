@@ -33,12 +33,14 @@ def to_epoch_seconds(dt_series) -> pd.Series:
     secs = (dt - epoch) // pd.Timedelta("1s")
     return secs.astype("int64")
 
+
 TWELVE_DATA_MAX_OUTPUTSIZE = 5000
 _MIN_SECONDS_BETWEEN_REQUESTS = 60 / 8  # 8 requests/minute free-tier limit
 
 
-def fetch_mock_candles(timeframe: str, n_candles: int, sessions_config: dict,
-                        end_ts: Optional[int] = None, seed: int = 42) -> pd.DataFrame:
+def fetch_mock_candles(
+    timeframe: str, n_candles: int, sessions_config: dict, end_ts: Optional[int] = None, seed: int = 42
+) -> pd.DataFrame:
     """
     Generate a deterministic, reproducible synthetic OHLCV series for offline testing.
     Uses a random walk around a plausible XAUUSD price level (~2000-2600 range as of 2026).
@@ -91,9 +93,13 @@ def _request_with_backoff(url: str, params: dict, max_retries: int = 5) -> dict:
     raise RuntimeError(f"Exceeded max retries ({max_retries}) due to rate limiting.")
 
 
-def fetch_live_candles(timeframe: str, n_candles: int, sessions_config: dict,
-                        api_key_env: str = "TWELVE_DATA_API_KEY",
-                        base_url: str = "https://api.twelvedata.com/time_series") -> pd.DataFrame:
+def fetch_live_candles(
+    timeframe: str,
+    n_candles: int,
+    sessions_config: dict,
+    api_key_env: str = "TWELVE_DATA_API_KEY",
+    base_url: str = "https://api.twelvedata.com/time_series",
+) -> pd.DataFrame:
     """
     Fetch real OHLCV candles from a market data vendor.
     Requires API key set via environment variable (never hardcoded).
@@ -126,14 +132,16 @@ def fetch_live_candles(timeframe: str, n_candles: int, sessions_config: dict,
     rows = []
     for item in payload["values"]:
         ts = int(pd.Timestamp(item["datetime"], tz="UTC").timestamp())
-        rows.append([
-            ts,
-            float(item["open"]),
-            float(item["high"]),
-            float(item["low"]),
-            float(item["close"]),
-            float(item.get("volume", 0.0) or 0.0),
-        ])
+        rows.append(
+            [
+                ts,
+                float(item["open"]),
+                float(item["high"]),
+                float(item["low"]),
+                float(item["close"]),
+                float(item.get("volume", 0.0) or 0.0),
+            ]
+        )
 
     df = pd.DataFrame(rows, columns=["timestamp_utc", "open", "high", "low", "close", "volume"])
     df = df.sort_values("timestamp_utc").reset_index(drop=True)
@@ -141,12 +149,18 @@ def fetch_live_candles(timeframe: str, n_candles: int, sessions_config: dict,
     return df
 
 
-def backfill_historical(timeframe: str, start_date: str, end_date: str, sessions_config: dict,
-                         symbol: str = "XAU/USD",
-                         api_key_env: str = "TWELVE_DATA_API_KEY",
-                         base_url: str = "https://api.twelvedata.com/time_series") -> pd.DataFrame:
+def backfill_historical(
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+    sessions_config: dict,
+    symbol: str = "XAU/USD",
+    api_key_env: str = "TWELVE_DATA_API_KEY",
+    base_url: str = "https://api.twelvedata.com/time_series",
+) -> pd.DataFrame:
     """Pull historical candles in 500-row chunks (free-tier safe)."""
     import time as _time
+
     api_key = get_env(api_key_env, required=True)
     interval_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1h", "H4": "4h"}
     if timeframe not in interval_map:
@@ -193,8 +207,7 @@ def backfill_historical(timeframe: str, start_date: str, end_date: str, sessions
     return df
 
 
-def fetch_candles(timeframe: str, n_candles: int, sessions_config: dict,
-                   mode: str = "mock", **kwargs) -> pd.DataFrame:
+def fetch_candles(timeframe: str, n_candles: int, sessions_config: dict, mode: str = "mock", **kwargs) -> pd.DataFrame:
     """
     Unified entry point used by downstream code.
     mode="mock" for offline/dev/test, mode="live" for real API pull.
@@ -205,4 +218,3 @@ def fetch_candles(timeframe: str, n_candles: int, sessions_config: dict,
         return fetch_live_candles(timeframe, n_candles, sessions_config, **kwargs)
     else:
         raise ValueError(f"Unknown ingestion mode: {mode}")
-

@@ -7,6 +7,7 @@ volume through the rate limiter (P2-7) without introducing stale values into
 the trading path: fresh reads (``MT5Client.symbol_info_tick``) bypass the
 cache; only ``symbol_info_tick_cached`` / ``symbol_info_cached`` use it.
 """
+
 from __future__ import annotations
 
 import threading

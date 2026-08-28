@@ -5,6 +5,7 @@ Covers:
   - lots_for_risk "never round up" skip rule;
   - P1-7: drawdown_throttle levels against the persistent HWM.
 """
+
 import inspect
 
 import numpy as np
@@ -62,8 +63,7 @@ def test_drawdown_throttle_uses_persistent_hwm_semantics():
     """P1-7: the function itself is pure — the HWM persistence/ratchet is
     RiskState's job; the throttle just consumes the current DD from it."""
     hwm = 10_000.0
-    for equity, expected in ((9_900.0, 1.0), (9_500.0, 0.75),
-                             (9_300.0, 0.5), (9_100.0, 0.0)):
+    for equity, expected in ((9_900.0, 1.0), (9_500.0, 0.75), (9_300.0, 0.5), (9_100.0, 0.0)):
         assert drawdown_throttle(equity / hwm - 1.0) == expected
 
 

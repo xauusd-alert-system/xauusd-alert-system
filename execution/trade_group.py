@@ -21,6 +21,7 @@ geometry/risk engine — за entry/step/TP1/TP2/TP3/SL/risk/volume/allocation.
 * ``allocate_leg_volumes`` — детерминированный volume allocator:
   total один раз → leg1 floor → leg2 floor → leg3 = остаток (ТЗ §15).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -48,7 +49,7 @@ def get_max_fill_deviation() -> float:
         from config.loader import load_config
 
         cfg = load_config() or {}
-        value = ((cfg.get("execution") or {}).get("max_actual_fill_deviation"))
+        value = (cfg.get("execution") or {}).get("max_actual_fill_deviation")
         if value is None:
             return DEFAULT_MAX_FILL_DEVIATION
         v = float(value)
@@ -62,6 +63,7 @@ def get_max_fill_deviation() -> float:
 # --------------------------------------------------------------------------
 # State machine
 # --------------------------------------------------------------------------
+
 
 class GroupState(str, Enum):
     DRAFT = "DRAFT"
@@ -90,43 +92,53 @@ class GroupState(str, Enum):
     FAILED_WITH_OPEN_RISK = "FAILED_WITH_OPEN_RISK"
 
 
-TERMINAL_STATES = frozenset({
-    GroupState.RECONCILED, GroupState.STOPPED, GroupState.REJECTED,
-    GroupState.EXPIRED, GroupState.CANCELLED, GroupState.FAILED,
-})
+TERMINAL_STATES = frozenset(
+    {
+        GroupState.RECONCILED,
+        GroupState.STOPPED,
+        GroupState.REJECTED,
+        GroupState.EXPIRED,
+        GroupState.CANCELLED,
+        GroupState.FAILED,
+    }
+)
 
 GROUP_TRANSITIONS: dict[GroupState, frozenset[GroupState]] = {
     GroupState.DRAFT: frozenset({GroupState.VALIDATED, GroupState.REJECTED, GroupState.CANCELLED}),
-    GroupState.VALIDATED: frozenset({GroupState.SUBMITTED, GroupState.REJECTED,
-                                     GroupState.EXPIRED, GroupState.CANCELLED}),
-    GroupState.SUBMITTED: frozenset({GroupState.OPENED, GroupState.REJECTED,
-                                     GroupState.FAILED, GroupState.EXPIRED,
-                                     GroupState.STOPPED,
-                                     GroupState.PARTIAL_SUBMISSION}),
-    GroupState.PARTIAL_SUBMISSION: frozenset({GroupState.COMPENSATION_REQUESTED,
-                                              GroupState.FAILED_WITH_OPEN_RISK,
-                                              GroupState.REJECTED}),
-    GroupState.COMPENSATION_REQUESTED: frozenset({
-        GroupState.COMPENSATION_CONFIRMED, GroupState.COMPENSATION_REQUESTED,
-        GroupState.FAILED_WITH_OPEN_RISK}),
+    GroupState.VALIDATED: frozenset(
+        {GroupState.SUBMITTED, GroupState.REJECTED, GroupState.EXPIRED, GroupState.CANCELLED}
+    ),
+    GroupState.SUBMITTED: frozenset(
+        {
+            GroupState.OPENED,
+            GroupState.REJECTED,
+            GroupState.FAILED,
+            GroupState.EXPIRED,
+            GroupState.STOPPED,
+            GroupState.PARTIAL_SUBMISSION,
+        }
+    ),
+    GroupState.PARTIAL_SUBMISSION: frozenset(
+        {GroupState.COMPENSATION_REQUESTED, GroupState.FAILED_WITH_OPEN_RISK, GroupState.REJECTED}
+    ),
+    GroupState.COMPENSATION_REQUESTED: frozenset(
+        {GroupState.COMPENSATION_CONFIRMED, GroupState.COMPENSATION_REQUESTED, GroupState.FAILED_WITH_OPEN_RISK}
+    ),
     GroupState.COMPENSATION_CONFIRMED: frozenset({GroupState.FAILED}),
-    GroupState.FAILED_WITH_OPEN_RISK: frozenset({
-        GroupState.COMPENSATION_REQUESTED, GroupState.COMPENSATION_CONFIRMED,
-        GroupState.FAILED_WITH_OPEN_RISK}),
-    GroupState.OPENED: frozenset({GroupState.TP1_FILLED, GroupState.STOPPED,
-                                  GroupState.FAILED, GroupState.EXPIRED}),
-    GroupState.TP1_FILLED: frozenset({GroupState.BE_REQUESTED, GroupState.STOPPED,
-                                      GroupState.FAILED}),
-    GroupState.BE_REQUESTED: frozenset({GroupState.BE_CONFIRMED, GroupState.BE_RETRY,
-                                        GroupState.STOPPED, GroupState.FAILED}),
-    GroupState.BE_RETRY: frozenset({GroupState.BE_CONFIRMED, GroupState.BE_RETRY,
-                                    GroupState.FAILED, GroupState.STOPPED}),
-    GroupState.BE_CONFIRMED: frozenset({GroupState.TP2_FILLED, GroupState.STOPPED,
-                                        GroupState.FAILED}),
-    GroupState.TP2_FILLED: frozenset({GroupState.TP3_FILLED, GroupState.STOPPED,
-                                      GroupState.FAILED}),
-    GroupState.TP3_FILLED: frozenset({GroupState.RECONCILED, GroupState.STOPPED,
-                                      GroupState.FAILED}),
+    GroupState.FAILED_WITH_OPEN_RISK: frozenset(
+        {GroupState.COMPENSATION_REQUESTED, GroupState.COMPENSATION_CONFIRMED, GroupState.FAILED_WITH_OPEN_RISK}
+    ),
+    GroupState.OPENED: frozenset({GroupState.TP1_FILLED, GroupState.STOPPED, GroupState.FAILED, GroupState.EXPIRED}),
+    GroupState.TP1_FILLED: frozenset({GroupState.BE_REQUESTED, GroupState.STOPPED, GroupState.FAILED}),
+    GroupState.BE_REQUESTED: frozenset(
+        {GroupState.BE_CONFIRMED, GroupState.BE_RETRY, GroupState.STOPPED, GroupState.FAILED}
+    ),
+    GroupState.BE_RETRY: frozenset(
+        {GroupState.BE_CONFIRMED, GroupState.BE_RETRY, GroupState.FAILED, GroupState.STOPPED}
+    ),
+    GroupState.BE_CONFIRMED: frozenset({GroupState.TP2_FILLED, GroupState.STOPPED, GroupState.FAILED}),
+    GroupState.TP2_FILLED: frozenset({GroupState.TP3_FILLED, GroupState.STOPPED, GroupState.FAILED}),
+    GroupState.TP3_FILLED: frozenset({GroupState.RECONCILED, GroupState.STOPPED, GroupState.FAILED}),
 }
 
 # ТЗ §12: allowed lifecycle state changes (BE path is mandatory after TP1).
@@ -141,9 +153,7 @@ def validate_transition(current: GroupState, next_state: GroupState) -> bool:
 
 def require_transition(current: GroupState, next_state: GroupState) -> None:
     if not validate_transition(current, next_state):
-        raise ValueError(
-            f"invalid group transition {current.value} -> {next_state.value}"
-        )
+        raise ValueError(f"invalid group transition {current.value} -> {next_state.value}")
 
 
 class TradeLegState(str, Enum):
@@ -166,6 +176,7 @@ class BeStatus(str, Enum):
 # --------------------------------------------------------------------------
 # Nested value objects (all frozen)
 # --------------------------------------------------------------------------
+
 
 class EntrySpec(BaseModel):
     model_config = {"frozen": True}
@@ -231,6 +242,7 @@ class GroupRisk(BaseModel):
 # TradeGroupSpec
 # --------------------------------------------------------------------------
 
+
 class TradeGroupSpec(BaseModel):
     """Immutable TradeGroupSpec v1 (ТЗ §5)."""
 
@@ -265,32 +277,32 @@ class TradeGroupSpec(BaseModel):
     def validate_contract(self):
         # ТЗ §5: required fields (pydantic already enforces presence; here we
         # additionally enforce non-empty identity and cross-field consistency).
-        for field in ("group_id", "signal_id", "intent_id", "asset_key",
-                      "broker_symbol", "profile_id", "model_version",
-                      "model_hash", "config_hash", "strategy_version"):
+        for field in (
+            "group_id",
+            "signal_id",
+            "intent_id",
+            "asset_key",
+            "broker_symbol",
+            "profile_id",
+            "model_version",
+            "model_hash",
+            "config_hash",
+            "strategy_version",
+        ):
             if not str(getattr(self, field)).strip():
                 raise ValueError(f"{field} must not be empty")
         # Follow-up ТЗ §2: explicit direction-aware geometry chains. The
         # sign-based formula is replaced by readable per-direction ordering.
         if self.side == "long":
             if not (
-                self.geometry.sl < self.entry.reference
-                < self.geometry.tp1
-                < self.geometry.tp2
-                < self.geometry.tp3
+                self.geometry.sl < self.entry.reference < self.geometry.tp1 < self.geometry.tp2 < self.geometry.tp3
             ):
-                raise ValueError("invalid LONG geometry: expected "
-                                 "SL < entry.reference < TP1 < TP2 < TP3")
+                raise ValueError("invalid LONG geometry: expected SL < entry.reference < TP1 < TP2 < TP3")
         else:
             if not (
-                self.geometry.tp3
-                < self.geometry.tp2
-                < self.geometry.tp1
-                < self.entry.reference
-                < self.geometry.sl
+                self.geometry.tp3 < self.geometry.tp2 < self.geometry.tp1 < self.entry.reference < self.geometry.sl
             ):
-                raise ValueError("invalid SHORT geometry: expected "
-                                 "TP3 < TP2 < TP1 < entry.reference < SL")
+                raise ValueError("invalid SHORT geometry: expected TP3 < TP2 < TP1 < entry.reference < SL")
         total_alloc = sum(t.allocation for t in self.targets)
         if abs(total_alloc - 1.0) > 1e-6:
             raise ValueError(f"target allocations must sum to 1.0, got {total_alloc}")
@@ -305,23 +317,24 @@ class TradeGroupSpec(BaseModel):
         lineage. The base model stays constructible (legacy tests / paper
         fixtures), but the execution path calls this before approval."""
         prov = self.provenance or {}
-        required_ids = ("market_snapshot_id", "feature_snapshot_id",
-                        "model_inference_id", "model_hash", "profile_id",
-                        "broker_snapshot_id", "cost_snapshot_id",
-                        "geometry_hash", "provenance_hash")
+        required_ids = (
+            "market_snapshot_id",
+            "feature_snapshot_id",
+            "model_inference_id",
+            "model_hash",
+            "profile_id",
+            "broker_snapshot_id",
+            "cost_snapshot_id",
+            "geometry_hash",
+            "provenance_hash",
+        )
         missing = [key for key in required_ids if not prov.get(key)]
         if missing:
-            raise ValueError(
-                f"trade-group provenance incomplete: missing {missing}"
-            )
+            raise ValueError(f"trade-group provenance incomplete: missing {missing}")
         if prov.get("geometry_hash") != self.geometry_hash():
-            raise ValueError(
-                "provenance.geometry_hash must equal the spec geometry_hash"
-            )
+            raise ValueError("provenance.geometry_hash must equal the spec geometry_hash")
         if prov.get("provenance_hash") != self.provenance_hash():
-            raise ValueError(
-                "provenance.provenance_hash must equal the spec provenance_hash"
-            )
+            raise ValueError("provenance.provenance_hash must equal the spec provenance_hash")
 
     # --- identity / hashing -------------------------------------------------
 
@@ -337,35 +350,46 @@ class TradeGroupSpec(BaseModel):
         ExecutionIntentMismatch, otherwise a group could trade with the
         original TP/SL ladder but different capital at risk.
         """
-        payload = json.dumps({
-            "group_id": self.group_id,
-            "asset_key": self.asset_key,
-            "side": self.side,
-            "entry_reference": self.entry.reference,
-            "geometry": self.geometry.model_dump(),
-            "targets": [t.model_dump() for t in self.targets],
-            "break_even": self.break_even.model_dump(),
-            "risk": self.risk.model_dump(),
-            "profile_id": self.profile_id,
-        }, sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(
+            {
+                "group_id": self.group_id,
+                "asset_key": self.asset_key,
+                "side": self.side,
+                "entry_reference": self.entry.reference,
+                "geometry": self.geometry.model_dump(),
+                "targets": [t.model_dump() for t in self.targets],
+                "break_even": self.break_even.model_dump(),
+                "risk": self.risk.model_dump(),
+                "profile_id": self.profile_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def provenance_hash(self) -> str:
         """Lineage hash over the parent snapshot ids (§21/§24)."""
         prov = self.provenance or {}
-        payload = json.dumps({
-            key: prov.get(key) for key in (
-                "market_snapshot_id", "feature_snapshot_id", "model_inference_id",
-                "model_hash", "profile_id", "broker_snapshot_id",
-                "cost_snapshot_id",
-            )
-        }, sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(
+            {
+                key: prov.get(key)
+                for key in (
+                    "market_snapshot_id",
+                    "feature_snapshot_id",
+                    "model_inference_id",
+                    "model_hash",
+                    "profile_id",
+                    "broker_snapshot_id",
+                    "cost_snapshot_id",
+                )
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def canonical_hash(self) -> str:
-        payload = json.dumps(
-            self.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-        )
+        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     # --- allowed lifecycle state change -------------------------------------
@@ -495,8 +519,7 @@ def allocate_leg_volumes(
 
     def _floor(value: float) -> float:
         d_val = Decimal(str(value))
-        lots = (d_val / d_step + _ALLOCATION_LOT_EPS) \
-            .to_integral_value(rounding=ROUND_DOWN)
+        lots = (d_val / d_step + _ALLOCATION_LOT_EPS).to_integral_value(rounding=ROUND_DOWN)
         return float(lots * d_step)
 
     leg1 = _floor(total_volume * allocations[0])
@@ -508,9 +531,7 @@ def allocate_leg_volumes(
     # P1-11: negative leg3 is invalid in EVERY mode — allow_short_legs only
     # relaxes the volume_min fillability gate for netting virtual legs.
     if leg3 < -1e-9:
-        raise ValueError(
-            f"{INSUFFICIENT_VOLUME_FOR_THREE_LEGS}: remainder leg3={leg3} < 0"
-        )
+        raise ValueError(f"{INSUFFICIENT_VOLUME_FOR_THREE_LEGS}: remainder leg3={leg3} < 0")
     if not allow_short_legs:
         for i, volume in enumerate(volumes, 1):
             if volume <= 0.0 or volume < minimum - 1e-9:
@@ -550,6 +571,7 @@ SIGNAL_EXPIRED = "SIGNAL_EXPIRED"
 # --------------------------------------------------------------------------
 # Ids (ТЗ §24)
 # --------------------------------------------------------------------------
+
 
 def _compact_ts(now_ms: int) -> str:
     return time.strftime("%Y%m%d-%H%M%S", time.gmtime(now_ms / 1000.0))

@@ -12,6 +12,7 @@ The router is factory-built (``provenance_router(db_path, cfg=None)``) so
 tests can wire a temp DB without touching the global app. It is mounted in
 ``realtime/app.py``; auth arrives in Phase 4 — the endpoint is read-only.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -66,10 +67,13 @@ def provenance_router(db_path: str, cfg: dict[str, Any] | None = None) -> APIRou
     def get_provenance(group_id: str) -> dict[str, Any]:
         record = store.get(group_id)
         if record is None:
-            raise HTTPException(status_code=404, detail={
-                "error": "provenance record not found",
-                "group_id": group_id,
-            })
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "provenance record not found",
+                    "group_id": group_id,
+                },
+            )
         result = verify_record(record, store=store, cfg=cfg)
         return {
             "record": record.model_dump(mode="json"),

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """ORB and opening drive on 5-min bars — cleaner signals, less noise."""
+
 import datetime as dt
 import json
 import os
@@ -37,14 +38,16 @@ def resample_5min(candles_1m):
     for date in sorted(days):
         for bar_ts in sorted(days[date]):
             bar_candles = days[date][bar_ts]
-            bars5.append({
-                "time": bar_ts,
-                "open": bar_candles[0]["open"],
-                "high": max(b["high"] for b in bar_candles),
-                "low": min(b["low"] for b in bar_candles),
-                "close": bar_candles[-1]["close"],
-                "volume": sum(b.get("volume", 0) for b in bar_candles),
-            })
+            bars5.append(
+                {
+                    "time": bar_ts,
+                    "open": bar_candles[0]["open"],
+                    "high": max(b["high"] for b in bar_candles),
+                    "low": min(b["low"] for b in bar_candles),
+                    "close": bar_candles[-1]["close"],
+                    "volume": sum(b.get("volume", 0) for b in bar_candles),
+                }
+            )
     return bars5
 
 
@@ -64,12 +67,14 @@ def _close(pos, price, ts, slip, reason):
     pos["exit_price"] = price * (1 - slip * pos["side"])
     pos["exit_ts"] = ts
     pos["exit_reason"] = reason
-    pos["pnl"] = (pos["exit_price"] - pos["entry"]) * pos["side"] * pos["qty"] \
-                 - fee(pos["entry"], pos["qty"]) - fee(pos["exit_price"], pos["qty"])
+    pos["pnl"] = (
+        (pos["exit_price"] - pos["entry"]) * pos["side"] * pos["qty"]
+        - fee(pos["entry"], pos["qty"])
+        - fee(pos["exit_price"], pos["qty"])
+    )
 
 
-def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0,
-             target=80.0, min_days=5):
+def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0, target=80.0, min_days=5):
     day_pnl = {}
     for tr in all_trades:
         d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.UTC).date()
@@ -119,9 +124,11 @@ def print_row(label, result):
         print(f"  {label:<45s} 0 trades")
         return
     n, wr, pf, net, avg_r, fees, sim = result
-    print(f"  {label:<45s} {n:>4d}  WR={wr:>4.0f}%  PF={pf:>5.2f}  "
-          f"net=${net:>+7.0f}  avgR={avg_r:>6.3f}  fees=${fees:>5.0f}  "
-          f"pass={sim['passed']}  days={sim['days_used']}")
+    print(
+        f"  {label:<45s} {n:>4d}  WR={wr:>4.0f}%  PF={pf:>5.2f}  "
+        f"net=${net:>+7.0f}  avgR={avg_r:>6.3f}  fees=${fees:>5.0f}  "
+        f"pass={sim['passed']}  days={sim['days_used']}"
+    )
 
 
 def _run_orb(bars5, range_bars=6, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0):
@@ -147,16 +154,26 @@ def _run_orb(bars5, range_bars=6, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5
                 if b["high"] >= rng_high:
                     entry = (rng_high if b["open"] < rng_high else b["open"]) * (1 + SLIP)
                     qty = (risk_per_trade / stop_pct) / entry
-                    open_pos = {"side": 1, "entry": entry, "qty": qty,
-                                "stop": entry * (1 - stop_pct),
-                                "tp": entry + entry * stop_pct * tp_ratio, "bar": t}
+                    open_pos = {
+                        "side": 1,
+                        "entry": entry,
+                        "qty": qty,
+                        "stop": entry * (1 - stop_pct),
+                        "tp": entry + entry * stop_pct * tp_ratio,
+                        "bar": t,
+                    }
                     took = True
                 elif b["low"] <= rng_low:
                     entry = (rng_low if b["open"] > rng_low else b["open"]) * (1 - SLIP)
                     qty = (risk_per_trade / stop_pct) / entry
-                    open_pos = {"side": -1, "entry": entry, "qty": qty,
-                                "stop": entry * (1 + stop_pct),
-                                "tp": entry - entry * stop_pct * tp_ratio, "bar": t}
+                    open_pos = {
+                        "side": -1,
+                        "entry": entry,
+                        "qty": qty,
+                        "stop": entry * (1 + stop_pct),
+                        "tp": entry - entry * stop_pct * tp_ratio,
+                        "bar": t,
+                    }
                     took = True
             if open_pos is None or t == open_pos["bar"]:
                 continue
@@ -190,8 +207,7 @@ def _run_orb(bars5, range_bars=6, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5
     return trades
 
 
-def _run_opening_drive(bars5, drive_bars=3, stop_pct=0.005, tp_ratio=1.5,
-                       risk_per_trade=5.0, min_body_ratio=0.5):
+def _run_opening_drive(bars5, drive_bars=3, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0, min_body_ratio=0.5):
     """Opening drive on 5-min bars. drive_bars=3 = first 15min, 6=30min."""
     days = build_days_5min(bars5)
     trades = []
@@ -221,8 +237,14 @@ def _run_opening_drive(bars5, drive_bars=3, stop_pct=0.005, tp_ratio=1.5,
             continue
         tp = entry + bias * risk_dist * tp_ratio
         qty = (risk_per_trade / stop_pct) / entry
-        open_pos = {"side": bias, "entry": entry, "qty": qty,
-                    "stop": stop, "tp": tp, "bar": bars[drive_bars - 1]["time"]}
+        open_pos = {
+            "side": bias,
+            "entry": entry,
+            "qty": qty,
+            "stop": stop,
+            "tp": tp,
+            "bar": bars[drive_bars - 1]["time"],
+        }
         for b in bars[drive_bars:]:
             t = b["time"]
             utc = dt.datetime.fromtimestamp(t, dt.UTC)
@@ -279,7 +301,7 @@ def main():
     print("5-MIN TIMEFRAME: ORB + OPENING DRIVE")
     print("=" * 110)
     print(f"  {'Strategy':<45s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s} {'fees$':>6s} {'pass':>5s}")
-    print(f"  {'-'*100}")
+    print(f"  {'-' * 100}")
 
     strategies = [
         # ORB variants on 5-min
@@ -311,43 +333,52 @@ def main():
     print("ORB RANGE SWEEP (5-min bars, stop=0.5%, tp=1.5R)")
     print("=" * 110)
     print(f"  {'range_bars':<12s} {'minutes':<10s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s}")
-    print(f"  {'-'*55}")
+    print(f"  {'-' * 55}")
     for rb in [2, 3, 4, 6, 8, 12, 16]:
         all_trades = []
         for t, bars5 in all_bars5.items():
             all_trades += _run_orb(bars5, range_bars=rb)
         r = row_stats(all_trades)
         if r is None:
-            print(f"  {rb:>10d}  {rb*5:>7d}min   0 trades")
+            print(f"  {rb:>10d}  {rb * 5:>7d}min   0 trades")
         else:
             n, wr, pf, net, avg_r, fees, sim = r
-            print(f"  {rb:>10d}  {rb*5:>7d}min  {n:>4d}  {wr:>4.0f}%  {pf:>5.2f}  ${net:>+7.0f}  {avg_r:>6.3f}")
+            print(f"  {rb:>10d}  {rb * 5:>7d}min  {n:>4d}  {wr:>4.0f}%  {pf:>5.2f}  ${net:>+7.0f}  {avg_r:>6.3f}")
 
     # === 3. Stop/TP sweep on best ORB ===
     print(f"\n{'=' * 110}")
     print("ORB STOP/TP SWEEP (5-min, 6-bar range)")
     print("=" * 110)
     print(f"  {'stop%':<8s} {'tp_R':<6s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s}")
-    print(f"  {'-'*50}")
-    for sp, tr in [(0.003, 1.5), (0.005, 1.5), (0.005, 2.0), (0.005, 2.5),
-                   (0.008, 1.5), (0.008, 2.0), (0.008, 2.5), (0.008, 3.0),
-                   (0.01, 2.0), (0.01, 3.0)]:
+    print(f"  {'-' * 50}")
+    for sp, tr in [
+        (0.003, 1.5),
+        (0.005, 1.5),
+        (0.005, 2.0),
+        (0.005, 2.5),
+        (0.008, 1.5),
+        (0.008, 2.0),
+        (0.008, 2.5),
+        (0.008, 3.0),
+        (0.01, 2.0),
+        (0.01, 3.0),
+    ]:
         all_trades = []
         for t, bars5 in all_bars5.items():
             all_trades += _run_orb(bars5, range_bars=6, stop_pct=sp, tp_ratio=tr)
         r = row_stats(all_trades)
         if r is None:
-            print(f"  {sp*100:.1f}%   {tr:.1f}R   0 trades")
+            print(f"  {sp * 100:.1f}%   {tr:.1f}R   0 trades")
         else:
             n, wr, pf, net, avg_r, fees, sim = r
-            print(f"  {sp*100:.1f}%   {tr:.1f}R  {n:>4d}  {wr:>4.0f}%  {pf:>5.2f}  ${net:>+7.0f}  {avg_r:>6.3f}")
+            print(f"  {sp * 100:.1f}%   {tr:.1f}R  {n:>4d}  {wr:>4.0f}%  {pf:>5.2f}  ${net:>+7.0f}  {avg_r:>6.3f}")
 
     # === 4. Per-ticker for best 5-min strategy ===
     print(f"\n{'=' * 110}")
     print("PER-TICKER: ORB 6-bar (30min) 0.5%/1.5R on 5-min bars")
     print("=" * 110)
     print(f"  {'Ticker':<10s} {'N':>4s} {'WR%':>5s} {'PF':>6s} {'net$':>8s} {'avgR':>7s}")
-    print(f"  {'-'*50}")
+    print(f"  {'-' * 50}")
     for t in tickers:
         trades = _run_orb(all_bars5[t], range_bars=6)
         if not trades:
@@ -372,8 +403,11 @@ def main():
     equity = 1000.0
     for d in sorted(day_pnl):
         equity += day_pnl[d]
-        bar = "+" * min(20, int(max(0, day_pnl[d] * 2))) if day_pnl[d] > 0 else \
-              "-" * min(20, int(max(0, -day_pnl[d] * 2)))
+        bar = (
+            "+" * min(20, int(max(0, day_pnl[d] * 2)))
+            if day_pnl[d] > 0
+            else "-" * min(20, int(max(0, -day_pnl[d] * 2)))
+        )
         print(f"  {d}  ${day_pnl[d]:>+7.2f}  ${equity:>8.2f}  {bar}")
     sim = simulate(best_trades)
     print(f"\n  Final: equity=${sim['equity_end']:.0f}  pass={sim['passed']}  days={sim['days_used']}")

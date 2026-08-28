@@ -14,6 +14,7 @@ Selection order: explicit argument > env ``LOG_FORMAT`` > config
 ``monitoring.logging.format`` > "text". Idempotent: calling it twice replaces
 the handlers it installed instead of duplicating them.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,12 +49,31 @@ class JsonFormatter(logging.Formatter):
         extra = {
             key: value
             for key, value in record.__dict__.items()
-            if key not in {
-                "name", "msg", "args", "levelname", "levelno", "pathname",
-                "filename", "module", "exc_info", "exc_text", "stack_info",
-                "lineno", "funcName", "created", "msecs", "relativeCreated",
-                "thread", "threadName", "processName", "process", "taskName",
-                "message", "asctime",
+            if key
+            not in {
+                "name",
+                "msg",
+                "args",
+                "levelname",
+                "levelno",
+                "pathname",
+                "filename",
+                "module",
+                "exc_info",
+                "exc_text",
+                "stack_info",
+                "lineno",
+                "funcName",
+                "created",
+                "msecs",
+                "relativeCreated",
+                "thread",
+                "threadName",
+                "processName",
+                "process",
+                "taskName",
+                "message",
+                "asctime",
             }
             and not key.startswith("_")
         }
@@ -68,9 +88,7 @@ class TextFormatter(logging.Formatter):
     """Legacy human format — the historical default is preserved exactly."""
 
     def __init__(self):
-        super().__init__(
-            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-        )
+        super().__init__(fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
 def resolve_format(
@@ -84,8 +102,7 @@ def resolve_format(
     candidate = (env_value or "").strip().lower()
     if candidate in ("json", "text"):
         return candidate
-    cfg_fmt = (((cfg or {}).get("monitoring") or {}).get("logging") or {}) \
-        .get("format")
+    cfg_fmt = (((cfg or {}).get("monitoring") or {}).get("logging") or {}).get("format")
     if cfg_fmt in ("json", "text"):
         return str(cfg_fmt)
     return "text"
@@ -98,13 +115,9 @@ def resolve_rotation(
 ) -> tuple[int, int]:
     """(max_bytes, backup_count) — config monitoring.logging.* with defaults."""
     cfg_log = ((cfg or {}).get("monitoring") or {}).get("logging") or {}
-    resolved_max = int(
-        max_bytes if max_bytes is not None
-        else cfg_log.get("max_bytes", _DEFAULT_MAX_BYTES)
-    )
+    resolved_max = int(max_bytes if max_bytes is not None else cfg_log.get("max_bytes", _DEFAULT_MAX_BYTES))
     resolved_backups = int(
-        backup_count if backup_count is not None
-        else cfg_log.get("backup_count", _DEFAULT_BACKUP_COUNT)
+        backup_count if backup_count is not None else cfg_log.get("backup_count", _DEFAULT_BACKUP_COUNT)
     )
     return max(1, resolved_max), max(0, resolved_backups)
 
@@ -133,7 +146,9 @@ def setup_logging(
     formatter = JsonFormatter() if resolved == "json" else TextFormatter()
     handler: RotatingFileHandler = RotatingFileHandler(
         os.path.join(log_dir, log_file),
-        maxBytes=r_max, backupCount=r_backups, encoding="utf-8",
+        maxBytes=r_max,
+        backupCount=r_backups,
+        encoding="utf-8",
     )
     handler.setFormatter(formatter)
 

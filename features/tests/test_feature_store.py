@@ -1,4 +1,5 @@
 """Tests for the Feature Store (ТЗ 8.3) and its pipeline integration."""
+
 import copy
 import os
 import sqlite3
@@ -33,25 +34,34 @@ def store(tmp_path):
 def test_compute_and_store_returns_deterministic_snapshot_id(store):
     """Same inputs (symbol|tf|bar_ts|version|features) -> same snapshot_id."""
     sid1, feats1 = store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
         features=FEATURES_A,
     )
     sid2, feats2 = store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
         features=FEATURES_A,
     )
     assert sid1 == sid2
     assert feats1 == FEATURES_A and feats2 == FEATURES_A
 
     expected = compute_snapshot_id(
-        "XAUUSD", "M5", 1_700_000_000_000,
-        FEATURES_SCHEMA_VERSION, features_hash(FEATURES_A),
+        "XAUUSD",
+        "M5",
+        1_700_000_000_000,
+        FEATURES_SCHEMA_VERSION,
+        features_hash(FEATURES_A),
     )
     assert sid1 == expected
 
     # A live compute_fn path yields the same id for the same values.
     sid3, _ = store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
         compute_fn=lambda: dict(FEATURES_A),
     )
     assert sid3 == sid1
@@ -60,7 +70,9 @@ def test_compute_and_store_returns_deterministic_snapshot_id(store):
 def test_get_latest_returns_most_recent(store):
     for ts in (1_700_000_000_000, 1_700_000_300_000, 1_700_000_600_000):
         store.compute_and_store(
-            symbol="XAUUSD", timeframe="M5", bar_ts=ts,
+            symbol="XAUUSD",
+            timeframe="M5",
+            bar_ts=ts,
             features={"atr": ts / 1e12},
         )
     latest = store.get_latest("XAUUSD", "M5")
@@ -71,9 +83,7 @@ def test_get_latest_returns_most_recent(store):
 
 def test_get_range_filters_by_ts(store):
     for ts in (100, 200, 300, 400):
-        store.compute_and_store(
-            symbol="XAUUSD", timeframe="M15", bar_ts=ts, features={"t": ts}
-        )
+        store.compute_and_store(symbol="XAUUSD", timeframe="M15", bar_ts=ts, features={"t": ts})
     rows = store.get_range("XAUUSD", "M15", from_ts=200, to_ts=300)
     assert [r["bar_ts_utc_ms"] for r in rows] == [200, 300]
     # Inclusive bounds and empty ranges behave as documented.
@@ -84,11 +94,15 @@ def test_get_range_filters_by_ts(store):
 def test_duplicate_snapshot_upserts_or_ignores(store):
     """UNIQUE(symbol, tf, bar_ts, version): re-writing upserts, never duplicates."""
     sid1, _ = store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
         features=FEATURES_A,
     )
     sid2, _ = store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
         features=FEATURES_B,
     )
     conn = sqlite3.connect(store.db_path)
@@ -115,26 +129,21 @@ def test_migration_creates_tables(tmp_path):
 
     conn = sqlite3.connect(db_path)
     try:
-        tables = {
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        indexes = {
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-            )
-        }
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(feature_snapshots)")
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(feature_snapshots)")}
     finally:
         conn.close()
     assert "feature_snapshots" in tables
     assert {"idx_feature_snapshots_lookup", "idx_feature_snapshots_ts"} <= indexes
     assert {
-        "snapshot_id", "symbol", "timeframe", "bar_ts_utc_ms",
-        "feature_set_version", "features_json", "computed_at_utc_ms",
+        "snapshot_id",
+        "symbol",
+        "timeframe",
+        "bar_ts_utc_ms",
+        "feature_set_version",
+        "features_json",
+        "computed_at_utc_ms",
     } <= columns
     # Idempotent: re-running applies nothing further.
     assert apply_migrations(db_path) == []
@@ -143,12 +152,18 @@ def test_migration_creates_tables(tmp_path):
 def test_version_isolation(store):
     """Different feature_set_version values never mix (UNIQUE includes version)."""
     store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
-        features=FEATURES_A, feature_set_version="v1",
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
+        features=FEATURES_A,
+        feature_set_version="v1",
     )
     store.compute_and_store(
-        symbol="XAUUSD", timeframe="M5", bar_ts=1_700_000_000_000,
-        features=FEATURES_B, feature_set_version="v2",
+        symbol="XAUUSD",
+        timeframe="M5",
+        bar_ts=1_700_000_000_000,
+        features=FEATURES_B,
+        feature_set_version="v2",
     )
     v1 = store.get_latest("XAUUSD", "M5", feature_set_version="v1")
     v2 = store.get_latest("XAUUSD", "M5", feature_set_version="v2")
@@ -189,9 +204,7 @@ def _make_pipeline(cfg_overrides: dict | None = None):
 
 def test_pipeline_writes_snapshot_when_enabled(tmp_path):
     store_db = str(tmp_path / "fs_enabled.sqlite")
-    pipeline, cfg = _make_pipeline(
-        {"features": {"store": {"enabled": True, "db_path": store_db}}}
-    )
+    pipeline, cfg = _make_pipeline({"features": {"store": {"enabled": True, "db_path": store_db}}})
     result = pipeline.generate_signal(n_candles=300)
     assert result["feature_snapshot_id"] is not None
 
@@ -206,9 +219,7 @@ def test_pipeline_writes_snapshot_when_enabled(tmp_path):
 def test_pipeline_skips_when_disabled(tmp_path):
     """Default config (features.store.enabled unset/false) writes nothing."""
     store_db = str(tmp_path / "fs_disabled.sqlite")
-    pipeline, cfg = _make_pipeline(
-        {"features": {"store": {"enabled": False, "db_path": store_db}}}
-    )
+    pipeline, cfg = _make_pipeline({"features": {"store": {"enabled": False, "db_path": store_db}}})
     result = pipeline.generate_signal(n_candles=300)
     assert result["feature_snapshot_id"] is None
     assert not os.path.exists(store_db)
@@ -226,9 +237,7 @@ def test_pipeline_skips_when_disabled(tmp_path):
 def test_pipeline_snapshot_id_is_deterministic_sha256_hex(tmp_path):
     """The published feature_snapshot_id is the store's sha256 hex snapshot id."""
     store_db = str(tmp_path / "fs_hex.sqlite")
-    pipeline, _cfg = _make_pipeline(
-        {"features": {"store": {"enabled": True, "db_path": store_db}}}
-    )
+    pipeline, _cfg = _make_pipeline({"features": {"store": {"enabled": True, "db_path": store_db}}})
     result = pipeline.generate_signal(n_candles=300)
     sid = result["feature_snapshot_id"]
     assert sid is None or (len(sid) == 64 and int(sid, 16) >= 0)

@@ -19,6 +19,7 @@ Startup rules (built by ``default_rules``):
 Integration into run_bot is gated behind ``monitoring.alerts.enabled``
 (default false) — no side effects unless explicitly enabled.
 """
+
 from __future__ import annotations
 
 import logging
@@ -66,9 +67,7 @@ class AlertManager:
         self.rules = {r.rule_name: r for r in rules}
         self.notifier = notifier
         self._clock = clock
-        self._state: dict[str, _RuleState] = {
-            name: _RuleState() for name in self.rules
-        }
+        self._state: dict[str, _RuleState] = {name: _RuleState() for name in self.rules}
 
     def evaluate(self, context: dict[str, Any] | None = None) -> list[str]:
         """Run all rules; fire notifier for triggered, non-cooled-down rules.
@@ -87,8 +86,7 @@ class AlertManager:
                 continue
             if not triggered:
                 continue
-            if state.last_fired is not None and \
-                    (now - state.last_fired) < rule.cooldown_sec:
+            if state.last_fired is not None and (now - state.last_fired) < rule.cooldown_sec:
                 state.suppressed += 1
                 logger.debug("alert %s suppressed by cooldown", name)
                 continue
@@ -106,13 +104,13 @@ class AlertManager:
     def rule_stats(self) -> dict[str, dict[str, Any]]:
         """Observability: fire/suppression counters per rule."""
         return {
-            name: {"fires": st.fire_count, "suppressed": st.suppressed,
-                   "last_fired": st.last_fired}
+            name: {"fires": st.fire_count, "suppressed": st.suppressed, "last_fired": st.last_fired}
             for name, st in self._state.items()
         }
 
 
 # ------------------------------------------------------------- default rules --
+
 
 def default_rules(
     *,
@@ -177,6 +175,7 @@ def _disk_low(path: str, min_free_mb: float) -> bool:
 
 
 # ------------------------------------------------------------------ wiring --
+
 
 def build_from_config(cfg: dict) -> AlertManager | None:
     """Build an AlertManager from ``monitoring.alerts`` config, or None when

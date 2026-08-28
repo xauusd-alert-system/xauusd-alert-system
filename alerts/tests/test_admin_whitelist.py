@@ -1,4 +1,5 @@
 """ТЗ 10.3 — Telegram admin whitelist (TELEGRAM_ADMIN_IDS) for control commands."""
+
 import sys
 from pathlib import Path
 from types import SimpleNamespace as NS

@@ -17,6 +17,7 @@ Design:
   are exposed as attributes so calling code can keep reading them off the
   client instead of importing the raw package.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,11 +42,18 @@ TRADE_RETCODE_DONE = 10009
 
 # Methods counted as part of one polling cycle (used by the live-loop
 # diagnostics; mirrors the old calls_per_poll bookkeeping).
-_POLL_METHODS = frozenset({
-    "account_info", "symbol_info", "symbol_info_tick",
-    "symbol_info_tick_cached", "symbol_info_cached",
-    "positions_get", "orders_get", "copy_rates_from_pos",
-})
+_POLL_METHODS = frozenset(
+    {
+        "account_info",
+        "symbol_info",
+        "symbol_info_tick",
+        "symbol_info_tick_cached",
+        "symbol_info_cached",
+        "positions_get",
+        "orders_get",
+        "copy_rates_from_pos",
+    }
+)
 
 _DEFAULT_MAX_CPS = 10
 
@@ -56,11 +64,11 @@ def _load_real_mt5_module() -> Any:
     Raises ``MT5NotInitializedError`` when the package is unavailable so the
     failure carries adapter semantics instead of a bare ImportError."""
     from mt5_adapter.lazy import get_mt5_module
+
     try:
         return get_mt5_module()
     except ImportError as exc:
-        raise MT5NotInitializedError(
-            f"MetaTrader5 package is not importable: {exc}") from exc
+        raise MT5NotInitializedError(f"MetaTrader5 package is not importable: {exc}") from exc
 
 
 def _max_calls_per_second_from_env(default: int | None = None) -> int | None:
@@ -104,8 +112,7 @@ class MT5Client:
         self._module_lock = threading.Lock()
         if rate_limiter is None:
             max_cps = _max_calls_per_second_from_env(default=None)
-            rate_limiter = (MT5RateLimiter(max_calls_per_second=max_cps)
-                            if max_cps else MT5RateLimiter(None))
+            rate_limiter = MT5RateLimiter(max_calls_per_second=max_cps) if max_cps else MT5RateLimiter(None)
         self.rate_limiter = rate_limiter
         self.cache = cache if cache is not None else SymbolCache(ttl_ms=500)
         self.timeout_s = timeout_s
@@ -136,13 +143,15 @@ class MT5Client:
         try:
             return getattr(self.module, name)
         except AttributeError:
-            raise AttributeError(
-                f"MT5Client and the underlying MT5 module have no "
-                f"attribute {name!r}") from None
+            raise AttributeError(f"MT5Client and the underlying MT5 module have no attribute {name!r}") from None
 
-    def _call(self, method: str, func: Callable[[], Any],
-              ok_when: Callable[[Any], bool] | None = None,
-              error_context: Callable[[], str] | None = None) -> Any:
+    def _call(
+        self,
+        method: str,
+        func: Callable[[], Any],
+        ok_when: Callable[[Any], bool] | None = None,
+        error_context: Callable[[], str] | None = None,
+    ) -> Any:
         """Rate-limited, counted, error-wrapping invocation of ``method``."""
         self.rate_limiter.wait()
         started = None
@@ -154,9 +163,7 @@ class MT5Client:
             raise
         except Exception as exc:
             self._count(method)
-            raise MT5CallError(
-                f"{method} raised {type(exc).__name__}: {exc}",
-                comment=str(exc)) from exc
+            raise MT5CallError(f"{method} raised {type(exc).__name__}: {exc}", comment=str(exc)) from exc
 
         self._count(method)
 
@@ -164,20 +171,17 @@ class MT5Client:
             if not ok_when(result):
                 last_error = self._last_error_text()
                 if result is None:
-                    raise MT5NotInitializedError(
-                        f"{method} returned None. {last_error}")
-                raise MT5CallError(
-                    f"{method} failed. {last_error}", comment=last_error)
+                    raise MT5NotInitializedError(f"{method} returned None. {last_error}")
+                raise MT5CallError(f"{method} failed. {last_error}", comment=last_error)
         elif result is None:
-            raise MT5NotInitializedError(
-                f"{method} returned None. {self._last_error_text()}")
+            raise MT5NotInitializedError(f"{method} returned None. {self._last_error_text()}")
 
-        if started is not None:
+        if started is not None and self.timeout_s is not None:
             elapsed = time.monotonic() - started
             if elapsed > self.timeout_s:
                 from mt5_adapter.errors import MT5TimeoutError
-                raise MT5TimeoutError(
-                    f"{method} took {elapsed:.3f}s > timeout {self.timeout_s}s")
+
+                raise MT5TimeoutError(f"{method} took {elapsed:.3f}s > timeout {self.timeout_s}s")
         return result
 
     def _count(self, method: str) -> None:
@@ -209,20 +213,20 @@ class MT5Client:
     def initialize(self, *args: Any, **kwargs: Any) -> bool:
         """Initialize the terminal connection. Raises MT5CallError when the
         terminal refuses (initialize() returned False)."""
+
         def _ok(result: Any) -> bool:
             return bool(result)
 
         def _err() -> str:
             return f"initialize failed. {self._last_error_text()}"
 
-        result = self._call("initialize",
-                            lambda: self.module.initialize(*args, **kwargs),
-                            ok_when=_ok, error_context=_err)
+        result = self._call(
+            "initialize", lambda: self.module.initialize(*args, **kwargs), ok_when=_ok, error_context=_err
+        )
         return bool(result)
 
     def shutdown(self) -> None:
-        self._call("shutdown", lambda: self.module.shutdown(),
-                   ok_when=lambda _r: True)
+        self._call("shutdown", lambda: self.module.shutdown(), ok_when=lambda _r: True)
 
     # ------------------------------------------------------------------
     # Read-only market/account data
@@ -244,14 +248,12 @@ class MT5Client:
         )
 
     def symbol_info_tick(self, symbol: str) -> Any:
-        return self._call("symbol_info_tick",
-                          lambda: self.module.symbol_info_tick(symbol))
+        return self._call("symbol_info_tick", lambda: self.module.symbol_info_tick(symbol))
 
     def symbol_info_tick_cached(self, symbol: str) -> Any:
         return self.cache.get_or_fetch(
             ("symbol_info_tick", symbol),
-            lambda: self._call("symbol_info_tick",
-                               lambda: self.module.symbol_info_tick(symbol)),
+            lambda: self._call("symbol_info_tick", lambda: self.module.symbol_info_tick(symbol)),
         )
 
     def symbol_select(self, symbol: str, enable: bool = True) -> bool:
@@ -263,36 +265,28 @@ class MT5Client:
         return bool(result)
 
     def positions_get(self, *args: Any, **kwargs: Any) -> Any:
-        return self._call("positions_get",
-                          lambda: self.module.positions_get(*args, **kwargs))
+        return self._call("positions_get", lambda: self.module.positions_get(*args, **kwargs))
 
     def orders_get(self, *args: Any, **kwargs: Any) -> Any:
-        return self._call("orders_get",
-                          lambda: self.module.orders_get(*args, **kwargs))
+        return self._call("orders_get", lambda: self.module.orders_get(*args, **kwargs))
 
     def history_deals_get(self, *args: Any, **kwargs: Any) -> Any:
-        return self._call("history_deals_get",
-                          lambda: self.module.history_deals_get(*args, **kwargs))
+        return self._call("history_deals_get", lambda: self.module.history_deals_get(*args, **kwargs))
 
     def history_orders_get(self, *args: Any, **kwargs: Any) -> Any:
-        return self._call("history_orders_get",
-                          lambda: self.module.history_orders_get(*args, **kwargs))
+        return self._call("history_orders_get", lambda: self.module.history_orders_get(*args, **kwargs))
 
-    def copy_rates_from_pos(self, symbol: str, timeframe: int,
-                            start_pos: int, count: int) -> Any:
+    def copy_rates_from_pos(self, symbol: str, timeframe: int, start_pos: int, count: int) -> Any:
         return self._call(
             "copy_rates_from_pos",
-            lambda: self.module.copy_rates_from_pos(
-                symbol, timeframe, start_pos, count),
+            lambda: self.module.copy_rates_from_pos(symbol, timeframe, start_pos, count),
             ok_when=lambda r: r is not None and len(r) > 0,
         )
 
-    def copy_rates_range(self, symbol: str, timeframe: int,
-                         date_from: Any, date_to: Any) -> Any:
+    def copy_rates_range(self, symbol: str, timeframe: int, date_from: Any, date_to: Any) -> Any:
         return self._call(
             "copy_rates_range",
-            lambda: self.module.copy_rates_range(
-                symbol, timeframe, date_from, date_to),
+            lambda: self.module.copy_rates_range(symbol, timeframe, date_from, date_to),
             ok_when=lambda r: r is not None,
         )
 
@@ -303,23 +297,18 @@ class MT5Client:
     def order_send(self, request: dict) -> Any:
         """Send a trade request. Raises :class:`MT5OrderRejectedError` when
         the terminal answers with a retcode != TRADE_RETCODE_DONE."""
-        result = self._call("order_send",
-                            lambda: self.module.order_send(request),
-                            ok_when=lambda r: r is not None)
+        result = self._call("order_send", lambda: self.module.order_send(request), ok_when=lambda r: r is not None)
         retcode = getattr(result, "retcode", None)
         if retcode is None or retcode != TRADE_RETCODE_DONE:
             raise MT5OrderRejectedError(
-                f"order_send rejected: retcode={retcode} "
-                f"comment={getattr(result, 'comment', '')!r}",
+                f"order_send rejected: retcode={retcode} comment={getattr(result, 'comment', '')!r}",
                 retcode=retcode,
                 comment=str(getattr(result, "comment", "")),
             )
         return result
 
     def order_check(self, request: dict) -> Any:
-        result = self._call("order_check",
-                            lambda: self.module.order_check(request),
-                            ok_when=lambda r: r is not None)
+        result = self._call("order_check", lambda: self.module.order_check(request), ok_when=lambda r: r is not None)
         retcode = getattr(result, "retcode", None)
         if retcode is None and isinstance(result, dict):
             retcode = result.get("retcode", 0)
@@ -339,15 +328,12 @@ class MT5Client:
     # ------------------------------------------------------------------
 
     def market_book_add(self, symbol: str) -> bool:
-        result = self._call("market_book_add",
-                            lambda: self.module.market_book_add(symbol))
+        result = self._call("market_book_add", lambda: self.module.market_book_add(symbol))
         return bool(result)
 
     def market_book_get(self, symbol: str) -> Any:
-        return self._call("market_book_get",
-                          lambda: self.module.market_book_get(symbol))
+        return self._call("market_book_get", lambda: self.module.market_book_get(symbol))
 
     def market_book_remove(self, symbol: str) -> bool:
-        result = self._call("market_book_remove",
-                            lambda: self.module.market_book_remove(symbol))
+        result = self._call("market_book_remove", lambda: self.module.market_book_remove(symbol))
         return bool(result)

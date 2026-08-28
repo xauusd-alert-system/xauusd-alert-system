@@ -4,6 +4,7 @@ The research truncation script deletes data — these tests pin the safety
 contract: --dry-run previews counts, deletion without consent is refused,
 and --yes --no-confirm actually deletes.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -41,7 +42,7 @@ def _table_rows(db):
     con = sqlite3.connect(db)
     try:
         return {
-            t: con.execute(f"SELECT count(*) FROM \"{t}\"").fetchone()[0]
+            t: con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]
             for t in ("ohlcv_xauusd_m5", "ohlcv_xauusd_m15", "other_table")
         }
     finally:
@@ -50,9 +51,7 @@ def _table_rows(db):
 
 def test_truncate_db_dry_run(research_db, capsys):
     """--dry-run prints per-table counts and deletes NOTHING."""
-    rc = truncate_db.main(
-        ["--db", str(research_db), "--cutoff", "2026-08-08", "--dry-run"]
-    )
+    rc = truncate_db.main(["--db", str(research_db), "--cutoff", "2026-08-08", "--dry-run"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "DRY RUN" in out
@@ -82,9 +81,7 @@ def test_truncate_db_requires_confirmation(research_db, capsys):
 
 def test_truncate_db_requires_yes_for_non_interactive(research_db):
     """--no-confirm without --yes must not delete (guard against a lone flag)."""
-    rc = truncate_db.main(
-        ["--db", str(research_db), "--cutoff", "2026-08-08", "--no-confirm"]
-    )
+    rc = truncate_db.main(["--db", str(research_db), "--cutoff", "2026-08-08", "--no-confirm"])
     assert rc == 2
     assert _table_rows(research_db)["ohlcv_xauusd_m5"] == 3
 
@@ -114,9 +111,7 @@ def test_truncate_db_deletes_with_yes_no_confirm(research_db, monkeypatch):
         return "n"  # if a prompt ever happens, answer "no"
 
     monkeypatch.setattr("builtins.input", _no_prompt)
-    rc = truncate_db.main(
-        ["--db", str(research_db), "--cutoff", "2026-08-08", "--yes", "--no-confirm"]
-    )
+    rc = truncate_db.main(["--db", str(research_db), "--cutoff", "2026-08-08", "--yes", "--no-confirm"])
     assert rc == 0
     assert not prompted
     assert _table_rows(research_db)["ohlcv_xauusd_m5"] == 1

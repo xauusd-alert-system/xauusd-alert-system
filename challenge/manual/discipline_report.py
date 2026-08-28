@@ -9,6 +9,7 @@ Combines journal data + outcomes data into a single discipline scorecard:
 5. Checklist compliance — were entry/stop/target planned before entry?
 6. Streak analysis — consecutive losses, max drawdown
 """
+
 from __future__ import annotations
 
 import csv
@@ -56,8 +57,7 @@ def compute_adherence(rows: list[dict]) -> dict:
     the discipline protocol from the checklist (audit §6.1).
     """
     if not rows:
-        return {"total": 0, "complete": 0, "adherence_pct": 0.0,
-                "missing_fields": {}, "by_plan_pct": 0.0}
+        return {"total": 0, "complete": 0, "adherence_pct": 0.0, "missing_fields": {}, "by_plan_pct": 0.0}
 
     total = len(rows)
     complete = 0
@@ -99,8 +99,7 @@ def compute_regime_breakdown(rows: list[dict]) -> dict:
     for regime, trades in sorted(by_regime.items()):
         rr = [_safe_float(x["result_r"]) for x in trades if x.get("result_r") not in ("", None)]
         usd = [_safe_float(x["result_usd"]) for x in trades if x.get("result_usd") not in ("", None)]
-        wins = sum(1 for r in trades
-                   if r.get("outcome", "").strip().upper() in ("W", "WIN", "TARGET"))
+        wins = sum(1 for r in trades if r.get("outcome", "").strip().upper() in ("W", "WIN", "TARGET"))
         n = len(trades)
         out[regime] = {
             "n": n,
@@ -129,8 +128,7 @@ def compute_time_bucket_stats(rows: list[dict]) -> dict:
     for bucket, trades in sorted(by_bucket.items()):
         rr = [_safe_float(x["result_r"]) for x in trades if x.get("result_r") not in ("", None)]
         usd = [_safe_float(x["result_usd"]) for x in trades if x.get("result_usd") not in ("", None)]
-        wins = sum(1 for r in trades
-                   if r.get("outcome", "").strip().upper() in ("W", "WIN", "TARGET"))
+        wins = sum(1 for r in trades if r.get("outcome", "").strip().upper() in ("W", "WIN", "TARGET"))
         n = len(trades)
         commissions = [_safe_float(x.get("commission_usd", 0)) for x in trades]
         time_in = [_safe_float(x.get("time_in_trade_min", 0)) for x in trades]
@@ -220,10 +218,12 @@ def compute_checklist_stats(date_filter: str = "") -> dict:
     """
     log_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "data", "challenge", "checklist_log.csv")
+        "data",
+        "challenge",
+        "checklist_log.csv",
+    )
     if not os.path.exists(log_path):
-        return {"total": 0, "passed": 0, "blocked": 0, "pass_rate": 0.0,
-                "block_reasons": {}, "by_symbol": {}}
+        return {"total": 0, "passed": 0, "blocked": 0, "pass_rate": 0.0, "block_reasons": {}, "by_symbol": {}}
 
     rows = []
     with open(log_path, newline="", encoding="utf-8") as f:
@@ -234,8 +234,7 @@ def compute_checklist_stats(date_filter: str = "") -> dict:
             rows.append(r)
 
     if not rows:
-        return {"total": 0, "passed": 0, "blocked": 0, "pass_rate": 0.0,
-                "block_reasons": {}, "by_symbol": {}}
+        return {"total": 0, "passed": 0, "blocked": 0, "pass_rate": 0.0, "block_reasons": {}, "by_symbol": {}}
 
     total = len(rows)
     passed = sum(1 for r in rows if r.get("passed") == "True")
@@ -327,8 +326,7 @@ def format_report(report: dict) -> str:
     a = report.get("adherence", {})
     lines.append("")
     lines.append("JOURNAL ADHERENCE")
-    lines.append(f"  Complete records: {a.get('complete', 0)}/{a.get('total', 0)} "
-                 f"({a.get('adherence_pct', 0):.0f}%)")
+    lines.append(f"  Complete records: {a.get('complete', 0)}/{a.get('total', 0)} ({a.get('adherence_pct', 0):.0f}%)")
     lines.append(f"  By-plan trades:  {a.get('by_plan_pct', 0):.0f}%")
     if a.get("missing_fields"):
         lines.append(f"  Missing fields:  {a['missing_fields']}")
@@ -343,8 +341,7 @@ def format_report(report: dict) -> str:
         lines.append(f"  Blocked:        {cl['blocked']}")
         if cl.get("block_reasons"):
             lines.append("  Block reasons:")
-            for reason, count in sorted(cl["block_reasons"].items(),
-                                        key=lambda x: -x[1]):
+            for reason, count in sorted(cl["block_reasons"].items(), key=lambda x: -x[1]):
                 lines.append(f"    {reason:<20s} {count}")
 
     # --- Regime breakdown ---
@@ -353,10 +350,12 @@ def format_report(report: dict) -> str:
         lines.append("")
         lines.append("REGIME BREAKDOWN")
         lines.append(f"  {'Regime':<14s} {'N':>4s} {'WR%':>6s} {'AvgR':>7s} {'Net$':>9s}")
-        lines.append(f"  {'-'*45}")
+        lines.append(f"  {'-' * 45}")
         for regime, stats in sorted(rb.items()):
-            lines.append(f"  {regime:<14s} {stats['n']:>4d} {stats['win_rate_pct']:>5.0f}% "
-                         f"{stats['avg_r']:>+6.3f} ${stats['net_pnl']:>+8.2f}")
+            lines.append(
+                f"  {regime:<14s} {stats['n']:>4d} {stats['win_rate_pct']:>5.0f}% "
+                f"{stats['avg_r']:>+6.3f} ${stats['net_pnl']:>+8.2f}"
+            )
 
     # --- Time bucket ---
     tb = report.get("time_bucket_stats", {})
@@ -364,11 +363,13 @@ def format_report(report: dict) -> str:
         lines.append("")
         lines.append("TIME BUCKET STATS")
         lines.append(f"  {'Bucket':<12s} {'N':>4s} {'WR%':>6s} {'AvgR':>7s} {'Comm$':>7s} {'AvgMin':>7s}")
-        lines.append(f"  {'-'*50}")
+        lines.append(f"  {'-' * 50}")
         for bucket, stats in sorted(tb.items()):
-            lines.append(f"  {bucket:<12s} {stats['n']:>4d} {stats['win_rate_pct']:>5.0f}% "
-                         f"{stats['avg_r']:>+6.3f} ${stats['total_commission']:>5.2f} "
-                         f"{stats['avg_time_min']:>6.1f}")
+            lines.append(
+                f"  {bucket:<12s} {stats['n']:>4d} {stats['win_rate_pct']:>5.0f}% "
+                f"{stats['avg_r']:>+6.3f} ${stats['total_commission']:>5.2f} "
+                f"{stats['avg_time_min']:>6.1f}"
+            )
 
     # --- Commission drag ---
     cd = report.get("commission_drag", {})

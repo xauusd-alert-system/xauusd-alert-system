@@ -2,6 +2,7 @@
 Ensemble-aware backtest wrapper with Multi-TP (Scale-Out) & Auto-Breakeven support.
 Reads asset-specific spreads and simulates commissions/swaps/slippage.
 """
+
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -70,17 +71,20 @@ class EnsembleBacktester:
         # slippage_usd override (MT5's real slippage is the instrument-specific
         # deviation in points, never a global absolute). Gold keeps the old 0.05 default
         # so existing benchmark behaviour for metals/BTC is preserved unless overridden.
-        self.slippage = asset_cfg.get(
-            "slippage_usd", bt_cfg.get("slippage_points", 5) / 100.0
-        )
+        self.slippage = asset_cfg.get("slippage_usd", bt_cfg.get("slippage_points", 5) / 100.0)
         self.balance = bt_cfg.get("initial_balance", 100.0)
         self.volume = bt_cfg.get("volume", 0.10)  # базовый объём для бэктеста
         self.commission_per_trade = bt_cfg.get("commission_per_trade", 0.07)
         self.swap_per_night = bt_cfg.get("swap_per_night", 0.0)
         # Validation of scaleout lot sizes (Task 7 / Section 5.2A)
         from execution.portfolio_allocator import validate_scaleout_tranches
+
         self.strict_scaleout_validation = bool(bt_cfg.get("strict_scaleout_validation", False))
-        is_valid, err_msg, _ = validate_scaleout_tranches(self.volume, [0.5, 0.3, 0.2], raise_on_invalid=self.strict_scaleout_validation)
+        is_valid, err_msg, _ = validate_scaleout_tranches(
+            self.volume,
+            [0.5, 0.3, 0.2],
+            raise_on_invalid=self.strict_scaleout_validation,
+        )
         if not is_valid and self.strict_scaleout_validation:
             raise ValueError(f"Scale-out validation error: {err_msg}")
         # HIGH 7: point_value_lot = USD notional per 1.0 lot per 1.0 price unit.
@@ -121,8 +125,7 @@ class EnsembleBacktester:
         # constraint) — the queue-loss measurement input.
         self.rejected_signals: List[dict] = []
 
-    def simulate_blocked_entry(self, df: pd.DataFrame, signal_bar: int,
-                               direction: int) -> Optional[Trade]:
+    def simulate_blocked_entry(self, df: pd.DataFrame, signal_bar: int, direction: int) -> Optional[Trade]:
         """Queue-loss measurement: what WOULD a rejected signal have earned.
 
         The signal fired at `signal_bar` while a position was open; the
@@ -133,7 +136,7 @@ class EnsembleBacktester:
         """
         if signal_bar + 1 >= len(df):
             return None
-        sub = df.iloc[signal_bar + 1:].reset_index(drop=True)
+        sub = df.iloc[signal_bar + 1 :].reset_index(drop=True)
         sim = EnsembleBacktester(self.cfg, asset_key=self.asset_key)
         sim.fill_mode = "next_open"
         trades = sim.run(sub, forced_direction=direction, max_trades=1)
@@ -156,8 +159,9 @@ class EnsembleBacktester:
         """Convert a price-space PnL to account money using lot size and contract multiplier."""
         return price_pnl * self.volume * self.point_value_lot
 
-    def run(self, df: pd.DataFrame, forced_direction: Optional[int] = None,
-            max_trades: Optional[int] = None) -> List[Trade]:
+    def run(
+        self, df: pd.DataFrame, forced_direction: Optional[int] = None, max_trades: Optional[int] = None
+    ) -> List[Trade]:
         """Run the backtest over `df`.
 
         forced_direction: if set (1/-1), a trade is opened at the first bar
@@ -205,8 +209,7 @@ class EnsembleBacktester:
 
             # LIMIT-ENTRY MODE (audit Q4b): try to fill the pending limit on
             # this bar's intrabar range before falling back to market logic.
-            if (open_position is None and pending_limit is not None
-                    and self.fill_mode == "limit"):
+            if open_position is None and pending_limit is not None and self.fill_mode == "limit":
                 limit_price, ldir, bars_waited, frozen_step, signal_regime, frozen_grid = pending_limit
                 touched = (lows[i] <= limit_price) if ldir == 1 else (highs[i] >= limit_price)
                 if touched:
@@ -317,10 +320,18 @@ class EnsembleBacktester:
             if open_position is not None and (entry_bar is None or i > entry_bar):
                 direction = open_position.direction
 
-                hit_tp1 = (highs[i] >= open_position.tp1_price) if direction == 1 else (lows[i] <= open_position.tp1_price)
-                hit_tp2 = (highs[i] >= open_position.tp2_price) if direction == 1 else (lows[i] <= open_position.tp2_price)
-                hit_tp3 = (highs[i] >= open_position.tp3_price) if direction == 1 else (lows[i] <= open_position.tp3_price)
-                hit_stop = (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
+                hit_tp1 = (
+                    (highs[i] >= open_position.tp1_price) if direction == 1 else (lows[i] <= open_position.tp1_price)
+                )
+                hit_tp2 = (
+                    (highs[i] >= open_position.tp2_price) if direction == 1 else (lows[i] <= open_position.tp2_price)
+                )
+                hit_tp3 = (
+                    (highs[i] >= open_position.tp3_price) if direction == 1 else (lows[i] <= open_position.tp3_price)
+                )
+                hit_stop = (
+                    (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
+                )
 
                 step = df["timestamp_utc"].diff().mode().iloc[0] if len(df) > 1 else 1
                 try:
@@ -367,9 +378,9 @@ class EnsembleBacktester:
                 # rate 96.82% reported vs 58.84% from the barrier geometry). Longs were
                 # unaffected, since for direction=+1 the squared factor is a no-op.
                 if not double_touch_stop and not tp1_hit and not be_triggered:
-                    be_level = (open_position.entry_price
-                                + open_position.be_trigger_mult
-                                * (open_position.tp1_price - open_position.entry_price))
+                    be_level = open_position.entry_price + open_position.be_trigger_mult * (
+                        open_position.tp1_price - open_position.entry_price
+                    )
                     if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
                         open_position.stop_price = open_position.entry_price
                         be_triggered = True
@@ -380,7 +391,9 @@ class EnsembleBacktester:
                     # HIGH 7: convert price-space PnL to money via volume * point_value_lot.
                     # W1: charge the exit cost (half-spread + slippage) on the scaleout.
                     exit_price_tp1 = self._apply_exit_cost(open_position.tp1_price, direction)
-                    pnl_tp1 = self._money(open_position.scaleout1 * direction * (exit_price_tp1 - open_position.entry_price))
+                    pnl_tp1 = self._money(
+                        open_position.scaleout1 * direction * (exit_price_tp1 - open_position.entry_price)
+                    )
                     accumulated_pnl += pnl_tp1
                     remaining_ratio = 1.0 - open_position.scaleout1
                     open_position.stop_price = open_position.entry_price  # BREAKEVEN
@@ -390,7 +403,9 @@ class EnsembleBacktester:
                     tp2_hit = True
                     # W1: charge the exit cost (half-spread + slippage) on the scaleout.
                     exit_price_tp2 = self._apply_exit_cost(open_position.tp2_price, direction)
-                    pnl_tp2 = self._money(open_position.scaleout2 * direction * (exit_price_tp2 - open_position.entry_price))
+                    pnl_tp2 = self._money(
+                        open_position.scaleout2 * direction * (exit_price_tp2 - open_position.entry_price)
+                    )
                     accumulated_pnl += pnl_tp2
                     remaining_ratio = 1.0 - open_position.scaleout1 - open_position.scaleout2
 
@@ -420,7 +435,11 @@ class EnsembleBacktester:
                     progress_bars = int(self.horizon_n * self.progress_stop_ratio)
                     if candles_held >= progress_bars:
                         atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
-                        prog = (highs[i] - open_position.entry_price) if direction == 1 else (open_position.entry_price - lows[i])
+                        prog = (
+                            (highs[i] - open_position.entry_price)
+                            if direction == 1
+                            else (open_position.entry_price - lows[i])
+                        )
                         prog_atr = prog / max(atr_val, 1e-6)
                         if prog_atr < self.progress_stop_atr:
                             hit_progress_stop = True
@@ -508,23 +527,21 @@ class EnsembleBacktester:
                     self.cfg,
                     session=str(sessions[i]),
                     timestamp_utc=int(timestamps[i]),
-                    asset_key=self.asset_key if hasattr(self, 'asset_key') else "XAUUSD"
+                    asset_key=self.asset_key if hasattr(self, "asset_key") else "XAUUSD",
                 )
                 pending_direction = {"long": 1, "short": -1, "no_trade": 0}[sig.bias]
 
                 # LIMIT-ENTRY MODE (audit Q4b): convert the pending market
                 # signal into a limit at signal_close +/- limit_frac * step;
                 # fills are attempted intrabar on the next bars (timeout).
-                if (self.fill_mode == "limit" and pending_direction != 0):
+                if self.fill_mode == "limit" and pending_direction != 0:
                     ldir = pending_direction
                     atr_here = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
                     signal_regime = _regime_name(regimes[i])
                     frozen_grid = get_signal_grid(self.cfg, self.asset_cfg, regime=signal_regime)
                     frozen_step = resolve_signal_step(atr_here, frozen_grid)
                     limit_price = closes[i] + (self.limit_frac * frozen_step * ldir)
-                    pending_limit = (
-                        float(limit_price), ldir, 0, frozen_step, signal_regime, frozen_grid
-                    )
+                    pending_limit = (float(limit_price), ldir, 0, frozen_step, signal_regime, frozen_grid)
                     pending_direction = None
 
                 # LOOK-AHEAD MEASUREMENT MODE ONLY: fill at the close of the
@@ -590,16 +607,18 @@ class EnsembleBacktester:
                     self.cfg,
                     session=str(sessions[i]),
                     timestamp_utc=int(timestamps[i]),
-                    asset_key=self.asset_key if hasattr(self, 'asset_key') else "XAUUSD"
+                    asset_key=self.asset_key if hasattr(self, "asset_key") else "XAUUSD",
                 )
                 if sig.bias in ("long", "short"):
-                    self.rejected_signals.append({
-                        "bar": i,
-                        "direction": 1 if sig.bias == "long" else -1,
-                        "regime": str(reg_val.value if hasattr(reg_val, "value") else reg_val),
-                        "session": str(sessions[i]),
-                        "p_long": float(p_longs[i]),
-                        "p_short": float(p_shorts[i]),
-                    })
+                    self.rejected_signals.append(
+                        {
+                            "bar": i,
+                            "direction": 1 if sig.bias == "long" else -1,
+                            "regime": str(reg_val.value if hasattr(reg_val, "value") else reg_val),
+                            "session": str(sessions[i]),
+                            "p_long": float(p_longs[i]),
+                            "p_short": float(p_shorts[i]),
+                        }
+                    )
 
         return self.trades

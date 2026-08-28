@@ -12,11 +12,11 @@ it matches each LTF timestamp to the most recent HTF timestamp <= it, never a
 future HTF candle. This is the single most common source of look-ahead bias in
 multi-timeframe systems, so it is isolated and heavily commented here.
 """
+
 import pandas as pd
 
 
-def merge_htf_feature(ltf_df: pd.DataFrame, htf_df: pd.DataFrame, feature_col: str,
-                       out_col_name: str) -> pd.DataFrame:
+def merge_htf_feature(ltf_df: pd.DataFrame, htf_df: pd.DataFrame, feature_col: str, out_col_name: str) -> pd.DataFrame:
     """
     Backward-merge a single HTF feature column onto the LTF DataFrame using merge_asof.
     Both DataFrames must be sorted ascending by timestamp_utc (enforced here defensively).
@@ -34,7 +34,8 @@ def merge_htf_feature(ltf_df: pd.DataFrame, htf_df: pd.DataFrame, feature_col: s
     htf_sorted[out_col_name] = htf_sorted[out_col_name].shift(1)
 
     merged = pd.merge_asof(
-        ltf_sorted, htf_sorted,
+        ltf_sorted,
+        htf_sorted,
         on="timestamp_utc",
         direction="backward",  # NEVER "forward" or "nearest" - would leak future HTF candles
     )

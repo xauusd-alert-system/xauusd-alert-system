@@ -6,6 +6,7 @@ Covers:
     - double_shutdown_safe               — idempotency (second call no-ops);
     - final poll failure                 — shutdown still completes.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -103,7 +104,8 @@ def test_run_bot_installs_handlers(monkeypatch):
 
     installed = {}
     monkeypatch.setattr(
-        signal, "signal",
+        signal,
+        "signal",
         lambda sig, handler: installed.__setitem__(sig, handler),
     )
     import logging
@@ -112,6 +114,7 @@ def test_run_bot_installs_handlers(monkeypatch):
     _install_shutdown_handlers(ex, logging.getLogger("test"))
 
     import sys as _sys
+
     assert signal.SIGTERM in installed or _sys.platform != "win32"
     if signal.SIGINT in installed:
         # invoking the handler triggers shutdown + SystemExit

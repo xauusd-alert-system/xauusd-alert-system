@@ -36,6 +36,7 @@ Example::
     st.hwm = max(st.hwm or 0.0, equity)
     st.save()
 """
+
 from __future__ import annotations
 
 import json
@@ -78,26 +79,21 @@ class RiskState:
             with open(self.state_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError):
-            logger.warning(
-                "Could not read risk state %s; starting fresh.", self.state_path)
+            logger.warning("Could not read risk state %s; starting fresh.", self.state_path)
             return
         if not isinstance(data, dict):
             return
         try:
             if data.get("current_day"):
-                self.current_day = datetime.fromisoformat(
-                    data["current_day"]).date()
+                self.current_day = datetime.fromisoformat(data["current_day"]).date()
             self.starting_equity_today = data.get("starting_equity_today")
             # P0-5 backwards compat: old files lack the balance anchor.
-            self.starting_balance_today = data.get(
-                "starting_balance_today", self.starting_equity_today)
+            self.starting_balance_today = data.get("starting_balance_today", self.starting_equity_today)
             self.hwm = data.get("hwm")
             self.daily_trades_count = dict(data.get("daily_trades_count", {}))
-            self.circuit_breaker_tripped = bool(
-                data.get("circuit_breaker_tripped", False))
+            self.circuit_breaker_tripped = bool(data.get("circuit_breaker_tripped", False))
         except (KeyError, ValueError, TypeError):
-            logger.warning(
-                "Malformed risk state %s; starting fresh.", self.state_path)
+            logger.warning("Malformed risk state %s; starting fresh.", self.state_path)
 
     def save(self) -> None:
         """Persist state atomically (tmp + os.replace)."""
@@ -121,8 +117,7 @@ class RiskState:
             logger.error("Failed to persist risk state: %s", e)
 
     # ------------------------------------------------------------- mutators
-    def reset_for_new_day(self, current_equity: float,
-                          current_balance: Optional[float] = None) -> None:
+    def reset_for_new_day(self, current_equity: float, current_balance: Optional[float] = None) -> None:
         """Anchor a fresh daily budget (UTC date changed or first anchor).
 
         ``current_balance`` defaults to the equity value for legacy callers
@@ -130,8 +125,7 @@ class RiskState:
         """
         self.current_day = datetime.now(UTC).date()
         self.starting_equity_today = current_equity
-        self.starting_balance_today = (
-            current_equity if current_balance is None else current_balance)
+        self.starting_balance_today = current_equity if current_balance is None else current_balance
         self.daily_trades_count = {}
         self.circuit_breaker_tripped = False
         self.save()
@@ -150,8 +144,7 @@ class RiskState:
 
     def record_trade(self, asset_key: str) -> int:
         """Increment the per-asset daily trade counter; returns new value."""
-        self.daily_trades_count[asset_key] = (
-            self.daily_trades_count.get(asset_key, 0) + 1)
+        self.daily_trades_count[asset_key] = self.daily_trades_count.get(asset_key, 0) + 1
         return self.daily_trades_count[asset_key]
 
     def is_today(self) -> bool:

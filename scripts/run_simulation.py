@@ -79,6 +79,7 @@ def build_virtual_cfg() -> dict:
     cfg["symbol_overrides"] = overrides
     return cfg
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -133,9 +134,7 @@ class SimulationDriver:
         )
         while not self._stop_event.is_set():
             try:
-                bar = self.simulator.advance_to_next_m5_bar(
-                    max_ticks=self.max_ticks_per_bar
-                )
+                bar = self.simulator.advance_to_next_m5_bar(max_ticks=self.max_ticks_per_bar)
             except Exception as e:  # pragma: no cover - defensive
                 logger.error("Simulation driver step failed: %s", e)
                 bar = None
@@ -156,9 +155,7 @@ class SimulationDriver:
 def _bar_timestamp(bar: dict) -> str:
     """Format a bar's Unix-second ``time`` field as a readable UTC string."""
     try:
-        return datetime.fromtimestamp(bar["time"], tz=UTC).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        return datetime.fromtimestamp(bar["time"], tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:  # pragma: no cover - defensive
         return str(bar.get("time"))
 

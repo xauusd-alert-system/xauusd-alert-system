@@ -124,19 +124,21 @@ def beta_verdict(corr: float) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Split backtest PnL into direction bias, market beta and exit policy.")
+    parser = argparse.ArgumentParser(description="Split backtest PnL into direction bias, market beta and exit policy.")
     parser.add_argument("--asset", required=True, help="Internal asset key (XAUUSD, ...)")
     parser.add_argument("--timeframe", default=None, help="Override timeframe (default: per-asset)")
     parser.add_argument("--db-path", default=None, help="SQLite DB (default: config general.db_path)")
-    parser.add_argument("--end-date", default=None,
-                        help="Drop candles at or after this UTC date (YYYY-MM-DD) before building "
-                             "features. Same semantics as scripts/run_backtest.py --end-date.")
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Drop candles at or after this UTC date (YYYY-MM-DD) before building "
+        "features. Same semantics as scripts/run_backtest.py --end-date.",
+    )
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds (quick runs)")
-    parser.add_argument("--allow-locked", action="store_true",
-                        help="Allow test windows overlapping the locked hold-out")
-    parser.add_argument("--out", default=None,
-                        help="Output CSV path (default: logs/direction_beta_<asset>.csv)")
+    parser.add_argument(
+        "--allow-locked", action="store_true", help="Allow test windows overlapping the locked hold-out"
+    )
+    parser.add_argument("--out", default=None, help="Output CSV path (default: logs/direction_beta_<asset>.csv)")
     args = parser.parse_args(argv)
 
     cfg = load_config()
@@ -188,43 +190,50 @@ def main(argv: list[str] | None = None) -> None:
         closes = fdf["close"].to_numpy(dtype=float)
         # Buy-and-hold over the same window, same lot, same contract multiplier,
         # so the number is directly comparable with the strategy PnL.
-        buy_hold = (float(closes[-1] - closes[0]) * engine.volume * engine.point_value_lot
-                    if len(closes) >= 2 else 0.0)
+        buy_hold = float(closes[-1] - closes[0]) * engine.volume * engine.point_value_lot if len(closes) >= 2 else 0.0
 
-        rows.append({
-            "fold": i + 1,
-            "n_trades": len(trades),
-            "n_long": len(longs),
-            "n_short": len(shorts),
-            "long_share_pct": round(100.0 * len(longs) / len(trades), 1) if trades else 0.0,
-            "pnl_long": round(_pnl(longs), 2),
-            "pnl_short": round(_pnl(shorts), 2),
-            "pnl_total": round(_pnl(trades), 2),
-            "buy_hold": round(buy_hold, 2),
-        })
+        rows.append(
+            {
+                "fold": i + 1,
+                "n_trades": len(trades),
+                "n_long": len(longs),
+                "n_short": len(shorts),
+                "long_share_pct": round(100.0 * len(longs) / len(trades), 1) if trades else 0.0,
+                "pnl_long": round(_pnl(longs), 2),
+                "pnl_short": round(_pnl(shorts), 2),
+                "pnl_total": round(_pnl(trades), 2),
+                "buy_hold": round(buy_hold, 2),
+            }
+        )
 
     rep = pd.DataFrame(rows)
 
     print(f"\n=== Direction / beta decomposition: {args.asset} ===")
     if args.end_date:
         print(f"Sample truncated at {args.end_date} (locked hold-out NOT touched)")
-    hdr = (f"{'fold':>5}{'n_tr':>6}{'n_long':>8}{'n_short':>8}{'long%':>7}"
-           f"{'pnl_long':>11}{'pnl_short':>11}{'pnl_tot':>11}{'buy_hold':>11}")
+    hdr = (
+        f"{'fold':>5}{'n_tr':>6}{'n_long':>8}{'n_short':>8}{'long%':>7}"
+        f"{'pnl_long':>11}{'pnl_short':>11}{'pnl_tot':>11}{'buy_hold':>11}"
+    )
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
-        print(f"{r['fold']:>5}{r['n_trades']:>6}{r['n_long']:>8}{r['n_short']:>8}"
-              f"{r['long_share_pct']:>7.1f}{r['pnl_long']:>11.1f}{r['pnl_short']:>11.1f}"
-              f"{r['pnl_total']:>11.1f}{r['buy_hold']:>11.1f}")
+        print(
+            f"{r['fold']:>5}{r['n_trades']:>6}{r['n_long']:>8}{r['n_short']:>8}"
+            f"{r['long_share_pct']:>7.1f}{r['pnl_long']:>11.1f}{r['pnl_short']:>11.1f}"
+            f"{r['pnl_total']:>11.1f}{r['buy_hold']:>11.1f}"
+        )
 
     tot_long = int(rep["n_long"].sum())
     tot_short = int(rep["n_short"].sum())
     tot_n = tot_long + tot_short
     print("-" * len(hdr))
-    print(f"{'ALL':>5}{tot_n:>6}{tot_long:>8}{tot_short:>8}"
-          f"{(100.0 * tot_long / tot_n if tot_n else 0.0):>7.1f}"
-          f"{rep['pnl_long'].sum():>11.1f}{rep['pnl_short'].sum():>11.1f}"
-          f"{rep['pnl_total'].sum():>11.1f}{rep['buy_hold'].sum():>11.1f}")
+    print(
+        f"{'ALL':>5}{tot_n:>6}{tot_long:>8}{tot_short:>8}"
+        f"{(100.0 * tot_long / tot_n if tot_n else 0.0):>7.1f}"
+        f"{rep['pnl_long'].sum():>11.1f}{rep['pnl_short'].sum():>11.1f}"
+        f"{rep['pnl_total'].sum():>11.1f}{rep['buy_hold'].sum():>11.1f}"
+    )
 
     # --- 1. beta ----------------------------------------------------------
     traded = rep[rep["n_trades"] > 0]
@@ -239,8 +248,10 @@ def main(argv: list[str] | None = None) -> None:
     for line in beta_verdict(corr):
         print(line)
     long_share = 100.0 * tot_long / tot_n if tot_n else 0.0
-    print(f"   long share = {long_share:.1f}% of {tot_n} trades "
-          f"({'directionally biased' if abs(long_share - 50.0) >= 10.0 else 'roughly balanced'})")
+    print(
+        f"   long share = {long_share:.1f}% of {tot_n} trades "
+        f"({'directionally biased' if abs(long_share - 50.0) >= 10.0 else 'roughly balanced'})"
+    )
 
     # --- 2. exit policy ---------------------------------------------------
     print("\n2. EXIT POLICY (where the money is actually booked)")
@@ -251,15 +262,18 @@ def main(argv: list[str] | None = None) -> None:
     grand_pnl = sum(reason_pnl.values())
     for reason, n in reason_n.most_common():
         pnl = reason_pnl.get(reason, 0.0)
-        print(f"{reason:<16}{n:>7}{(100.0 * n / grand_n if grand_n else 0.0):>9.1f}"
-              f"{pnl:>12.1f}{(pnl / n if n else 0.0):>10.2f}")
+        print(
+            f"{reason:<16}{n:>7}{(100.0 * n / grand_n if grand_n else 0.0):>9.1f}"
+            f"{pnl:>12.1f}{(pnl / n if n else 0.0):>10.2f}"
+        )
     print("-" * len(ehdr))
-    print(f"{'TOTAL':<16}{grand_n:>7}{100.0:>9.1f}{grand_pnl:>12.1f}"
-          f"{(grand_pnl / grand_n if grand_n else 0.0):>10.2f}")
+    print(f"{'TOTAL':<16}{grand_n:>7}{100.0:>9.1f}{grand_pnl:>12.1f}{(grand_pnl / grand_n if grand_n else 0.0):>10.2f}")
     scratch = reason_n.get("breakeven", 0)
     if grand_n:
-        print(f"   breakeven scratches = {100.0 * scratch / grand_n:.1f}% of all exits "
-              f"(these are created by the TP1 stop-to-entry move, not by the signal)")
+        print(
+            f"   breakeven scratches = {100.0 * scratch / grand_n:.1f}% of all exits "
+            f"(these are created by the TP1 stop-to-entry move, not by the signal)"
+        )
 
     os.makedirs("logs", exist_ok=True)
     out_csv = args.out or f"logs/direction_beta_{args.asset.lower()}.csv"

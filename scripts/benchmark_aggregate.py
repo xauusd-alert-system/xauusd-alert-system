@@ -7,6 +7,7 @@ column, plus the net sum of total_pnl.
 Usage:
     python scripts/benchmark_aggregate.py [asset ...]  # default: all five assets
 """
+
 import os
 import sys
 

@@ -12,6 +12,7 @@ producer side, so outbox retries and restart reconciliation cannot duplicate
 rows. UPDATE/DELETE are blocked by SQLite triggers, mirroring
 ``data/trading_event_ledger.py``.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,11 +29,32 @@ from data.storage import get_connection
 TABLE = "ledger_events"
 
 COLUMNS = [
-    "event_id", "schema_version", "source", "event_type", "intent_id", "asset_key",
-    "broker_symbol", "magic_number", "account_mode", "precision", "order_ticket",
-    "deal_ticket", "position_ticket", "deal_time_msc", "retcode", "requested_price",
-    "fill_price", "filled_volume", "volume_requested", "spread_points", "commission",
-    "swap", "latency_ms", "reason", "signature_valid", "received_at_utc_ms",
+    "event_id",
+    "schema_version",
+    "source",
+    "event_type",
+    "intent_id",
+    "asset_key",
+    "broker_symbol",
+    "magic_number",
+    "account_mode",
+    "precision",
+    "order_ticket",
+    "deal_ticket",
+    "position_ticket",
+    "deal_time_msc",
+    "retcode",
+    "requested_price",
+    "fill_price",
+    "filled_volume",
+    "volume_requested",
+    "spread_points",
+    "commission",
+    "swap",
+    "latency_ms",
+    "reason",
+    "signature_valid",
+    "received_at_utc_ms",
     "payload_json",
 ]
 
@@ -69,12 +91,9 @@ def init_ledger_events(db_path: str) -> None:
             received_at_utc_ms INTEGER NOT NULL,
             payload_json TEXT NOT NULL
         )""")
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_source_time "
-                     f"ON {TABLE}(source, received_at_utc_ms)")
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_intent "
-                     f"ON {TABLE}(intent_id, received_at_utc_ms)")
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_asset_time "
-                     f"ON {TABLE}(asset_key, received_at_utc_ms)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_source_time ON {TABLE}(source, received_at_utc_ms)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_intent ON {TABLE}(intent_id, received_at_utc_ms)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_asset_time ON {TABLE}(asset_key, received_at_utc_ms)")
         for action in ("UPDATE", "DELETE"):
             conn.execute(f"""CREATE TRIGGER IF NOT EXISTS prevent_{TABLE}_{action.lower()}
                 BEFORE {action} ON {TABLE} BEGIN
@@ -94,21 +113,40 @@ def upsert_ledger_event(
     """Insert one fact; returns (event_id, inserted). Idempotent by event_id
     (a re-delivered fact returns inserted=False and changes nothing)."""
     init_ledger_events(db_path)
-    received = int(received_at_utc_ms) if received_at_utc_ms is not None \
-        else int(event.received_at_utc_ms)
+    received = int(received_at_utc_ms) if received_at_utc_ms is not None else int(event.received_at_utc_ms)
     payload_json = json.dumps(event.payload or {}, sort_keys=True, separators=(",", ":"), default=str)
     conn = get_connection(db_path)
     try:
         cursor = conn.execute(
             f"""INSERT OR IGNORE INTO {TABLE} VALUES ({",".join("?" for _ in COLUMNS)})""",
             (
-                event.event_id, event.schema_version, event.source, event.event_type,
-                event.intent_id, event.asset_key, event.broker_symbol, event.magic_number,
-                event.account_mode, event.precision, event.order_ticket, event.deal_ticket,
-                event.position_ticket, event.deal_time_msc, event.retcode, event.requested_price,
-                event.fill_price, event.filled_volume, event.volume_requested, event.spread_points,
-                event.commission, event.swap, event.latency_ms, event.reason,
-                1 if signature_valid else 0, received, payload_json,
+                event.event_id,
+                event.schema_version,
+                event.source,
+                event.event_type,
+                event.intent_id,
+                event.asset_key,
+                event.broker_symbol,
+                event.magic_number,
+                event.account_mode,
+                event.precision,
+                event.order_ticket,
+                event.deal_ticket,
+                event.position_ticket,
+                event.deal_time_msc,
+                event.retcode,
+                event.requested_price,
+                event.fill_price,
+                event.filled_volume,
+                event.volume_requested,
+                event.spread_points,
+                event.commission,
+                event.swap,
+                event.latency_ms,
+                event.reason,
+                1 if signature_valid else 0,
+                received,
+                payload_json,
             ),
         )
         conn.commit()
@@ -238,9 +276,7 @@ def lifecycle_trace(db_path: str, intent_id: str) -> dict[str, Any]:
         return {"intent_id": intent_id, "available": False, "facts": []}
     conn = get_connection(db_path)
     try:
-        intent_row = conn.execute(
-            "SELECT * FROM ledger_intents WHERE intent_id = ?", (intent_id,)
-        ).fetchone()
+        intent_row = conn.execute("SELECT * FROM ledger_intents WHERE intent_id = ?", (intent_id,)).fetchone()
         columns = [row[1] for row in conn.execute("PRAGMA table_info(ledger_intents)").fetchall()]
     finally:
         conn.close()

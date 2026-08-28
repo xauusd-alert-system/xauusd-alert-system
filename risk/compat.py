@@ -23,6 +23,7 @@ Example::
                                    state_path="logs/risk_state.json")
     ok, reason = mgr.can_trade("XAUUSD")
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -45,8 +46,7 @@ class InstitutionalRiskManager(RiskLimits):
     """Historical API name for the daily risk gates (thin compat wrapper
     around :class:`risk.limits.RiskLimits`; see module docstring)."""
 
-    def __init__(self, cfg: dict, magic: Optional[int] = None,
-                 state_path: str = "logs/risk_state.json"):
+    def __init__(self, cfg: dict, magic: Optional[int] = None, state_path: str = "logs/risk_state.json"):
         state = RiskState(state_path)
         super().__init__(cfg, magic=magic, state=state)
         self.state_path = state_path
@@ -56,5 +56,4 @@ class InstitutionalRiskManager(RiskLimits):
         # state surface to the embedded RiskState.
         if name in _STATE_ATTRS:
             return getattr(self.state, name)
-        raise AttributeError(
-            f"{type(self).__name__!r} object has no attribute {name!r}")
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")

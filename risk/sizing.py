@@ -29,14 +29,16 @@ Example::
 
     mult = drawdown_throttle(dd_from_hwm=equity / hwm - 1.0)
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 
-def trade_risk_pct(target_ann_vol: float, sigma_r: float, trades_per_day: float,
-                   enb: float = 1.0, periods_per_year: float = 250.0) -> float:
+def trade_risk_pct(
+    target_ann_vol: float, sigma_r: float, trades_per_day: float, enb: float = 1.0, periods_per_year: float = 250.0
+) -> float:
     """Per-trade risk (% of equity) implied by the portfolio vol target:
 
         risk_pct = target_vol / (sigma_r * sqrt(trades_per_day * periods_per_year) * enb_adjust)
@@ -51,8 +53,9 @@ def trade_risk_pct(target_ann_vol: float, sigma_r: float, trades_per_day: float,
     return float(per_day_risk / (np.sqrt(trades_per_day) * np.sqrt(enb)))
 
 
-def lots_for_risk(equity: float, risk_pct: float, sl_ticks: float,
-                  tick_value_per_lot: float, min_lot: float = 0.01) -> dict:
+def lots_for_risk(
+    equity: float, risk_pct: float, sl_ticks: float, tick_value_per_lot: float, min_lot: float = 0.01
+) -> dict:
     """Lot size so the full SL costs `risk_pct` of equity:
 
         lots = equity * risk_pct / (sl_ticks * tick_value_per_lot)
@@ -64,14 +67,17 @@ def lots_for_risk(equity: float, risk_pct: float, sl_ticks: float,
         return {"lots": 0.0, "skipped": True, "reason": "non-positive inputs"}
     lots = float(equity * risk_pct / (sl_ticks * tick_value_per_lot))
     if lots < min_lot:
-        return {"lots": lots, "skipped": True,
-                "reason": f"computed lot {lots:.4f} < minimum {min_lot}; skip (never round up)"}
+        return {
+            "lots": lots,
+            "skipped": True,
+            "reason": f"computed lot {lots:.4f} < minimum {min_lot}; skip (never round up)",
+        }
     return {"lots": lots, "skipped": False, "reason": "ok"}
 
 
-def cluster_exposure_ok(current_risk_by_cluster: dict[str, float],
-                        cluster: str, add_risk_pct: float,
-                        cluster_cap: float, total_cap: float) -> dict:
+def cluster_exposure_ok(
+    current_risk_by_cluster: dict[str, float], cluster: str, add_risk_pct: float, cluster_cap: float, total_cap: float
+) -> dict:
     """Correlated-exposure cap (P1-4: caps are REQUIRED parameters — no
     defaults in the signature, callers must pass the configured caps).
 
@@ -81,13 +87,18 @@ def cluster_exposure_ok(current_risk_by_cluster: dict[str, float],
     cluster_sum = float(current_risk_by_cluster.get(cluster, 0.0)) + add_risk_pct
     total_sum = float(sum(current_risk_by_cluster.values())) + add_risk_pct
     ok = cluster_sum <= cluster_cap and total_sum <= total_cap
-    return {"ok": ok, "cluster_sum": cluster_sum, "total_sum": total_sum,
-            "cluster_cap": cluster_cap, "total_cap": total_cap}
+    return {
+        "ok": ok,
+        "cluster_sum": cluster_sum,
+        "total_sum": total_sum,
+        "cluster_cap": cluster_cap,
+        "total_cap": total_cap,
+    }
 
 
-def same_direction_cluster_penalty(current_dir: dict[str, int], asset: str,
-                                   direction: int, cluster: str,
-                                   multiplier: float = 0.35) -> float:
+def same_direction_cluster_penalty(
+    current_dir: dict[str, int], asset: str, direction: int, cluster: str, multiplier: float = 0.35
+) -> float:
     """New same-direction signal inside an already-exposed cluster: multiply
     the size by 0.35-0.50 (audit) instead of rejecting outright."""
     exposed = current_dir.get(cluster)
@@ -96,8 +107,7 @@ def same_direction_cluster_penalty(current_dir: dict[str, int], asset: str,
     return 1.0
 
 
-def drawdown_throttle(dd_from_hwm: float,
-                      levels=((-0.04, 0.75), (-0.06, 0.50), (-0.08, 0.0))) -> float:
+def drawdown_throttle(dd_from_hwm: float, levels=((-0.04, 0.75), (-0.06, 0.50), (-0.08, 0.0))) -> float:
     """Risk multiplier from the drawdown vs high-water mark: -4% -> 0.75,
     -6% -> 0.50, -8% -> 0.0 (no new live entries, shadow only).
 
@@ -116,8 +126,7 @@ def drawdown_throttle(dd_from_hwm: float,
     return mult
 
 
-def leverage_multiplier(target_ann_vol: float, ewma_vol_20d: float,
-                        lo: float = 0.5, hi: float = 1.25) -> float:
+def leverage_multiplier(target_ann_vol: float, ewma_vol_20d: float, lo: float = 0.5, hi: float = 1.25) -> float:
     """Vol targeting leverage: clip(lo, hi, target / EWMA20d vol)."""
     vol = np.asarray(ewma_vol_20d, dtype=float)
     if vol.size == 0 or np.all(vol <= 0):
@@ -128,9 +137,9 @@ def leverage_multiplier(target_ann_vol: float, ewma_vol_20d: float,
     return out
 
 
-def vol_target_scale(returns: np.ndarray, target_ann_vol: float,
-                     periods_per_year: float = 250.0,
-                     ewma_span: int = 20) -> np.ndarray:
+def vol_target_scale(
+    returns: np.ndarray, target_ann_vol: float, periods_per_year: float = 250.0, ewma_span: int = 20
+) -> np.ndarray:
     """Per-day ex-ante scale = leverage_multiplier(target, EWMA vol of the
     trailing `ewma_span` returns), 1.0 for the warm-up window."""
     r = np.asarray(returns, dtype=float)

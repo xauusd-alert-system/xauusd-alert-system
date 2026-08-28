@@ -1,4 +1,5 @@
 """Unit tests for SymbolCache (ТЗ 8.6)."""
+
 from __future__ import annotations
 
 from mt5_adapter.cache import SymbolCache
@@ -32,7 +33,7 @@ def test_cache_returns_within_ttl():
 def test_cache_refetches_after_ttl():
     clock = FakeClock()
     cache = SymbolCache(ttl_ms=500, clock=clock)
-    calls = []
+    calls: list[int] = []
 
     def fetcher():
         calls.append(len(calls))

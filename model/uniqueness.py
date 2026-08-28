@@ -14,6 +14,7 @@ uniqueness bar-by-bar across arbitrary overlapping time intervals [t_0, t_1],
 yielding an effective sample size T_eff = sum(uniqueness) used in DSR and PBO
 instead of nominal trade count N.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -67,16 +68,13 @@ def aligned_uniqueness_weights(
     if not source_index.is_unique:
         raise ValueError("source_index must be unique for sample-weight alignment")
 
-    series = pd.Series(
-        average_uniqueness_weights(len(source_index), horizon), index=source_index
-    )
+    series = pd.Series(average_uniqueness_weights(len(source_index), horizon), index=source_index)
     aligned = series.reindex(selected_index)
     if aligned.isna().any():
         missing = selected_index[aligned.isna()]
         if default is None:
             raise ValueError(
-                f"sample-weight alignment failed for {len(missing)} rows; "
-                f"first missing index={missing[0]!r}"
+                f"sample-weight alignment failed for {len(missing)} rows; first missing index={missing[0]!r}"
             )
         aligned = aligned.fillna(float(default))
 

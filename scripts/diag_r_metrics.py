@@ -94,6 +94,7 @@ def _signal_mask(df: pd.DataFrame, cfg: dict = None, asset_key: str = None) -> n
     regime and everything below the real per-asset bar). Now it reads the same
     per-asset ensemble config the live trader uses."""
     from regime.classifier import RegimeLabel
+
     mask = np.zeros(len(df), dtype=bool)
     p_longs = df.get("ml_p_long", pd.Series(0.5, index=df.index)).to_numpy(dtype=float)
     p_shorts = df.get("ml_p_short", pd.Series(0.5, index=df.index)).to_numpy(dtype=float)
@@ -121,8 +122,7 @@ def _signal_mask(df: pd.DataFrame, cfg: dict = None, asset_key: str = None) -> n
     return mask
 
 
-def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                    max_folds: int | None = None) -> dict:
+def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame, max_folds: int | None = None) -> dict:
     """Full Week-1 measurement for one asset (honest walk-forward)."""
     windows, frames = _build_fold_frames(df_full, cfg, asset_key, max_folds)
     if not windows:
@@ -137,8 +137,7 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     commission = float(bt_cfg.get("commission_per_trade", 0.07))
     commission_price = commission / (volume * point_value_lot)
 
-    horizon = int(merge_asset_cfg(cfg, asset_key, "labeling")["labeling"].get(
-        "horizon_candles_n", 36))
+    horizon = int(merge_asset_cfg(cfg, asset_key, "labeling")["labeling"].get("horizon_candles_n", 36))
 
     fold_results = []
     all_trades = []
@@ -153,9 +152,14 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         tdf = trades_to_df(trades)
         if len(tdf):
             all_trades.append(tdf)
-            fold_results.append({"fold": fold_i, "n_trades": len(tdf),
-                                 "total_pnl": float(tdf["pnl"].sum()),
-                                 "profit_factor": _pf(tdf["pnl"].to_numpy())})
+            fold_results.append(
+                {
+                    "fold": fold_i,
+                    "n_trades": len(tdf),
+                    "total_pnl": float(tdf["pnl"].sum()),
+                    "profit_factor": _pf(tdf["pnl"].to_numpy()),
+                }
+            )
         # Queue loss (audit week 1): signals rejected because a position was
         # already open — simulate their hypothetical honest entry.
         for rej in engine.rejected_signals:
@@ -163,13 +167,15 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             if t_sim is None:
                 continue
             risk = abs(t_sim.entry_price - t_sim.initial_stop_price) * volume * point_value_lot
-            rejected_rows.append({
-                "fold": fold_i,
-                "regime": rej["regime"],
-                "direction": rej["direction"],
-                "pnl": float(t_sim.pnl),
-                "r": float(t_sim.pnl / risk) if risk > 1e-12 else float("nan"),
-            })
+            rejected_rows.append(
+                {
+                    "fold": fold_i,
+                    "regime": rej["regime"],
+                    "direction": rej["direction"],
+                    "pnl": float(t_sim.pnl),
+                    "r": float(t_sim.pnl / risk) if risk > 1e-12 else float("nan"),
+                }
+            )
         # MFE/MAE for all signal rows in this fold
         mm = _mfe_mae(fdf, horizon)
         sig = _signal_mask(fdf, cfg=cfg, asset_key=asset_key)
@@ -178,9 +184,14 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             reg = regs[i]
             if hasattr(reg, "value"):
                 reg = reg.value
-            mfe_mae_rows.append({"fold": fold_i, "regime": str(reg),
-                                 "mfe": float(mm["mfe"].iloc[i]) if np.isfinite(mm["mfe"].iloc[i]) else np.nan,
-                                 "mae": float(mm["mae"].iloc[i]) if np.isfinite(mm["mae"].iloc[i]) else np.nan})
+            mfe_mae_rows.append(
+                {
+                    "fold": fold_i,
+                    "regime": str(reg),
+                    "mfe": float(mm["mfe"].iloc[i]) if np.isfinite(mm["mfe"].iloc[i]) else np.nan,
+                    "mae": float(mm["mae"].iloc[i]) if np.isfinite(mm["mae"].iloc[i]) else np.nan,
+                }
+            )
 
     trades_df = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     r_metrics = compute_r_metrics(trades_df, point_value_lot=point_value_lot, volume=volume)
@@ -188,8 +199,11 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     # cost ratio on the mean realized step (TP1 distance) and stress
     steps = None
     if len(trades_df):
-        steps = (trades_df["tp1_price"] - trades_df["entry_price"]).abs().to_numpy() \
-            if "tp1_price" in trades_df.columns else None
+        steps = (
+            (trades_df["tp1_price"] - trades_df["entry_price"]).abs().to_numpy()
+            if "tp1_price" in trades_df.columns
+            else None
+        )
     mean_step = float(np.nanmean(steps)) if steps is not None and len(steps) else float("nan")
     total_cost = spread + 2.0 * slippage + commission_price
     cost_ratio = total_cost / mean_step if np.isfinite(mean_step) and mean_step > 0 else float("nan")
@@ -219,8 +233,7 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             }
 
     # Queue-loss summary: E[R] of rejected signals vs E[R] of taken trades.
-    queue_loss = {"n_rejected": 0, "n_simulated": 0, "mean_r_rejected": None,
-                  "mean_r_taken": None, "verdict": None}
+    queue_loss = {"n_rejected": 0, "n_simulated": 0, "mean_r_rejected": None, "mean_r_taken": None, "verdict": None}
     if rejected_rows:
         rdf = pd.DataFrame(rejected_rows)
         r_rej = rdf["r"].dropna().to_numpy(dtype=float)
@@ -240,7 +253,8 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             queue_loss["verdict"] = (
                 "queue constraint destroys edge: rejected E[R] >= taken E[R]"
                 if queue_loss["mean_r_rejected"] >= queue_loss["mean_r_taken"]
-                else "queue constraint costs little: rejected E[R] < taken E[R]")
+                else "queue constraint costs little: rejected E[R] < taken E[R]"
+            )
 
     # fold sign test + consistency
     fold_results = [r for r in fold_results if r["n_trades"] > 0]
@@ -269,7 +283,7 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         "mean_step": round(mean_step, 6) if np.isfinite(mean_step) else None,
         "cost_stress": {
             "note": "cost stress x1.5/x2.0 runs via scripts.deflated_sharpe (cost_stress) "
-                    "and scripts.run_backtest with adjusted spread/slippage",
+            "and scripts.run_backtest with adjusted spread/slippage",
         },
         "fold_sign_test": sign,
         "fold_summary": summary,
@@ -281,6 +295,7 @@ def run_diagnostics(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 
 def trades_to_df(trades):
     from backtest.metrics import trades_to_dataframe
+
     return trades_to_dataframe(trades)
 
 
@@ -299,41 +314,57 @@ def print_report(d: dict) -> None:
         print("\n!!! ⚠️ SYNTHETIC DEMO DATA — RESULTS ARE NOT REAL !!!")
         print("    Real DB was not available; a biased synthetic signal was used.\n")
     print(f"\n=== Week-1 diagnostics: {a} ===")
-    print(f"Folds: {d['n_folds']} (valid {d['n_valid_folds']}) | trades: {d['n_trades']} | "
-          f"features: {d['n_features']} | events/feature: {d['events_per_feature']} "
-          f"(audit rule: >= 10)")
+    print(
+        f"Folds: {d['n_folds']} (valid {d['n_valid_folds']}) | trades: {d['n_trades']} | "
+        f"features: {d['n_features']} | events/feature: {d['events_per_feature']} "
+        f"(audit rule: >= 10)"
+    )
     r = d["r_metrics"]
     if r.get("n", 0) == 0:
         print("  no trades on this data slice.")
         return
-    print(f"R metrics: E[R]={r['mean_r']} | sigma[R]={r['std_r']} | skew={r['skew_r']} | "
-          f"kurt_ex={r['kurtosis_excess_r']} | t_block={d['t_block']}")
-    print(f"Payoff geometry: avg win {r['avg_win_r']}R | avg loss {r['avg_loss_r']}R | "
-          f"breakeven WR {r['breakeven_wr_pct']}% | actual WR {r['actual_wr_pct']}%")
+    print(
+        f"R metrics: E[R]={r['mean_r']} | sigma[R]={r['std_r']} | skew={r['skew_r']} | "
+        f"kurt_ex={r['kurtosis_excess_r']} | t_block={d['t_block']}"
+    )
+    print(
+        f"Payoff geometry: avg win {r['avg_win_r']}R | avg loss {r['avg_loss_r']}R | "
+        f"breakeven WR {r['breakeven_wr_pct']}% | actual WR {r['actual_wr_pct']}%"
+    )
     if d.get("cost_ratio_pct") is not None:
         zone = "OK" if d["cost_ratio_pct"] <= 10 else ("RED" if d["cost_ratio_pct"] > 15 else "borderline")
-        print(f"Costs: total {d['cost_total_price']} price units | mean step {d['mean_step']} | "
-              f"cost_ratio = {d['cost_ratio_pct']}% ({zone}; norm <8-10%, red >15%)")
+        print(
+            f"Costs: total {d['cost_total_price']} price units | mean step {d['mean_step']} | "
+            f"cost_ratio = {d['cost_ratio_pct']}% ({zone}; norm <8-10%, red >15%)"
+        )
     print("Buckets (R contribution):")
     for b, v in sorted(r["buckets"].items(), key=lambda kv: -abs(kv[1]["r_contribution_pct"])):
-        print(f"  {b:<16} n={v['n']:<6} share={v['share_pct']:>5.1f}%  meanR={v['mean_r']:>7.3f}  "
-              f"R-contr={v['r_contribution_pct']:>7.1f}%")
+        print(
+            f"  {b:<16} n={v['n']:<6} share={v['share_pct']:>5.1f}%  meanR={v['mean_r']:>7.3f}  "
+            f"R-contr={v['r_contribution_pct']:>7.1f}%"
+        )
     if d["fold_sign_test"].get("n_folds"):
         st = d["fold_sign_test"]
-        print(f"Fold sign test: {st['n_positive']}/{st['n_folds']} positive valid folds "
-              f"(z={st['z']}, p={st['p_one_sided']})")
+        print(
+            f"Fold sign test: {st['n_positive']}/{st['n_folds']} positive valid folds "
+            f"(z={st['z']}, p={st['p_one_sided']})"
+        )
     ql = d["queue_loss"]
     if ql["n_rejected"]:
-        print(f"Queue loss: {ql['n_rejected']} rejected signals (simulated "
-              f"{ql['n_simulated']}) | E[R] rejected = {ql['mean_r_rejected']} vs "
-              f"E[R] taken = {ql['mean_r_taken']} -> {ql['verdict']}")
+        print(
+            f"Queue loss: {ql['n_rejected']} rejected signals (simulated "
+            f"{ql['n_simulated']}) | E[R] rejected = {ql['mean_r_rejected']} vs "
+            f"E[R] taken = {ql['mean_r_taken']} -> {ql['verdict']}"
+        )
     if d["mfe_mae"]:
         print("MFE/MAE (steps over horizon, per regime; exit calibration input):")
         for reg, v in d["mfe_mae"].items():
-            print(f"  {reg:<14} n={v['n_signals']:<6} P(MFE>=1)={v['p_mfe_ge_1']:.2f} "
-                  f"P(MFE>=2)={v['p_mfe_ge_2']:.2f} P(MFE>=3)={v['p_mfe_ge_3']:.2f} "
-                  f"P(MFE>=5)={v['p_mfe_ge_5']:.2f} | MAE p50/p80/p90 = "
-                  f"{v['mae_p50']}/{v['mae_p80']}/{v['mae_p90']}")
+            print(
+                f"  {reg:<14} n={v['n_signals']:<6} P(MFE>=1)={v['p_mfe_ge_1']:.2f} "
+                f"P(MFE>=2)={v['p_mfe_ge_2']:.2f} P(MFE>=3)={v['p_mfe_ge_3']:.2f} "
+                f"P(MFE>=5)={v['p_mfe_ge_5']:.2f} | MAE p50/p80/p90 = "
+                f"{v['mae_p50']}/{v['mae_p80']}/{v['mae_p90']}"
+            )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -356,13 +387,15 @@ def main(argv: list[str] | None = None) -> None:
     synthetic = False
     try:
         from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[diag] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[diag] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[diag] WARNING: cannot load real data ({exc.__class__.__name__}); SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)

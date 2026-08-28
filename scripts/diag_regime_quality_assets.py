@@ -10,6 +10,7 @@ Reads per-trade CSVs produced by the diag_*_prepost walk-forward runs
 Usage:
     python -m scripts.diag_regime_quality_assets [--csv path ...]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,16 +47,18 @@ def per_regime(df: pd.DataFrame) -> pd.DataFrame:
     for reg, g in df.groupby("regime"):
         stops = g["exit_reason"].astype(str).str.contains("SL|STOP|stop", na=False).sum()
         tp3 = g["exit_reason"].astype(str).str.contains("TP3|TP2", na=False).sum()
-        rows.append({
-            "regime": reg,
-            "n": len(g),
-            "share_pct": 100 * len(g) / len(df),
-            "meanR": g["R"].mean(),
-            "sumR": g["R"].sum(),
-            "wr_pct": 100 * (g["R"] > 0).mean(),
-            "stops_pct": 100 * stops / len(g),
-            "tp2_3_pct": 100 * tp3 / len(g),
-        })
+        rows.append(
+            {
+                "regime": reg,
+                "n": len(g),
+                "share_pct": 100 * len(g) / len(df),
+                "meanR": g["R"].mean(),
+                "sumR": g["R"].sum(),
+                "wr_pct": 100 * (g["R"] > 0).mean(),
+                "stops_pct": 100 * stops / len(g),
+                "tp2_3_pct": 100 * tp3 / len(g),
+            }
+        )
     out = pd.DataFrame(rows).sort_values("n", ascending=False)
     return out
 
@@ -117,8 +120,10 @@ def regime_predictive_quality(df: pd.DataFrame) -> dict:
         a = g.loc[aligned, "R"]
         o = g.loc[opposed, "R"]
         out[reg] = {
-            "aligned_n": len(a), "aligned_meanR": a.mean() if len(a) else np.nan,
-            "opposed_n": len(o), "opposed_meanR": o.mean() if len(o) else np.nan,
+            "aligned_n": len(a),
+            "aligned_meanR": a.mean() if len(a) else np.nan,
+            "opposed_n": len(o),
+            "opposed_meanR": o.mean() if len(o) else np.nan,
             "aligned_wr": 100 * (a > 0).mean() if len(a) else np.nan,
             "opposed_wr": 100 * (o > 0).mean() if len(o) else np.nan,
             "edge_aligned_minus_opposed": (a.mean() if len(a) else np.nan) - (o.mean() if len(o) else np.nan),
@@ -128,8 +133,9 @@ def regime_predictive_quality(df: pd.DataFrame) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", action="append", default=None,
-                    help="override CSV per asset, format ASSET=PATH (repeatable)")
+    ap.add_argument(
+        "--csv", action="append", default=None, help="override CSV per asset, format ASSET=PATH (repeatable)"
+    )
     args = ap.parse_args()
 
     overrides = {}
@@ -168,12 +174,17 @@ def main() -> None:
         if len(pr) >= 2:
             best = pr.iloc[0]["regime"] if pr.iloc[0]["meanR"] >= pr.iloc[1]["meanR"] else pr.iloc[1]["regime"]
             worst = pr.iloc[-1]["regime"] if pr.iloc[-1]["meanR"] <= pr.iloc[-2]["meanR"] else pr.iloc[-2]["regime"]
-            summary_rows.append({
-                "asset": asset, "n": len(df), "totalR": df["R"].sum(),
-                "best_regime": best, "best_meanR": pr.loc[pr["meanR"].idxmax(), "meanR"],
-                "worst_regime": pr.loc[pr["meanR"].idxmin(), "regime"],
-                "worst_meanR": pr["meanR"].min(),
-            })
+            summary_rows.append(
+                {
+                    "asset": asset,
+                    "n": len(df),
+                    "totalR": df["R"].sum(),
+                    "best_regime": best,
+                    "best_meanR": pr.loc[pr["meanR"].idxmax(), "meanR"],
+                    "worst_regime": pr.loc[pr["meanR"].idxmin(), "regime"],
+                    "worst_meanR": pr["meanR"].min(),
+                }
+            )
 
     if summary_rows:
         print("\n" + "=" * 100)

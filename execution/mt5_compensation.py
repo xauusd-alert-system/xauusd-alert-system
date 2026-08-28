@@ -11,6 +11,7 @@ confirmation (or "already closed" — the goal state), rejected closes stay
 unmarked for the bounded retry, and FAILED_WITH_OPEN_RISK stays non-terminal
 so reconciliation keeps polling.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,8 +31,7 @@ from execution.trade_group import (
 )
 
 
-def begin_compensation(executor, group: dict[str, Any],
-                       rejected: list[dict[str, Any]]) -> str:
+def begin_compensation(executor, group: dict[str, Any], rejected: list[dict[str, Any]]) -> str:
     """SUBMITTED/PARTIAL_SUBMISSION -> compensation of already-opened legs.
 
     Every compensating close uses a deterministic actionId
@@ -47,14 +47,19 @@ def begin_compensation(executor, group: dict[str, Any],
     group_id = group["group_id"]
     spec: TradeGroupSpec = group["spec"]
     require_transition(group["state"], GroupState.PARTIAL_SUBMISSION)
-    opened = [item for item in group.get("legs", [])
-              if item.get("state") in ("SUBMITTED", "PARTIALLY_FILLED", "VIRTUAL")]
+    opened = [
+        item for item in group.get("legs", []) if item.get("state") in ("SUBMITTED", "PARTIALLY_FILLED", "VIRTUAL")
+    ]
     update_group_state(executor.db_path, group_id, GroupState.PARTIAL_SUBMISSION)
     append_trading_event(
-        executor.ledger_db_path, event_type="partial_submission",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+        executor.ledger_db_path,
+        event_type="partial_submission",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
         group_id=group_id,
         payload={
             "opened_legs": [item["leg"] for item in opened],
@@ -63,13 +68,16 @@ def begin_compensation(executor, group: dict[str, Any],
         },
     )
     if executor.notifier:
-        executor.notifier(executor._partial_submission_message(
-            spec, [item["leg"] for item in opened],
-            [item["leg"] for item in rejected]))
+        executor.notifier(
+            executor._partial_submission_message(
+                spec, [item["leg"] for item in opened], [item["leg"] for item in rejected]
+            )
+        )
 
     driver = executor._resolve_driver(spec)
     comp_state = {
-        "status": "REQUESTED", "retries": int(group.get("comp_state", {}).get("retries", 0)),
+        "status": "REQUESTED",
+        "retries": int(group.get("comp_state", {}).get("retries", 0)),
         "legs": {},
     }
     failures: list[int | str] = []
@@ -98,18 +106,19 @@ def begin_compensation(executor, group: dict[str, Any],
         if pos is None:
             # already closed (or never opened): the goal is achieved
             if action_id is not None:
-                mark_action(executor.db_path, group_id, action_id,
-                            {"reason": "already_closed"})
-                comp_state["legs"][action_id] = {"status": "filled",
-                                                 "comment": "already_closed"}
+                mark_action(executor.db_path, group_id, action_id, {"reason": "already_closed"})
+                comp_state["legs"][action_id] = {"status": "filled", "comment": "already_closed"}
             continue
         result = driver.close_position(ref, float(pos["volume"]))
         label = action_id if action_id is not None else "GROUP"
         if result.get("status") == "filled":
             if action_id is not None:
-                mark_action(executor.db_path, group_id, action_id,
-                            {"leg": label, "volume": pos["volume"],
-                             "fill_price": result.get("fill_price")})
+                mark_action(
+                    executor.db_path,
+                    group_id,
+                    action_id,
+                    {"leg": label, "volume": pos["volume"], "fill_price": result.get("fill_price")},
+                )
             comp_state["legs"][label] = result
             # volume ledger: closed volume grows with the ACTUAL closed
             # volume of every compensated reference (§10/§11/§25)
@@ -119,35 +128,37 @@ def begin_compensation(executor, group: dict[str, Any],
                 leg_no = int(label.rsplit("L", 1)[1])
                 legs_ledger = volume.setdefault("legs", {})
                 entry = legs_ledger.setdefault(str(leg_no), {})
-                entry["closed_volume"] = round(
-                    float(entry.get("closed_volume") or 0.0) + filled_close, 8)
+                entry["closed_volume"] = round(float(entry.get("closed_volume") or 0.0) + filled_close, 8)
                 entry["remaining_volume"] = 0.0
         else:
             comp_state["legs"][label] = result  # rejected; UNMARKED -> retried
             failures.append(label)
     volume["total_closed"] = round(closed_total, 8)
-    volume["total_remaining"] = round(
-        float(volume.get("total_filled") or 0.0) - closed_total, 8)
+    volume["total_remaining"] = round(float(volume.get("total_filled") or 0.0) - closed_total, 8)
 
     if failures:
         comp_state["status"] = "FAILED"
-        update_group_state(executor.db_path, group_id,
-                           GroupState.FAILED_WITH_OPEN_RISK,
-                           comp_state=comp_state)
-        record_compensation_failure(executor, spec, comp_state, failures,
-                                    reason="compensation close rejected")
+        update_group_state(executor.db_path, group_id, GroupState.FAILED_WITH_OPEN_RISK, comp_state=comp_state)
+        record_compensation_failure(executor, spec, comp_state, failures, reason="compensation close rejected")
         return "compensation_failed"
-    update_group_state(executor.db_path, group_id, GroupState.COMPENSATION_REQUESTED,
-                       comp_state=comp_state, volume=volume)
+    update_group_state(
+        executor.db_path, group_id, GroupState.COMPENSATION_REQUESTED, comp_state=comp_state, volume=volume
+    )
     append_trading_event(
-        executor.ledger_db_path, event_type="compensation_requested",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+        executor.ledger_db_path,
+        event_type="compensation_requested",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
         group_id=group_id,
-        payload={"action_ids": list(comp_state["legs"].keys()),
-                 "rejected_legs": [item["leg"] for item in rejected],
-                 "mode": spec.mode},
+        payload={
+            "action_ids": list(comp_state["legs"].keys()),
+            "rejected_legs": [item["leg"] for item in rejected],
+            "mode": spec.mode,
+        },
     )
     return "compensation_requested"
 
@@ -174,19 +185,16 @@ def verify_compensation(executor, group: dict[str, Any]) -> str:
     retries = int(comp_state.get("retries", 0))
 
     # --- Phase 1: re-send rejected (unmarked) closes ---------------------
-    rejected_refs = [ref for ref, result in comp_legs.items()
-                     if result.get("status") != "filled"]
+    rejected_refs = [ref for ref, result in comp_legs.items() if result.get("status") != "filled"]
     if rejected_refs:
         if retries >= executor.max_compensation_retries:
             comp_state["status"] = "FAILED"
             if not comp_state.get("recorded"):
                 comp_state["recorded"] = True
                 record_compensation_failure(
-                    executor, spec, comp_state, rejected_refs,
-                    reason="compensation retries exhausted")
-            update_group_state(executor.db_path, group_id,
-                               GroupState.FAILED_WITH_OPEN_RISK,
-                               comp_state=comp_state)
+                    executor, spec, comp_state, rejected_refs, reason="compensation retries exhausted"
+                )
+            update_group_state(executor.db_path, group_id, GroupState.FAILED_WITH_OPEN_RISK, comp_state=comp_state)
             return "failed"
         retries += 1
         comp_state["retries"] = retries
@@ -197,17 +205,19 @@ def verify_compensation(executor, group: dict[str, Any]) -> str:
             if pos is None:
                 # already closed between polls -> goal achieved
                 comp_legs[ref] = {"status": "filled", "comment": "already_closed"}
-                mark_action(executor.db_path, group_id,
-                            compensation_action_id(ref),
-                            {"reason": "already_closed_on_retry"})
+                mark_action(
+                    executor.db_path, group_id, compensation_action_id(ref), {"reason": "already_closed_on_retry"}
+                )
                 continue
             result = driver.close_position(ticket, float(pos["volume"]))
             comp_legs[ref] = result
             if result.get("status") == "filled":
-                mark_action(executor.db_path, group_id,
-                            compensation_action_id(ref),
-                            {"leg": ref, "volume": pos["volume"],
-                             "fill_price": result.get("fill_price")})
+                mark_action(
+                    executor.db_path,
+                    group_id,
+                    compensation_action_id(ref),
+                    {"leg": ref, "volume": pos["volume"], "fill_price": result.get("fill_price")},
+                )
             else:
                 still_failed.append(ref)
         comp_state["legs"] = comp_legs
@@ -216,16 +226,12 @@ def verify_compensation(executor, group: dict[str, Any]) -> str:
             if not comp_state.get("recorded"):
                 comp_state["recorded"] = True
                 record_compensation_failure(
-                    executor, spec, comp_state, still_failed,
-                    reason="compensation close rejected on retry")
-            update_group_state(executor.db_path, group_id,
-                               GroupState.FAILED_WITH_OPEN_RISK,
-                               comp_state=comp_state)
+                    executor, spec, comp_state, still_failed, reason="compensation close rejected on retry"
+                )
+            update_group_state(executor.db_path, group_id, GroupState.FAILED_WITH_OPEN_RISK, comp_state=comp_state)
             return "failed"
         comp_state.pop("recorded", None)
-        update_group_state(executor.db_path, group_id,
-                           GroupState.COMPENSATION_REQUESTED,
-                           comp_state=comp_state)
+        update_group_state(executor.db_path, group_id, GroupState.COMPENSATION_REQUESTED, comp_state=comp_state)
 
     # --- Phase 2: verify every marked reference is closed ----------------
     pending: list[str] = []
@@ -242,16 +248,12 @@ def verify_compensation(executor, group: dict[str, Any]) -> str:
             if not comp_state.get("recorded"):
                 comp_state["recorded"] = True
                 record_compensation_failure(
-                    executor, spec, comp_state, pending,
-                    reason="compensation not confirmed within retry budget")
-            update_group_state(executor.db_path, group_id,
-                               GroupState.FAILED_WITH_OPEN_RISK,
-                               comp_state=comp_state)
+                    executor, spec, comp_state, pending, reason="compensation not confirmed within retry budget"
+                )
+            update_group_state(executor.db_path, group_id, GroupState.FAILED_WITH_OPEN_RISK, comp_state=comp_state)
             return "failed"
         comp_state["status"] = "REQUESTED"
-        update_group_state(executor.db_path, group_id,
-                           GroupState.COMPENSATION_REQUESTED,
-                           comp_state=comp_state)
+        update_group_state(executor.db_path, group_id, GroupState.COMPENSATION_REQUESTED, comp_state=comp_state)
         return "pending"
 
     # every compensated reference is closed -> consume their OUT deals so
@@ -266,24 +268,28 @@ def verify_compensation(executor, group: dict[str, Any]) -> str:
     # confirmed from either COMPENSATION_REQUESTED or a retried
     # FAILED_WITH_OPEN_RISK (both transitions are allowed)
     require_transition(group["state"], GroupState.COMPENSATION_CONFIRMED)
-    update_group_state(executor.db_path, group_id, GroupState.COMPENSATION_CONFIRMED,
-                       comp_state=comp_state, volume=volume)
+    update_group_state(
+        executor.db_path, group_id, GroupState.COMPENSATION_CONFIRMED, comp_state=comp_state, volume=volume
+    )
     append_trading_event(
-        executor.ledger_db_path, event_type="compensation_confirmed",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
+        executor.ledger_db_path,
+        event_type="compensation_confirmed",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
         group_id=group_id,
         payload={"open_risk": 0.0, "mode": spec.mode},
     )
     require_transition(GroupState.COMPENSATION_CONFIRMED, GroupState.FAILED)
-    update_group_state(executor.db_path, group_id, GroupState.FAILED,
-                       comp_state=comp_state, volume=volume)
+    update_group_state(executor.db_path, group_id, GroupState.FAILED, comp_state=comp_state, volume=volume)
     if executor.notifier:
         reason = ", ".join(
-            f"LEG{leg}_REJECTED" for leg in sorted(
-                int(i["leg"]) for i in group.get("legs", [])
-                if i.get("state") == "REJECTED"))
+            f"LEG{leg}_REJECTED"
+            for leg in sorted(int(i["leg"]) for i in group.get("legs", []) if i.get("state") == "REJECTED")
+        )
         executor.notifier(executor._failed_after_compensation_message(spec, reason))
     return "confirmed"
 
@@ -293,8 +299,7 @@ def compensation_action_id(ref: str) -> str:
     return ref
 
 
-def compensation_ticket(group: dict[str, Any], driver,
-                        ref: str) -> str:
+def compensation_ticket(group: dict[str, Any], driver, ref: str) -> str:
     """Resolve a comp_state reference to a broker position ticket."""
     group_id = group["group_id"]
     if ref == "COMPENSATE-GROUP":
@@ -307,8 +312,7 @@ def compensation_ticket(group: dict[str, Any], driver,
     return ""
 
 
-def consume_compensation_deals(executor, group: dict[str, Any], driver,
-                               comp_legs: dict[str, Any]) -> None:
+def consume_compensation_deals(executor, group: dict[str, Any], driver, comp_legs: dict[str, Any]) -> None:
     """Mark the compensation OUT deals consumed (never TP/SL-classified)."""
     group_id = group["group_id"]
     tickets: list[int] = []
@@ -323,34 +327,43 @@ def consume_compensation_deals(executor, group: dict[str, Any], driver,
     for ticket in set(tickets):
         for deal in driver.query_deals(ticket):
             if int(deal.get("entry", -1)) == 1:  # OUT
-                mark_action(executor.db_path, group_id, f"DEAL-{deal.get('ticket')}",
-                            {"kind": "compensation"})
+                mark_action(executor.db_path, group_id, f"DEAL-{deal.get('ticket')}", {"kind": "compensation"})
 
 
-def record_compensation_failure(executor, spec: TradeGroupSpec,
-                                comp_state: dict[str, Any],
-                                open_refs: list[Any],
-                                reason: str) -> None:
+def record_compensation_failure(
+    executor, spec: TradeGroupSpec, comp_state: dict[str, Any], open_refs: list[Any], reason: str
+) -> None:
     """FAILED_WITH_OPEN_RISK: explicit ledger facts + emergency Telegram.
     Reconciliation keeps polling this non-terminal state (P1.5.1 §8)."""
     append_trading_event(
-        executor.ledger_db_path, event_type="compensation_failed",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
-        reason=reason, group_id=spec.group_id,
-        payload={"open_refs": [str(r) for r in open_refs],
-                 "retries": int(comp_state.get("retries", 0)),
-                 "mode": spec.mode},
+        executor.ledger_db_path,
+        event_type="compensation_failed",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
+        reason=reason,
+        group_id=spec.group_id,
+        payload={
+            "open_refs": [str(r) for r in open_refs],
+            "retries": int(comp_state.get("retries", 0)),
+            "mode": spec.mode,
+        },
     )
     append_trading_event(
-        executor.ledger_db_path, event_type="failed_with_open_risk",
-        signal_id=spec.signal_id, asset_key=spec.asset_key,
-        strategy_version=spec.strategy_version, config_hash=spec.config_hash,
-        model_hash=spec.model_hash, actor="mt5_trade_group_executor",
-        reason=reason, group_id=spec.group_id,
-        payload={"open_refs": [str(r) for r in open_refs],
-                 "mode": spec.mode},
+        executor.ledger_db_path,
+        event_type="failed_with_open_risk",
+        signal_id=spec.signal_id,
+        asset_key=spec.asset_key,
+        strategy_version=spec.strategy_version,
+        config_hash=spec.config_hash,
+        model_hash=spec.model_hash,
+        actor="mt5_trade_group_executor",
+        reason=reason,
+        group_id=spec.group_id,
+        payload={"open_refs": [str(r) for r in open_refs], "mode": spec.mode},
     )
     if executor.notifier:
         executor.notifier(executor._open_risk_message(spec, open_refs))

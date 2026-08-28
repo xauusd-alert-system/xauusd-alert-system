@@ -7,6 +7,7 @@ These tests pin the restored contract: decision_function returns the log-odds
 margin, predict_proba delegates, the object survives a pickle round-trip, and
 the production bundle (if on disk) still loads.
 """
+
 import pickle
 
 import numpy as np
@@ -80,9 +81,7 @@ def test_production_bundle_loads():
 
     import joblib
 
-    path = os.environ.get(
-        "MODEL_PATH", "output/models/xauusd_direction_model.joblib"
-    )
+    path = os.environ.get("MODEL_PATH", "output/models/xauusd_direction_model.joblib")
     if not os.path.isfile(path):
         pytest.skip("production model not on disk")
     bundle = joblib.load(path)

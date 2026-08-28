@@ -37,9 +37,7 @@ class NewsInjector:
         self.rng = rng or random.Random()
         self.clock = clock
 
-        self.mean_arrival_ticks: float = float(
-            cfg.get("news_mean_arrival_ticks", 500.0)
-        )
+        self.mean_arrival_ticks: float = float(cfg.get("news_mean_arrival_ticks", 500.0))
         self.shock_std: float = float(cfg.get("news_shock_std", 0.002))
         self._decay: float = 0.9
         if self.mean_arrival_ticks > 0:
@@ -97,7 +95,7 @@ class NewsInjector:
 
     def _decay_shock(self, ticks: int) -> None:
         if self._current_shock != 0.0:
-            self._current_shock *= self._decay ** ticks
+            self._current_shock *= self._decay**ticks
             if abs(self._current_shock) < 1e-12:
                 self._current_shock = 0.0
 

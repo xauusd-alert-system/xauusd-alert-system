@@ -3,6 +3,7 @@ Realtime inference pipeline: wires MT5 live data -> features -> regime -> model 
 into a single callable that produces the structured signal JSON required by the
 FastAPI service, MT5 Auto-Trader, and Telegram bot.
 """
+
 import hashlib
 import json
 import logging
@@ -83,10 +84,10 @@ class RealtimePipeline:
         # Explicit model_path (env/config) takes precedence over per-asset default.
         self.model_path = model_path or self.asset_cfg.get("model_path")
         # Per-asset timeframe override (assets.<key>.timeframe), else global.
-        self.timeframe = self.asset_cfg.get("timeframe") or self.cfg.get(
-            "market_data", {}
-        ).get("timeframe", "M5")
-        self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
+        self.timeframe = self.asset_cfg.get("timeframe") or self.cfg.get("market_data", {}).get("timeframe", "M5")
+        self._predictor = (
+            ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
+        )
 
         # One resolver for production training, research and live inference.
         self.effective_cfg = effective_asset_config(self.cfg, asset_key)
@@ -117,6 +118,7 @@ class RealtimePipeline:
         """Fetches and prepares DataFrame directly from MT5 (live) or Mock generator."""
         if self.data_mode == "live":
             from data.mt5_provider import fetch_closed_candles
+
             raw = fetch_closed_candles(symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles)
 
             # Приводим метку времени к единому формату UTC epoch seconds.
@@ -124,12 +126,14 @@ class RealtimePipeline:
             # legacy `astype("int64") // 10**9` would return milliseconds).
             if "timestamp_utc" not in raw.columns:
                 from data.ingestion import to_epoch_seconds
+
                 raw["timestamp_utc"] = to_epoch_seconds(raw["timestamp"])
 
             df = tag_dataframe(raw, self.cfg["sessions"])
             return df
         else:
             from data.ingestion import fetch_mock_candles
+
             return fetch_mock_candles(timeframe, n_candles, self.cfg["sessions"])
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -140,9 +144,11 @@ class RealtimePipeline:
         df = add_regime_indicators(df, self.cfg)
         try:
             from features.bifurcation import add_bifurcation_features
+
             df = add_bifurcation_features(df)
         except Exception as e:
             import logging
+
             logging.getLogger("realtime.pipeline").warning("bifurcation features skipped: %s", e)
 
         htf_frames = {}
@@ -159,17 +165,18 @@ class RealtimePipeline:
                 # for every signal with no trace. Keep the graceful degradation but
                 # make it observable so a broken HTF feed can be diagnosed.
                 logger.warning(
-                    "[%s] higher-timeframe (%s) confluence fetch failed; "
-                    "continuing without it: %s",
-                    self.asset_key, htf, e,
+                    "[%s] higher-timeframe (%s) confluence fetch failed; continuing without it: %s",
+                    self.asset_key,
+                    htf,
+                    e,
                 )
 
         if htf_frames:
             df = compute_confluence_score(df, htf_frames, self.cfg)
         else:
             logger.warning(
-                "[%s] no higher-timeframe frames available; "
-                "mtf_confluence_score defaulted to 0.0", self.asset_key,
+                "[%s] no higher-timeframe frames available; mtf_confluence_score defaulted to 0.0",
+                self.asset_key,
             )
             df["mtf_confluence_score"] = 0.0
 
@@ -199,9 +206,7 @@ class RealtimePipeline:
                 return self._no_trade_response(latest, regime, "Insufficient feature data (warm-up period)")
             ml_p_long, ml_p_short = proba["p_long"], proba["p_short"]
             feature_dict = {
-                k: float(v)
-                for k, v in latest.items()
-                if k in self._predictor.feature_cols and not pd.isna(v)
+                k: float(v) for k, v in latest.items() if k in self._predictor.feature_cols and not pd.isna(v)
             }
         else:
             ml_p_long, ml_p_short = 0.5, 0.5
@@ -210,9 +215,7 @@ class RealtimePipeline:
         # snapshot for this signal bar. The store catalogs ready-made values
         # (it never recomputes or alters them). Disabled by default via
         # `features.store.enabled: false` — baseline behaviour is unchanged.
-        feature_snapshot_id = self._store_feature_snapshot(
-            feature_dict, int(latest["timestamp_utc"])
-        )
+        feature_snapshot_id = self._store_feature_snapshot(feature_dict, int(latest["timestamp_utc"]))
 
         signal = compute_ensemble_signal(
             regime,
@@ -233,9 +236,7 @@ class RealtimePipeline:
         book_gate = {"decision": "unavailable", "reason": "book feed not attached"}
         book_features = None
         if self.book_feed is not None and signal.bias in ("long", "short"):
-            feats = self.book_feed.bar_features(
-                self.asset_key, int(latest["timestamp_utc"])
-            )
+            feats = self.book_feed.bar_features(self.asset_key, int(latest["timestamp_utc"]))
             if feats is not None:
                 book_features = feats
                 book_gate = self._apply_book_gate(signal, feats)
@@ -275,13 +276,17 @@ class RealtimePipeline:
             entry_zone, invalidation, targets = None, None, None
 
         signal_ts = int(latest["timestamp_utc"])
-        signal_id = str(uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
-        ))
-        feature_hash = hashlib.sha256(
-            json.dumps(feature_dict, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest() if feature_dict else None
+        signal_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+            )
+        )
+        feature_hash = (
+            hashlib.sha256(json.dumps(feature_dict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if feature_dict
+            else None
+        )
         scaleout = grid_cfg.get("scaleout") or {}
         ratios = [float(scaleout.get("tp1_ratio", 1 / 3)), float(scaleout.get("tp2_ratio", 1 / 3))]
         ratios.append(max(0.0, 1.0 - sum(ratios)))
@@ -295,8 +300,13 @@ class RealtimePipeline:
             "feature_snapshot_hash": feature_hash,
             "setup_timeframe": self.timeframe,
             "context_timeframes": self.cfg.get("features", {}).get("mtf_reference_timeframes", []),
-            "expires_at_utc": signal_ts + 4 * {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400}.get(self.timeframe, 900),
-            "target_legs": ([{"price": p, "close_ratio": ratios[i], "label": f"TP{i+1}"} for i, p in enumerate(targets)] if targets else []),
+            "expires_at_utc": signal_ts
+            + 4 * {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400}.get(self.timeframe, 900),
+            "target_legs": (
+                [{"price": p, "close_ratio": ratios[i], "label": f"TP{i + 1}"} for i, p in enumerate(targets)]
+                if targets
+                else []
+            ),
             "confirmation_predicates": ["candle_closed", "regime_allowed", "session_allowed", "ensemble_gate_passed"],
             "confirmed_by": ("systematic:ensemble" if signal.bias != "no_trade" else None),
             "confirmation_time_utc": (signal_ts if signal.bias != "no_trade" else None),
@@ -337,9 +347,7 @@ class RealtimePipeline:
                 db_path = str(
                     os.environ.get("FEATURE_STORE_DB_PATH")
                     or store_cfg.get("db_path")
-                    or (self.cfg.get("general") or {}).get(
-                        "db_path", "data/market_data_mt5.sqlite"
-                    )
+                    or (self.cfg.get("general") or {}).get("db_path", "data/market_data_mt5.sqlite")
                 )
                 self._feature_store = FeatureStore(db_path)
             snapshot_id, _ = self._feature_store.compute_and_store(
@@ -352,7 +360,8 @@ class RealtimePipeline:
         except Exception as exc:  # pragma: no cover - defensive fail-open
             logger.warning(
                 "[%s] feature snapshot store failed (continuing): %s",
-                self.asset_key, exc,
+                self.asset_key,
+                exc,
             )
             return None
 
@@ -370,9 +379,7 @@ class RealtimePipeline:
         boost = float(bg.get("boost_confidence", 0.05))
         imb = float(feats.get("imb5_last", 0.0))
         direction = signal.bias
-        opposed = (direction == "long" and imb > veto_imb) or (
-            direction == "short" and imb < -veto_imb
-        )
+        opposed = (direction == "long" and imb > veto_imb) or (direction == "short" and imb < -veto_imb)
         if opposed:
             old_confidence = signal.confidence
             signal.bias = "no_trade"
@@ -401,10 +408,12 @@ class RealtimePipeline:
 
     def _no_trade_response(self, latest, regime, reason: str) -> dict:
         signal_ts = int(latest["timestamp_utc"])
-        signal_id = str(uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
-        ))
+        signal_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+            )
+        )
         return {
             "signal_id": signal_id,
             "signal_state": "no_trade",

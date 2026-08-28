@@ -3,6 +3,7 @@ Tests for calibration monitoring (scripts/monitor_calibration.py, TZ 5.3 / P2-46
 
 Run with: pytest scripts/tests/test_monitor_calibration.py -v
 """
+
 import json
 import os
 import sys

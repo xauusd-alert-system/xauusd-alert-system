@@ -5,6 +5,7 @@ Implements the three risk profiles (C / B / A), per-day limits, stop-day rules,
 profit lock, challenge pause and drawdown-based risk scaling. Profile switching
 is allowed ONLY between days, never intraday.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -13,19 +14,33 @@ import os
 from dataclasses import asdict, dataclass, field
 
 STAGE = {
-    1: {"target_usd": 80.0, "target_pct": 0.08,
-        "max_daily_loss_usd": 50.0, "max_daily_loss_pct": 0.05,
-        "max_dd_usd": 100.0, "max_dd_pct": 0.10,
+    1: {
+        "target_usd": 80.0,
+        "target_pct": 0.08,
+        "max_daily_loss_usd": 50.0,
+        "max_daily_loss_pct": 0.05,
+        "max_dd_usd": 100.0,
+        "max_dd_pct": 0.10,
         # RESEARCH (deep-research-report): experts recommend NOT using profit
         # lock — it caps upside without reducing risk. Remove from active rules.
         # Kept as 0 so the evaluate() code path still works if needed.
-        "profit_lock_usd": 0.0, "profit_lock_pct": 0.0,
-        "pause_usd": 60.0, "pause_pct": 0.06},
-    2: {"target_usd": 60.0, "target_pct": 0.06,
-        "max_daily_loss_usd": 50.0, "max_daily_loss_pct": 0.05,
-        "max_dd_usd": 80.0, "max_dd_pct": 0.08,
-        "profit_lock_usd": 0.0, "profit_lock_pct": 0.0,
-        "pause_usd": 50.0, "pause_pct": 0.05},
+        "profit_lock_usd": 0.0,
+        "profit_lock_pct": 0.0,
+        "pause_usd": 60.0,
+        "pause_pct": 0.06,
+    },
+    2: {
+        "target_usd": 60.0,
+        "target_pct": 0.06,
+        "max_daily_loss_usd": 50.0,
+        "max_daily_loss_pct": 0.05,
+        "max_dd_usd": 80.0,
+        "max_dd_pct": 0.08,
+        "profit_lock_usd": 0.0,
+        "profit_lock_pct": 0.0,
+        "pause_usd": 50.0,
+        "pause_pct": 0.05,
+    },
 }
 
 # ТЗ §3: base parameters per profile. pause_usd is per stage.
@@ -44,59 +59,80 @@ STAGE = {
 # - Commission feasibility: at $2.50 risk, min fee $2 leaves only $0.50
 #   for stop movement. Added commission-aware sizing check.
 PROFILES = {
-    "C": {"risk_usd": 2.0, "risk_pct": 0.002,
-          "daily_limit_usd": 10.0, "daily_limit_pct": 0.01,
-          "max_trades": 2, "stop_after_losses": 1,
-          "pause_usd": {1: 50.0, 2: 40.0}, "pause_pct": {1: 0.05, 2: 0.04},
-          "only_a": False, "max_risk_usd": 2.0},
-    "B": {"risk_usd": 2.5, "risk_pct": 0.0025,
-          # RAISED from $15: research says profit lock caps upside.
-          # Personal stop at -$25 is already 50% of firm's -$50.
-          "daily_limit_usd": 25.0, "daily_limit_pct": 0.025,
-          "max_trades": 3, "stop_after_losses": 2,
-          "pause_usd": {1: 60.0, 2: 50.0}, "pause_pct": {1: 0.06, 2: 0.05},
-          "only_a": False, "max_risk_usd": 2.5},
-    "A": {"risk_usd": 5.0, "risk_pct": 0.005,
-          # RAISED from $20: at 0.5% risk, $5 risk is at the upper edge
-          # of the research-recommended range. Allow bigger daily swings.
-          "daily_limit_usd": 30.0, "daily_limit_pct": 0.03,
-          "max_trades": 3, "stop_after_losses": 2,
-          "pause_usd": {1: 50.0, 2: 50.0}, "pause_pct": {1: 0.05, 2: 0.05},
-          "only_a": False, "max_risk_usd": 5.0},
+    "C": {
+        "risk_usd": 2.0,
+        "risk_pct": 0.002,
+        "daily_limit_usd": 10.0,
+        "daily_limit_pct": 0.01,
+        "max_trades": 2,
+        "stop_after_losses": 1,
+        "pause_usd": {1: 50.0, 2: 40.0},
+        "pause_pct": {1: 0.05, 2: 0.04},
+        "only_a": False,
+        "max_risk_usd": 2.0,
+    },
+    "B": {
+        "risk_usd": 2.5,
+        "risk_pct": 0.0025,
+        # RAISED from $15: research says profit lock caps upside.
+        # Personal stop at -$25 is already 50% of firm's -$50.
+        "daily_limit_usd": 25.0,
+        "daily_limit_pct": 0.025,
+        "max_trades": 3,
+        "stop_after_losses": 2,
+        "pause_usd": {1: 60.0, 2: 50.0},
+        "pause_pct": {1: 0.06, 2: 0.05},
+        "only_a": False,
+        "max_risk_usd": 2.5,
+    },
+    "A": {
+        "risk_usd": 5.0,
+        "risk_pct": 0.005,
+        # RAISED from $20: at 0.5% risk, $5 risk is at the upper edge
+        # of the research-recommended range. Allow bigger daily swings.
+        "daily_limit_usd": 30.0,
+        "daily_limit_pct": 0.03,
+        "max_trades": 3,
+        "stop_after_losses": 2,
+        "pause_usd": {1: 50.0, 2: 50.0},
+        "pause_pct": {1: 0.05, 2: 0.05},
+        "only_a": False,
+        "max_risk_usd": 5.0,
+    },
 }
 
 # ТЗ §2.3: drawdown scaling steps (applied between days).
 # (total_drawdown_pct, risk_usd, max_trades, only_a)
 DRAWDOWN_STEPS = [
-    (0.030, 2.0, 2, False),   # -3%: risk 0.2%, 2 trades (both grades — grade
-                              #       does not predict outcomes, see PROFILES)
-    (0.045, 1.5, 1, False),   # -4.5% (S1) / -4% (S2): risk 0.15%, 1 trade
+    (0.030, 2.0, 2, False),  # -3%: risk 0.2%, 2 trades (both grades — grade
+    #       does not predict outcomes, see PROFILES)
+    (0.045, 1.5, 1, False),  # -4.5% (S1) / -4% (S2): risk 0.15%, 1 trade
 ]
 
 DEFAULT_STATE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "data", "manual", "day_state.json")
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "manual", "day_state.json"
+)
 
 
 @dataclass
 class DayState:
     stage: int = 1
     profile: str = "B"
-    date: str = ""                      # local session date (YYYY-MM-DD)
-    day_start_equity: float = 1000.0    # equity at start of day (balance)
+    date: str = ""  # local session date (YYYY-MM-DD)
+    day_start_equity: float = 1000.0  # equity at start of day (balance)
     total_start_equity: float = 1000.0  # stage-start reference
-    current_equity: float = 1000.0      # equity incl. floating P&L
+    current_equity: float = 1000.0  # equity incl. floating P&L
     trades_today: int = 0
     losses_today: int = 0
-    status: str = "active"              # active | stop_day | profit_locked | paused | no_trade
+    status: str = "active"  # active | stop_day | profit_locked | paused | no_trade
     status_reason: str = ""
-    effective_risk_usd: float = 2.5     # after profile + drawdown scaling
+    effective_risk_usd: float = 2.5  # after profile + drawdown scaling
     effective_max_trades: int = 3
-    effective_stop_after_losses: int = 2   # audit B: per-day effective rule
+    effective_stop_after_losses: int = 2  # audit B: per-day effective rule
     effective_only_a: bool = True
     clusters_used_today: list = field(default_factory=list)  # anti-correlation cap
     risk_reduced: bool = False
-    paused_until: str = ""              # ISO date when a pause ends
+    paused_until: str = ""  # ISO date when a pause ends
 
     def daily_pnl(self) -> float:
         return self.current_equity - self.day_start_equity
@@ -112,8 +148,7 @@ def _stage_pause_usd(stage: int, profile: str) -> float:
     return float(PROFILES[profile]["pause_usd"].get(stage, 60.0))
 
 
-def effective_profile(stage: int, profile: str, total_pnl: float,
-                      day_start_equity: float) -> dict:
+def effective_profile(stage: int, profile: str, total_pnl: float, day_start_equity: float) -> dict:
     """ТЗ §2.3: drawdown-based scaling of the base profile. Returns the params
     that actually apply for the day (profile switching happens between days)."""
     base = dict(PROFILES[profile])
@@ -141,8 +176,7 @@ class DailyStateMachine:
         try:
             with open(self.state_path, encoding="utf-8") as f:
                 data = json.load(f)
-            return DayState(**{k: v for k, v in data.items()
-                               if k in DayState.__dataclass_fields__})
+            return DayState(**{k: v for k, v in data.items() if k in DayState.__dataclass_fields__})
         except Exception:
             return None
 
@@ -152,17 +186,18 @@ class DailyStateMachine:
             json.dump(self.state.as_dict(), f, indent=2, ensure_ascii=False)
 
     # ---- day lifecycle ----
-    def start_day(self, stage: int, profile: str, day_start_equity: float,
-                  total_start_equity: float, now: dt.datetime) -> dict:
+    def start_day(
+        self, stage: int, profile: str, day_start_equity: float, total_start_equity: float, now: dt.datetime
+    ) -> dict:
         """Begin a new session day. Computes the effective profile params
         (base + drawdown scaling) and resets daily counters."""
         if self._is_paused(now):
-            return {"ok": False, "reason": "paused",
-                    "paused_until": self.state.paused_until}
+            return {"ok": False, "reason": "paused", "paused_until": self.state.paused_until}
         total_pnl = day_start_equity - total_start_equity
         eff = effective_profile(stage, profile, total_pnl, total_start_equity)
         self.state = DayState(
-            stage=stage, profile=profile,
+            stage=stage,
+            profile=profile,
             date=now.date().isoformat(),
             day_start_equity=day_start_equity,
             total_start_equity=total_start_equity,
@@ -174,10 +209,13 @@ class DailyStateMachine:
             risk_reduced=(float(eff["risk_usd"]) < float(PROFILES[profile]["risk_usd"])),
         )
         self.save()
-        return {"ok": True, "effective": eff,
-                "day_start_equity": day_start_equity,
-                "total_pnl": total_pnl,
-                "risk_reduced": self.state.risk_reduced}
+        return {
+            "ok": True,
+            "effective": eff,
+            "day_start_equity": day_start_equity,
+            "total_pnl": total_pnl,
+            "risk_reduced": self.state.risk_reduced,
+        }
 
     def _is_paused(self, now: dt.datetime) -> bool:
         if not self.state.paused_until:
@@ -188,8 +226,7 @@ class DailyStateMachine:
             return False
         return now.date() < end
 
-    def record_trade(self, result_usd: float, was_planned: bool = True,
-                     violation: str = "", cluster: str = "") -> None:
+    def record_trade(self, result_usd: float, was_planned: bool = True, violation: str = "", cluster: str = "") -> None:
         """Register a closed trade for the day. Hard-rule violations force a
         stop-day immediately (ТЗ §6.2)."""
         self.state.trades_today += 1
@@ -261,20 +298,19 @@ class DailyStateMachine:
         # Audit B: use the day's effective rule instead of a hard-coded 2
         # (profile C stops after 1 loss; drawdown modes may differ).
         if s.losses_today >= s.effective_stop_after_losses:
-            return False, (f"{s.losses_today} losses today "
-                           f"(stop-day at {s.effective_stop_after_losses})")
+            return False, (f"{s.losses_today} losses today (stop-day at {s.effective_stop_after_losses})")
         if s.effective_only_a and setup_class != "A":
             return False, f"profile {s.profile} allows A-setups only"
         # Anti-correlation cap (2026-08-23): max ONE position per cluster per
         # day — 12/18 watchlist names are bitcoin-beta and fire together.
         used = getattr(s, "clusters_used_today", []) or []
         if cluster and cluster in used:
-            return False, (f"кластер «{cluster}» уже торговался сегодня "
-                           f"(анти-корреляционный кап: 1 позиция на кластер)")
+            return False, (
+                f"кластер «{cluster}» уже торговался сегодня (анти-корреляционный кап: 1 позиция на кластер)"
+            )
         return True, "ok"
 
-    def position_size(self, price: float, stop_price: float, bias: str,
-                      commission_per_share: float = 0.0) -> int:
+    def position_size(self, price: float, stop_price: float, bias: str, commission_per_share: float = 0.0) -> int:
         """Fractional share count so the max loss on a full stop-out equals
         the effective risk in dollars (ТЗ §4.6).
 
@@ -301,14 +337,10 @@ class DailyStateMachine:
         qty = s.effective_risk_usd / stop_dist if stop_dist else 0.0
         risk_usd = qty * stop_dist
         cap = float(PROFILES[s.profile]["max_risk_usd"])
-        return {"risk_usd": round(risk_usd, 2),
-                "qty": round(qty, 2),
-                "cap_usd": cap,
-                "ok": risk_usd <= cap + 1e-9}
+        return {"risk_usd": round(risk_usd, 2), "qty": round(qty, 2), "cap_usd": cap, "ok": risk_usd <= cap + 1e-9}
 
 
-def profile_params(stage: int, profile: str, total_pnl: float,
-                   reference_equity: float) -> dict:
+def profile_params(stage: int, profile: str, total_pnl: float, reference_equity: float) -> dict:
     eff = effective_profile(stage, profile, total_pnl, reference_equity)
     st = STAGE.get(stage, STAGE[1])
     return {

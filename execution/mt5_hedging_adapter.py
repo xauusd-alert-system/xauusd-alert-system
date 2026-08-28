@@ -16,6 +16,7 @@ The driver is duck-typed against the real MetaTrader5 Python package surface
 (``import MetaTrader5 as mt5``), so it works unchanged on a Windows demo
 terminal and in tests against a deterministic double.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -45,8 +46,7 @@ class MT5HedgingDriver:
         tick = snapshot["tick_size"]
         side = 1.0 if spec.side == "long" else -1.0
         price = snapshot["ask"] if spec.side == "long" else snapshot["bid"]
-        order_type = self.mt5.ORDER_TYPE_BUY if spec.side == "long" \
-            else self.mt5.ORDER_TYPE_SELL
+        order_type = self.mt5.ORDER_TYPE_BUY if spec.side == "long" else self.mt5.ORDER_TYPE_SELL
         request = {
             "action": self.mt5.TRADE_ACTION_DEAL,
             "symbol": spec.broker_symbol,
@@ -66,7 +66,8 @@ class MT5HedgingDriver:
         done = getattr(self.mt5, "TRADE_RETCODE_DONE", 10009)
         if retcode != done:
             return {
-                "status": "rejected", "retcode": retcode,
+                "status": "rejected",
+                "retcode": retcode,
                 "comment": str(getattr(result, "comment", "") or ""),
                 "order_id": getattr(result, "order", None),
                 "requested_volume": float(volume),
@@ -76,7 +77,8 @@ class MT5HedgingDriver:
         position = self._resolve_position(spec, leg)
         if position is None:
             return {
-                "status": "rejected", "retcode": retcode,
+                "status": "rejected",
+                "retcode": retcode,
                 "comment": "order accepted but position could not be resolved",
                 "order_id": getattr(result, "order", None),
                 "requested_volume": float(volume),
@@ -94,8 +96,7 @@ class MT5HedgingDriver:
             "position_id": int(position["ticket"]),
             "requested_volume": float(volume),
             "filled_volume": float(filled),
-            "fill_price": float(getattr(result, "price", 0.0) or 0.0)
-            or float(position["price_open"]),
+            "fill_price": float(getattr(result, "price", 0.0) or 0.0) or float(position["price_open"]),
         }
 
     def modify_sl(self, reference: str, sl: float) -> tuple[bool, str]:
@@ -132,15 +133,12 @@ class MT5HedgingDriver:
         ticket = int(reference)
         position = self._position(ticket)
         if position is None:
-            return {"status": "rejected", "retcode": -1,
-                    "comment": f"position {ticket} not found"}
-        close_type = self.mt5.ORDER_TYPE_SELL if position["type"] == 0 \
-            else self.mt5.ORDER_TYPE_BUY
+            return {"status": "rejected", "retcode": -1, "comment": f"position {ticket} not found"}
+        close_type = self.mt5.ORDER_TYPE_SELL if position["type"] == 0 else self.mt5.ORDER_TYPE_BUY
         snapshot = self.ctx.symbol_snapshot(position["symbol"])
         price = snapshot["bid"] if position["type"] == 0 else snapshot["ask"]
         close_volume = min(float(volume), float(position["volume"]))
-        group_id = self.ctx.parse_comment(str(position.get("comment") or "")) \
-            or f"TG:{ticket}"
+        group_id = self.ctx.parse_comment(str(position.get("comment") or "")) or f"TG:{ticket}"
         request = {
             "action": self.mt5.TRADE_ACTION_DEAL,
             "position": ticket,
@@ -158,11 +156,15 @@ class MT5HedgingDriver:
         retcode = int(getattr(result, "retcode", -1) or -1)
         done = getattr(self.mt5, "TRADE_RETCODE_DONE", 10009)
         if retcode != done:
-            return {"status": "rejected", "retcode": retcode,
-                    "comment": str(getattr(result, "comment", "") or ""),
-                    "order_id": getattr(result, "order", None)}
+            return {
+                "status": "rejected",
+                "retcode": retcode,
+                "comment": str(getattr(result, "comment", "") or ""),
+                "order_id": getattr(result, "order", None),
+            }
         return {
-            "status": "filled", "retcode": retcode,
+            "status": "filled",
+            "retcode": retcode,
             "comment": str(getattr(result, "comment", "") or ""),
             "order_id": int(getattr(result, "order", 0) or 0) or None,
             "deal_id": int(getattr(result, "deal", 0) or 0) or None,

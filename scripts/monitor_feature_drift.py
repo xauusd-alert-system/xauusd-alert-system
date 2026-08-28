@@ -23,6 +23,7 @@ Eps-protection prevents division/log of zero for empty bins (a live bin with
 zero share is clamped to eps, which contributes a large but finite penalty —
 exactly the behaviour you want when a feature's support has shifted).
 """
+
 import argparse
 import json
 import logging
@@ -118,9 +119,9 @@ def check_drift(
         common = [c for c in common if c in set(features)]
     # Only numeric features can be binned.
     numeric_common = [
-        c for c in common
-        if pd.api.types.is_numeric_dtype(train_features_df[c])
-        and pd.api.types.is_numeric_dtype(live_features_df[c])
+        c
+        for c in common
+        if pd.api.types.is_numeric_dtype(train_features_df[c]) and pd.api.types.is_numeric_dtype(live_features_df[c])
     ]
     if not numeric_common:
         return {
@@ -138,9 +139,7 @@ def check_drift(
             live_features_df[col].to_numpy(dtype=float),
         )
 
-    drifted = sorted(
-        [f for f, psi in per_feature.items() if psi > drifted_psi_threshold]
-    )
+    drifted = sorted([f for f, psi in per_feature.items() if psi > drifted_psi_threshold])
     return {
         "per_feature": per_feature,
         "max_psi": max(per_feature.values()) if per_feature else 0.0,
@@ -157,13 +156,13 @@ def _load_table(path: str) -> pd.DataFrame:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        description="PSI feature-drift check between a train and a live feature matrix."
-    )
+    parser = argparse.ArgumentParser(description="PSI feature-drift check between a train and a live feature matrix.")
     parser.add_argument("--train", required=True, help="Train features csv/parquet")
     parser.add_argument("--live", required=True, help="Live features csv/parquet")
     parser.add_argument(
-        "--threshold", type=float, default=DRIFTED_PSI_THRESHOLD,
+        "--threshold",
+        type=float,
+        default=DRIFTED_PSI_THRESHOLD,
         help=f"PSI above which a feature is flagged drifted (default {DRIFTED_PSI_THRESHOLD})",
     )
     parser.add_argument("--json", action="store_true", help="Emit the report as JSON")
@@ -185,7 +184,8 @@ def main(argv=None) -> int:
                 print(f"  - {feat}: psi={report['per_feature'][feat]:.4f}")
             logger.warning(
                 "Feature drift detected: %d feature(s) above PSI %.2f",
-                len(report["drifted_features"]), args.threshold,
+                len(report["drifted_features"]),
+                args.threshold,
             )
         else:
             print("No drifted features.")

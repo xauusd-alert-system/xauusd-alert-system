@@ -3,6 +3,7 @@ Tests for PSI feature-drift monitoring (scripts/monitor_feature_drift.py, TZ 5.3
 
 Run with: pytest scripts/tests/test_monitor_feature_drift.py -v
 """
+
 import json
 import os
 import sys
@@ -18,10 +19,12 @@ from scripts.monitor_feature_drift import _psi_for_feature, check_drift
 
 def _train_df(n: int = 2000, seed: int = 7) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
-    return pd.DataFrame({
-        "feat_a": rng.normal(0.0, 1.0, n),
-        "feat_b": rng.uniform(0.0, 1.0, n),
-    })
+    return pd.DataFrame(
+        {
+            "feat_a": rng.normal(0.0, 1.0, n),
+            "feat_b": rng.uniform(0.0, 1.0, n),
+        }
+    )
 
 
 def test_psi_identical_zero():
@@ -60,15 +63,13 @@ def test_psi_handles_empty_bins():
     # Degenerate train distribution (constant value).
     train_const = pd.DataFrame({"f": np.full(100, 5.0)})
     live_const = pd.DataFrame({"f": np.full(100, 5.0)})
-    assert _psi_for_feature(
-        train_const["f"].to_numpy(float), live_const["f"].to_numpy(float)
-    ) == pytest.approx(0.0, abs=1e-9)
+    assert _psi_for_feature(train_const["f"].to_numpy(float), live_const["f"].to_numpy(float)) == pytest.approx(
+        0.0, abs=1e-9
+    )
 
     # Constant train vs shifted live -> finite, large penalty (no crash/NaN).
     live_shifted = pd.DataFrame({"f": np.full(100, 9.0)})
-    psi_shift = _psi_for_feature(
-        train_const["f"].to_numpy(float), live_shifted["f"].to_numpy(float)
-    )
+    psi_shift = _psi_for_feature(train_const["f"].to_numpy(float), live_shifted["f"].to_numpy(float))
     assert np.isfinite(psi_shift)
     assert psi_shift > 0.2
 

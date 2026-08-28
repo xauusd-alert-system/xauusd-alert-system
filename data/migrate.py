@@ -21,6 +21,7 @@ CLI::
 
     python -m data.migrate [--db PATH] [--dry-run] [--status]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -63,9 +64,7 @@ def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
 
 
 def _applied_versions(conn: sqlite3.Connection) -> dict[int, str]:
-    rows = conn.execute(
-        f"SELECT version, name FROM {MIGRATIONS_TABLE} ORDER BY version"
-    ).fetchall()
+    rows = conn.execute(f"SELECT version, name FROM {MIGRATIONS_TABLE} ORDER BY version").fetchall()
     return {int(row[0]): str(row[1]) for row in rows}
 
 
@@ -79,21 +78,16 @@ def load_builtin_migrations() -> list[Migration]:
 
     migrations: list[Migration] = []
     seen: dict[int, str] = {}
-    for module_info in sorted(pkgutil.iter_modules(package.__path__),
-                              key=lambda m: m.name):
+    for module_info in sorted(pkgutil.iter_modules(package.__path__), key=lambda m: m.name):
         if module_info.name.startswith("_"):
             continue
         module = importlib.import_module(f"data.migrations.{module_info.name}")
         version = int(module.VERSION)
         name = str(module.NAME)
         if version in seen:
-            raise RuntimeError(
-                f"duplicate migration version {version}: "
-                f"{seen[version]!r} and {module_info.name!r}"
-            )
+            raise RuntimeError(f"duplicate migration version {version}: {seen[version]!r} and {module_info.name!r}")
         seen[version] = module_info.name
-        migrations.append(Migration(version=version, name=name,
-                                    apply=module.apply))
+        migrations.append(Migration(version=version, name=name, apply=module.apply))
     return migrations
 
 
@@ -157,8 +151,7 @@ def apply_migrations(
             try:
                 migration.apply(conn)
                 conn.execute(
-                    f"INSERT INTO {MIGRATIONS_TABLE} "
-                    f"(version, name, applied_at_utc_ms) VALUES (?, ?, ?)",
+                    f"INSERT INTO {MIGRATIONS_TABLE} (version, name, applied_at_utc_ms) VALUES (?, ?, ?)",
                     (migration.version, migration.name, _now_ms()),
                 )
                 conn.commit()
@@ -202,15 +195,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--db",
         default=None,
-        help="database path (default: config general.db_path or "
-             "data/market_data_mt5.sqlite)",
+        help="database path (default: config general.db_path or data/market_data_mt5.sqlite)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="print what would be applied without changing the database",
     )
     parser.add_argument(
-        "--status", action="store_true",
+        "--status",
+        action="store_true",
         help="print applied and pending migrations, then exit",
     )
     args = parser.parse_args(argv)
@@ -221,11 +215,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             from config.loader import load_config
 
-            db_path = str(
-                load_config().get("general", {}).get(
-                    "db_path", "data/market_data_mt5.sqlite"
-                )
-            )
+            db_path = str(load_config().get("general", {}).get("db_path", "data/market_data_mt5.sqlite"))
         except Exception:
             db_path = "data/market_data_mt5.sqlite"
 

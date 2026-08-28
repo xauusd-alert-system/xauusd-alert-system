@@ -2,6 +2,7 @@
 Unit tests for realtime/pipeline.py.
 Run with: pytest realtime/tests/test_pipeline.py -v
 """
+
 import os
 import sys
 
@@ -56,6 +57,7 @@ def test_pipeline_uses_only_last_closed_candle():
     """The signal's timestamp must match the LAST row of the fetched series, never an earlier one."""
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     from data.ingestion import fetch_mock_candles
+
     df_check = fetch_mock_candles(CFG["market_data"]["timeframe"], n_candles=300, sessions_config=CFG["sessions"])
     result = pipeline.generate_signal(n_candles=300)
     # Timestamps are time-based (not seeded), so we just check the signal timestamp is recent/valid
@@ -64,6 +66,7 @@ def test_pipeline_uses_only_last_closed_candle():
 
 def test_pipeline_regime_field_is_valid_enum_value():
     from regime.classifier import RegimeLabel
+
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     result = pipeline.generate_signal(n_candles=300)
     assert result["regime"] in [r.value for r in RegimeLabel]
@@ -203,8 +206,7 @@ def test_pipeline_builds_order_flow_features():
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     df = pipeline._fetch_data_frame("M5", 300)
     featured = pipeline._build_features(df)
-    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
-                "order_flow_imbalance_50", "dist_vwap_atr"):
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50", "dist_vwap_atr"):
         assert col in featured.columns, f"missing {col}"
     assert featured["cvd"].notna().all()
 
@@ -213,8 +215,8 @@ def test_order_flow_columns_in_training_feature_set():
     """FEATURE_COLUMNS must include the order-flow columns so build_training_matrix
     feeds them to the model (training/inference consistency)."""
     from model.trainer import FEATURE_COLUMNS
-    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
-                "order_flow_imbalance_50", "dist_vwap_atr"):
+
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50", "dist_vwap_atr"):
         assert col in FEATURE_COLUMNS
 
 

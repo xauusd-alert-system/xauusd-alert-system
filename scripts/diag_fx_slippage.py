@@ -51,9 +51,10 @@ def main():
     split = int(len(X_train) * 0.7)
     X_fit = X_train.iloc[:split]
     y_fit = y_train.iloc[:split]
-    df_eval = df.iloc[len(df) - len(X_train) + split:].copy().reset_index(drop=True)
+    df_eval = df.iloc[len(df) - len(X_train) + split :].copy().reset_index(drop=True)
 
     import tempfile
+
     base = train_model(X_fit, y_fit, cfg_inner)
     calib = calibrate_model(base, X_fit, y_fit, cfg_inner)
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="diag_model_", suffix=".joblib")
@@ -92,6 +93,7 @@ def main():
         return
 
     from collections import Counter
+
     wins = sum(1 for t in trades if t.pnl > 0)
     print(f"  win_rate = {wins / len(trades) * 100:.2f}%  (win/loss = {wins}/{len(trades) - wins})")
     print(f"  exit_reasons = {dict(Counter(t.exit_reason for t in trades))}")

@@ -4,6 +4,7 @@ Win Rate, Profit Factor, Sharpe Ratio, Sortino Ratio, Expectancy, Drawdown, Max 
 PnL Concentration Report (quant audit Section 5 / Task 3).
 AUC Translator for Meta-Labeling / PF Targets (quant audit Section 5 / Task 9).
 """
+
 from __future__ import annotations
 
 import math
@@ -16,9 +17,19 @@ from scipy import stats
 def trades_to_dataframe(trades) -> pd.DataFrame:
     if not trades:
         return pd.DataFrame(
-            columns=["entry_ts", "exit_ts", "direction", "session", "regime_at_entry",
-                     "pnl", "exit_reason", "entry_price", "initial_stop_price",
-                     "tp1_price", "volume"]
+            columns=[
+                "entry_ts",
+                "exit_ts",
+                "direction",
+                "session",
+                "regime_at_entry",
+                "pnl",
+                "exit_reason",
+                "entry_price",
+                "initial_stop_price",
+                "tp1_price",
+                "volume",
+            ]
         )
     return pd.DataFrame(
         [
@@ -153,8 +164,8 @@ def compute_metrics_per_session(trades_df: pd.DataFrame) -> dict:
 # stop distance, trade count).
 # ---------------------------------------------------------------------------
 
-def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0,
-                      volume: float = 0.01) -> dict:
+
+def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0, volume: float = 0.01) -> dict:
     """R-normalized performance summary + exit-path bucket table.
 
     Requires entry_price / initial_stop_price columns (trades_to_dataframe
@@ -163,9 +174,19 @@ def compute_r_metrics(trades_df: pd.DataFrame, point_value_lot: float = 1.0,
     report count, share, mean R and the contribution of the bucket to the
     total R sum.
     """
-    empty = {"n": 0, "mean_r": 0.0, "std_r": 0.0, "skew_r": 0.0, "kurtosis_excess_r": 0.0,
-             "avg_win_r": 0.0, "avg_loss_r": 0.0, "breakeven_wr_pct": float("nan"),
-             "actual_wr_pct": float("nan"), "net_expectancy_r": 0.0, "buckets": {}}
+    empty = {
+        "n": 0,
+        "mean_r": 0.0,
+        "std_r": 0.0,
+        "skew_r": 0.0,
+        "kurtosis_excess_r": 0.0,
+        "avg_win_r": 0.0,
+        "avg_loss_r": 0.0,
+        "breakeven_wr_pct": float("nan"),
+        "actual_wr_pct": float("nan"),
+        "net_expectancy_r": 0.0,
+        "buckets": {},
+    }
     if trades_df is None or len(trades_df) == 0:
         return empty
     if "initial_stop_price" not in trades_df.columns or "entry_price" not in trades_df.columns:
@@ -265,7 +286,7 @@ def block_bootstrap_t(r, block: int = 20, n_boot: int = 10000, seed: int = 0) ->
     means = np.empty(n_boot)
     for i in range(n_boot):
         starts = rng.integers(0, n - block, size=nb)
-        sample = np.concatenate([arr[s:s + block] for s in starts])[:n]
+        sample = np.concatenate([arr[s : s + block] for s in starts])[:n]
         means[i] = sample.mean()
     std = means.std(ddof=1)
     if std == 0.0 or not np.isfinite(std):
@@ -280,6 +301,7 @@ def fold_sign_test(n_positive_folds: int, n_folds: int) -> dict:
     z for reporting. This is the audit's 'знаковый тест по фолдам'.
     """
     from scipy.stats import binomtest
+
     if n_folds <= 0:
         return {"z": float("nan"), "p_one_sided": float("nan"), "n_positive": 0, "n_folds": 0}
     z = (n_positive_folds - 0.5 * n_folds) / (0.5 * np.sqrt(n_folds)) if n_folds > 0 else float("nan")
@@ -304,13 +326,9 @@ def summarize_folds(results: list) -> dict:
     valid = [r for r in results if r.get("n_trades", 0) > 0]
     pos_all = [r for r in results if r.get("total_pnl", 0.0) > 0]
     pos_valid = [r for r in valid if r.get("total_pnl", 0.0) > 0]
-    pfs = [r["profit_factor"] for r in valid
-           if np.isfinite(r.get("profit_factor", np.nan))]
+    pfs = [r["profit_factor"] for r in valid if np.isfinite(r.get("profit_factor", np.nan))]
     median_pf = float(np.median(pfs)) if pfs else float("nan")
-    inconsistent = bool(
-        valid and np.isfinite(median_pf) and median_pf > 1.0
-        and (len(pos_valid) / len(valid)) < 0.5
-    )
+    inconsistent = bool(valid and np.isfinite(median_pf) and median_pf > 1.0 and (len(pos_valid) / len(valid)) < 0.5)
     return {
         "n_folds": len(results),
         "valid_folds": len(valid),
@@ -319,14 +337,18 @@ def summarize_folds(results: list) -> dict:
         "positive_folds_pct_valid": round(100.0 * len(pos_valid) / len(valid), 1) if valid else 0.0,
         "median_pf_valid": round(median_pf, 3) if np.isfinite(median_pf) else None,
         "inconsistent": inconsistent,
-        "note": ("PF/PnL statistics refer to different fold sets (empty folds counted in one, "
-                 "excluded from the other)" if inconsistent else None),
+        "note": (
+            "PF/PnL statistics refer to different fold sets (empty folds counted in one, excluded from the other)"
+            if inconsistent
+            else None
+        ),
     }
 
 
 # ---------------------------------------------------------------------------
 # Task 3: PnL Concentration Metrics (KIMI K3 / Quant Audit Section 5)
 # ---------------------------------------------------------------------------
+
 
 def pnl_concentration_report(
     trades_df: pd.DataFrame,
@@ -460,6 +482,7 @@ def pnl_concentration_report(
 # ---------------------------------------------------------------------------
 # Task 9: AUC Translator for PF Targets (Signal Detection Theory / Quant Audit)
 # ---------------------------------------------------------------------------
+
 
 def required_auc_for_pf_target(
     pf_current: float,
@@ -605,20 +628,24 @@ def progress_pnl_curve(
 
         n_open = len(bar_pnls)
         if n_open > 0:
-            records.append({
-                "bar": bar_k,
-                "n_open": n_open,
-                "cum_pnl": round(float(np.sum(bar_pnls)), 2),
-                "mean_pnl": round(float(np.mean(bar_pnls)), 4),
-                "mean_progress_atr": round(float(np.mean(bar_progress)), 4),
-            })
+            records.append(
+                {
+                    "bar": bar_k,
+                    "n_open": n_open,
+                    "cum_pnl": round(float(np.sum(bar_pnls)), 2),
+                    "mean_pnl": round(float(np.mean(bar_pnls)), 4),
+                    "mean_progress_atr": round(float(np.mean(bar_progress)), 4),
+                }
+            )
         else:
-            records.append({
-                "bar": bar_k,
-                "n_open": 0,
-                "cum_pnl": 0.0,
-                "mean_pnl": 0.0,
-                "mean_progress_atr": 0.0,
-            })
+            records.append(
+                {
+                    "bar": bar_k,
+                    "n_open": 0,
+                    "cum_pnl": 0.0,
+                    "mean_pnl": 0.0,
+                    "mean_progress_atr": 0.0,
+                }
+            )
 
     return pd.DataFrame(records)

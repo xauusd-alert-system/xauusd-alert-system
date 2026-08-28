@@ -4,6 +4,7 @@ Reads logs/backtest_<asset>.csv for each asset and prints:
   asset, folds, total_trades, trades_only_folds, mean_win_rate,
   mean_expectancy, sum_total_pnl, positive_pnl_folds, min_win_rate, max_win_rate
 """
+
 import os
 import sys
 

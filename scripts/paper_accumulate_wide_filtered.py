@@ -128,8 +128,9 @@ def main() -> None:
         print(f"Frozen model not found: {FROZEN_MODEL_PATH}")
         print("Copy the current production model first:")
         print("  New-Item -ItemType Directory -Force output/models/frozen")
-        print("  Copy-Item output/models/xauusd_direction_model.joblib "
-              "output/models/frozen/xauusd_paper_20260815.joblib")
+        print(
+            "  Copy-Item output/models/xauusd_direction_model.joblib output/models/frozen/xauusd_paper_20260815.joblib"
+        )
         return
 
     print("Loading market data...")

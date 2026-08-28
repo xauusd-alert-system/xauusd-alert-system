@@ -11,6 +11,7 @@ SQL-identifier audit note (ТЗ 10.11): a manual grep of all
 all VALUE predicates use ``?`` parameters. The AST guard below enforces
 the value-interpolation ban permanently.
 """
+
 import ast
 import sys
 from pathlib import Path
@@ -19,8 +20,17 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 SCAN_EXCLUDED_DIRS = {
-    ".git", ".pytest_cache", "__pycache__", "node_modules", ".venv", "venv",
-    "models", "output", "backup", "logs", "UI 3.7 flsah updated v3",
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    "models",
+    "output",
+    "backup",
+    "logs",
+    "UI 3.7 flsah updated v3",
 }
 SELF = Path(__file__).resolve()
 
@@ -54,9 +64,14 @@ def _sql_value_interpolations(source: str, path: Path) -> list[str]:
             else:
                 parts.append(("expr", ""))
         text = "".join(p[1] for p in parts)
-        if "SELECT" not in text.upper() and "INSERT" not in text.upper() \
-                and "DELETE" not in text.upper() and "UPDATE" not in text.upper() \
-                and "PRAGMA" not in text.upper() and "ALTER" not in text.upper():
+        if (
+            "SELECT" not in text.upper()
+            and "INSERT" not in text.upper()
+            and "DELETE" not in text.upper()
+            and "UPDATE" not in text.upper()
+            and "PRAGMA" not in text.upper()
+            and "ALTER" not in text.upper()
+        ):
             continue
         # walk fragments tracking SQL single-quote parity
         in_quote = False
@@ -70,10 +85,7 @@ def _sql_value_interpolations(source: str, path: Path) -> list[str]:
                     # else interpolated inside SQL quotes is a value: banned.
                     names = [n for n in _names_in(expr_node) if not n.isupper()]
                     if names:
-                        offenders.append(
-                            f"{path.as_posix()}: interpolated SQL value inside "
-                            f"quotes (name={names[0]!r})"
-                        )
+                        offenders.append(f"{path.as_posix()}: interpolated SQL value inside quotes (name={names[0]!r})")
                         break
             else:
                 in_quote = frag.count("'") % 2 == 1 if not in_quote else frag.count("'") % 2 == 0
@@ -81,10 +93,7 @@ def _sql_value_interpolations(source: str, path: Path) -> list[str]:
 
 
 def _names_in(node: ast.AST) -> list[str]:
-    return [
-        n.id for n in ast.walk(node)
-        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-    ]
+    return [n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)]
 
 
 def test_no_sql_value_interpolation_in_execute():
@@ -120,7 +129,8 @@ def test_ingest_rejects_oversized_body(tmp_path, monkeypatch):
     sig = hmac_mod.new(b"sec", body, hashlib.sha256).hexdigest()
     client = TestClient(app)
     res = client.post(
-        "/api/ledger/ingest", content=body,
+        "/api/ledger/ingest",
+        content=body,
         headers={"Authorization": "Bearer tok", "X-Ledger-Signature": sig},
     )
     assert res.status_code == 413

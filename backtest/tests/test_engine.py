@@ -2,6 +2,7 @@
 Unit tests for backtest/engine.py, metrics.py, and walk_forward.py.
 Run with: pytest backtest/tests/test_engine.py -v
 """
+
 import os
 import sys
 
@@ -79,8 +80,9 @@ def test_at_most_one_open_position_at_a_time():
     trades = engine.run(df)
     trades_sorted = sorted(trades, key=lambda t: t.entry_ts)
     for i in range(1, len(trades_sorted)):
-        assert trades_sorted[i].entry_ts >= trades_sorted[i - 1].exit_ts, \
+        assert trades_sorted[i].entry_ts >= trades_sorted[i - 1].exit_ts, (
             "New trade must not open before the previous one closed"
+        )
 
 
 def test_metrics_computation_basic():
@@ -123,7 +125,17 @@ def test_walk_forward_runner_calls_strategy_per_fold():
         return compute_metrics(trades_df)
 
     # Use shorter windows for the test to guarantee at least one fold with limited mock data
-    test_cfg = {**CFG, "backtest": {**CFG["backtest"], "walk_forward": {"train_window_days": 5, "test_window_days": 2, "step_days": 2}}}
+    test_cfg = {
+        **CFG,
+        "backtest": {
+            **CFG["backtest"],
+            "walk_forward": {
+                "train_window_days": 5,
+                "test_window_days": 2,
+                "step_days": 2,
+            },
+        },
+    }
     results = run_walk_forward(df, test_cfg, dummy_strategy)
     assert isinstance(results, list)
     for r in results:
@@ -196,7 +208,7 @@ def test_engine_early_breakeven_limits_loss():
         }
     )
     df.loc[2, "high"] = price + 0.6 * step  # probe above the 0.5-step BE trigger
-    df.loc[3, "low"] = price - 3.5 * step   # would-be stop-out below -3*step
+    df.loc[3, "low"] = price - 3.5 * step  # would-be stop-out below -3*step
 
     engine = EventDrivenBacktester(cfg)
     trades = engine.run(df)
@@ -214,16 +226,18 @@ def test_walk_forward_purges_train_rows_whose_labels_overlap_test():
     def spy(train_df, test_df, cfg):
         return {"n_trades": 0, "total_pnl": 0.0, "profit_factor": 1.0}
 
-    test_cfg = {**CFG, "backtest": {**CFG["backtest"],
-                                    "walk_forward": {"train_window_days": 5,
-                                                     "test_window_days": 2,
-                                                     "step_days": 2}}}
+    test_cfg = {
+        **CFG,
+        "backtest": {
+            **CFG["backtest"],
+            "walk_forward": {"train_window_days": 5, "test_window_days": 2, "step_days": 2},
+        },
+    }
     results = run_walk_forward(df, test_cfg, spy)
     assert results
     first = results[0]
     w = first["window"]
-    full_train = df[(df["timestamp_utc"] >= w.train_start_ts) &
-                    (df["timestamp_utc"] < w.train_end_ts)]
+    full_train = df[(df["timestamp_utc"] >= w.train_start_ts) & (df["timestamp_utc"] < w.train_end_ts)]
     # The purged train set must be strictly smaller than the full window.
     assert first["purged_train_rows"] < len(full_train)
     assert first["purged_train_rows"] > 0

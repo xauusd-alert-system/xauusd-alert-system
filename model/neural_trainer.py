@@ -10,6 +10,7 @@ kept as a research prototype with its own unit tests
 a dedicated economic A/B and deploy_guard integration. Removal/reintegration
 decision tracked in docs/TODO.md.
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,10 +59,12 @@ class NeuralSequenceClassifier:
             validation_fraction=0.15,
             n_iter_no_change=10,
         )
-        self.pipeline = Pipeline([
-            ("scaler", scaler),
-            ("mlp", mlp),
-        ])
+        self.pipeline = Pipeline(
+            [
+                ("scaler", scaler),
+                ("mlp", mlp),
+            ]
+        )
         self.pipeline.fit(X, y)
         self.classes_ = mlp.classes_
         return self

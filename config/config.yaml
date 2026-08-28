@@ -800,7 +800,10 @@ execution:
   # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
   # it falls back to backtest.volume (default 0.10, which yields fillable
   # tranches 0.05 / 0.03 / 0.02).
-  volume: 1
+  # OWNER REQUEST 2026-08-28: 0.03 for the $500 demo account (3 x 0.01 legs,
+  # each with its own TP1/TP2/TP3; scale-out partial closes are skipped below
+  # the 0.01 broker min lot ΓÇö remainder stays on broker TP/SL).
+  volume: 0.03
   signal_ranking_metric: confidence   # confidence | ev | probability
 
 

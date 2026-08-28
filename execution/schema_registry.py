@@ -22,6 +22,7 @@ Guarantees:
 * the registered version list is validated at import time (each step's
   ``migrate`` target must itself be registered, and versions are contiguous).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Protocol
@@ -55,8 +56,7 @@ class SchemaMigration(Protocol):
     VERSION: str
     MIGRATES_FROM: str | None
 
-    def migrate(self, data: dict[str, Any]) -> dict[str, Any]:
-        ...  # pragma: no cover - protocol
+    def migrate(self, data: dict[str, Any]) -> dict[str, Any]: ...  # pragma: no cover - protocol
 
 
 class TradeGroupSpecV1:
@@ -110,15 +110,11 @@ def _build_chain(migrations: dict[str, SchemaMigration]) -> list[str]:
     """
     roots = [v for v, m in migrations.items() if m.MIGRATES_FROM is None]
     if len(roots) != 1:
-        raise RuntimeError(
-            f"schema registry must have exactly one root version, got {roots}"
-        )
+        raise RuntimeError(f"schema registry must have exactly one root version, got {roots}")
     for version, migration in migrations.items():
         parent = migration.MIGRATES_FROM
         if parent is not None and parent not in migrations:
-            raise RuntimeError(
-                f"schema {version!r} migrates from unregistered {parent!r}"
-            )
+            raise RuntimeError(f"schema {version!r} migrates from unregistered {parent!r}")
     chain: list[str] = []
     seen: set[str] = set()
     cursor: str | None = roots[0]
@@ -127,9 +123,7 @@ def _build_chain(migrations: dict[str, SchemaMigration]) -> list[str]:
             raise RuntimeError(f"cycle in schema migration chain at {cursor!r}")
         seen.add(cursor)
         chain.append(cursor)
-        next_targets = [
-            v for v, m in migrations.items() if m.MIGRATES_FROM == cursor
-        ]
+        next_targets = [v for v, m in migrations.items() if m.MIGRATES_FROM == cursor]
         cursor = next_targets[0] if next_targets else None
     return chain
 
@@ -155,20 +149,15 @@ def _apply_chain(
     payload = dict(data)
     version = payload.get("schema_version") or default_version
     if not isinstance(version, str) or version not in known_versions:
-        raise UnknownSchemaVersionError(
-            f"unknown schema_version {version!r}; known versions: "
-            f"{sorted(known_versions)}"
-        )
+        raise UnknownSchemaVersionError(f"unknown schema_version {version!r}; known versions: {sorted(known_versions)}")
     # Walk forward from the payload's version to the current one.
     chain = _build_chain(migrations)
     index = chain.index(version)
-    for target in chain[index + 1:]:
+    for target in chain[index + 1 :]:
         payload = migrations[target].migrate(payload)
         payload["schema_version"] = target
     if chain[-1] != current:  # pragma: no cover - defensive
-        raise RuntimeError(
-            f"registry chain ends at {chain[-1]!r}, expected {current!r}"
-        )
+        raise RuntimeError(f"registry chain ends at {chain[-1]!r}, expected {current!r}")
     return payload
 
 
@@ -187,8 +176,11 @@ def deserialize_spec(data: dict[str, Any]) -> TradeGroupSpec:
     if not isinstance(data, dict):
         raise ValueError("TradeGroupSpec payload must be a dict")
     payload = _apply_chain(
-        data, _SPEC_VERSIONS, _SPEC_MIGRATIONS,
-        CURRENT_TRADE_GROUP_SCHEMA, LEGACY_SPEC_SCHEMA_VERSION,
+        data,
+        _SPEC_VERSIONS,
+        _SPEC_MIGRATIONS,
+        CURRENT_TRADE_GROUP_SCHEMA,
+        LEGACY_SPEC_SCHEMA_VERSION,
     )
     return TradeGroupSpec.model_validate(payload)
 
@@ -198,8 +190,11 @@ def deserialize_intent(data: dict[str, Any]) -> ExecutionIntent:
     if not isinstance(data, dict):
         raise ValueError("ExecutionIntent payload must be a dict")
     payload = _apply_chain(
-        data, _INTENT_VERSIONS, _INTENT_MIGRATIONS,
-        CURRENT_INTENT_SCHEMA, LEGACY_INTENT_SCHEMA_VERSION,
+        data,
+        _INTENT_VERSIONS,
+        _INTENT_MIGRATIONS,
+        CURRENT_INTENT_SCHEMA,
+        LEGACY_INTENT_SCHEMA_VERSION,
     )
     return ExecutionIntent.model_validate(payload)
 

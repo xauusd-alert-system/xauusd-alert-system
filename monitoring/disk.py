@@ -4,6 +4,7 @@ Pure stdlib (no psutil / os.statvfs — the latter does not exist on Windows);
 uses ``shutil.disk_usage``. Returns a structured result so both the alert
 rules (monitoring/alerts.py) and the CLI can consume it.
 """
+
 from __future__ import annotations
 
 import shutil

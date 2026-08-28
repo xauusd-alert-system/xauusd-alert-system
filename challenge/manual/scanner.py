@@ -9,6 +9,7 @@ Session model (US stocks on the challenge terminal):
   13:30-19:55 UTC. First ~10-15 min are observation-only; the momentum bar must
   print within the first 60-90 minutes; entries are allowed only there.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -41,8 +42,14 @@ def resample(candles, minutes: int):
     out, cur = [], None
     for c in sorted(candles, key=lambda x: x["time"]):
         if cur is None:
-            cur = {"open": c["open"], "high": c["high"], "low": c["low"],
-                   "close": c["close"], "time": c["time"], "volume": c.get("volume", 0.0)}
+            cur = {
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "time": c["time"],
+                "volume": c.get("volume", 0.0),
+            }
         elif c["time"] < cur["time"] + minutes * 60:
             cur["high"] = max(cur["high"], c["high"])
             cur["low"] = min(cur["low"], c["low"])
@@ -50,8 +57,14 @@ def resample(candles, minutes: int):
             cur["volume"] += c.get("volume", 0.0)
         else:
             out.append(cur)
-            cur = {"open": c["open"], "high": c["high"], "low": c["low"],
-                   "close": c["close"], "time": c["time"], "volume": c.get("volume", 0.0)}
+            cur = {
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "time": c["time"],
+                "volume": c.get("volume", 0.0),
+            }
     if cur:
         out.append(cur)
     return out
@@ -77,9 +90,7 @@ def atr(candles, period: int = 14) -> float:
     trs = []
     prev_close = candles[0]["close"]
     for c in candles[1:]:
-        tr = max(c["high"] - c["low"],
-                 abs(c["high"] - prev_close),
-                 abs(c["low"] - prev_close))
+        tr = max(c["high"] - c["low"], abs(c["high"] - prev_close), abs(c["low"] - prev_close))
         trs.append(tr)
         prev_close = c["close"]
     return sum(trs[-period:]) / period
@@ -119,6 +130,7 @@ def _load_earnings(cfg) -> dict:
         path = os.path.join(_REPO_ROOT, path)
     try:
         import yaml as _yaml
+
         with open(path, encoding="utf-8") as f:
             data = _yaml.safe_load(f) or {}
         return data if isinstance(data, dict) else {}
@@ -146,12 +158,12 @@ def earnings_blackout(symbol: str, date, cal: dict, block_days: int = 2):
 class Setup:
     symbol: str
     date: str
-    bias: str                          # long | short | none
-    grade: str                         # A | B | C | none
+    bias: str  # long | short | none
+    grade: str  # A | B | C | none
     impulse_bar: Optional[dict] = None
     pullback_bars: list = field(default_factory=list)
     signal_bar: Optional[dict] = None
-    trend15: str = ""                  # up | down | flat
+    trend15: str = ""  # up | down | flat
     trend30: str = ""
     entry: float = 0.0
     stop: float = 0.0
@@ -169,9 +181,9 @@ def _higher_highs_lower_lows(closes: list, n: int = 20) -> tuple[bool, bool]:
     if len(closes) < n:
         return False, False
     seg = closes[-n:]
-    highs = max(seg[len(seg) // 2:])
-    lows = min(seg[len(seg) // 2:])
-    first_half = seg[:len(seg) // 2]
+    highs = max(seg[len(seg) // 2 :])
+    lows = min(seg[len(seg) // 2 :])
+    first_half = seg[: len(seg) // 2]
     hh = all(first_half[i] < first_half[i + 1] for i in range(len(first_half) - 1))
     hl = all(first_half[i] < first_half[i + 1] for i in range(len(first_half) - 1))
     return hh, hl
@@ -194,8 +206,7 @@ def _trend(day_bars, ema_period: int = 20) -> str:
     return "flat"
 
 
-def _impulse_candidates(bars5, avg_range, avg_vol, window_start_idx, window_end_idx,
-                        trend: str) -> list:
+def _impulse_candidates(bars5, avg_range, avg_vol, window_start_idx, window_end_idx, trend: str) -> list:
     """Momentum bars inside the impulse window (ТЗ §4.3)."""
     out = []
     for b in bars5[window_start_idx:window_end_idx]:
@@ -224,21 +235,21 @@ def _pullback(bars5, impulse, avg_range, idx_of, trend: str):
     start = idx_of(impulse["time"])
     if start is None:
         return [], 0.0, False, False
-    closes = [b["close"] for b in bars5[:start + 1]]
+    closes = [b["close"] for b in bars5[: start + 1]]
     e = ema(closes, 20)
     ema_now = e[-1]
     i_high = impulse["high"]
     i_low = impulse["low"]
     i_range = i_high - i_low
     pull = []
-    for b in bars5[start + 1:start + 11]:  # max 10 bars (50 min)
+    for b in bars5[start + 1 : start + 11]:  # max 10 bars (50 min)
         if b["time"] <= impulse["time"]:
             continue
         pull.append(b)
         if trend == "up":
             depth = (i_high - b["low"]) / i_range if i_range else 0.0
             if b["low"] < i_low:
-                return pull, depth, False, True   # impulse low broken
+                return pull, depth, False, True  # impulse low broken
             if depth >= 0.382:
                 return pull, depth, depth <= 0.618, len(pull) <= 10
         else:
@@ -267,11 +278,19 @@ def _is_pinbar(b, trend: str) -> bool:
 
 def _is_engulfing(prev, cur, trend: str) -> bool:
     if trend == "up":
-        return (cur["close"] > cur["open"] and prev["close"] < prev["open"]
-                and cur["open"] <= prev["close"] and cur["close"] >= prev["open"])
+        return (
+            cur["close"] > cur["open"]
+            and prev["close"] < prev["open"]
+            and cur["open"] <= prev["close"]
+            and cur["close"] >= prev["open"]
+        )
     if trend == "down":
-        return (cur["close"] < cur["open"] and prev["close"] > prev["open"]
-                and cur["open"] >= prev["close"] and cur["close"] <= prev["open"])
+        return (
+            cur["close"] < cur["open"]
+            and prev["close"] > prev["open"]
+            and cur["open"] >= prev["close"]
+            and cur["close"] <= prev["open"]
+        )
     return False
 
 
@@ -302,8 +321,7 @@ def _signal(bars5, pull_bars, idx_of, avg_vol, trend: str):
     return signal, True
 
 
-def _grade(trend15, trend30, impulse, pull_retrace, signal_ok, atr_normal,
-           news: bool) -> tuple[str, list]:
+def _grade(trend15, trend30, impulse, pull_retrace, signal_ok, atr_normal, news: bool) -> tuple[str, list]:
     """ТЗ §5.1: A/B/C grading + explicit NO-GO list.
 
     IMPORTANT (2026-08-21, 24w backtest): the A/B split by retrace depth is
@@ -329,14 +347,12 @@ def _grade(trend15, trend30, impulse, pull_retrace, signal_ok, atr_normal,
         no_go.append("pullback too deep")
     if no_go:
         return "C", no_go
-    if trend15 == trend30 and trend15 != "flat" and impulse is not None \
-            and 0.382 <= pull_retrace <= 0.50 and signal_ok:
+    if trend15 == trend30 and trend15 != "flat" and impulse is not None and 0.382 <= pull_retrace <= 0.50 and signal_ok:
         return "A", []
     return "B", []
 
 
-def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UTC,
-               cfg=None) -> Setup:
+def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UTC, cfg=None) -> Setup:
     """Run the full setup scan for one symbol on one date (ТЗ §4)."""
     cfg = cfg or {}
     news_zones = cfg.get("news_red_zone_utc") or []
@@ -358,18 +374,19 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     # ratio in backtests (elapsed >= full session => full window on both sides).
     # Dead days (range < atr_min_ratio of normal) are NO-GO: 24w backtest data
     # showed ~100% of the strategy's losses concentrate on atr_ratio < 0.7.
-    prior = [c for c in candles_1m if c["time"] < dt.datetime(
-        date.year, date.month, date.day, tzinfo=dt.UTC).timestamp()]
+    prior = [
+        c for c in candles_1m if c["time"] < dt.datetime(date.year, date.month, date.day, tzinfo=dt.UTC).timestamp()
+    ]
     prior_days = {}
     for c in prior:
         d = dt.datetime.fromtimestamp(c["time"], dt.UTC).date()
         prior_days.setdefault(d, []).append(c)
     sess_start_dt = dt.datetime.combine(date, session_start_utc, tzinfo=dt.UTC)
-    sess_len_min = (SESSION_END_UTC.hour * 60 + SESSION_END_UTC.minute) - \
-                   (session_start_utc.hour * 60 + session_start_utc.minute)
+    sess_len_min = (SESSION_END_UTC.hour * 60 + SESSION_END_UTC.minute) - (
+        session_start_utc.hour * 60 + session_start_utc.minute
+    )
     last_ts = max((c["time"] for c in day), default=0)
-    elapsed_min = max(1.0, min(sess_len_min,
-                               (last_ts - sess_start_dt.timestamp()) / 60.0))
+    elapsed_min = max(1.0, min(sess_len_min, (last_ts - sess_start_dt.timestamp()) / 60.0))
 
     def _range_in_window(cs, d):
         s = dt.datetime.combine(d, session_start_utc, tzinfo=dt.UTC).timestamp()
@@ -391,16 +408,15 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     # Impulse window inside the session (first 60-90 minutes).
     t_start = dt.datetime.combine(date, session_start_utc, tzinfo=dt.UTC)
     t_end = t_start + dt.timedelta(minutes=IMPULSE_WINDOW_MAX)
+
     def idx_of(ts):
         for i, b in enumerate(bars5):
             if b["time"] == ts:
                 return i
         return None
 
-    win_lo = next((i for i, b in enumerate(bars5)
-                   if b["time"] >= t_start.timestamp() + NO_ENTRY_FIRST_MIN * 60), 0)
-    win_hi = next((i for i, b in enumerate(bars5)
-                   if b["time"] > t_end.timestamp()), len(bars5))
+    win_lo = next((i for i, b in enumerate(bars5) if b["time"] >= t_start.timestamp() + NO_ENTRY_FIRST_MIN * 60), 0)
+    win_hi = next((i for i, b in enumerate(bars5) if b["time"] > t_end.timestamp()), len(bars5))
 
     closes5 = [b["close"] for b in bars5]
     # Audit K 2026-08-23: baselines over SESSION bars only. The day's last-20
@@ -419,8 +435,7 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
 
     pull_bars, retrace, depth_ok, time_ok = [], 0.0, False, True
     if impulse is not None:
-        pull_bars, retrace, depth_ok, time_ok = _pullback(bars5, impulse, avg_range,
-                                                          idx_of, trend)
+        pull_bars, retrace, depth_ok, time_ok = _pullback(bars5, impulse, avg_range, idx_of, trend)
     signal_bar, signal_ok = (None, False)
     if impulse is not None and pull_bars:
         signal_bar, signal_ok = _signal(bars5, pull_bars, idx_of, avg_vol, trend)
@@ -429,9 +444,15 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     check_ts = signal_bar["time"] if signal_bar else (t_end.timestamp() if impulse else t_start.timestamp())
     news = check_news_red_zone(dt.datetime.fromtimestamp(check_ts, dt.UTC), news_zones)
 
-    grade, no_go = _grade(trend15, trend30, impulse,
-                          retrace if depth_ok else (None if not pull_bars else 1.0),
-                          signal_ok, atr_normal, news)
+    grade, no_go = _grade(
+        trend15,
+        trend30,
+        impulse,
+        retrace if depth_ok else (None if not pull_bars else 1.0),
+        signal_ok,
+        atr_normal,
+        news,
+    )
 
     # Signal dead zone (2026-08-21, 24w/411-setup backtest): signals printing
     # 60-69 min after the open are the only consistently negative bucket
@@ -447,8 +468,7 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     # Earnings blackout (audit 2026-08-23): report day + next session.
     ecal = _load_earnings(cfg)
     if ecal:
-        blocked, src = earnings_blackout(
-            symbol, date, ecal, int(cfg.get("earnings_block_days", 2)))
+        blocked, src = earnings_blackout(symbol, date, ecal, int(cfg.get("earnings_block_days", 2)))
         if blocked:
             no_go.append(f"earnings blackout (отчёт {src})")
 
@@ -503,8 +523,8 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
             if (sr_buffer > 0 or sr_buffer_pct > 0) and bias in ("long", "short"):
                 sr_zones = detect_sr_zones(candles_1m, date)
                 sr_ok, sr_reason = check_proximity(
-                    entry, stop, setup.target, bias, sr_zones,
-                    buffer_usd=sr_buffer, buffer_pct=sr_buffer_pct)
+                    entry, stop, setup.target, bias, sr_zones, buffer_usd=sr_buffer, buffer_pct=sr_buffer_pct
+                )
                 if not sr_ok:
                     setup.bias = "none"
                     setup.no_go.append(f"S/R proximity: {sr_reason}")

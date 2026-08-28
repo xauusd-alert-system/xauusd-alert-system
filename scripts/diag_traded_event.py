@@ -63,17 +63,15 @@ def _pct(part: int, whole: int) -> float:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Unconditional base rates of the traded event (A10).")
+    parser = argparse.ArgumentParser(description="Unconditional base rates of the traded event (A10).")
     parser.add_argument("--asset", required=True)
     parser.add_argument("--timeframe", default=None)
     parser.add_argument("--db-path", default=None)
-    parser.add_argument("--end-date", default=None,
-                        help="Drop candles at or after this UTC date (YYYY-MM-DD).")
-    parser.add_argument("--no-costs", action="store_true",
-                        help="Do not adjust the entry for half-spread + slippage.")
-    parser.add_argument("--keep-uneconomic", action="store_true",
-                        help="Keep events whose TP1 cannot cover the round-trip cost.")
+    parser.add_argument("--end-date", default=None, help="Drop candles at or after this UTC date (YYYY-MM-DD).")
+    parser.add_argument("--no-costs", action="store_true", help="Do not adjust the entry for half-spread + slippage.")
+    parser.add_argument(
+        "--keep-uneconomic", action="store_true", help="Keep events whose TP1 cannot cover the round-trip cost."
+    )
     parser.add_argument("--allow-locked", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
@@ -94,6 +92,7 @@ def main(argv: list[str] | None = None) -> None:
     if not args.allow_locked:
         from backtest.walk_forward import generate_windows
         from scripts.trial_journal import enforce_locked_holdout
+
         wf = cfg["backtest"]["walk_forward"]
         enforce_locked_holdout(
             cfg,
@@ -115,8 +114,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\n=== Traded-event base rates: {args.asset} ===")
     if args.end_date:
         print(f"Sample truncated at {args.end_date} (locked hold-out NOT touched)")
-    print(f"Geometry: protect = {protect_mult:g} x ATR (be_trigger {be_trigger:g} x tp1 "
-          f"{tp1_mult:g}) | stop = {stop_mult:g} x ATR | horizon = {horizon} bars")
+    print(
+        f"Geometry: protect = {protect_mult:g} x ATR (be_trigger {be_trigger:g} x tp1 "
+        f"{tp1_mult:g}) | stop = {stop_mult:g} x ATR | horizon = {horizon} bars"
+    )
     print(f"Driftless random-walk expectation: {rw_expected:.1f}% reach protect first")
 
     kw = dict(
@@ -134,31 +135,39 @@ def main(argv: list[str] | None = None) -> None:
     for name, lab in (("long", long_lab), ("short", short_lab)):
         v = lab.dropna()
         fav = int((v == 1.0).sum())
-        out_rows.append({
-            "side": name,
-            "resolved": len(v),
-            "unresolved": int(lab.isna().sum()),
-            "protect_first": fav,
-            "stop_first": int((v == 0.0).sum()),
-            "protect_first_pct": round(_pct(fav, len(v)), 2),
-        })
+        out_rows.append(
+            {
+                "side": name,
+                "resolved": len(v),
+                "unresolved": int(lab.isna().sum()),
+                "protect_first": fav,
+                "stop_first": int((v == 0.0).sum()),
+                "protect_first_pct": round(_pct(fav, len(v)), 2),
+            }
+        )
 
     hdr = f"{'side':<7}{'resolved':>10}{'unresolved':>12}{'protect':>9}{'stop':>8}{'protect%':>10}"
     print("\n1. UNCONDITIONAL OUTCOME PER SIDE (every bar, no signal filter)")
     print(hdr)
     print("-" * len(hdr))
     for r in out_rows:
-        print(f"{r['side']:<7}{r['resolved']:>10}{r['unresolved']:>12}"
-              f"{r['protect_first']:>9}{r['stop_first']:>8}{r['protect_first_pct']:>10.2f}")
+        print(
+            f"{r['side']:<7}{r['resolved']:>10}{r['unresolved']:>12}"
+            f"{r['protect_first']:>9}{r['stop_first']:>8}{r['protect_first_pct']:>10.2f}"
+        )
 
     obs = OBSERVED.get(args.asset)
     if obs:
-        print(f"\n   observed on {obs['trades']} selected entries: {obs['protected_pct']:.1f}% protected, "
-              f"{obs['stop_pct']:.1f}% full stops")
+        print(
+            f"\n   observed on {obs['trades']} selected entries: {obs['protected_pct']:.1f}% protected, "
+            f"{obs['stop_pct']:.1f}% full stops"
+        )
         short_rate = out_rows[1]["protect_first_pct"]
         edge = short_rate - obs["protected_pct"]
-        print(f"   short side unconditional {short_rate:.2f}% vs selected {obs['protected_pct']:.1f}% "
-              f"-> selection effect {edge:+.2f} pp")
+        print(
+            f"   short side unconditional {short_rate:.2f}% vs selected {obs['protected_pct']:.1f}% "
+            f"-> selection effect {edge:+.2f} pp"
+        )
         if abs(edge) < 2.0:
             print("   -> the signal selected nothing: the result is barrier geometry.")
         elif edge < -2.0:
@@ -183,8 +192,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"   short better than long    : {int(short_better.sum()):>7}  ({_pct(int(short_better.sum()), rows):.2f}%)")
     print(f"   -> directionally informative bars: {defined} ({_pct(defined, rows):.2f}% of sample)")
     if defined:
-        print(f"   -> class balance of that subset: long {_pct(int(long_better.sum()), defined):.2f}% / "
-              f"short {_pct(int(short_better.sum()), defined):.2f}%")
+        print(
+            f"   -> class balance of that subset: long {_pct(int(long_better.sum()), defined):.2f}% / "
+            f"short {_pct(int(short_better.sum()), defined):.2f}%"
+        )
         print("      (any deviation from 50% becomes a permanent live bias, because the")
         print("       ensemble compares p against absolute constants 0.55 / 0.62 / 0.71)")
     if _pct(defined, rows) < 20.0:
@@ -197,9 +208,11 @@ def main(argv: list[str] | None = None) -> None:
         old = df["label"] if "label" in df.columns else generate_labels_from_config(df, cfg)
         summ = label_distribution_summary(old)
         if summ.get("total_valid"):
-            print(f"   valid={summ['total_valid']} nan={summ['nan_count']} "
-                  f"upper={summ['pct_upper_hit']:.2f}% lower={summ['pct_lower_hit']:.2f}% "
-                  f"no_hit={summ['pct_no_hit']:.2f}%")
+            print(
+                f"   valid={summ['total_valid']} nan={summ['nan_count']} "
+                f"upper={summ['pct_upper_hit']:.2f}% lower={summ['pct_lower_hit']:.2f}% "
+                f"no_hit={summ['pct_no_hit']:.2f}%"
+            )
             print("   The model is trained to predict THIS, then executed against the")
             print("   geometry measured in section 1. Those are different events.")
         else:

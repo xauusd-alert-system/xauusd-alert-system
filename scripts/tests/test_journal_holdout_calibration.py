@@ -39,6 +39,7 @@ from scripts.trial_journal import (
 # Trial journal
 # ---------------------------------------------------------------------------
 
+
 def test_journal_append_and_read(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.trial_journal.JOURNAL_PATH", str(tmp_path / "trial_journal.csv"))
     log_trial("run_backtest", "GBPUSD", {"timeframe": "H1"}, {"median_pf": 2.42, "n_folds": 24})
@@ -66,8 +67,10 @@ def test_journal_default_historical_trials(tmp_path, monkeypatch):
 # Locked hold-out
 # ---------------------------------------------------------------------------
 
+
 def _windows():
     from backtest.walk_forward import WalkForwardWindow
+
     return [
         WalkForwardWindow(0, 10, 10, 20),
         WalkForwardWindow(10, 20, 20, 30),
@@ -81,8 +84,11 @@ def test_locked_holdout_disabled_returns_empty():
 
 
 def test_locked_holdout_violations_detected():
-    cfg = {"validation": {"locked_holdout": {"enabled": True, "start": "1970-01-01 00:00:21",
-                                             "end": "1970-01-01 00:00:25"}}}
+    cfg = {
+        "validation": {
+            "locked_holdout": {"enabled": True, "start": "1970-01-01 00:00:21", "end": "1970-01-01 00:00:25"}
+        }
+    }
     bad = locked_holdout_violations(cfg, _windows())
     # windows: [10,20) no overlap, [20,30) overlaps [21,25], [30,40) no
     assert len(bad) == 1
@@ -90,8 +96,11 @@ def test_locked_holdout_violations_detected():
 
 
 def test_enforce_locked_holdout_raises_and_allows():
-    cfg = {"validation": {"locked_holdout": {"enabled": True, "start": "1970-01-01 00:00:21",
-                                             "end": "1970-01-01 00:00:25"}}}
+    cfg = {
+        "validation": {
+            "locked_holdout": {"enabled": True, "start": "1970-01-01 00:00:21", "end": "1970-01-01 00:00:25"}
+        }
+    }
     with pytest.raises(SystemExit, match="LOCKED HOLD-OUT VIOLATION"):
         enforce_locked_holdout(cfg, _windows(), "run_backtest")
     # --allow-locked proceeds
@@ -101,6 +110,7 @@ def test_enforce_locked_holdout_raises_and_allows():
 # ---------------------------------------------------------------------------
 # Exit calibration math
 # ---------------------------------------------------------------------------
+
 
 def _mfe_mae_df(n=2000, seed=5):
     rng = np.random.default_rng(seed)
@@ -136,8 +146,9 @@ def test_calibrate_targets_quantiles():
 
 def test_trailing_decision_thresholds():
     # strong tail -> trailing recommended
-    strong = pd.DataFrame({"regime": ["trend_up"] * 200, "mfe": np.concatenate(
-        [np.full(100, 3.0), np.full(60, 6.0), np.full(40, 8.0)])})
+    strong = pd.DataFrame(
+        {"regime": ["trend_up"] * 200, "mfe": np.concatenate([np.full(100, 3.0), np.full(60, 6.0), np.full(40, 8.0)])}
+    )
     r = trailing_decision(strong)
     assert r["verdict"] == "trailing_recommended"
     # weak tail -> fixed TP3
@@ -147,6 +158,7 @@ def test_trailing_decision_thresholds():
 
 def test_run_calibration_structure_and_train_only():
     from config.loader import load_config
+
     cfg = load_config()
     df = _make_synthetic_wf_df(12600, price=1.28, atr=0.0014, freq="1h")
     df = _inject_biased_probs(df)
@@ -162,8 +174,10 @@ def test_run_calibration_structure_and_train_only():
 # Entry-timing (look-ahead) check
 # ---------------------------------------------------------------------------
 
+
 def test_run_fill_modes_structure():
     from config.loader import load_config
+
     cfg = load_config()
     df = _make_synthetic_wf_df(12600, price=1.28, atr=0.0014, freq="1h")
     df = _inject_biased_probs(df)
@@ -178,6 +192,7 @@ def test_run_fill_modes_structure():
 
 def test_run_fill_modes_no_folds_raises():
     from config.loader import load_config
+
     cfg = load_config()
     df = _make_synthetic_wf_df(500, price=1.28, atr=0.0014, freq="1h")
     with pytest.raises(ValueError, match="No walk-forward folds"):

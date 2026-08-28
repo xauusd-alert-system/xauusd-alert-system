@@ -1,4 +1,5 @@
 """Tests for scripts/migrate_all.py (ТЗ 9.11)."""
+
 from __future__ import annotations
 
 import json
@@ -39,12 +40,9 @@ def test_dry_run_does_not_change_data(tmp_path):
     # Snapshot data before.
     conn = sqlite3.connect(db_path)
     try:
-        before_rows = conn.execute(
-            "SELECT group_id, spec_json, state FROM trade_groups"
-        ).fetchall()
+        before_rows = conn.execute("SELECT group_id, spec_json, state FROM trade_groups").fetchall()
         has_migrations_table = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='schema_migrations'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
         ).fetchone()
     finally:
         conn.close()
@@ -57,15 +55,12 @@ def test_dry_run_does_not_change_data(tmp_path):
     # Data unchanged: no migration applied, no records written.
     conn = sqlite3.connect(db_path)
     try:
-        after_rows = conn.execute(
-            "SELECT group_id, spec_json, state FROM trade_groups"
-        ).fetchall()
-        applied = conn.execute(
-            "SELECT COUNT(*) FROM schema_migrations"
-        ).fetchone()[0] if conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='schema_migrations'"
-        ).fetchone() else 0
+        after_rows = conn.execute("SELECT group_id, spec_json, state FROM trade_groups").fetchall()
+        applied = (
+            conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").fetchone()
+            else 0
+        )
     finally:
         conn.close()
     assert after_rows == before_rows
@@ -83,13 +78,10 @@ def test_real_run_applies_migrations(tmp_path):
     # 003 = provenance_store).
     conn = sqlite3.connect(db_path)
     try:
-        applied = conn.execute(
-            "SELECT version, name FROM schema_migrations ORDER BY version"
-        ).fetchall()
+        applied = conn.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall()
     finally:
         conn.close()
-    assert applied == [(1, "initial"), (2, "feature_store"),
-                       (3, "provenance_store")]
+    assert applied == [(1, "initial"), (2, "feature_store"), (3, "provenance_store")]
     # Registry check on the healthy payload passed.
     migration_ok, _ = entries[0]
     assert migration_ok
@@ -118,6 +110,5 @@ def test_run_migrate_all_fails_on_registry_error(tmp_path):
     db_path = str(tmp_path / "fail.sqlite")
     _make_group_db(db_path, corrupt=True)
     results = run_migrate_all(db_paths=[db_path], dry_run=False)
-    failures = [summary for name, ok, summary in results
-                if name == db_path and not ok]
+    failures = [summary for name, ok, summary in results if name == db_path and not ok]
     assert failures, "corrupt registry records must surface as failures"

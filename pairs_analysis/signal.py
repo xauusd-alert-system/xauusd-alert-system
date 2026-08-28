@@ -17,6 +17,7 @@ Backtest (ТЗ §7.2) — point-in-time walk-forward: β_t из прямого �
 Калмана (только данные <= t), z по скользящему окну, гейты (ADF/HL/Hurst)
 считаются по окну ДО текущего бара. Никакого look-ahead.
 """
+
 from __future__ import annotations
 
 import math
@@ -32,18 +33,19 @@ from .analyzer import BARS_PER_DAY, PairMetrics
 @dataclass
 class PairTrade:
     """Одна закрытая парная сделка."""
+
     entry_ts: str
     entry_z: float
     exit_ts: str
     exit_z: float
-    exit_reason: str            # exit_z | stop_z | timeout | end_of_data
+    exit_reason: str  # exit_z | stop_z | timeout | end_of_data
     r: float
     bars_held: int
     half_life_bars: float
     adf_p: float
     hurst: float
     beta: float
-    side: str                   # long P1 / short P2, либо наоборот
+    side: str  # long P1 / short P2, либо наоборот
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -60,8 +62,7 @@ class BacktestResult:
         rs = [t.r for t in self.trades]
         n = len(rs)
         if n == 0:
-            return {"name": self.name, "timeframe": self.timeframe,
-                    "n_bars": self.n_bars, "n_trades": 0}
+            return {"name": self.name, "timeframe": self.timeframe, "n_bars": self.n_bars, "n_trades": 0}
         wins = sum(1 for r in rs if r > 0)
         # макс-просадка серии R
         cum = np.cumsum(rs)
@@ -78,25 +79,30 @@ class BacktestResult:
         for t in self.trades:
             by_reason[t.exit_reason] = by_reason.get(t.exit_reason, 0) + 1
         return {
-            "name": self.name, "timeframe": self.timeframe,
-            "n_bars": self.n_bars, "n_trades": n,
+            "name": self.name,
+            "timeframe": self.timeframe,
+            "n_bars": self.n_bars,
+            "n_trades": n,
             "win_rate": round(100 * wins / n, 1),
-            "sum_r": round(sum(rs), 2), "avg_r": round(sum(rs) / n, 3),
+            "sum_r": round(sum(rs), 2),
+            "avg_r": round(sum(rs) / n, 3),
             "max_dd_r": round(mdd, 2),
             "avg_bars_held": round(sum(held) / n, 1),
             "median_bars_held": float(np.median(held)),
-            "by_entry_z": by_z, "by_reason": by_reason,
+            "by_entry_z": by_z,
+            "by_reason": by_reason,
         }
 
 
 @dataclass
 class Signal:
     """Текущий сигнал по паре (живой снимок, ТЗ §6 интерфейс)."""
+
     name: str
     timeframe: str
     ts: str
     z: float
-    direction: str              # long | short | none
+    direction: str  # long | short | none
     reason: str
     adf_p: float
     half_life_days: float
@@ -104,9 +110,16 @@ class Signal:
     valid: bool
 
 
-def _simulate_position(side: str, entry_idx: int, entry_z: float,
-                       z: np.ndarray, stop_z: float, exit_z: float,
-                       hl_bars: float, last_idx: int):
+def _simulate_position(
+    side: str,
+    entry_idx: int,
+    entry_z: float,
+    z: np.ndarray,
+    stop_z: float,
+    exit_z: float,
+    hl_bars: float,
+    last_idx: int,
+):
     """Проводит открытую позицию по ряду z до первого исхода.
     Возвращает (exit_idx, reason, z_at_exit). Чистая функция — тестируемая."""
     timeout = int(math.ceil(2.0 * hl_bars)) if np.isfinite(hl_bars) else 10**9
@@ -147,12 +160,11 @@ class SignalEngine:
     # ---- гейты (point-in-time: только данные <= t) ----
     def _gates(self, e: pd.Series, t: int) -> dict:
         lo = max(0, t + 1 - self.gate_window)
-        tail = e.iloc[lo:t + 1]
+        tail = e.iloc[lo : t + 1]
         adf_p = metrics_mod.adf_pvalue(tail)
         theta, hl_bars = metrics_mod.half_life(tail)
         hurst = metrics_mod.hurst_rs(tail.diff().dropna())
-        return {"adf_p": adf_p, "theta": theta, "half_life_bars": hl_bars,
-                "hurst": hurst}
+        return {"adf_p": adf_p, "theta": theta, "half_life_bars": hl_bars, "hurst": hurst}
 
     def _gates_ok(self, g: dict, tf: str) -> tuple[bool, str]:
         bars_per_day = BARS_PER_DAY.get(tf, 1.0)
@@ -166,21 +178,18 @@ class SignalEngine:
         return True, "ok"
 
     # ---- walk-forward бэктест (ТЗ §7.2) ----
-    def walk_forward(self, p1: pd.DataFrame, p2: pd.DataFrame,
-                     name: str, timeframe: str) -> BacktestResult:
+    def walk_forward(self, p1: pd.DataFrame, p2: pd.DataFrame, name: str, timeframe: str) -> BacktestResult:
         ln1 = np.log(p1["close"].astype(float))
         ln2 = np.log(p2["close"].astype(float))
         if len(ln1) < self.window + 50:
             return BacktestResult(name, timeframe, len(ln1))
-        beta_series = pd.Series(
-            metrics_mod.kalman_beta(ln2, ln1, q=self.kalman_q, r=self.kalman_r),
-            index=ln1.index)
+        beta_series = pd.Series(metrics_mod.kalman_beta(ln2, ln1, q=self.kalman_q, r=self.kalman_r), index=ln1.index)
         e = ln1 - beta_series * ln2
         z = metrics_mod.zscore(e, self.window).to_numpy(dtype=float)
         min_start = max(self.window, int(self.cfg.get("min_start_bars", 250)))
 
         trades: list[PairTrade] = []
-        cooldown = False        # после выхода ждём |z| < entry_z (анти-чатер)
+        cooldown = False  # после выхода ждём |z| < entry_z (анти-чатер)
         n = len(ln1)
         t = min_start
         while t < n:
@@ -199,22 +208,28 @@ class SignalEngine:
                     # позиция симулируется до конца и время перепрыгивает на
                     # выход: сделки не перекрываются, look-ahead нет
                     exit_idx, reason, z_exit = _simulate_position(
-                        side, t, zt, z, self.stop_z, self.exit_z,
-                        g["half_life_bars"], n - 1)
+                        side, t, zt, z, self.stop_z, self.exit_z, g["half_life_bars"], n - 1
+                    )
                     if side == "long":
-                        r = (z_exit - zt) / (self.stop_z + zt)          # risk = stop_z - |z0|
+                        r = (z_exit - zt) / (self.stop_z + zt)  # risk = stop_z - |z0|
                     else:
                         r = (zt - z_exit) / (self.stop_z - zt)
-                    trades.append(PairTrade(
-                        entry_ts=str(ln1.index[t].date()), entry_z=round(float(zt), 3),
-                        exit_ts=str(ln1.index[exit_idx].date()),
-                        exit_z=round(float(z_exit), 3), exit_reason=reason,
-                        r=round(float(r), 3), bars_held=exit_idx - t,
-                        half_life_bars=round(float(g["half_life_bars"]), 1),
-                        adf_p=round(float(g["adf_p"]), 5),
-                        hurst=round(float(g["hurst"]), 3),
-                        beta=round(float(beta_series.iloc[t]), 4),
-                        side=side))
+                    trades.append(
+                        PairTrade(
+                            entry_ts=str(ln1.index[t].date()),
+                            entry_z=round(float(zt), 3),
+                            exit_ts=str(ln1.index[exit_idx].date()),
+                            exit_z=round(float(z_exit), 3),
+                            exit_reason=reason,
+                            r=round(float(r), 3),
+                            bars_held=exit_idx - t,
+                            half_life_bars=round(float(g["half_life_bars"]), 1),
+                            adf_p=round(float(g["adf_p"]), 5),
+                            hurst=round(float(g["hurst"]), 3),
+                            beta=round(float(beta_series.iloc[t]), 4),
+                            side=side,
+                        )
+                    )
                     t = exit_idx
                     cooldown = True
                     continue
@@ -225,23 +240,69 @@ class SignalEngine:
     def current(self, m: PairMetrics) -> Signal:
         zs = m.zscore.dropna()
         if not len(zs):
-            return Signal(m.name, m.timeframe, m.end, float("nan"), "none",
-                          "нет данных", float("nan"), float("nan"), float("nan"), False)
+            return Signal(
+                m.name,
+                m.timeframe,
+                m.end,
+                float("nan"),
+                "none",
+                "нет данных",
+                float("nan"),
+                float("nan"),
+                float("nan"),
+                False,
+            )
         z_cur = float(zs.iloc[-1])
         g = {"adf_p": m.adf_p, "half_life_bars": m.half_life_bars, "hurst": m.hurst}
         ok, why = self._gates_ok(g, m.timeframe)
         if not ok:
-            return Signal(m.name, m.timeframe, m.end, z_cur, "none",
-                          f"NO EDGE — гейты не пройдены ({why})",
-                          m.adf_p, m.half_life_days, m.hurst, False)
+            return Signal(
+                m.name,
+                m.timeframe,
+                m.end,
+                z_cur,
+                "none",
+                f"NO EDGE — гейты не пройдены ({why})",
+                m.adf_p,
+                m.half_life_days,
+                m.hurst,
+                False,
+            )
         if z_cur >= self.entry_z:
-            return Signal(m.name, m.timeframe, m.end, z_cur, "short",
-                          "MEAN-REV SHORT (z > +2σ, ADF/HL/Hurst ок)",
-                          m.adf_p, m.half_life_days, m.hurst, True)
+            return Signal(
+                m.name,
+                m.timeframe,
+                m.end,
+                z_cur,
+                "short",
+                "MEAN-REV SHORT (z > +2σ, ADF/HL/Hurst ок)",
+                m.adf_p,
+                m.half_life_days,
+                m.hurst,
+                True,
+            )
         if z_cur <= -self.entry_z:
-            return Signal(m.name, m.timeframe, m.end, z_cur, "long",
-                          "MEAN-REV LONG (z < −2σ, ADF/HL/Hurst ок)",
-                          m.adf_p, m.half_life_days, m.hurst, True)
-        return Signal(m.name, m.timeframe, m.end, z_cur, "none",
-                      f"NO EDGE — STAND ASIDE (|z|={abs(z_cur):.2f} < {self.entry_z:.0f}σ)",
-                      m.adf_p, m.half_life_days, m.hurst, False)
+            return Signal(
+                m.name,
+                m.timeframe,
+                m.end,
+                z_cur,
+                "long",
+                "MEAN-REV LONG (z < −2σ, ADF/HL/Hurst ок)",
+                m.adf_p,
+                m.half_life_days,
+                m.hurst,
+                True,
+            )
+        return Signal(
+            m.name,
+            m.timeframe,
+            m.end,
+            z_cur,
+            "none",
+            f"NO EDGE — STAND ASIDE (|z|={abs(z_cur):.2f} < {self.entry_z:.0f}σ)",
+            m.adf_p,
+            m.half_life_days,
+            m.hurst,
+            False,
+        )

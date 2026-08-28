@@ -9,6 +9,7 @@ SQLite-каталог ``ProvenanceStore``, ``verify_record`` c TTL-провер�
 адаптер ``record_from_group_row`` каталогизирует записи из существующего
 ``data.trade_group_store`` без изменения его семантики.
 """
+
 from provenance.spec import (
     PROVENANCE_V2_SCHEMA_VERSION,
     REQUIRED_RECORD_FIELDS,

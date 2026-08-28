@@ -32,9 +32,7 @@ from backtest.portfolio import (
 )
 from config.loader import load_config
 
-DEFAULT_CLUSTERS = {"metals": ["XAUUSD", "XAGUSD"],
-                    "fx": ["EURUSD", "GBPUSD"],
-                    "crypto": ["BTCUSD"]}
+DEFAULT_CLUSTERS = {"metals": ["XAUUSD", "XAGUSD"], "fx": ["EURUSD", "GBPUSD"], "crypto": ["BTCUSD"]}
 
 
 def load_trades_for_asset(asset_key: str, cfg: dict, max_folds: int | None) -> pd.DataFrame:
@@ -59,6 +57,7 @@ def load_trades_for_asset(asset_key: str, cfg: dict, max_folds: int | None) -> p
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     try:
         from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, asset_key)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=asset_key)
     except Exception:
@@ -78,10 +77,8 @@ def load_trades_for_asset(asset_key: str, cfg: dict, max_folds: int | None) -> p
         cfg_run = merge_asset_cfg(cfg_run, asset_key, "ensemble")
         engine = EnsembleBacktester(cfg_run, asset_key=asset_key)
         for t in engine.run(fdf.reset_index(drop=True)):
-            risk = abs(t.entry_price - t.initial_stop_price) * t.volume * pvl \
-                if t.initial_stop_price else 0.0
-            rows.append({"entry_ts": int(t.entry_ts),
-                         "net_r": float(t.pnl / risk) if risk > 1e-12 else float("nan")})
+            risk = abs(t.entry_price - t.initial_stop_price) * t.volume * pvl if t.initial_stop_price else 0.0
+            rows.append({"entry_ts": int(t.entry_ts), "net_r": float(t.pnl / risk) if risk > 1e-12 else float("nan")})
     return pd.DataFrame(rows)
 
 
@@ -107,8 +104,7 @@ def main(argv: list[str] | None = None) -> None:
     schemes = compare_schemes(daily, DEFAULT_CLUSTERS)
     print("\nScheme comparison:")
     for name, m in schemes.items():
-        print(f"  {name:<20} Sharpe={m['sharpe']}  maxDD={m['max_dd_r']}R  "
-              f"Calmar={m['calmar']}  ENB={m['enb']}")
+        print(f"  {name:<20} Sharpe={m['sharpe']}  maxDD={m['max_dd_r']}R  Calmar={m['calmar']}  ENB={m['enb']}")
 
     crp = cluster_risk_parity_weights(list(daily.columns), DEFAULT_CLUSTERS)
     print("\nCluster risk parity weights:", crp.round(4).to_dict())
@@ -119,24 +115,32 @@ def main(argv: list[str] | None = None) -> None:
         schemes_no = compare_schemes(daily_no, DEFAULT_CLUSTERS)
         crp_no = cluster_risk_parity_weights(no_xag, DEFAULT_CLUSTERS)
         print(f"\nWITHOUT XAG ({len(no_xag)} assets):")
-        print(f"  ENB = {effective_number_bets(daily_no):.2f} | cluster parity "
-              f"Sharpe = {schemes_no['cluster_risk_parity']['sharpe']} "
-              f"vs with-XAG Sharpe = {schemes['cluster_risk_parity']['sharpe']}")
+        print(
+            f"  ENB = {effective_number_bets(daily_no):.2f} | cluster parity "
+            f"Sharpe = {schemes_no['cluster_risk_parity']['sharpe']} "
+            f"vs with-XAG Sharpe = {schemes['cluster_risk_parity']['sharpe']}"
+        )
         print("  weights:", crp_no.round(4).to_dict())
 
     ks = kill_switch_thresholds(daily)
     print("\nKill-switch thresholds (from backtest distribution):")
-    print(f"  daily 2-sigma = {ks['daily_2sigma']}R | weekly 3-sigma = "
-          f"{ks['weekly_3sigma']}R (n_days={ks['n_days']})")
+    print(f"  daily 2-sigma = {ks['daily_2sigma']}R | weekly 3-sigma = {ks['weekly_3sigma']}R (n_days={ks['n_days']})")
 
     os.makedirs("logs", exist_ok=True)
     out_json = args.out or "logs/portfolio.json"
     with open(out_json, "w", encoding="utf-8") as f:
-        json.dump({"correlation": strategy_correlation(daily).round(4).to_dict(),
-                   "enb": effective_number_bets(daily),
-                   "schemes": schemes,
-                   "cluster_weights": crp.to_dict(),
-                   "kill_switch": ks}, f, indent=2, default=str)
+        json.dump(
+            {
+                "correlation": strategy_correlation(daily).round(4).to_dict(),
+                "enb": effective_number_bets(daily),
+                "schemes": schemes,
+                "cluster_weights": crp.to_dict(),
+                "kill_switch": ks,
+            },
+            f,
+            indent=2,
+            default=str,
+        )
     print(f"\n[portfolio] -> {out_json}")
 
 

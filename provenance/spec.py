@@ -18,6 +18,7 @@
     broker_snapshot(dict), cost_snapshot(dict), lineage(dict),
     as_of_utc_ms, executed_at_utc_ms?, schema_version, record_hash
 """
+
 from __future__ import annotations
 
 from typing import Any, TypedDict
@@ -124,14 +125,18 @@ class ProvenanceRecordV2(BaseModel):
         prov = dict(getattr(spec, "provenance", None) or {})
         broker_snapshot = prov.pop("broker_snapshot", None)
         if not isinstance(broker_snapshot, dict):
-            broker_snapshot = ({"broker_snapshot_id": prov.pop(
-                "broker_snapshot_id", None)} if prov.get("broker_snapshot_id")
-                or "broker_snapshot_id" in prov else {})
+            broker_snapshot = (
+                {"broker_snapshot_id": prov.pop("broker_snapshot_id", None)}
+                if prov.get("broker_snapshot_id") or "broker_snapshot_id" in prov
+                else {}
+            )
         cost_snapshot = prov.pop("cost_snapshot", None)
         if not isinstance(cost_snapshot, dict):
-            cost_snapshot = ({"cost_snapshot_id": prov.pop(
-                "cost_snapshot_id", None)} if prov.get("cost_snapshot_id")
-                or "cost_snapshot_id" in prov else {})
+            cost_snapshot = (
+                {"cost_snapshot_id": prov.pop("cost_snapshot_id", None)}
+                if prov.get("cost_snapshot_id") or "cost_snapshot_id" in prov
+                else {}
+            )
         feature_snapshot_id = prov.pop("feature_snapshot_id", None)
         return cls(
             group_id=str(spec.group_id),

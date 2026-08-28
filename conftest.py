@@ -6,6 +6,7 @@ use ``cfg``, ``pipeline``, ``signal``, ``position``, ``stub_predictor``,
 All fixtures are function-scoped (fresh per test) and accept optional
 overrides via indirect parametrize.
 """
+
 import os
 import sys
 
@@ -63,8 +64,7 @@ def pipeline_with_model(cfg):
     model_path = cfg["assets"]["XAUUSD"]["model_path"]
     if not os.path.isfile(model_path):
         pytest.skip("production model not on disk")
-    return build_pipeline(cfg=cfg, asset="XAUUSD", data_mode="mock",
-                          model_path=model_path)
+    return build_pipeline(cfg=cfg, asset="XAUUSD", data_mode="mock", model_path=model_path)
 
 
 # ---------------------------------------------------------------------------

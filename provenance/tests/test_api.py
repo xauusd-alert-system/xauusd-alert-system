@@ -1,4 +1,5 @@
 """Tests for provenance/api.py — single GET + bulk audit (ТЗ 8.7 / P2-3)."""
+
 from __future__ import annotations
 
 import pytest
@@ -40,8 +41,7 @@ def test_bulk_audit_aggregates(client):
     client, store = client
     store.save(make_record(group_id="TG-1", signal_id="SGL-1"))
     store.save(make_record(group_id="TG-2", signal_id="SGL-2"))
-    store.save(make_record(group_id="TG-3", signal_id="SGL-3",
-                           broker_snapshot={}))  # incomplete lineage
+    store.save(make_record(group_id="TG-3", signal_id="SGL-3", broker_snapshot={}))  # incomplete lineage
     response = client.get(
         "/api/provenance/bulk",
         params={"from": NOW_MS - 1000, "to": NOW_MS + 1000},
@@ -57,10 +57,8 @@ def test_bulk_audit_aggregates(client):
 
 def test_bulk_audit_avg_time_to_execution(client):
     client, store = client
-    store.save(make_record(group_id="TG-E1", signal_id="SGL-E1",
-                           executed_at_utc_ms=NOW_MS + 500))
-    store.save(make_record(group_id="TG-E2", signal_id="SGL-E2",
-                           executed_at_utc_ms=NOW_MS + 1500))
+    store.save(make_record(group_id="TG-E1", signal_id="SGL-E1", executed_at_utc_ms=NOW_MS + 500))
+    store.save(make_record(group_id="TG-E2", signal_id="SGL-E2", executed_at_utc_ms=NOW_MS + 1500))
     payload = client.get(
         "/api/provenance/bulk",
         params={"from": NOW_MS - 1000, "to": NOW_MS + 2000},
@@ -76,10 +74,13 @@ def test_bulk_empty_range_and_validation(client):
     ).json()
     assert payload["total_groups"] == 0
     assert payload["complete_lineage_count"] == 0
-    assert client.get(
-        "/api/provenance/bulk",
-        params={"from": NOW_MS + 1000, "to": NOW_MS},
-    ).status_code == 422
+    assert (
+        client.get(
+            "/api/provenance/bulk",
+            params={"from": NOW_MS + 1000, "to": NOW_MS},
+        ).status_code
+        == 422
+    )
 
 
 def test_bulk_missing_params_422(client):
@@ -94,21 +95,17 @@ def test_bulk_audit_cli(tmp_path, capsys):
     db_path = str(tmp_path / "prov.sqlite")
     store = ProvenanceStore(db_path)
     store.save(make_record(group_id="TG-C1", signal_id="SGL-C1"))
-    store.save(make_record(group_id="TG-C2", signal_id="SGL-C2",
-                           cost_snapshot={}))
-    code = main(["--from", str(NOW_MS - 1000), "--to", str(NOW_MS + 1000),
-                 "--db", db_path])
+    store.save(make_record(group_id="TG-C2", signal_id="SGL-C2", cost_snapshot={}))
+    code = main(["--from", str(NOW_MS - 1000), "--to", str(NOW_MS + 1000), "--db", db_path])
     out = capsys.readouterr().out
     assert code == 0
     assert "total_groups          : 2" in out
     assert "complete_lineage_count: 1" in out
     assert "- cost_snapshot: 1" in out
 
-    code_json = main(["--from", str(NOW_MS - 1000), "--to", str(NOW_MS + 1000),
-                      "--db", db_path, "--json"])
+    code_json = main(["--from", str(NOW_MS - 1000), "--to", str(NOW_MS + 1000), "--db", db_path, "--json"])
     assert code_json == 0
     assert '"total_groups": 2' in capsys.readouterr().out
 
-    code_strict = main(["--from", str(NOW_MS - 1000), "--to", str(NOW_MS + 1000),
-                        "--db", db_path, "--strict"])
+    code_strict = main(["--from", str(NOW_MS - 1000), "--to", str(NOW_MS + 1000), "--db", db_path, "--strict"])
     assert code_strict == 1

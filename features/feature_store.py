@@ -28,6 +28,7 @@
     computed_at_utc_ms INTEGER NOT NULL
     UNIQUE(symbol, timeframe, bar_ts_utc_ms, feature_set_version)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -57,8 +58,7 @@ FEATURE_SNAPSHOTS_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_feature_snapshots_lookup "
     "ON feature_snapshots(symbol, timeframe, feature_set_version, "
     "bar_ts_utc_ms);",
-    "CREATE INDEX IF NOT EXISTS idx_feature_snapshots_ts "
-    "ON feature_snapshots(bar_ts_utc_ms);",
+    "CREATE INDEX IF NOT EXISTS idx_feature_snapshots_ts ON feature_snapshots(bar_ts_utc_ms);",
 )
 
 
@@ -68,9 +68,7 @@ def _now_ms() -> int:
 
 def canonical_features_json(features: Mapping[str, Any]) -> str:
     """Canonical JSON for a feature dict (stable ordering, compact separators)."""
-    return json.dumps(
-        dict(features), sort_keys=True, separators=(",", ":"), default=_json_default
-    )
+    return json.dumps(dict(features), sort_keys=True, separators=(",", ":"), default=_json_default)
 
 
 def _json_default(value: Any) -> str:
@@ -137,9 +135,7 @@ class FeatureStore:
         Returns ``(snapshot_id, features_dict)``.
         """
         if (compute_fn is None) == (features is None):
-            raise ValueError(
-                "provide exactly one of compute_fn or features"
-            )
+            raise ValueError("provide exactly one of compute_fn or features")
         if compute_fn is not None:
             computed = compute_fn()
             if computed is None:
@@ -241,8 +237,7 @@ class FeatureStore:
                 f"WHERE symbol = ? AND timeframe = ? AND feature_set_version = ? "
                 f"AND bar_ts_utc_ms >= ? AND bar_ts_utc_ms <= ? "
                 f"ORDER BY bar_ts_utc_ms ASC",
-                (str(symbol), str(timeframe), str(feature_set_version),
-                 int(from_ts), int(to_ts)),
+                (str(symbol), str(timeframe), str(feature_set_version), int(from_ts), int(to_ts)),
             ).fetchall()
         finally:
             conn.close()

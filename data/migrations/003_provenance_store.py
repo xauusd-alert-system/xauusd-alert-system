@@ -46,10 +46,8 @@ CREATE TABLE IF NOT EXISTS provenance_records (
 """
 
 INDEX_SQL = (
-    "CREATE INDEX IF NOT EXISTS idx_provenance_records_signal "
-    "ON provenance_records(signal_id)",
-    "CREATE INDEX IF NOT EXISTS idx_provenance_records_as_of "
-    "ON provenance_records(as_of_utc_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_provenance_records_signal ON provenance_records(signal_id)",
+    "CREATE INDEX IF NOT EXISTS idx_provenance_records_as_of ON provenance_records(as_of_utc_ms)",
 )
 
 

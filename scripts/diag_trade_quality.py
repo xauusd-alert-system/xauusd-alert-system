@@ -47,10 +47,15 @@ from scripts.run_backtest import (
 )
 
 
-def collect_trades_for_variant(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                               variant_name: str, overrides: dict | None,
-                               max_folds: int | None = None,
-                               random_seed: int = 42) -> list[dict]:
+def collect_trades_for_variant(
+    cfg: dict,
+    asset_key: str,
+    df_full: pd.DataFrame,
+    variant_name: str,
+    overrides: dict | None,
+    max_folds: int | None = None,
+    random_seed: int = 42,
+) -> list[dict]:
     """Run all walk-forward folds for one variant and return per-trade records.
 
     Each record contains the fields needed for quality slicing:
@@ -62,8 +67,8 @@ def collect_trades_for_variant(cfg: dict, asset_key: str, df_full: pd.DataFrame,
 
     bt_cfg = cfg_v.get("backtest", {})
     volume = bt_cfg.get("volume", 0.10)
-    point_value_lot = cfg_v.get("assets", {}).get(asset_key, {}).get(
-        "point_value_lot", bt_cfg.get("point_value_lot", 100.0)
+    point_value_lot = (
+        cfg_v.get("assets", {}).get(asset_key, {}).get("point_value_lot", bt_cfg.get("point_value_lot", 100.0))
     )
 
     records = []
@@ -93,20 +98,22 @@ def collect_trades_for_variant(cfg: dict, asset_key: str, df_full: pd.DataFrame,
             risk_money = abs(t.entry_price - t.initial_stop_price) * t.volume * point_value_lot
             r = float(t.pnl / risk_money) if risk_money > 1e-12 else 0.0
 
-            records.append({
-                "variant": variant_name,
-                "entry_ts": int(t.entry_ts),
-                "session": t.session,
-                "regime": t.regime_at_entry,
-                "direction": t.direction,
-                "p_long": round(p_long, 4),
-                "p_short": round(p_short, 4),
-                "p_max": round(p_max, 4),
-                "pnl": round(float(t.pnl), 6),
-                "R": round(r, 6),
-                "exit_reason": t.exit_reason,
-                "atr": float(row.get("atr", np.nan)),
-            })
+            records.append(
+                {
+                    "variant": variant_name,
+                    "entry_ts": int(t.entry_ts),
+                    "session": t.session,
+                    "regime": t.regime_at_entry,
+                    "direction": t.direction,
+                    "p_long": round(p_long, 4),
+                    "p_short": round(p_short, 4),
+                    "p_max": round(p_max, 4),
+                    "pnl": round(float(t.pnl), 6),
+                    "R": round(r, 6),
+                    "exit_reason": t.exit_reason,
+                    "atr": float(row.get("atr", np.nan)),
+                }
+            )
     return records
 
 
@@ -123,14 +130,16 @@ def _metrics_for(df_slice: pd.DataFrame) -> pd.Series:
     pf = (gp / gl) if gl > 0 else 999.0
     wr = 100.0 * len(wins) / n
     t_block = block_bootstrap_t(r.tolist()) if n >= 2 else np.nan
-    return pd.Series({
-        "n": n,
-        "WR%": round(wr, 1),
-        "PF": round(pf, 2) if pf != 999.0 else 999.0,
-        "PnL_R": round(float(r.sum()), 3),
-        "R_mean": round(float(r.mean()), 4),
-        "t_block": round(t_block, 3) if not np.isnan(t_block) else np.nan,
-    })
+    return pd.Series(
+        {
+            "n": n,
+            "WR%": round(wr, 1),
+            "PF": round(pf, 2) if pf != 999.0 else 999.0,
+            "PnL_R": round(float(r.sum()), 3),
+            "R_mean": round(float(r.mean()), 4),
+            "t_block": round(t_block, 3) if not np.isnan(t_block) else np.nan,
+        }
+    )
 
 
 def summarize_records(df: pd.DataFrame) -> None:
@@ -175,10 +184,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Per-trade signal quality diagnostic.")
     parser.add_argument("--asset", required=True, help="Asset key (e.g. XAUUSD)")
     parser.add_argument("--db-path", default=None, help="SQLite DB path")
-    parser.add_argument("--variants", default="current,wide",
-                        help="Comma-separated variant names (must exist in the asset's variant family)")
-    parser.add_argument("--end-date", default=None,
-                        help="End date for data (same semantics as deflated_sharpe)")
+    parser.add_argument(
+        "--variants",
+        default="current,wide",
+        help="Comma-separated variant names (must exist in the asset's variant family)",
+    )
+    parser.add_argument("--end-date", default=None, help="End date for data (same semantics as deflated_sharpe)")
     parser.add_argument("--max-folds", type=int, default=None, help="Cap folds for quick runs")
     parser.add_argument("--out-dir", default="logs", help="Directory for output CSV")
     args = parser.parse_args(argv)
@@ -204,8 +215,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Warning: variant '{vname}' not in family for {asset_key}, skipping")
             continue
         overrides = family[vname]
-        records = collect_trades_for_variant(cfg, asset_key, df_full, vname, overrides,
-                                             max_folds=args.max_folds)
+        records = collect_trades_for_variant(cfg, asset_key, df_full, vname, overrides, max_folds=args.max_folds)
         all_records.extend(records)
         print(f"Collected {len(records)} trades for variant '{vname}'")
 

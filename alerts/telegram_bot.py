@@ -2,6 +2,7 @@
 Telegram bot integration - sends alerts for signals AND trade execution/close updates.
 CRITICAL: bot token is read exclusively from environment variable TELEGRAM_BOT_TOKEN.
 """
+
 import logging
 import time
 from datetime import UTC, datetime
@@ -49,11 +50,7 @@ class TelegramAlertBot:
             return False
 
         try:
-            response = requests.post(
-                self.base_url,
-                data={"chat_id": self.chat_id, "text": text},
-                timeout=10
-            )
+            response = requests.post(self.base_url, data={"chat_id": self.chat_id, "text": text}, timeout=10)
             response.raise_for_status()
             return True
         except Exception as e:
@@ -100,9 +97,7 @@ class TelegramAlertBot:
             published = int(time.time())
             signal["published_at_utc"] = published
             created = signal.get("timestamp_utc")
-            signal["publish_latency_seconds"] = (
-                max(0, published - int(created)) if created is not None else None
-            )
+            signal["publish_latency_seconds"] = max(0, published - int(created)) if created is not None else None
             self._last_alert_ts = time.time()
             self._alerts_sent_today += 1
             return True

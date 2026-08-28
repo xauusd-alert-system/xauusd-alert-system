@@ -1,4 +1,5 @@
 """Tests for realtime/prepost_metrics.py (dashboard pre/post comparison)."""
+
 import os
 
 import pandas as pd
@@ -17,20 +18,36 @@ def _write_pair(tmp_path, asset_lower: str, tf: str, pre_rows, post_rows) -> Non
 
 def _rows(dirs, rs, pnls, variant="current"):
     return [
-        {"fold_id": 0, "variant": variant, "entry_ts": 1700000000 + i,
-         "direction": d, "session": "london", "regime": "range",
-         "p_long": 0.6, "p_short": 0.4, "p_max": 0.6,
-         "pnl": pnls[i], "R": rs[i], "exit_reason": "tp3_runner"}
+        {
+            "fold_id": 0,
+            "variant": variant,
+            "entry_ts": 1700000000 + i,
+            "direction": d,
+            "session": "london",
+            "regime": "range",
+            "p_long": 0.6,
+            "p_short": 0.4,
+            "p_max": 0.6,
+            "pnl": pnls[i],
+            "R": rs[i],
+            "exit_reason": "tp3_runner",
+        }
         for i, (d, r, p) in enumerate(zip(dirs, rs, pnls))
     ]
 
 
 def test_collect_prepost_basic(tmp_path):
     # two assets: XAUUSD with a pair, EURUSD with a pair
-    _write_pair(tmp_path, "xauusd", "", _rows(["long"] * 3, [1.0, 1.0, -1.0], [10, 10, -10]),
-                _rows(["long"] * 4, [1.0, 1.0, 1.0, -1.0], [10, 10, 10, -10]))
-    _write_pair(tmp_path, "eurusd", "", _rows(["short"] * 2, [-1.0, -1.0], [-5, -5]),
-                _rows(["short"] * 2, [0.5, -1.0], [5, -5]))
+    _write_pair(
+        tmp_path,
+        "xauusd",
+        "",
+        _rows(["long"] * 3, [1.0, 1.0, -1.0], [10, 10, -10]),
+        _rows(["long"] * 4, [1.0, 1.0, 1.0, -1.0], [10, 10, 10, -10]),
+    )
+    _write_pair(
+        tmp_path, "eurusd", "", _rows(["short"] * 2, [-1.0, -1.0], [-5, -5]), _rows(["short"] * 2, [0.5, -1.0], [5, -5])
+    )
     out = pm.collect_prepost(str(tmp_path))
     assert out["available"] is True
     assert set(out["assets"]) == {"XAUUSD", "EURUSD"}
@@ -45,10 +62,16 @@ def test_collect_prepost_basic(tmp_path):
 
 def test_collect_prepost_prefers_newest_tf(tmp_path):
     # BTCUSD has both default and m5 pairs; the newer file must win.
-    _write_pair(tmp_path, "btcusd", "", _rows(["short"] * 2, [-1.0, -1.0], [-1, -1]),
-                _rows(["short"] * 2, [-1.0, -1.0], [-1, -1]))
-    _write_pair(tmp_path, "btcusd", "m5", _rows(["short"] * 5, [1.0] * 5, [1] * 5),
-                _rows(["short"] * 5, [1.0] * 5, [1] * 5))
+    _write_pair(
+        tmp_path,
+        "btcusd",
+        "",
+        _rows(["short"] * 2, [-1.0, -1.0], [-1, -1]),
+        _rows(["short"] * 2, [-1.0, -1.0], [-1, -1]),
+    )
+    _write_pair(
+        tmp_path, "btcusd", "m5", _rows(["short"] * 5, [1.0] * 5, [1] * 5), _rows(["short"] * 5, [1.0] * 5, [1] * 5)
+    )
     out = pm.collect_prepost(str(tmp_path))
     btc = out["assets"]["BTCUSD"]
     assert btc["tf"] == "m5"
@@ -60,7 +83,8 @@ def test_collect_prepost_prefers_newest_tf(tmp_path):
 def test_collect_prepost_missing_pair(tmp_path):
     # Only a prefix file, no postfix -> reported as extra, not an asset.
     pd.DataFrame(_rows(["long"], [1.0], [1.0])).to_csv(
-        os.path.join(tmp_path, "dir_prepost_gbpusd_prefix.csv"), index=False)
+        os.path.join(tmp_path, "dir_prepost_gbpusd_prefix.csv"), index=False
+    )
     out = pm.collect_prepost(str(tmp_path))
     assert out["available"] is False
     assert "GBPUSD" not in out["assets"]

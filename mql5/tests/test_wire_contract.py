@@ -7,6 +7,7 @@ Python ExecutionEvent model, and the deterministic event-id scheme is checked
 against the Python mirror (contracts/execution_contracts.py). Any future change
 to the serializer that breaks the contract fails here.
 """
+
 from __future__ import annotations
 
 import json
@@ -78,7 +79,8 @@ GOLDEN_ENVELOPE = (
     '"account_fingerprint":"demo:12345678","batch_id":"1234567890123",'
     '"sent_at_utc_ms":1701234600000,"events":['
     + GOLDEN_DEAL.split("\t", 1)[1]
-    + "," + GOLDEN_DEAL_RECONCILED.split("\t", 1)[1]
+    + ","
+    + GOLDEN_DEAL_RECONCILED.split("\t", 1)[1]
     + "]}"
 )
 
@@ -165,8 +167,8 @@ def test_intent_short_id_extraction_mirror():
     comment = f"XAUUSD ML Scalp {('ab' * 16)[:8]}"
     assert extract(comment) == ("ab" * 16)[:8]
     assert extract("XAUUSD ML Scalp") is None
-    assert extract("XAUUSD ML Scalp 1234567") is None          # too short
-    assert extract("XAUUSD ML Scalp zz123456") is None         # not hex
+    assert extract("XAUUSD ML Scalp 1234567") is None  # too short
+    assert extract("XAUUSD ML Scalp zz123456") is None  # not hex
 
 
 # ==========================================================================
@@ -179,8 +181,7 @@ import re
 
 def _observer_source():
     root = os.path.join(os.path.dirname(__file__), "..", "SignalDeskObserver")
-    files = [os.path.join(root, f) for f in os.listdir(root)
-             if f.endswith((".mq5", ".mqh"))]
+    files = [os.path.join(root, f) for f in os.listdir(root) if f.endswith((".mq5", ".mqh"))]
     return files
 
 
@@ -188,7 +189,8 @@ def test_mql5_has_no_trade_calls():
     """Observer stays read-only: no OrderSend/CTrade/order-modification APIs."""
     forbidden = re.compile(
         r"\b(OrderSend|OrderSendAsync|OrderModify|OrderDelete|PositionOpen|"
-        r"PositionClose|PositionModify|CTrade)\b")
+        r"PositionClose|PositionModify|CTrade)\b"
+    )
     for path in _observer_source():
         with open(path, encoding="utf-8") as handle:
             for lineno, line in enumerate(handle, 1):
@@ -196,13 +198,12 @@ def test_mql5_has_no_trade_calls():
                 if stripped.startswith("//") or stripped.startswith("/*"):
                     continue
                 if forbidden.search(stripped):
-                    raise AssertionError(
-                        f"forbidden trade API in {os.path.basename(path)}:{lineno}: {stripped}"
-                    )
+                    raise AssertionError(f"forbidden trade API in {os.path.basename(path)}:{lineno}: {stripped}")
 
 
 def _loopback_url_validator():
     """Python mirror of ObserverEA.IsLoopbackProxyUrl for unit-level checks."""
+
     def validate(url: str) -> bool:
         if not url.startswith("http://127.0.0.1:"):
             return False
@@ -217,8 +218,9 @@ def _loopback_url_validator():
         colon = host_port.find(":")
         if colon < 0:
             return False
-        port = host_port[colon + 1:]
+        port = host_port[colon + 1 :]
         return bool(port) and port.isdigit()
+
     return validate
 
 
@@ -231,14 +233,14 @@ def test_observer_accepts_only_loopback_proxy_url():
 def test_observer_rejects_direct_external_urls():
     validate = _loopback_url_validator()
     for bad in (
-        "https://ledger.example.com/api/ledger/ingest",   # https direct external
-        "http://localhost:8787/v1/observer/ingest",       # hostname not 127.0.0.1
-        "http://0.0.0.0:8787/v1/observer/ingest",         # non-loopback IP
-        "http://192.168.1.10:8787/v1/observer/ingest",    # non-loopback IP
-        "http://127.0.0.1:8787/other/path",               # wrong proxy path
-        "http://127.0.0.1:8787/v1/observer/ingest?x=1",   # query string
-        "http://127.0.0.1:8787",                          # missing path
-        "http://127.0.0.1:port/v1/observer/ingest",       # non-numeric port
+        "https://ledger.example.com/api/ledger/ingest",  # https direct external
+        "http://localhost:8787/v1/observer/ingest",  # hostname not 127.0.0.1
+        "http://0.0.0.0:8787/v1/observer/ingest",  # non-loopback IP
+        "http://192.168.1.10:8787/v1/observer/ingest",  # non-loopback IP
+        "http://127.0.0.1:8787/other/path",  # wrong proxy path
+        "http://127.0.0.1:8787/v1/observer/ingest?x=1",  # query string
+        "http://127.0.0.1:8787",  # missing path
+        "http://127.0.0.1:port/v1/observer/ingest",  # non-numeric port
     ):
         assert validate(bad) is False, bad
 

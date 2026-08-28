@@ -4,6 +4,7 @@ Retrain all models based on config.yaml.
 - If max_age_hours is exceeded, force retrain.
 - Downloads fresh data first if download_data is true.
 """
+
 import logging
 import os
 import subprocess
@@ -66,8 +67,14 @@ def main():
         # backfill_data --all now resolves per-asset timeframes automatically,
         # but we still pass --timeframe=None to let it use the config chain.
         download_cmd = [
-            sys.executable, "-m", "scripts.backfill_data",
-            "--all", "--start", start_date, "--end", end_date
+            sys.executable,
+            "-m",
+            "scripts.backfill_data",
+            "--all",
+            "--start",
+            start_date,
+            "--end",
+            end_date,
         ]
         logger.info(f"Running: {download_cmd}")
         subprocess.run(download_cmd, check=True)

@@ -12,6 +12,7 @@ Contract: .classify(row: pd.Series) -> RegimeLabel
 Any concrete ML implementation (e.g. a trained sklearn/XGBoost multi-class model)
 should subclass RegimeClassifierBase and implement these two methods.
 """
+
 from abc import ABC, abstractmethod
 
 import pandas as pd
@@ -41,10 +42,12 @@ class RuleBasedRegimeClassifier(RegimeClassifierBase):
 
     def classify(self, row: pd.Series) -> RegimeLabel:
         from regime.classifier import classify_regime_row
+
         return classify_regime_row(row, self.cfg)
 
     def classify_series(self, df: pd.DataFrame) -> pd.Series:
         from regime.classifier import classify_regime_series
+
         return classify_regime_series(df, self.cfg)
 
 

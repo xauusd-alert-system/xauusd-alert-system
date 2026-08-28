@@ -145,10 +145,10 @@ def test_cscv_deterministic_with_seed():
 
 
 def test_pick_n_splits_prefers_exact_divisor():
-    assert _pick_n_splits(24) == 12   # exact divisors 4,6,8,12 -> largest
-    assert _pick_n_splits(42) == 14   # exact divisors 6,14 -> largest
+    assert _pick_n_splits(24) == 12  # exact divisors 4,6,8,12 -> largest
+    assert _pick_n_splits(42) == 14  # exact divisors 6,14 -> largest
     assert _pick_n_splits(14) == 14
-    assert _pick_n_splits(26) == 12   # no exact divisor: min truncation (26%12=2), tie -> larger
+    assert _pick_n_splits(26) == 12  # no exact divisor: min truncation (26%12=2), tie -> larger
     assert _pick_n_splits(6) == 6
 
 
@@ -173,14 +173,15 @@ def synthetic_gbp_df():
 
 def test_run_analysis_synthetic_structure(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
-    variants = {"current": {},
-                "tight": {"signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5}},
-                "wide": {"signal_grid": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0, "tp3_mult": 4.0}},
-                "null": None,
-                }
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
-                       historical_trials=729)
+    variants = {
+        "current": {},
+        "tight": {"signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5}},
+        "wide": {"signal_grid": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0, "tp3_mult": 4.0}},
+        "null": None,
+    }
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants, historical_trials=729)
     assert res["n_folds"] == 4
     assert res["n_trials"] == 4
     assert len(res["trials"]) == 4
@@ -200,10 +201,9 @@ def test_run_analysis_biased_beats_null(synthetic_gbp_df):
     more trades, higher Sharpe, higher PnL. This proves the machinery detects
     a real (here: leaked) edge instead of calling everything random."""
     from config.loader import load_config
+
     cfg = load_config()
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df,
-                       variants={"current": {}, "null": None},
-                       historical_trials=729)
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants={"current": {}, "null": None}, historical_trials=729)
     cur = next(t for t in res["trials"] if t["variant"] == "current")
     null = next(t for t in res["trials"] if t["variant"] == "null")
     assert cur["n_trades"] > 0 and null["n_trades"] > 0
@@ -215,17 +215,18 @@ def test_run_analysis_biased_beats_null(synthetic_gbp_df):
 
 def test_run_analysis_deterministic(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
     variants = {"current": {}, "null": None}
     r1 = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants)
     r2 = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants)
     # NaN-tolerant comparison (floats may be nan, and nan != nan under ==)
-    assert json.dumps(r1, sort_keys=True, default=str) == json.dumps(
-        r2, sort_keys=True, default=str)
+    assert json.dumps(r1, sort_keys=True, default=str) == json.dumps(r2, sort_keys=True, default=str)
 
 
 def test_run_analysis_raises_without_folds():
     from config.loader import load_config
+
     cfg = load_config()
     df = _make_synthetic_wf_df(500, price=1.28, atr=0.0014, freq="1h")  # ~21 days
     with pytest.raises(ValueError, match="No walk-forward folds"):
@@ -241,17 +242,37 @@ def test_main_writes_csv_and_json(tmp_path, monkeypatch):
     """
     monkeypatch.chdir(tmp_path)
     from scripts.deflated_sharpe import main
+
     out = str(tmp_path / "dsr_gbp.csv")
-    main(["--asset", "GBPUSD", "--variants", "current,null,v3_early_be,v4a",
-          "--max-folds", "2", "--out", out, "--allow-locked"])
+    main(
+        [
+            "--asset",
+            "GBPUSD",
+            "--variants",
+            "current,null,v3_early_be,v4a",
+            "--max-folds",
+            "2",
+            "--out",
+            out,
+            "--allow-locked",
+        ]
+    )
     assert os.path.exists(out)
     assert os.path.exists(out.replace(".csv", ".json"))
     # keep_default_na=False: the literal variant name "null" must not be
     # parsed into NaN by pandas' default NA list on the CSV round-trip.
     df = pd.read_csv(out, keep_default_na=False)
     assert list(df["variant"]) == ["current", "null", "v3_early_be", "v4a"]
-    assert {"variant", "n_trades", "total_pnl", "sharpe", "psr_0",
-            "dsr_trials", "dsr_historical", "min_trl_years"} <= set(df.columns)
+    assert {
+        "variant",
+        "n_trades",
+        "total_pnl",
+        "sharpe",
+        "psr_0",
+        "dsr_trials",
+        "dsr_historical",
+        "min_trl_years",
+    } <= set(df.columns)
     with open(out.replace(".csv", ".json"), encoding="utf-8") as f:
         payload = json.load(f)
     assert payload["asset"] == "GBPUSD"
@@ -266,6 +287,7 @@ def test_main_writes_csv_and_json(tmp_path, monkeypatch):
 def test_effective_number_trials_perfectly_correlated():
     """Identical trials -> N_eff == 1 (one independent draw)."""
     from backtest.deflated_sharpe import effective_number_trials
+
     rng = np.random.default_rng(11)
     base = rng.normal(0.0, 1.0, 24)
     M = np.stack([base, base, base, base])  # rho = 1
@@ -277,6 +299,7 @@ def test_effective_number_trials_perfectly_correlated():
 def test_effective_number_trials_uncorrelated():
     """Independent trials -> N_eff == M."""
     from backtest.deflated_sharpe import effective_number_trials
+
     rng = np.random.default_rng(12)
     M = rng.normal(0.0, 1.0, size=(5, 24))
     res = effective_number_trials(M)
@@ -286,12 +309,13 @@ def test_effective_number_trials_uncorrelated():
 def test_effective_number_trials_audit_example():
     """Audit numbers: M=729, rho=0.95 -> N_eff ~= 37; rho=0.90 -> ~74."""
     from backtest.deflated_sharpe import effective_number_trials
+
     # Construct a matrix with approximate rho by mixing a common factor
     rng = np.random.default_rng(13)
     M = 729
     common = rng.normal(0.0, 1.0, 24)
     w = 0.9747  # ~ rho 0.95 after noise
-    rows = [w * common + np.sqrt(1 - w ** 2) * rng.normal(0.0, 1.0, 24) for _ in range(M)]
+    rows = [w * common + np.sqrt(1 - w**2) * rng.normal(0.0, 1.0, 24) for _ in range(M)]
     res = effective_number_trials(np.asarray(rows))
     n_eff_729 = 1.0 + (729 - 1.0) * (1.0 - res["mean_rho"])
     assert 25 < n_eff_729 < 55  # rho~0.95 -> ~37
@@ -313,11 +337,20 @@ def test_cscv_oos_prob_loss_and_degradation():
 
 def test_run_analysis_reports_n_eff(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df,
-                       variants={"current": {}, "tight": {"signal_grid": {"stop_mult": 2.0}},
-                                 "wide": {"signal_grid": {"stop_mult": 4.0}}, "null": None},
-                       historical_trials=729)
+    res = run_analysis(
+        cfg,
+        "GBPUSD",
+        synthetic_gbp_df,
+        variants={
+            "current": {},
+            "tight": {"signal_grid": {"stop_mult": 2.0}},
+            "wide": {"signal_grid": {"stop_mult": 4.0}},
+            "null": None,
+        },
+        historical_trials=729,
+    )
     assert "n_eff" in res
     assert res["n_eff"]["n_eff_historical"] > 0
     assert res["n_eff"]["n_eff_historical"] <= 729
@@ -325,6 +358,7 @@ def test_run_analysis_reports_n_eff(synthetic_gbp_df):
     # every trial row carries the new DSR(N_eff) column
     for t in res["trials"]:
         assert "dsr_neff" in t
+
 
 # ---------------------------------------------------------------------------
 # Per-variant cost stress + block-bootstrap t (audit follow-up: gate
@@ -338,18 +372,18 @@ def test_run_analysis_reports_n_eff(synthetic_gbp_df):
 
 def test_stress_fields_present_for_every_variant(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
     variants = {
         "current": {},
         "tight": {"signal_grid": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5}},
         "wide": {"signal_grid": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0, "tp3_mult": 4.0}},
-        "progress_stop": {"signal_grid": {"progress_stop_enabled": True,
-                                          "progress_stop_ratio": 0.5,
-                                          "progress_stop_atr": 0.3}},
+        "progress_stop": {
+            "signal_grid": {"progress_stop_enabled": True, "progress_stop_ratio": 0.5, "progress_stop_atr": 0.3}
+        },
         "null": None,
     }
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
-                       historical_trials=729, cost_stress=True)
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants, historical_trials=729, cost_stress=True)
     required = {"cost_x1_5_pnl", "cost_x1_5_pf", "cost_x1_5_n_trades", "t_block"}
     for t in res["trials"]:
         missing = required - set(t.keys())
@@ -361,10 +395,10 @@ def test_block_bootstrap_t_not_gated_to_current(synthetic_gbp_df):
     every variant except 'current', because per-trade R was only appended to
     `variant_r` inside an `if name == "current":` branch of the main loop."""
     from config.loader import load_config
+
     cfg = load_config()
     variants = {"current": {}, "wide": {"signal_grid": {"stop_mult": 4.0}}}
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
-                       historical_trials=729)
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants, historical_trials=729)
     for t in res["trials"]:
         if t["n_trades"] >= 2:
             assert not math.isnan(t["t_block"]), (
@@ -376,10 +410,10 @@ def test_block_bootstrap_t_not_gated_to_current(synthetic_gbp_df):
 
 def test_cost_stress_never_improves_pnl(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
     variants = {"current": {}, "wide": {"signal_grid": {"stop_mult": 4.0}}, "null": None}
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
-                       historical_trials=729)
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants, historical_trials=729)
     for t in res["trials"]:
         assert t["cost_x1_5_pnl"] <= t["total_pnl"] + 1e-6, (
             f"variant '{t['variant']}': cost x1.5 PnL ({t['cost_x1_5_pnl']}) > "
@@ -392,10 +426,9 @@ def test_current_cost_stress_field_backward_compatible(synthetic_gbp_df):
     mirroring the 'current' variant's own cost_x1_5_* fields after moving the
     computation inside the per-variant loop."""
     from config.loader import load_config
+
     cfg = load_config()
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df,
-                       variants={"current": {}, "null": None},
-                       historical_trials=729)
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants={"current": {}, "null": None}, historical_trials=729)
     cur = next(t for t in res["trials"] if t["variant"] == "current")
     stress = res["cost_stress"]
     assert stress is not None
@@ -410,10 +443,10 @@ def test_decision_gate_still_current_only(synthetic_gbp_df):
     change. Promoting a non-current variant is a deliberate separate step."""
     from config.loader import load_config
     from scripts.deflated_sharpe import decision_gate
+
     cfg = load_config()
     variants = {"current": {}, "wide": {"signal_grid": {"stop_mult": 4.0}}, "null": None}
-    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants,
-                       historical_trials=729)
+    res = run_analysis(cfg, "GBPUSD", synthetic_gbp_df, variants=variants, historical_trials=729)
     gate = decision_gate(res)
     assert "PF > 1.1 at 1.5x costs" in gate["checks"]
     assert isinstance(gate["passed_all"], bool)
@@ -424,6 +457,7 @@ def test_prepare_fold_frame_deterministic_for_null():
     the same (name='null', fold_i, seed) call -- required so a cost-stress
     rerun of the null control stresses cost only, never the signal."""
     from scripts.deflated_sharpe import _prepare_fold_frame
+
     idx = pd.date_range("2023-01-01", periods=50, freq="1h", tz="UTC")
     fdf = pd.DataFrame({"close": np.arange(50, dtype=float)}, index=idx)
     a = _prepare_fold_frame(fdf, "null", fold_i=2, random_seed=42)
@@ -436,6 +470,7 @@ def test_prepare_fold_frame_passthrough_for_non_null():
     """For every variant except 'null', the fold frame must pass through
     unchanged (the model's own ml_p_* is authoritative, not re-randomized)."""
     from scripts.deflated_sharpe import _prepare_fold_frame
+
     fdf = pd.DataFrame({"ml_p_long": [0.6, 0.4], "ml_p_short": [0.4, 0.6]})
     for name in ("current", "tight", "wide", "progress_stop"):
         out = _prepare_fold_frame(fdf, name, fold_i=0, random_seed=42)
@@ -444,11 +479,13 @@ def test_prepare_fold_frame_passthrough_for_non_null():
 
 def test_cscv_identical_trials_slope_none():
     # near-identical trials -> IS var ~ 0 -> slope must be None, not negative garbage
-    M = np.array([
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    ])
+    M = np.array(
+        [
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        ]
+    )
     res = cscv_pbo(M)
     assert res["is_oos_slope"] is None

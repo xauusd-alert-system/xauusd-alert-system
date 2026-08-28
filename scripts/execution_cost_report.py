@@ -1,4 +1,5 @@
 """Print empirical broker fill/slippage/latency distributions as JSON."""
+
 import argparse
 import json
 
@@ -14,9 +15,7 @@ def main() -> None:
     args = parser.parse_args()
     report = {"execution_fills": execution_cost_report(args.db_path, args.asset)}
     if args.timeframe and args.asset:
-        report["broker_bar_spread"] = broker_spread_report(
-            args.db_path, args.timeframe, args.asset
-        )
+        report["broker_bar_spread"] = broker_spread_report(args.db_path, args.timeframe, args.asset)
     payload = json.dumps(report, indent=2, sort_keys=True)
     print(payload)
     if args.output:

@@ -1,4 +1,5 @@
 """Tests for execution/schema_registry.py (ТЗ 9.1–9.2)."""
+
 from __future__ import annotations
 
 import pytest

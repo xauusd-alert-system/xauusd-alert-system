@@ -5,6 +5,7 @@ default (backward compatibility with existing execution code), but the
 dataclasses below are available for typed conversions via ``.from_raw()`` /
 ``.raw()`` round-trips.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,8 +72,7 @@ class SymbolInfo:
             volume_min=float(getattr(raw, "volume_min", 0.0) or 0.0),
             volume_max=float(getattr(raw, "volume_max", 0.0) or 0.0),
             volume_step=float(getattr(raw, "volume_step", 0.0) or 0.0),
-            trade_contract_size=float(
-                getattr(raw, "trade_contract_size", 0.0) or 0.0),
+            trade_contract_size=float(getattr(raw, "trade_contract_size", 0.0) or 0.0),
             trade_exec_mode=getattr(raw, "trade_exec_mode", None),
             visible=bool(getattr(raw, "visible", False)),
         )
@@ -103,10 +103,8 @@ class AccountInfo:
             margin=float(getattr(raw, "margin", 0.0) or 0.0),
             margin_free=float(getattr(raw, "margin_free", 0.0) or 0.0),
             currency=str(getattr(raw, "currency", "USD") or "USD"),
-            trade_mode=int(getattr(raw, "trade_mode", -1) if
-                           getattr(raw, "trade_mode", None) is not None else -1),
-            margin_mode=int(getattr(raw, "margin_mode", -1) if
-                            getattr(raw, "margin_mode", None) is not None else -1),
+            trade_mode=int(getattr(raw, "trade_mode", -1) if getattr(raw, "trade_mode", None) is not None else -1),
+            margin_mode=int(getattr(raw, "margin_mode", -1) if getattr(raw, "margin_mode", None) is not None else -1),
             leverage=int(getattr(raw, "leverage", 0) or 0),
         )
 
@@ -172,8 +170,7 @@ class OrderResult:
         if raw is None:
             raise ValueError("cannot build OrderResult from None")
         return cls(
-            retcode=int(getattr(raw, "retcode", -1) if
-                        getattr(raw, "retcode", None) is not None else -1),
+            retcode=int(getattr(raw, "retcode", -1) if getattr(raw, "retcode", None) is not None else -1),
             deal=int(getattr(raw, "deal", 0) or 0),
             order=int(getattr(raw, "order", 0) or 0),
             volume=float(getattr(raw, "volume", 0.0) or 0.0),

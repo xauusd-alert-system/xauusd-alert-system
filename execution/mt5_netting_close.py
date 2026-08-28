@@ -13,6 +13,7 @@ Behavior is unchanged: the close actionId is recorded only AFTER a successful
 close (restart safety, ТЗ §29) and a below-step close is noted ONCE and the
 position stays managed.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -34,8 +35,7 @@ def floor_to_step_value(value: float, step: float) -> float:
     return floor_to_step(value, step)
 
 
-def netting_close_leg(executor, group: dict[str, Any], leg: int,
-                      action_id: str) -> bool:
+def netting_close_leg(executor, group: dict[str, Any], leg: int, action_id: str) -> bool:
     """Idempotent, volume-aware netting partial close (P1.5.1 §12–§15).
 
     The close volume is computed from the BROKER's actual position volume
@@ -52,10 +52,10 @@ def netting_close_leg(executor, group: dict[str, Any], leg: int,
     if close_volume <= 0.0:
         # increment below the broker volume_step/min: nothing fillable.
         # Note it ONCE (actionId-guarded) and keep the position managed.
-        if mark_action(executor.db_path, group_id, f"{action_id}-SKIP",
-                       {"reason": "below_volume_step", "leg": leg}):
+        if mark_action(executor.db_path, group_id, f"{action_id}-SKIP", {"reason": "below_volume_step", "leg": leg}):
             emit_execution_error(
-                executor.ledger_db_path, spec,
+                executor.ledger_db_path,
+                spec,
                 reason=f"{action_id} below volume_step (no fillable close)",
                 payload={"action_id": action_id, "leg": leg, "mode": spec.mode},
                 leg=leg,
@@ -65,19 +65,26 @@ def netting_close_leg(executor, group: dict[str, Any], leg: int,
     ref = new_leg_id(group_id, 1)  # aggregate position ref
     result = driver.close_partial(ref, close_volume)
     if result.get("status") != "filled":
-        emit_execution_error(executor.ledger_db_path, spec,
-                             reason=f"{action_id} rejected",
-                             payload={"action_id": action_id,
-                                      "retcode": result.get("retcode"),
-                                      "comment": result.get("comment"),
-                                      "mode": spec.mode},
-                             leg=leg)
+        emit_execution_error(
+            executor.ledger_db_path,
+            spec,
+            reason=f"{action_id} rejected",
+            payload={
+                "action_id": action_id,
+                "retcode": result.get("retcode"),
+                "comment": result.get("comment"),
+                "mode": spec.mode,
+            },
+            leg=leg,
+        )
         return False
     filled_close = float(result.get("filled_volume") or close_volume)
-    mark_action(executor.db_path, group_id, action_id,
-                {"leg": leg, "volume": close_volume,
-                 "filled_volume": filled_close,
-                 "fill_price": result.get("fill_price")})
+    mark_action(
+        executor.db_path,
+        group_id,
+        action_id,
+        {"leg": leg, "volume": close_volume, "filled_volume": filled_close, "fill_price": result.get("fill_price")},
+    )
     update_volume_after_close(executor, group, leg, filled_close)
     fill_price = float(result.get("fill_price") or 0.0)
     if leg == 1:
@@ -96,8 +103,7 @@ def netting_close_volume(executor, group: dict[str, Any], leg: int) -> float:
     spec: TradeGroupSpec = group["spec"]
     driver = executor._resolve_driver(spec)
     try:
-        snapshot = MT5BrokerContext(executor.mt5, magic=executor.magic) \
-            .symbol_snapshot(spec.broker_symbol)
+        snapshot = MT5BrokerContext(executor.mt5, magic=executor.magic).symbol_snapshot(spec.broker_symbol)
     except BrokerUnavailable:
         return 0.0
     step = float(snapshot.get("volume_step") or 0.0)
@@ -130,20 +136,15 @@ def netting_close_volume(executor, group: dict[str, Any], leg: int) -> float:
     return close_volume
 
 
-def update_volume_after_close(executor, group: dict[str, Any], leg: int,
-                              filled_close: float) -> None:
+def update_volume_after_close(executor, group: dict[str, Any], leg: int, filled_close: float) -> None:
     """Update the per-group/per-leg volume ledger after a confirmed close."""
     group_id = group["group_id"]
     volume = dict(group.get("volume") or {})
-    volume["total_closed"] = round(
-        float(volume.get("total_closed") or 0.0) + filled_close, 8)
-    volume["total_remaining"] = round(
-        float(volume.get("total_filled") or 0.0) - volume["total_closed"], 8)
+    volume["total_closed"] = round(float(volume.get("total_closed") or 0.0) + filled_close, 8)
+    volume["total_remaining"] = round(float(volume.get("total_filled") or 0.0) - volume["total_closed"], 8)
     legs = volume.setdefault("legs", {})
     entry = legs.setdefault(str(leg), {})
-    entry["closed_volume"] = round(
-        float(entry.get("closed_volume") or 0.0) + filled_close, 8)
-    entry["remaining_volume"] = round(
-        float(entry.get("filled_volume") or 0.0) - entry["closed_volume"], 8)
+    entry["closed_volume"] = round(float(entry.get("closed_volume") or 0.0) + filled_close, 8)
+    entry["remaining_volume"] = round(float(entry.get("filled_volume") or 0.0) - entry["closed_volume"], 8)
     current = load_group(executor.db_path, group_id)
     update_group_state(executor.db_path, group_id, current["state"], volume=volume)

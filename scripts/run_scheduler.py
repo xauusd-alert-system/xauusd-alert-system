@@ -13,6 +13,7 @@ with the "never score an in-progress candle" guarantee in realtime/pipeline.py.
 Runs as a long-lived process (`python -m scripts.run_scheduler`), intended to be
 supervised by systemd/Docker/pm2 in production - this module itself does not daemonize.
 """
+
 import logging
 import time
 
@@ -51,43 +52,59 @@ def run_once(pipeline: RealtimePipeline, bot: TelegramAlertBot, db_path: str, n_
     alert_sent = bot.send_alert_if_qualified(signal)
     log_signal(db_path, signal, alert_sent, symbol=pipeline.asset_key)
     common = dict(
-        db_path=db_path, signal_id=signal["signal_id"], asset_key=pipeline.asset_key,
-        strategy_version=signal["strategy_version"], config_hash=signal["config_hash"],
+        db_path=db_path,
+        signal_id=signal["signal_id"],
+        asset_key=pipeline.asset_key,
+        strategy_version=signal["strategy_version"],
+        config_hash=signal["config_hash"],
         model_hash=signal.get("model_hash"),
-        feature_snapshot_hash=signal.get("feature_snapshot_hash"), actor="pipeline",
+        feature_snapshot_hash=signal.get("feature_snapshot_hash"),
+        actor="pipeline",
         event_timestamp_utc=int(signal["timestamp_utc"]),
     )
     append_trading_event(
-        event_type="signal_created", event_id=f"{signal['signal_id']}:created",
-        reason=signal.get("reasoning_summary"), payload={
+        event_type="signal_created",
+        event_id=f"{signal['signal_id']}:created",
+        reason=signal.get("reasoning_summary"),
+        payload={
             "state": ("watch" if signal.get("bias") != "no_trade" else "no_trade"),
             "bias": signal.get("bias"),
-            "confidence": signal.get("confidence"), "targets": signal.get("target_legs"),
-        }, **common,
+            "confidence": signal.get("confidence"),
+            "targets": signal.get("target_legs"),
+        },
+        **common,
     )
     if signal.get("bias") != "no_trade":
         append_trading_event(
-            event_type="signal_armed", event_id=f"{signal['signal_id']}:armed",
-            reason="setup_zone_active", payload={"state": "armed"}, **common,
+            event_type="signal_armed",
+            event_id=f"{signal['signal_id']}:armed",
+            reason="setup_zone_active",
+            payload={"state": "armed"},
+            **common,
         )
         append_trading_event(
-            event_type="signal_confirmed", event_id=f"{signal['signal_id']}:confirmed",
-            reason="machine_confirmation_predicates_passed", payload={
-                "state": "confirmed", "predicates": signal.get("confirmation_predicates", [])
-            }, **common,
+            event_type="signal_confirmed",
+            event_id=f"{signal['signal_id']}:confirmed",
+            reason="machine_confirmation_predicates_passed",
+            payload={"state": "confirmed", "predicates": signal.get("confirmation_predicates", [])},
+            **common,
         )
     if alert_sent:
         append_trading_event(
-            event_type="signal_published", event_id=f"{signal['signal_id']}:published",
+            event_type="signal_published",
+            event_id=f"{signal['signal_id']}:published",
             event_timestamp_utc=int(signal["published_at_utc"]),
-            reason="telegram_alert_sent", payload={
-                "publish_latency_seconds": signal.get("publish_latency_seconds")
-            }, **{k: v for k, v in common.items() if k != "event_timestamp_utc"},
+            reason="telegram_alert_sent",
+            payload={"publish_latency_seconds": signal.get("publish_latency_seconds")},
+            **{k: v for k, v in common.items() if k != "event_timestamp_utc"},
         )
 
     logger.info(
         "Signal generated: bias=%s confidence=%.3f regime=%s alert_sent=%s",
-        signal["bias"], signal["confidence"], signal["regime"], alert_sent,
+        signal["bias"],
+        signal["confidence"],
+        signal["regime"],
+        alert_sent,
     )
     return signal
 
@@ -104,8 +121,12 @@ def main():
     pipeline = RealtimePipeline(cfg=cfg, model_path=model_path, data_mode=data_mode)
     bot = TelegramAlertBot(cfg)
 
-    logger.info("Scheduler starting. timeframe=%s data_mode=%s model_loaded=%s",
-                timeframe, data_mode, pipeline._predictor is not None)
+    logger.info(
+        "Scheduler starting. timeframe=%s data_mode=%s model_loaded=%s",
+        timeframe,
+        data_mode,
+        pipeline._predictor is not None,
+    )
 
     while True:
         sleep_s = seconds_until_next_candle_close(timeframe)

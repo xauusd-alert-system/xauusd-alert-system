@@ -67,10 +67,7 @@ class VirtualTick:
         }
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (
-            f"VirtualTick(symbol={self.symbol!r}, bid={self.bid}, "
-            f"ask={self.ask}, time={self.time})"
-        )
+        return f"VirtualTick(symbol={self.symbol!r}, bid={self.bid}, ask={self.ask}, time={self.time})"
 
 
 @dataclass
@@ -264,9 +261,7 @@ class VirtualState:
             point=float(over.get("point", 0.01)),
             trade_stops_level=int(over.get("trade_stops_level", 50)),
             trade_freeze_level=int(over.get("trade_freeze_level", 0)),
-            trade_contract_size=float(
-                over.get("trade_contract_size", 100.0)
-            ),
+            trade_contract_size=float(over.get("trade_contract_size", 100.0)),
             volume_min=float(over.get("volume_min", 0.01)),
             volume_step=float(over.get("volume_step", 0.01)),
             spread=float(over.get("spread", 0.30)),
@@ -290,7 +285,11 @@ class VirtualState:
     # PnL helpers
     # ------------------------------------------------------------------
     def _compute_pnl(
-        self, symbol: str, position_type: int, entry: float, exit_price: float,
+        self,
+        symbol: str,
+        position_type: int,
+        entry: float,
+        exit_price: float,
         volume: float,
     ) -> float:
         """Realized or floating PnL for a (partial) lot volume."""
@@ -302,9 +301,7 @@ class VirtualState:
         return round(pnl, 2)
 
     def _compute_floating_pnl(self, pos: VirtualPosition, mark: float) -> float:
-        return self._compute_pnl(
-            pos.symbol, pos.type, pos.price_open, mark, pos.volume
-        )
+        return self._compute_pnl(pos.symbol, pos.type, pos.price_open, mark, pos.volume)
 
     # ------------------------------------------------------------------
     # Account
@@ -418,9 +415,7 @@ class VirtualState:
         # On a full close we take the entire remaining swap (already scaled by
         # the volume ratio so no double counting occurs).
         close_type = 1 if pos.type == 0 else 0  # opposite side deal type
-        profit = self._compute_pnl(
-            pos.symbol, pos.type, pos.price_open, price, volume
-        )
+        profit = self._compute_pnl(pos.symbol, pos.type, pos.price_open, price, volume)
         swap_charge = round(pos.swap * (volume / pos.volume), 2)
         self.balance = round(self.balance + profit + swap_charge, 2)
 
@@ -462,9 +457,7 @@ class VirtualState:
         pos.tp = round(tp, 6) if tp else 0.0
         return True
 
-    def get_positions(
-        self, symbol: Optional[str] = None, magic: Optional[int] = None
-    ) -> list[VirtualPosition]:
+    def get_positions(self, symbol: Optional[str] = None, magic: Optional[int] = None) -> list[VirtualPosition]:
         """Filtered list of open positions (MT5 positions_get semantics)."""
         result = []
         for pos in self.positions.values():
@@ -481,9 +474,7 @@ class VirtualState:
     # ------------------------------------------------------------------
     # History
     # ------------------------------------------------------------------
-    def get_history_deals(
-        self, position: Optional[int] = None
-    ) -> list[VirtualDeal]:
+    def get_history_deals(self, position: Optional[int] = None) -> list[VirtualDeal]:
         """Deals history, optionally filtered by position_id (ticket)."""
         if position is None:
             return list(self.deals)
@@ -510,7 +501,4 @@ class VirtualState:
             self.symbols[sym] = self._build_symbol_info(sym, over)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (
-            f"VirtualState(balance={self.balance:.2f}, "
-            f"positions={len(self.positions)}, deals={len(self.deals)})"
-        )
+        return f"VirtualState(balance={self.balance:.2f}, positions={len(self.positions)}, deals={len(self.deals)})"

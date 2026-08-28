@@ -1,4 +1,5 @@
 """Tests for execution/trade_group_executor.py — paper lifecycle engine."""
+
 from __future__ import annotations
 
 import json
@@ -19,51 +20,75 @@ from execution.trade_group_executor import (
 )
 
 BROKER = BrokerSnapshot(
-    symbol_point=0.01, tick_size=0.01, digits=2,
-    trade_stops_level=0, trade_freeze_level=0, spread=0.25,
-    contract_size=100.0, volume_min=0.01, volume_max=10.0, volume_step=0.01,
-    execution_mode="request", account_margin_mode="netting", balance=10000.0,
+    symbol_point=0.01,
+    tick_size=0.01,
+    digits=2,
+    trade_stops_level=0,
+    trade_freeze_level=0,
+    spread=0.25,
+    contract_size=100.0,
+    volume_min=0.01,
+    volume_max=10.0,
+    volume_step=0.01,
+    execution_mode="request",
+    account_margin_mode="netting",
+    balance=10000.0,
 )
-COST = CostSnapshot(round_trip_cost_price=0.30, safety_buffer_price=0.10,
-                    expected_exit_slippage=0.10, commission_buffer=0.05)
+COST = CostSnapshot(
+    round_trip_cost_price=0.30, safety_buffer_price=0.10, expected_exit_slippage=0.10, commission_buffer=0.05
+)
 
 
-def make_spec(group_id: str = "TG-EXEC-1", mode: str = "paper",
-              side: str = "long") -> TradeGroupSpec:
+def make_spec(group_id: str = "TG-EXEC-1", mode: str = "paper", side: str = "long") -> TradeGroupSpec:
     return TradeGroupSpec(
         group_id=group_id,
-        signal_id="SGL-EXEC-1", intent_id="INT-EXEC-1",
-        asset_key="XAUUSD", broker_symbol="GOLD", mode=mode, side=side,
+        signal_id="SGL-EXEC-1",
+        intent_id="INT-EXEC-1",
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        mode=mode,
+        side=side,
         entry={"low": 4159.10, "high": 4159.50, "reference": 4159.30},
-        geometry={"version": "v1", "unit": "price", "step_price": 4.30,
-                  "tp1": 4163.60, "tp2": 4167.70, "tp3": 4171.20, "sl": 4140.30},
-        targets=[{"leg": 1, "price": 4163.60, "allocation": 0.333333},
-                 {"leg": 2, "price": 4167.70, "allocation": 0.333333},
-                 {"leg": 3, "price": 4171.20, "allocation": 0.333334}],
-        break_even={"trigger": "tp1_filled",
-                    "raw_price_policy": "actual_fill",
-                    "protected_price_policy": "actual_fill_plus_cost_buffer",
-                    "apply_to": [2, 3]},
-        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
-              "estimated_loss_at_sl": 48.0, "total_volume": 0.06},
+        geometry={
+            "version": "v1",
+            "unit": "price",
+            "step_price": 4.30,
+            "tp1": 4163.60,
+            "tp2": 4167.70,
+            "tp3": 4171.20,
+            "sl": 4140.30,
+        },
+        targets=[
+            {"leg": 1, "price": 4163.60, "allocation": 0.333333},
+            {"leg": 2, "price": 4167.70, "allocation": 0.333333},
+            {"leg": 3, "price": 4171.20, "allocation": 0.333334},
+        ],
+        break_even={
+            "trigger": "tp1_filled",
+            "raw_price_policy": "actual_fill",
+            "protected_price_policy": "actual_fill_plus_cost_buffer",
+            "apply_to": [2, 3],
+        },
+        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5, "estimated_loss_at_sl": 48.0, "total_volume": 0.06},
         profile_id="xau_m15_intraday_v1",
-        model_version="v3", model_hash="m" * 64, config_hash="c" * 64,
+        model_version="v3",
+        model_hash="m" * 64,
+        config_hash="c" * 64,
         strategy_version="s3",
-        expires_at_utc_ms=1_800_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        expires_at_utc_ms=1_800_000_000_000,
+        created_at_utc_ms=1_700_000_000_000,
     )
 
 
 @pytest.fixture
 def executor(tmp_path):
     db = str(tmp_path / "exec.sqlite")
-    return TradeGroupExecutor(db, driver=PaperDriver(account_mode="netting"),
-                              cost=COST, broker=BROKER)
+    return TradeGroupExecutor(db, driver=PaperDriver(account_mode="netting"), cost=COST, broker=BROKER)
 
 
 def _event_types(db) -> list[tuple[str, str | None, str | None]]:
     df = read_trading_events(db)
-    return [(row["event_type"], row.get("group_id"), row.get("leg_id"))
-            for row in df.to_dict("records")]
+    return [(row["event_type"], row.get("group_id"), row.get("leg_id")) for row in df.to_dict("records")]
 
 
 def test_paper_full_lifecycle_to_reconciled(executor, tmp_path):
@@ -101,9 +126,18 @@ def test_paper_full_lifecycle_to_reconciled(executor, tmp_path):
     assert stored["state"] == GroupState.RECONCILED
 
     events = _event_types(executor.ledger_db_path)
-    for event in ("signal_validated", "trade_intent_created", "group_submitted",
-                  "leg_submitted", "tp1_filled", "be_requested", "be_confirmed",
-                  "tp2_filled", "tp3_filled", "group_reconciled"):
+    for event in (
+        "signal_validated",
+        "trade_intent_created",
+        "group_submitted",
+        "leg_submitted",
+        "tp1_filled",
+        "be_requested",
+        "be_confirmed",
+        "tp2_filled",
+        "tp3_filled",
+        "group_reconciled",
+    ):
         assert event in {e[0] for e in events}, event
     for row in events:
         if row[1] is not None:
@@ -143,8 +177,8 @@ def test_be_rejection_never_confirms(executor):
     assert stored["be_state"]["last_error"] == "simulated modify rejection (freeze/requote)"
     assert "be_confirmed" not in {e[0] for e in _event_types(executor.ledger_db_path)}
     # retry until the bounded limit -> FAILED, still never BE_CONFIRMED
-    executor.confirm_break_even(spec.group_id)   # retries=2 -> BE_RETRY
-    executor.confirm_break_even(spec.group_id)   # retries=3 -> FAILED
+    executor.confirm_break_even(spec.group_id)  # retries=2 -> BE_RETRY
+    executor.confirm_break_even(spec.group_id)  # retries=3 -> FAILED
     stored = load_group(executor.db_path, spec.group_id)
     assert stored["state"] == GroupState.FAILED
     assert "be_confirmed" not in {e[0] for e in _event_types(executor.ledger_db_path)}
@@ -188,13 +222,15 @@ def test_restart_no_duplicate_submission(executor, tmp_path):
 
     # "restart": a NEW executor instance over the same DB + fresh driver
     recovered = TradeGroupExecutor(
-        executor.db_path, driver=PaperDriver(account_mode="netting"),
-        cost=COST, broker=BROKER,
+        executor.db_path,
+        driver=PaperDriver(account_mode="netting"),
+        cost=COST,
+        broker=BROKER,
     )
     current = recovered.recover_after_restart(spec.group_id)
     assert current["state"] == GroupState.BE_REQUESTED
     assert current["submitted"] is True
-    assert current["spec"].entry.actual_fill == 4163.60   # TP state preserved
+    assert current["spec"].entry.actual_fill == 4163.60  # TP state preserved
     # resubmission is impossible -> no duplicate orders (ТЗ §25)
     with pytest.raises(DuplicateSubmissionError):
         recovered.submit_group(spec.group_id)
@@ -202,27 +238,26 @@ def test_restart_no_duplicate_submission(executor, tmp_path):
 
 def test_hedging_driver_three_positions(tmp_path):
     driver = PaperDriver(account_mode="hedging")
-    executor = TradeGroupExecutor(str(tmp_path / "hedging-test.sqlite"), driver=driver,
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "hedging-test.sqlite"), driver=driver, cost=COST, broker=BROKER)
     spec = make_spec()
     executor.create_group(spec)
     executor.submit_group(spec.group_id)
     stored = load_group(executor.db_path, spec.group_id)
     pos_ids = {item["broker"]["position_id"] for item in stored["legs"]}
-    assert len(pos_ids) == 3   # ТЗ §13.1: each leg its own position
+    assert len(pos_ids) == 3  # ТЗ §13.1: each leg its own position
 
 
 def test_mode_gates(tmp_path):
     live_spec = make_spec(mode="live")
     demo_spec = make_spec(mode="demo")
-    executor = TradeGroupExecutor(str(tmp_path / "gates.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "gates.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     with pytest.raises(LiveExecutionForbidden):
         executor.create_group(live_spec)
     with pytest.raises(DemoExecutionNotEnabled):
         executor.create_group(demo_spec)
-    allowed = TradeGroupExecutor(str(tmp_path / "gates2.sqlite"), driver=PaperDriver(),
-                                 cost=COST, broker=BROKER, allow_demo=True)
+    allowed = TradeGroupExecutor(
+        str(tmp_path / "gates2.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER, allow_demo=True
+    )
     assert allowed.create_group(demo_spec) == GroupState.VALIDATED
 
 
@@ -258,23 +293,21 @@ def test_actual_fill_be_not_signal_reference(executor):
 # Follow-up ТЗ §9/§10: demo env gate + live path forbidden + no order_send
 # ==========================================================================
 
+
 def test_live_forbidden_with_env_disabled(monkeypatch, tmp_path):
     monkeypatch.delenv("TRADE_GROUP_ENABLE_DEMO", raising=False)
-    executor = TradeGroupExecutor(str(tmp_path / "live-gate.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "live-gate.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     with pytest.raises(LiveExecutionForbidden):
         executor.create_group(make_spec(mode="live"))
 
 
 def test_demo_requires_explicit_env_gate(monkeypatch, tmp_path):
     monkeypatch.setenv("TRADE_GROUP_ENABLE_DEMO", "0")
-    executor = TradeGroupExecutor(str(tmp_path / "demo-gate0.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "demo-gate0.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     with pytest.raises(DemoExecutionNotEnabled):
         executor.create_group(make_spec(mode="demo"))
     monkeypatch.setenv("TRADE_GROUP_ENABLE_DEMO", "1")
-    executor = TradeGroupExecutor(str(tmp_path / "demo-gate1.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "demo-gate1.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     assert executor.create_group(make_spec(mode="demo")) == GroupState.VALIDATED
 
 
@@ -323,6 +356,7 @@ def test_mt5_trader_live_path_does_not_reference_group_executor():
     import inspect
 
     import execution.mt5_trader as trader
+
     source = inspect.getsource(trader)
     assert "trade_group_executor" not in source
     assert "TradeGroupExecutor" not in source
@@ -333,19 +367,20 @@ def test_mt5_trader_live_path_does_not_reference_group_executor():
 # Follow-up ТЗ §16/§17: hedging leg lifecycle + TP immutability after TP1
 # ==========================================================================
 
+
 def test_hedging_legs_after_tp1_be(tmp_path):
     from execution.trade_group_executor import PaperDriver as PD
+
     driver = PD(account_mode="hedging")
-    ex = TradeGroupExecutor(str(tmp_path / "hedge-lifecycle.sqlite"), driver=driver,
-                            cost=COST, broker=BROKER)
+    ex = TradeGroupExecutor(str(tmp_path / "hedge-lifecycle.sqlite"), driver=driver, cost=COST, broker=BROKER)
     spec = make_spec()
     ex.create_group(spec)
     ex.submit_group(spec.group_id)
     stored = load_group(ex.db_path, spec.group_id)
     pos_ids = {item["broker"]["position_id"] for item in stored["legs"]}
-    assert len(pos_ids) == 3                       # 3 physical legs (ТЗ §13.1)
+    assert len(pos_ids) == 3  # 3 physical legs (ТЗ §13.1)
 
-    ex.simulate_tick(spec.group_id, 4163.60)      # TP1
+    ex.simulate_tick(spec.group_id, 4163.60)  # TP1
     stored = load_group(ex.db_path, spec.group_id)
     leg1 = next(i for i in stored["legs"] if i["leg"] == 1)
     assert leg1["state"] == "CLOSED"
@@ -362,49 +397,66 @@ def test_hedging_legs_after_tp1_be(tmp_path):
         assert item["state"] != "CLOSED"
     assert stored["spec"].geometry.tp2 == 4167.70
     assert stored["spec"].geometry.tp3 == 4171.20
-    assert stored["spec"].geometry.sl == 4140.30   # original SL is history; BE applied
+    assert stored["spec"].geometry.sl == 4140.30  # original SL is history; BE applied
     assert be != 4140.30
 
 
 def test_tp_levels_immutable_after_tp1_and_be(tmp_path):
     spec = make_spec()
-    executor = TradeGroupExecutor(str(tmp_path / "tp-immutable.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "tp-immutable.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     executor.create_group(spec)
     executor.submit_group(spec.group_id)
-    executor.simulate_tick(spec.group_id, 4163.60)   # TP1
+    executor.simulate_tick(spec.group_id, 4163.60)  # TP1
     executor.request_break_even(spec.group_id)
     executor.confirm_break_even(spec.group_id)
     stored = load_group(executor.db_path, spec.group_id)
-    assert stored["spec"].geometry.tp2 == 4167.70    # TP2 untouched
-    assert stored["spec"].geometry.tp3 == 4171.20    # TP3 untouched
+    assert stored["spec"].geometry.tp2 == 4167.70  # TP2 untouched
+    assert stored["spec"].geometry.tp3 == 4171.20  # TP3 untouched
     assert stored["be_state"]["confirmed_price"] != spec.geometry.sl  # SL moved to BE
-    assert stored["spec"].geometry.sl == 4140.30     # approved geometry itself immutable
+    assert stored["spec"].geometry.sl == 4140.30  # approved geometry itself immutable
 
 
 def test_no_premature_be_below_tp1(tmp_path):
     """ТЗ §18: price 102 with TP1 104 -> no BE, no events."""
     scaled = TradeGroupSpec(
-        group_id="TG-NOBE-1", signal_id="SGL-NOBE-1", intent_id="INT-NOBE-1",
-        asset_key="XAUUSD", broker_symbol="GOLD", mode="paper", side="long",
+        group_id="TG-NOBE-1",
+        signal_id="SGL-NOBE-1",
+        intent_id="INT-NOBE-1",
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        mode="paper",
+        side="long",
         entry={"low": 99.0, "high": 101.0, "reference": 100.0},
-        geometry={"version": "v1", "unit": "price", "step_price": 4.0,
-                  "tp1": 104.0, "tp2": 108.0, "tp3": 112.0, "sl": 90.0},
-        targets=[{"leg": 1, "price": 104.0, "allocation": 0.333333},
-                 {"leg": 2, "price": 108.0, "allocation": 0.333333},
-                 {"leg": 3, "price": 112.0, "allocation": 0.333334}],
-        break_even={"trigger": "tp1_filled",
-                    "raw_price_policy": "actual_fill",
-                    "protected_price_policy": "actual_fill_plus_cost_buffer",
-                    "apply_to": [2, 3]},
-        risk={"currency": "USD", "max_cash": 25.0, "max_pct": 0.5,
-              "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
-        profile_id="dir_v1", model_version="v3", model_hash="m" * 64,
-        config_hash="c" * 64, strategy_version="s3",
-        expires_at_utc_ms=1_800_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        geometry={
+            "version": "v1",
+            "unit": "price",
+            "step_price": 4.0,
+            "tp1": 104.0,
+            "tp2": 108.0,
+            "tp3": 112.0,
+            "sl": 90.0,
+        },
+        targets=[
+            {"leg": 1, "price": 104.0, "allocation": 0.333333},
+            {"leg": 2, "price": 108.0, "allocation": 0.333333},
+            {"leg": 3, "price": 112.0, "allocation": 0.333334},
+        ],
+        break_even={
+            "trigger": "tp1_filled",
+            "raw_price_policy": "actual_fill",
+            "protected_price_policy": "actual_fill_plus_cost_buffer",
+            "apply_to": [2, 3],
+        },
+        risk={"currency": "USD", "max_cash": 25.0, "max_pct": 0.5, "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
+        profile_id="dir_v1",
+        model_version="v3",
+        model_hash="m" * 64,
+        config_hash="c" * 64,
+        strategy_version="s3",
+        expires_at_utc_ms=1_800_000_000_000,
+        created_at_utc_ms=1_700_000_000_000,
     )
-    executor = TradeGroupExecutor(str(tmp_path / "no-be.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "no-be.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     executor.create_group(scaled)
     executor.submit_group(scaled.group_id)
     # price moves toward TP1 but does not reach it -> nothing happens
@@ -414,6 +466,7 @@ def test_no_premature_be_below_tp1(tmp_path):
     assert "be_requested" not in {e[0] for e in _event_types(executor.ledger_db_path)}
     # and BE can never be requested before the confirmed TP1 event
     from execution.trade_group import require_transition
+
     with pytest.raises(ValueError, match="invalid group transition"):
         require_transition(GroupState.SUBMITTED, GroupState.BE_REQUESTED)
 
@@ -421,8 +474,7 @@ def test_no_premature_be_below_tp1(tmp_path):
 def test_be_retry_then_success(tmp_path):
     """ТЗ §19: modify rejected -> BE_RETRY; after the failure clears -> BE_CONFIRMED."""
     spec = make_spec()
-    executor = TradeGroupExecutor(str(tmp_path / "be-retry.sqlite"), driver=PaperDriver(),
-                                  cost=COST, broker=BROKER)
+    executor = TradeGroupExecutor(str(tmp_path / "be-retry.sqlite"), driver=PaperDriver(), cost=COST, broker=BROKER)
     executor.create_group(spec)
     executor.submit_group(spec.group_id)
     executor.simulate_tick(spec.group_id, 4163.60)
@@ -432,7 +484,7 @@ def test_be_retry_then_success(tmp_path):
     assert executor.confirm_break_even(spec.group_id) == GroupState.BE_RETRY
     assert "be_confirmed" not in {e[0] for e in _event_types(executor.ledger_db_path)}
 
-    executor.driver.reject_modify = False            # broker recovered
+    executor.driver.reject_modify = False  # broker recovered
     assert executor.confirm_break_even(spec.group_id) == GroupState.BE_CONFIRMED
     stored = load_group(executor.db_path, spec.group_id)
     assert stored["be_state"]["status"] == "BE_CONFIRMED"
@@ -443,14 +495,18 @@ def test_be_retry_then_success(tmp_path):
 # Follow-up ТЗ §20/§21: restart recovery matrix + ledger consistency
 # ==========================================================================
 
-@pytest.mark.parametrize("target_state", [
-    GroupState.OPENED,
-    GroupState.TP1_FILLED,
-    GroupState.BE_REQUESTED,
-    GroupState.BE_RETRY,
-    GroupState.BE_CONFIRMED,
-    GroupState.TP2_FILLED,
-])
+
+@pytest.mark.parametrize(
+    "target_state",
+    [
+        GroupState.OPENED,
+        GroupState.TP1_FILLED,
+        GroupState.BE_REQUESTED,
+        GroupState.BE_RETRY,
+        GroupState.BE_CONFIRMED,
+        GroupState.TP2_FILLED,
+    ],
+)
 def test_restart_recovery_preserves_state_and_ids(target_state, tmp_path):
     from data.trade_group_store import load_group as lg
 
@@ -464,19 +520,22 @@ def test_restart_recovery_preserves_state_and_ids(target_state, tmp_path):
     def _advance_to(state):
         if state == GroupState.OPENED:
             executor._ensure_open(spec.group_id)
-        if state in (GroupState.TP1_FILLED, GroupState.BE_REQUESTED,
-                     GroupState.BE_RETRY, GroupState.BE_CONFIRMED,
-                     GroupState.TP2_FILLED):
+        if state in (
+            GroupState.TP1_FILLED,
+            GroupState.BE_REQUESTED,
+            GroupState.BE_RETRY,
+            GroupState.BE_CONFIRMED,
+            GroupState.TP2_FILLED,
+        ):
             executor.simulate_tick(spec.group_id, 4163.60)  # TP1
-        if state in (GroupState.BE_REQUESTED, GroupState.BE_RETRY,
-                     GroupState.BE_CONFIRMED, GroupState.TP2_FILLED):
+        if state in (GroupState.BE_REQUESTED, GroupState.BE_RETRY, GroupState.BE_CONFIRMED, GroupState.TP2_FILLED):
             executor.request_break_even(spec.group_id)
         if state in (GroupState.BE_RETRY, GroupState.BE_CONFIRMED, GroupState.TP2_FILLED):
             executor.driver.reject_modify = True
-            executor.confirm_break_even(spec.group_id)      # -> BE_RETRY
+            executor.confirm_break_even(spec.group_id)  # -> BE_RETRY
             executor.driver.reject_modify = False
         if state in (GroupState.BE_CONFIRMED, GroupState.TP2_FILLED):
-            executor.confirm_break_even(spec.group_id)      # -> BE_CONFIRMED
+            executor.confirm_break_even(spec.group_id)  # -> BE_CONFIRMED
         if state == GroupState.TP2_FILLED:
             executor.simulate_tick(spec.group_id, 4167.70)  # TP2
 
@@ -490,8 +549,7 @@ def test_restart_recovery_preserves_state_and_ids(target_state, tmp_path):
     assert "group_reconciled" not in event_types_before  # not reached TP3 yet
 
     # "restart": fresh executor + fresh driver over the same DB
-    recovered = TradeGroupExecutor(db, driver=PaperDriver(account_mode="netting"),
-                                   cost=COST, broker=BROKER)
+    recovered = TradeGroupExecutor(db, driver=PaperDriver(account_mode="netting"), cost=COST, broker=BROKER)
     restored = recovered.recover_after_restart(spec.group_id)
     assert restored["state"] == target_state
     assert restored["spec"].as_geometry_payload() == geometry_before
@@ -527,12 +585,25 @@ def test_ledger_events_chronological_and_deduplicated(executor):
     assert timestamps == sorted(timestamps)
     # every lifecycle event carries group_id (+ leg_id where applicable)
     for r in rows:
-        if r["event_type"] in {"tp1_filled", "tp2_filled", "tp3_filled",
-                               "leg_submitted", "be_requested", "be_confirmed"}:
+        if r["event_type"] in {
+            "tp1_filled",
+            "tp2_filled",
+            "tp3_filled",
+            "leg_submitted",
+            "be_requested",
+            "be_confirmed",
+        }:
             assert r["group_id"] == spec.group_id
     # no duplicates of key events
-    counts = {event: sum(1 for r in rows if r["event_type"] == event)
-              for event in ("tp1_filled", "be_requested", "be_confirmed",
-                            "tp2_filled", "tp3_filled", "group_reconciled")}
-    assert counts == {"tp1_filled": 1, "be_requested": 1, "be_confirmed": 1,
-                      "tp2_filled": 1, "tp3_filled": 1, "group_reconciled": 1}
+    counts = {
+        event: sum(1 for r in rows if r["event_type"] == event)
+        for event in ("tp1_filled", "be_requested", "be_confirmed", "tp2_filled", "tp3_filled", "group_reconciled")
+    }
+    assert counts == {
+        "tp1_filled": 1,
+        "be_requested": 1,
+        "be_confirmed": 1,
+        "tp2_filled": 1,
+        "tp3_filled": 1,
+        "group_reconciled": 1,
+    }
