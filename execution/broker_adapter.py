@@ -7,11 +7,11 @@ Provides an abstract BrokerAdapter interface and concrete implementations for:
 - cTrader Open API compatible adapter
 """
 from __future__ import annotations
+
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
-import time
-import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("broker_adapter")
 

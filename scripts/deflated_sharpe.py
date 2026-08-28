@@ -73,44 +73,41 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_signal_grid
-from data.ingestion import to_epoch_seconds
-from scripts.run_backtest import (
-    load_asset_history,
-    build_full_df,
-    merge_asset_cfg,
-    truncate_before,
-    _maybe_downgrade_three_class,
-)
-from backtest.walk_forward import generate_windows, split_fold_frames, bar_seconds
-from backtest.metrics import trades_to_dataframe, compute_metrics
 # NOTE: backtest.deflated_sharpe also exports a `decision_gate`, but this module
 # defines its own (the 7-condition admission checklist below). Importing both put
 # two different functions under one name, with the local def silently winning.
 from backtest.deflated_sharpe import (
     annualized_sharpe,
-    probabilistic_sharpe_ratio,
-    deflated_sharpe_ratio,
-    minimum_track_record_length,
     cscv_pbo,
+    deflated_sharpe_ratio,
     effective_number_trials,
-    n_eff_participation_ratio,
+    minimum_track_record_length,
+    probabilistic_sharpe_ratio,
 )
-from model.uniqueness import (
-    compute_trade_uniqueness,
-    average_uniqueness_weights,
-    aligned_uniqueness_weights,
-)
-from backtest.metrics import block_bootstrap_t
+from backtest.metrics import block_bootstrap_t, compute_metrics, trades_to_dataframe
+from backtest.walk_forward import bar_seconds, generate_windows, split_fold_frames
+from config.loader import get_signal_grid, load_config
+from data.ingestion import to_epoch_seconds
 from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
 from model.trainer import (
+    DegenerateLabelSpaceError,
     build_training_matrix,
-    train_model,
     calibrate_model,
     save_model,
-    DegenerateLabelSpaceError,
+    train_model,
 )
-from model.predictor import ModelPredictor
+from model.uniqueness import (
+    aligned_uniqueness_weights,
+    average_uniqueness_weights,
+)
+from scripts.run_backtest import (
+    _maybe_downgrade_three_class,
+    build_full_df,
+    load_asset_history,
+    merge_asset_cfg,
+    truncate_before,
+)
 
 # ---------------------------------------------------------------------------
 # Gate constants
@@ -921,12 +918,12 @@ def print_report(res: dict) -> None:
     print(f"+folds = valid folds with positive PnL / valid folds "
           f"(valid = >= {MIN_TRADES_FOR_VALID_FOLD} trades); "
           f"exBest = total PnL minus the single best fold")
-    print(f"t_block = block-bootstrap t-stat on per-trade R-multiples; "
-          f"x1.5PnL/x1.5PF = cost-stress rerun at 1.5x spread/slippage/commission "
-          f"(gate conditions 1 & 4, now computed for EVERY variant, not just 'current')")
+    print("t_block = block-bootstrap t-stat on per-trade R-multiples; "
+          "x1.5PnL/x1.5PF = cost-stress rerun at 1.5x spread/slippage/commission "
+          "(gate conditions 1 & 4, now computed for EVERY variant, not just 'current')")
 
     dsr_label = f"DSR({res['historical_trials']})"
-    neff_label = f"DSR(Nef)"
+    neff_label = "DSR(Nef)"
     hdr = (f"{'variant':<14}{'n_tr':>6}{'PnL':>9}{'exBest':>9}{'WR%':>6}{'PF':>6}"
            f"{'medPF':>7}{'SR':>8}{'PSR(0)':>8}{'DSR(n)':>8}"
            f"{neff_label:>8}{dsr_label:>9}{'MinTRL y':>9}{'+folds':>8}"
@@ -946,7 +943,7 @@ def print_report(res: dict) -> None:
               f"{_fmt(t.get('cost_x1_5_pf', float('nan')), 8):>8}")
 
     c = res["cscv"]
-    print(f"\nCSCV (Probability of Backtest Overfitting):")
+    print("\nCSCV (Probability of Backtest Overfitting):")
     print(f"  splits={c['n_splits']} (blocks of {c['n_observations'] // c['n_splits']} folds), "
           f"combinations={c['n_combinations']} (of {c['total_combinations']})")
     print(f"  PBO = {c['pbo']:.3f} | mean lambda = {c['mean_lambda']:+.3f} | "
@@ -1064,7 +1061,11 @@ def main(argv: list[str] | None = None) -> None:
         df = _make_synthetic_wf_df(n, spec["price"], spec["atr"], freq)
         df = _inject_biased_probs(df)
 
-    from scripts.trial_journal import default_historical_trials, enforce_locked_holdout, log_trial
+    from scripts.trial_journal import (
+        default_historical_trials,
+        enforce_locked_holdout,
+        log_trial,
+    )
     if args.historical_trials is None:
         args.historical_trials = default_historical_trials(args.asset)
 

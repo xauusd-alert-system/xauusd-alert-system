@@ -32,8 +32,6 @@ Example::
 from risk.compat import InstitutionalRiskManager
 from risk.engine import RiskEngine
 from risk.limits import RiskLimits
-from risk.state import RiskState
-from risk.throttle import RateThrottle
 
 # Sizing convenience re-exports (the full set lives in risk.sizing).
 from risk.sizing import (  # noqa: F401
@@ -46,6 +44,8 @@ from risk.sizing import (  # noqa: F401
     trade_risk_pct,
     vol_target_scale,
 )
+from risk.state import RiskState
+from risk.throttle import RateThrottle
 
 __all__ = [
     "RiskEngine",

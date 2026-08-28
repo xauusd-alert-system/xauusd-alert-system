@@ -12,13 +12,14 @@ The engine processes candles strictly in order (no vectorized shortcuts), mainta
 at most ONE open position at a time (consistent with small-deposit, no-leverage-blowup
 risk context), and applies spread/slippage on both entry and exit.
 """
+from dataclasses import dataclass
+from typing import List, Optional
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import Optional, List
 
-from regime.classifier import RegimeLabel
 from config.loader import get_signal_grid, resolve_signal_step
+from regime.classifier import RegimeLabel
 
 
 @dataclass

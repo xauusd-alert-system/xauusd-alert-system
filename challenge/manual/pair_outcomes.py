@@ -17,14 +17,14 @@ import datetime as dt
 import json
 import os
 import sys
-import time
 
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from pairs_analysis import load_config as load_pairs_config, PairAnalyzer, SignalEngine
+from pairs_analysis import PairAnalyzer
+from pairs_analysis import load_config as load_pairs_config
 
 PAIR_SENT_FILE = os.path.join(ROOT, "data", "manual", "pair_alerts_sent.json")
 PAIR_RESOLVED_FILE = os.path.join(ROOT, "data", "manual", "pair_outcomes_resolved.json")

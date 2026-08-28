@@ -84,7 +84,8 @@ def test_ingest_accepts_and_dedupes(client):
 
 def test_ingest_rejects_malformed_envelope(client):
     # signed with valid HMAC, but invalid schema -> 422 (schema checked AFTER signature)
-    import hashlib, hmac as _hmac
+    import hashlib
+    import hmac as _hmac
     raw = b'{"schema_version": 1, "events": "nope"}'
     sig = _hmac.new(b"test-hmac-secret", raw, hashlib.sha256).hexdigest()
     res = client.post("/api/ledger/ingest", content=raw,
@@ -228,7 +229,7 @@ def test_provenance_audit_endpoint(tmp_path, monkeypatch):
     """P1.6 §39: the provenance audit returns the group lineage with explicit
     missing nodes — never synthetic placeholders."""
     from data.trade_group_store import save_group
-    from execution.trade_group import TradeGroupSpec, GroupState
+    from execution.trade_group import GroupState, TradeGroupSpec
 
     monkeypatch.setenv("LEDGER_INGEST_TOKEN", "ingest-token")
     monkeypatch.setenv("LEDGER_OWNER_TOKEN", "owner-token")
@@ -287,7 +288,6 @@ def test_provenance_audit_endpoint(tmp_path, monkeypatch):
 # Strict signed ingress (security contract) — P1 finding regression tests
 # ==========================================================================
 
-from data.ledger_bridge import sign_envelope
 
 
 @pytest.fixture

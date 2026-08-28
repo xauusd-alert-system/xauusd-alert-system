@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from config.loader import load_config
 from scripts.deflated_sharpe import _build_fold_frames
-from scripts.run_backtest import load_asset_history, build_full_df
+from scripts.run_backtest import build_full_df, load_asset_history
 
 
 def _sigmoid_params(model):
@@ -193,7 +193,7 @@ def main():
         "p_long_prop": all_pl_prop, "p_short_prop": all_ps_prop,
     })
     rdf.to_csv("logs/diag_calib_ab_btcusd.csv", index=False)
-    print(f"\n  CSV -> logs/diag_calib_ab_btcusd.csv")
+    print("\n  CSV -> logs/diag_calib_ab_btcusd.csv")
 
 
 if __name__ == "__main__":

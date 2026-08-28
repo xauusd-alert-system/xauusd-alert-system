@@ -25,23 +25,24 @@ look like PF 6-30 / 27/27 positive folds — that path is deleted).
 Works on synthetic mock data for tests (no real DB required).
 """
 
+import itertools
 import os
 import sys
-import itertools
-import pandas as pd
-import numpy as np
 from copy import deepcopy
+
+import numpy as np
+import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.walk_forward import run_walk_forward
 from config.loader import load_config
+from data.ingestion import to_epoch_seconds
 from scripts.run_backtest import (
-    load_asset_history,
     build_full_df,
+    load_asset_history,
     strategy_fn_factory,
 )
-from data.ingestion import to_epoch_seconds
-from backtest.walk_forward import run_walk_forward
 
 
 def _make_synthetic_gbp_wf_df(n=4800, start_price=1.28):

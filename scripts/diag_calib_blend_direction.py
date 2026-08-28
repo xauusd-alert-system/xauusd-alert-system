@@ -180,22 +180,22 @@ def main() -> None:
         else:
             print("# NO calibration wrapper - probabilities are RAW")
         print(f"{'#' * 100}")
-        print(f"\n-- P(long) distribution: RAW (XGBoost) vs CALIBRATED --")
+        print("\n-- P(long) distribution: RAW (XGBoost) vs CALIBRATED --")
         print(f"  {'':16s} {'mean':>7s} {'std':>7s} {'p5':>7s} {'p50':>7s} {'p95':>7s} {'%>0.5':>7s}")
         print(f"  {'raw':16s} {s_raw['mean']:7.4f} {s_raw['std']:7.4f} {s_raw['p5']:7.4f} "
               f"{s_raw['p50']:7.4f} {s_raw['p95']:7.4f} {100*s_raw['share_gt_0.5']:6.1f}%")
         print(f"  {'calibrated':16s} {s_cal['mean']:7.4f} {s_cal['std']:7.4f} {s_cal['p5']:7.4f} "
               f"{s_cal['p50']:7.4f} {s_cal['p95']:7.4f} {100*s_cal['share_gt_0.5']:6.1f}%")
 
-        print(f"\n-- Transfer check --")
+        print("\n-- Transfer check --")
         print(f"  {transfer_note}")
 
-        print(f"\n-- Direction balance (long share of ALL bars) --")
+        print("\n-- Direction balance (long share of ALL bars) --")
         print(f"  raw says LONG:      {100*raw_dir_long.mean():6.1f}%   ({raw_dir_long.sum()}/{len(df)})")
         print(f"  cal says LONG:      {100*cal_dir_long.mean():6.1f}%   ({cal_dir_long.sum()}/{len(df)})")
         print(f"  direction flipped by cal: {(raw_dir_long != cal_dir_long).mean()*100:.1f}% of bars")
 
-        print(f"\n-- Gate funnel (on CALIBRATED probs) --")
+        print("\n-- Gate funnel (on CALIBRATED probs) --")
         n0 = len(df)
         n1 = int(prob_pass.sum())          # min_ml_probability
         n2 = int(cal_pass.sum())           # min_edge
@@ -208,7 +208,7 @@ def main() -> None:
         if n2:
             print(f"  long share of edge-pass:     {100*n2_long/n2:5.1f}%")
 
-        print(f"\n-- Rule + ML blend (on CALIBRATED probs) --")
+        print("\n-- Rule + ML blend (on CALIBRATED probs) --")
         print(f"  rule_vote from regime: +1(up) {int((rule_vote==1).sum())} / -1(down) "
               f"{int((rule_vote==-1).sum())} / 0 {int((rule_vote==0).sum())}")
         print(f"  ml_vote long share: {100*(ml_vote==1).mean():5.1f}%")

@@ -40,15 +40,16 @@ Now supports multiple model backends:
 - lightgbm (optional, if installed)
 - ensemble (soft voting of available models)
 """
-import os
 import logging
+import os
+
+import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-import joblib
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("model_trainer")

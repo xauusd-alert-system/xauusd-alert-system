@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
+from data.trade_logger import init_trade_log_schema, log_trade_close, log_trade_entry
 from scripts.monitor_live_execution import compute_live_metrics
 
 

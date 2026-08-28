@@ -7,9 +7,9 @@ AUC Translator for Meta-Labeling / PF Targets (quant audit Section 5 / Task 9).
 from __future__ import annotations
 
 import math
+
 import numpy as np
 import pandas as pd
-from typing import List
 from scipy import stats
 
 

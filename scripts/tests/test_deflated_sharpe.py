@@ -17,20 +17,19 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from backtest.deflated_sharpe import (
-    annualized_sharpe,
-    probabilistic_sharpe_ratio,
-    expected_max_sharpe,
-    deflated_sharpe_ratio,
-    minimum_track_record_length,
-    cscv_pbo,
     _pick_n_splits,
+    annualized_sharpe,
+    cscv_pbo,
+    deflated_sharpe_ratio,
+    expected_max_sharpe,
+    minimum_track_record_length,
+    probabilistic_sharpe_ratio,
 )
 from scripts.deflated_sharpe import (
-    run_analysis,
-    _make_synthetic_wf_df,
     _inject_biased_probs,
+    _make_synthetic_wf_df,
+    run_analysis,
 )
-
 
 # ---------------------------------------------------------------------------
 # PSR / DSR math

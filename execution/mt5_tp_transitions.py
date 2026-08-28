@@ -18,7 +18,12 @@ from typing import Any
 
 from data.trade_group_store import save_group, update_group_state
 from data.trading_event_ledger import append_trading_event
-from execution.trade_group import GroupState, TradeGroupSpec, new_leg_id, require_transition
+from execution.trade_group import (
+    GroupState,
+    TradeGroupSpec,
+    new_leg_id,
+    require_transition,
+)
 
 
 def tp1_filled(executor, group: dict[str, Any], fill_price: float,

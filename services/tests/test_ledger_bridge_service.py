@@ -6,8 +6,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from data.ledger_bridge import enqueue_event, init_outbox, mark_delivered
 from contracts.execution_contracts import ExecutionEvent
+from data.ledger_bridge import enqueue_event, init_outbox, mark_delivered
 from services.base import create_health_app
 from services.ledger_bridge import service as lb
 

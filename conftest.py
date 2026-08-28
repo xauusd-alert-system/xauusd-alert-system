@@ -6,8 +6,8 @@ use ``cfg``, ``pipeline``, ``signal``, ``position``, ``stub_predictor``,
 All fixtures are function-scoped (fresh per test) and accept optional
 overrides via indirect parametrize.
 """
-import sys
 import os
+import sys
 
 # logs/ws_live_test.py is a manual live-trading smoke script (needs MetaTrader5
 # + websockets + an open MT5 session), NOT a test. Exclude it from collection so
@@ -22,14 +22,14 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 from tests.builder import (
+    StubConnector,
+    StubMT5,
+    StubPredictor,
     build_cfg,
     build_pipeline,
-    build_signal,
     build_position,
     build_risk,
-    StubPredictor,
-    StubMT5,
-    StubConnector,
+    build_signal,
 )
 
 

@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import requests
 
@@ -384,8 +384,9 @@ class TelegramControlBot:
         if not self._require_admin(chat_id):
             return
         try:
-            from news.calendar_feed import get_feed
             from news.guard import get_guard
+
+            from news.calendar_feed import get_feed
 
             feed = get_feed()
             guard = get_guard()
@@ -452,7 +453,10 @@ class TelegramControlBot:
                 self._send(chat_id, "❓ Использование: /metrics [today|week|2week|month|3month|all]")
             return
         try:
-            from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
+            from features.smart_money_metrics import (
+                compute_institutional_metrics,
+                format_institutional_metrics_report,
+            )
             candles = None
             source = "synthetic"
             # Prefer REAL candles from the running trader's pipeline (any enabled
@@ -582,8 +586,12 @@ class TelegramControlBot:
             return
         try:
             import os
+
             from data.paper_ledger import paper_accumulation_status
-            from paper.accumulator import format_accumulation_status, load_frozen_manifest
+            from paper.accumulator import (
+                format_accumulation_status,
+                load_frozen_manifest,
+            )
 
             manifest_path = os.getenv("PAPER_MANIFEST_PATH")
             db_path = os.getenv("PAPER_LEDGER_DB", "data/paper_forward.sqlite")

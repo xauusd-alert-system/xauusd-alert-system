@@ -5,7 +5,11 @@ import pandas as pd
 import pytest
 
 from config.loader import effective_asset_config
-from data.execution_ledger import broker_spread_report, execution_cost_report, log_execution_attempt
+from data.execution_ledger import (
+    broker_spread_report,
+    execution_cost_report,
+    log_execution_attempt,
+)
 from data.storage import init_schema, read_candles, upsert_candles
 from model.trainer import load_model, save_model
 from model.uniqueness import aligned_uniqueness_weights

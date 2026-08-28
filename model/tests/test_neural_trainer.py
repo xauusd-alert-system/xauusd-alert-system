@@ -6,12 +6,10 @@ import pandas as pd
 import pytest
 
 from model.neural_trainer import (
-    NeuralSequenceClassifier,
-    HybridEnsembleModel,
-    train_neural_model,
     train_hybrid_model,
+    train_neural_model,
 )
-from model.trainer import train_model, calibrate_model
+from model.trainer import train_model
 
 
 @pytest.fixture

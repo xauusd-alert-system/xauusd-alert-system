@@ -29,7 +29,7 @@ import os
 import sqlite3
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Sequence
 
 logger = logging.getLogger("migrate_all")
 
@@ -101,7 +101,7 @@ def registry_check(db_path: str) -> RegistryCheckResult:
     Only tables that actually exist are inspected; a database without any
     trade-group/intent tables simply reports zero records checked.
     """
-    from execution.schema_registry import deserialize_intent, deserialize_spec
+    from execution.schema_registry import deserialize_spec
 
     result = RegistryCheckResult(db_path=db_path)
     if not os.path.exists(db_path):

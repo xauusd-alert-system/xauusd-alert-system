@@ -16,17 +16,14 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 
-import pandas as pd
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
-from scripts.run_backtest import load_asset_history, build_full_df
-from scripts.deflated_sharpe import _apply_variant
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
 from alerts.telegram_bot import TelegramAlertBot
-
+from config.loader import load_config
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
+from scripts.deflated_sharpe import _apply_variant
+from scripts.run_backtest import build_full_df, load_asset_history
 
 LIVE_START_UTC = "2026-08-08"
 PAPER_DB_PATH = os.getenv("PAPER_TRADES_DB_PATH", "data/paper_trades.sqlite")

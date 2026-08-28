@@ -18,20 +18,19 @@ import json
 import os
 import sys
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
 from backtest.portfolio import (
-    daily_r_matrix,
-    strategy_correlation,
-    effective_number_bets,
     cluster_risk_parity_weights,
     compare_schemes,
+    daily_r_matrix,
+    effective_number_bets,
     kill_switch_thresholds,
+    strategy_correlation,
 )
+from config.loader import load_config
 
 DEFAULT_CLUSTERS = {"metals": ["XAUUSD", "XAGUSD"],
                     "fx": ["EURUSD", "GBPUSD"],
@@ -46,17 +45,20 @@ def load_trades_for_asset(asset_key: str, cfg: dict, max_folds: int | None) -> p
         tdf = pd.read_csv(csv_path)
         if {"entry_ts", "net_r"}.issubset(tdf.columns) and len(tdf):
             return tdf
+    from model.ensemble_backtest import EnsembleBacktester
     from scripts.deflated_sharpe import (
-        _make_synthetic_wf_df, _inject_biased_probs, _build_fold_frames, _SYNTH_DEFAULTS,
+        _SYNTH_DEFAULTS,
+        _build_fold_frames,
+        _inject_biased_probs,
+        _make_synthetic_wf_df,
     )
     from scripts.run_backtest import merge_asset_cfg
-    from model.ensemble_backtest import EnsembleBacktester
 
     asset_cfg = cfg.get("assets", {}).get(asset_key, {})
     timeframe = asset_cfg.get("timeframe") or "M5"
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
         raw = load_asset_history(db_path, timeframe, asset_key)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=asset_key)
     except Exception:
@@ -123,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
         print("  weights:", crp_no.round(4).to_dict())
 
     ks = kill_switch_thresholds(daily)
-    print(f"\nKill-switch thresholds (from backtest distribution):")
+    print("\nKill-switch thresholds (from backtest distribution):")
     print(f"  daily 2-sigma = {ks['daily_2sigma']}R | weekly 3-sigma = "
           f"{ks['weekly_3sigma']}R (n_days={ks['n_days']})")
 

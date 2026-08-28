@@ -8,11 +8,11 @@ import pandas as pd
 import pytest
 
 from features.smart_money_metrics import (
-    calculate_manipulation_index,
-    calculate_zone_strength,
-    calculate_smf_ratio,
-    calculate_liquidity_grab,
     calculate_delta_confidence,
+    calculate_liquidity_grab,
+    calculate_manipulation_index,
+    calculate_smf_ratio,
+    calculate_zone_strength,
     compute_institutional_metrics,
     format_institutional_metrics_report,
 )
@@ -88,7 +88,6 @@ def test_compute_institutional_metrics_and_formatting(sample_market_df):
 def test_delta_confidence_very_high_is_reachable():
     """N9: with a very strong, consistent delta the level must be VERY HIGH
     (previously unreachable because the looser HIGH branch ran first)."""
-    import numpy as np
     import pandas as pd
     # 30 bars, consistently buying (close near high -> positive signed delta),
     # strong cumulative slope relative to volume.
@@ -109,8 +108,8 @@ def test_delta_confidence_very_high_is_reachable():
 
 from features.smart_money_metrics import (
     FORBIDDEN_CLAIMS,
-    SOURCE_KIND,
     PARAMETER_META,
+    SOURCE_KIND,
 )
 
 

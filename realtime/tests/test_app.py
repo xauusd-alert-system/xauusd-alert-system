@@ -1,8 +1,8 @@
 """
 Tests for FastAPI Realtime Application, Dashboard API, Charts, Sentiment, and Monte Carlo.
 """
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from realtime.app import app
 

@@ -10,6 +10,7 @@ Run with: pytest features/tests/test_no_lookahead.py -v
 """
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -17,10 +18,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
-from features.indicators import ema, rsi, macd, atr, bollinger_width, build_all_indicators
 from features.candle_anatomy import candle_anatomy
-from features.structure import detect_structure
+from features.indicators import (
+    atr,
+    bollinger_width,
+    build_all_indicators,
+    ema,
+    macd,
+    rsi,
+)
 from features.mtf_confluence import merge_htf_feature
+from features.structure import detect_structure
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -306,9 +314,8 @@ def test_fractional_diff_no_lookahead():
 
 def test_regime_classifier_no_lookahead():
     """classify_regime_series at row i must be identical to a truncated run."""
-    from regime.classifier import classify_regime_series
     from features.indicators import build_all_indicators
-    from regime.classifier import add_regime_indicators
+    from regime.classifier import add_regime_indicators, classify_regime_series
     df = _sample_df(n=300)
     df = build_all_indicators(df, CFG)
     df = add_regime_indicators(df, CFG)
@@ -509,7 +516,11 @@ def test_regime_module_rejects_stale_zero_to_one_column():
 def test_compression_regime_share_is_sane():
     """A3 guard: if the compression branch ever reads a 0..1 column again, every
     value is below the threshold of 20 and every bar becomes COMPRESSION."""
-    from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
+    from regime.classifier import (
+        RegimeLabel,
+        add_regime_indicators,
+        classify_regime_series,
+    )
 
     df = _sample_df_tf("M15", n=600)
     df = build_all_indicators(df, CFG)

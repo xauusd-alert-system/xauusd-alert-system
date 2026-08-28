@@ -41,18 +41,24 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config
+from backtest.metrics import block_bootstrap_t, trades_to_dataframe
+from backtest.walk_forward import generate_windows
+from config.loader import effective_asset_config, load_config
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
+from model.trainer import (
+    FEATURE_COLUMNS,
+    build_training_matrix,
+    calibrate_model,
+    save_model,
+    train_model,
+)
 from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
     _SYNTH_DEFAULTS,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
 )
 from scripts.run_backtest import merge_asset_cfg
-from backtest.walk_forward import generate_windows
-from backtest.metrics import trades_to_dataframe, compute_r_metrics, block_bootstrap_t
-from model.trainer import build_training_matrix, train_model, calibrate_model, save_model, FEATURE_COLUMNS
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
 
 ATR_SCALED_FEATURES = [f for f in FEATURE_COLUMNS if f.endswith("_atr") or f in (
     "atr_pct", "return_1", "return_4", "volume_ratio")]
@@ -70,7 +76,7 @@ def _load_asset_frames(cfg, assets, max_folds):
         timeframe = a_cfg.get("timeframe") or "M5"
         db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
         try:
-            from scripts.run_backtest import load_asset_history, build_full_df
+            from scripts.run_backtest import build_full_df, load_asset_history
             raw = load_asset_history(db_path, timeframe, asset)
             df = build_full_df(cfg, raw, db_path=db_path, asset_key=asset)
             out[asset] = df

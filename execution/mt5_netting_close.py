@@ -17,7 +17,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from data.trade_group_store import has_action, load_group, mark_action, update_group_state
+from data.trade_group_store import (
+    has_action,
+    load_group,
+    mark_action,
+    update_group_state,
+)
 from execution.mt5_common import BrokerUnavailable, MT5BrokerContext
 from execution.reconciliation import emit_execution_error
 from execution.trade_group import TradeGroupSpec, floor_to_step, new_leg_id

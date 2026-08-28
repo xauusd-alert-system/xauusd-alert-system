@@ -4,8 +4,10 @@ Generates clean SVG and ASCII chart snapshots with Entry, Stop Loss,
 and Take Profit target levels.
 """
 from __future__ import annotations
+
+from typing import List, Optional
+
 import pandas as pd
-from typing import Optional, List, Dict
 
 
 class ChartRenderer:
@@ -58,7 +60,7 @@ class ChartRenderer:
 
         svg = [
             f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" style="background:#0f172a; font-family:monospace;">',
-            f'<rect width="100%" height="100%" fill="#0f172a"/>',
+            '<rect width="100%" height="100%" fill="#0f172a"/>',
             f'<text x="20" y="22" fill="#f8fafc" font-size="14" font-weight="bold">{symbol} M5 Setup</text>',
         ]
 

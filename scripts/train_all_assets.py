@@ -8,8 +8,8 @@ training pipeline (safety > functionality; the model file itself is written
 by scripts/train_mt5.py exactly as before).
 """
 import os
-import sys
 import subprocess
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from config.loader import load_config
@@ -43,10 +43,10 @@ def main():
         model_path = asset_cfg["model_path"]
         # Per-asset timeframe override (assets.<key>.timeframe), else global.
         asset_tf = asset_cfg.get("timeframe") or timeframe
-        print(f"\n==========================================")
+        print("\n==========================================")
         print(f"Training Model for {asset} ({asset_cfg['mt5_symbol']}) on {asset_tf}...")
-        print(f"==========================================")
-        
+        print("==========================================")
+
         cmd = [
             sys.executable, "-m", "scripts.train_mt5",
             "--symbol", asset,

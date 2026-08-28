@@ -264,6 +264,7 @@ def test_proxy_remote_transport_error_returns_non_2xx(monkeypatch):
 def test_proxy_never_logs_secrets(caplog):
     """Logs must contain only safe metadata — never secrets/tokens/HMAC."""
     import logging
+
     import scripts.run_observer_signing_proxy as proxy_mod
 
     with caplog.at_level(logging.INFO):

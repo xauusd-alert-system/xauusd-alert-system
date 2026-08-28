@@ -35,15 +35,15 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config
+from config.loader import effective_asset_config, load_config
+from model.cv import purged_kfold_indices
+from model.trainer import FEATURE_COLUMNS, build_training_matrix, train_model
 from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
     _SYNTH_DEFAULTS,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
 )
 from scripts.run_backtest import merge_asset_cfg
-from model.cv import purged_kfold_indices
-from model.trainer import build_training_matrix, train_model, FEATURE_COLUMNS
 
 
 def _oof_accuracy(model, X_test: pd.DataFrame, y_test: pd.Series) -> float:
@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> None:
 
     synthetic = False
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[featsel] Real data: {len(df)} {timeframe} rows from {db_path}")

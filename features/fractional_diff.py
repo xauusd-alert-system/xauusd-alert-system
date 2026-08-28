@@ -68,7 +68,6 @@ def min_d_adf(series: pd.Series, d_list: list[float] | None = None,
     """Smallest d in d_list whose fractionally-differenced series passes the
     ADF test at `significance` (i.e. is stationary). Returns the chosen d and
     the ADF statistic/p-value ladder."""
-    from scipy import stats
     from statsmodels.tsa.stattools import adfuller
 
     d_list = d_list or DEFAULT_D_LIST

@@ -7,17 +7,14 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 from provenance.store import ProvenanceStore
-from provenance.tests.test_spec import make_record
 from provenance.verifier import verify_record
 
 
 def test_executor_records_provenance_when_enabled(tmp_path, monkeypatch):
     """create_group writes an audit record when provenance.store.enabled."""
-    from execution.trade_group_executor import PaperDriver, TradeGroupExecutor
     from execution.tests.test_trade_group_executor import BROKER, COST, make_spec
+    from execution.trade_group_executor import PaperDriver, TradeGroupExecutor
 
     store_db = str(tmp_path / "prov_enabled.sqlite")
     monkeypatch.setattr(
@@ -47,8 +44,8 @@ def test_executor_records_provenance_when_enabled(tmp_path, monkeypatch):
 
 def test_executor_skips_when_disabled(tmp_path, monkeypatch):
     """Default config (enabled: false / unset) writes nothing (fail-open)."""
-    from execution.trade_group_executor import PaperDriver, TradeGroupExecutor
     from execution.tests.test_trade_group_executor import BROKER, COST, make_spec
+    from execution.trade_group_executor import PaperDriver, TradeGroupExecutor
 
     store_db = str(tmp_path / "prov_disabled.sqlite")
     monkeypatch.setattr(
@@ -77,8 +74,8 @@ def test_executor_skips_when_disabled(tmp_path, monkeypatch):
 
 def test_executor_fail_open_on_store_error(tmp_path, monkeypatch):
     """A broken store must never break the execution path (fail-open)."""
-    from execution.trade_group_executor import PaperDriver, TradeGroupExecutor
     from execution.tests.test_trade_group_executor import BROKER, COST, make_spec
+    from execution.trade_group_executor import PaperDriver, TradeGroupExecutor
 
     monkeypatch.setattr(
         "execution.trade_group_executor.load_config",

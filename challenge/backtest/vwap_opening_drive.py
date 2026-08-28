@@ -5,8 +5,11 @@ Two new strategies tested against ORB baseline:
 1. VWAP breakout: enter when price crosses VWAP with volume confirmation
 2. Opening drive: enter in the direction of the first 5-min candle after open
 """
-import json, os, datetime as dt, math
+import datetime as dt
+import json
+import os
 import sys as _sys
+
 _sys.path.insert(0, r"C:\Users\botbo\Desktop\xauusd-alert-system")
 
 BASE = r"C:\Users\botbo\Desktop\xauusd-alert-system\data\backtest"

@@ -8,8 +8,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from challenge.manual.quality_score import (
-    compute_quality_score, format_quality,
-    _time_of_day_score, _volume_score, _regime_score,
+    _regime_score,
+    _time_of_day_score,
+    _volume_score,
+    compute_quality_score,
+    format_quality,
 )
 
 

@@ -11,7 +11,7 @@ raises is reported as a failed check — a health probe must never 500.
 from __future__ import annotations
 
 import threading
-from typing import Callable, Mapping
+from typing import Callable
 
 # A single health check: returns (ok, human-readable detail).
 CheckFn = Callable[[], "tuple[bool, str]"]

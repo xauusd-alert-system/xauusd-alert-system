@@ -9,9 +9,11 @@ temporal transition modelling is performed. Kept under this name to avoid
 churn; the class is currently NOT wired into any production pipeline.
 """
 from __future__ import annotations
+
+from typing import Dict
+
 import numpy as np
 import pandas as pd
-from typing import Optional, List, Dict
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
@@ -41,7 +43,7 @@ class UnsupervisedRegimeClassifier:
         vol = vol.fillna(0.0)
         vol_ma = vol.rolling(window=20, min_periods=1).mean()
         rel_vol = (vol / vol_ma.replace(0, np.nan)).fillna(1.0)
-        
+
         volume = df["volume"] if "volume" in df.columns else pd.Series(1.0, index=df.index)
         vol_sma = volume.rolling(window=20, min_periods=1).mean()
         norm_volume = (volume / vol_sma.replace(0, np.nan)).fillna(1.0)

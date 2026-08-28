@@ -12,7 +12,6 @@ Tests for the final audit batch:
 """
 
 import json
-import math
 import os
 import sys
 
@@ -22,38 +21,35 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from features.fractional_diff import frac_diff, min_d_adf
-from model.cv import purged_kfold_indices, purge_train_indices, embargo_train_indices
-from model.uniqueness import average_uniqueness_weights, sample_weight_series
 from backtest.portfolio import (
-    daily_r_matrix,
-    strategy_correlation,
-    effective_number_bets,
     cluster_risk_parity_weights,
-    portfolio_curve,
-    portfolio_metrics,
     compare_schemes,
+    daily_r_matrix,
+    effective_number_bets,
     kill_switch_thresholds,
+    portfolio_curve,
+    strategy_correlation,
 )
 from execution.risk_sizer import (
-    trade_risk_pct,
-    lots_for_risk,
     cluster_exposure_ok,
-    same_direction_cluster_penalty,
     drawdown_throttle,
     leverage_multiplier,
+    lots_for_risk,
+    same_direction_cluster_penalty,
+    trade_risk_pct,
     vol_target_scale,
 )
-from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
-    run_analysis,
-)
-from scripts.exit_calibration import calibrate_stop
-from scripts.diag_meta_precheck import run_meta_precheck
-from scripts.diag_event_tail import run_event_tail, _minutes_to_nearest
-from scripts.diag_time_stop import run_time_stop
+from features.fractional_diff import frac_diff, min_d_adf
+from model.cv import embargo_train_indices, purge_train_indices, purged_kfold_indices
 from model.ensemble_backtest import EnsembleBacktester
+from model.uniqueness import average_uniqueness_weights, sample_weight_series
+from scripts.deflated_sharpe import (
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
+)
+from scripts.diag_event_tail import _minutes_to_nearest, run_event_tail
+from scripts.diag_meta_precheck import run_meta_precheck
+from scripts.diag_time_stop import run_time_stop
 
 
 @pytest.fixture(scope="module")
@@ -80,7 +76,7 @@ def test_regime_override_applied_with_enum_regimes():
     'RegimeLabel.TREND_UP' while regime_overrides keys are 'trend_up' (.value).
     The engine must normalize via _regime_name() so the override applies:
     stop 5.0xATR vs the base 3.0xATR, and regime_at_entry == 'trend_up'."""
-    from model.tests.test_ensemble_backtest import _fx_v3_early_be_cfg, _df
+    from model.tests.test_ensemble_backtest import _df, _fx_v3_early_be_cfg
     from regime.classifier import RegimeLabel
     cfg = _fx_v3_early_be_cfg(1.0)
     cfg["signal_grid"]["regime_overrides"] = {
@@ -230,9 +226,9 @@ def test_train_model_sample_weight():
 
 def test_feature_selection_run(synthetic_gbp_df):
     from config.loader import load_config
+    from labeling.label_generator import generate_labels_from_config
     from model.trainer import FEATURE_COLUMNS
     from scripts.feature_selection import run_feature_selection
-    from labeling.label_generator import generate_labels_from_config
     cfg = load_config()
     df = synthetic_gbp_df.copy()
     if "label" not in df.columns:

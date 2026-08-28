@@ -5,33 +5,33 @@ Example:
     python -m scripts.train_mt5 --symbol XAUUSD --db-path data/market_data_mt5.sqlite --output output/models/xauusd_direction_model.joblib
 """
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config, get_signal_grid
+from config.loader import effective_asset_config, get_signal_grid, load_config
 from data.storage import read_candles
-from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
-from features.structure import detect_structure
+from features.indicators import build_all_indicators
 from features.mtf_confluence import compute_confluence_score
 from features.order_flow import add_order_flow_features
-from regime.classifier import add_regime_indicators, classify_regime_series
+from features.structure import detect_structure
 from labeling.label_generator import generate_labels_from_config, resolve_label_event
-from model.uniqueness import aligned_uniqueness_weights
 from model.trainer import (
     build_training_matrix,
-    purged_time_ordered_split,
-    train_model,
     calibrate_model,
+    purged_time_ordered_split,
     save_model,
+    train_model,
 )
+from model.uniqueness import aligned_uniqueness_weights
+from regime.classifier import add_regime_indicators, classify_regime_series
 
 
 def build_full_df(
@@ -113,6 +113,7 @@ def _purged_oos_calibration(model, X_test: pd.DataFrame, y_test: pd.Series,
                             asset_key: str) -> dict:
     """Mandatory untouched production-split probability report."""
     import numpy as np
+
     from model.calibration import calibration_report
 
     if X_test.empty:

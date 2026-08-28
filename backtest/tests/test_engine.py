@@ -4,18 +4,23 @@ Run with: pytest backtest/tests/test_engine.py -v
 """
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from backtest.engine import EventDrivenBacktester, Trade, rule_based_signal
+from backtest.metrics import (
+    compute_metrics,
+    compute_metrics_per_session,
+    trades_to_dataframe,
+)
+from backtest.walk_forward import generate_windows, run_walk_forward
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles, to_epoch_seconds
 from features.indicators import build_all_indicators
-from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
-from backtest.engine import EventDrivenBacktester, rule_based_signal, Trade
-from backtest.metrics import trades_to_dataframe, compute_metrics, compute_metrics_per_session
-from backtest.walk_forward import generate_windows, run_walk_forward
+from regime.classifier import RegimeLabel, add_regime_indicators, classify_regime_series
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]

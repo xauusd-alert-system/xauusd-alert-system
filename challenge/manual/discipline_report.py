@@ -14,10 +14,10 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import os
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 
-from challenge.manual.journal import read as journal_read, DEFAULT_JOURNAL
-
+from challenge.manual.journal import DEFAULT_JOURNAL
+from challenge.manual.journal import read as journal_read
 
 # --- Compliance scoring ---
 
@@ -342,7 +342,7 @@ def format_report(report: dict) -> str:
         lines.append(f"  Passed:         {cl['passed']}  ({cl['pass_rate']:.0f}%)")
         lines.append(f"  Blocked:        {cl['blocked']}")
         if cl.get("block_reasons"):
-            lines.append(f"  Block reasons:")
+            lines.append("  Block reasons:")
             for reason, count in sorted(cl["block_reasons"].items(),
                                         key=lambda x: -x[1]):
                 lines.append(f"    {reason:<20s} {count}")

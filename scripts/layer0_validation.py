@@ -480,8 +480,13 @@ def _score(name, model, X_test, y_test, cfg):
 
 
 def phase3(cfg, fixed: pd.DataFrame, legacy: pd.DataFrame, args):
-    from model.trainer import (build_training_matrix, time_ordered_split,
-                               train_model, calibrate_model, save_model)
+    from model.trainer import (
+        build_training_matrix,
+        calibrate_model,
+        save_model,
+        time_ordered_split,
+        train_model,
+    )
 
     hr("PHASE 3  retrain on the fixed features and measure the shift")
     print("NOT a deployment run. Identical config, identical time-ordered split,")
@@ -498,7 +503,7 @@ def phase3(cfg, fixed: pd.DataFrame, legacy: pd.DataFrame, args):
     X_a, y_a, cols_a = built["after"]
 
     if list(cols_b) != list(cols_a):
-        print(f"\n  !! feature lists differ:")
+        print("\n  !! feature lists differ:")
         print(f"     only before: {sorted(set(cols_b) - set(cols_a))}")
         print(f"     only after : {sorted(set(cols_a) - set(cols_b))}")
     if len(X_b) != len(X_a) or not np.array_equal(np.asarray(y_b), np.asarray(y_a)):

@@ -5,8 +5,8 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from config.loader import load_config
 from alerts.control_bot import TelegramControlBot, parse_admin_ids
+from config.loader import load_config
 
 CFG = load_config()
 

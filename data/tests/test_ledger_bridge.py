@@ -3,18 +3,16 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from contracts.execution_contracts import ExecutionEvent, execution_event_id
 from data.ledger_bridge import (
-    deliver_batch,
     build_envelope,
+    deliver_batch,
     deliver_outbox,
     enqueue_event,
-    init_outbox,
     mark_delivered,
     mark_failed,
     outbox_stats,

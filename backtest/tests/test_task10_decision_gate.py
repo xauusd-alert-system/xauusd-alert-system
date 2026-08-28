@@ -1,5 +1,3 @@
-import numpy as np
-import pytest
 from backtest.deflated_sharpe import decision_gate
 
 

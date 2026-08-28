@@ -7,7 +7,6 @@ and timestamps make spread/slippage/latency distributions reproducible per asset
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from typing import Any
 

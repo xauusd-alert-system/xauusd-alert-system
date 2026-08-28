@@ -53,20 +53,20 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.metrics import compute_metrics, trades_to_dataframe
+from backtest.walk_forward import generate_windows
 from config.loader import load_config
 from data.storage import read_candles
-from scripts.train_mt5 import build_full_df
-from backtest.metrics import trades_to_dataframe, compute_metrics
-from backtest.walk_forward import generate_windows
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
+from model.registry import ModelRegistry, file_sha256
 from model.trainer import (
     build_training_matrix,
-    train_model,
     calibrate_model,
     save_model,
+    train_model,
 )
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
-from model.registry import ModelRegistry, file_sha256
+from scripts.train_mt5 import build_full_df
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("deploy_guard")

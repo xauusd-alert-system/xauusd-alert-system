@@ -12,7 +12,6 @@ import os
 import sys
 
 import pandas as pd
-import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
@@ -20,9 +19,9 @@ from scripts.retrain_with_real_trades import (
     EXIT_OK,
     EXIT_PAYLOAD_MISSING,
     load_config,
+    main,
     prepare_real_trades_df,
     retrain_asset,
-    main,
 )
 
 FEATURE_COLS = ["rsi", "atr", "ema_9"]

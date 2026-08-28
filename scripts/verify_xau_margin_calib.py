@@ -24,7 +24,7 @@ import numpy as np
 from config.loader import load_config, resolve_asset_timeframe
 from model.calibration import compute_ece
 from scripts.train_mt5 import build_full_df, build_training_matrix
-from scripts.verify_model_fingerprints import compute_model_fingerprint, verify_file
+from scripts.verify_model_fingerprints import verify_file
 
 
 def main() -> int:

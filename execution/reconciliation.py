@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from data.trade_group_store import load_group, list_groups
+from data.trade_group_store import list_groups
 from data.trading_event_ledger import append_trading_event
 from execution.trade_group import GroupState, TradeGroupSpec
 
@@ -127,6 +127,7 @@ def detect_orphan_positions(driver, db_path: str, *, ledger_db_path: str | None 
     auto-managed (ТЗ §28).
     """
     import time
+
     from data.trading_event_ledger import append_trading_event
 
     now = int(now_ms) if now_ms is not None else time.time_ns() // 1_000_000

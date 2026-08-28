@@ -1,6 +1,5 @@
-import numpy as np
 import pandas as pd
-import pytest
+
 from backtest.plateau import select_plateau_config
 
 

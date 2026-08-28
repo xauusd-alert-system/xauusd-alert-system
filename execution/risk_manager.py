@@ -9,7 +9,6 @@ working unchanged. It will be deleted in the cleanup phase (Фаза 7) —
 update imports to ``risk`` instead.
 """
 import warnings
-
 from datetime import datetime, timezone  # noqa: F401 — legacy test surface
 
 from mt5_adapter.lazy import get_mt5_module

@@ -4,6 +4,7 @@ Run with: pytest regime/tests/test_classifier.py -v
 """
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -12,8 +13,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
 from features.indicators import build_all_indicators
-from regime.classifier import add_regime_indicators, classify_regime_series, classify_regime_row, regime_onehot_df, RegimeLabel
-from regime.ml_interface import RuleBasedRegimeClassifier, MLRegimeClassifierStub
+from regime.classifier import (
+    RegimeLabel,
+    add_regime_indicators,
+    classify_regime_series,
+    regime_onehot_df,
+)
+from regime.ml_interface import MLRegimeClassifierStub, RuleBasedRegimeClassifier
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]

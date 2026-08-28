@@ -113,7 +113,7 @@ def compute_ece(y_true, y_prob, n_bins=10):
 
 
 def score_block(name, y_true, prob):
-    from sklearn.metrics import roc_auc_score, brier_score_loss
+    from sklearn.metrics import brier_score_loss, roc_auc_score
     y = np.asarray(y_true, dtype=int)
     p = np.asarray(prob, dtype=float)
     return {
@@ -133,6 +133,7 @@ def score_block(name, y_true, prob):
 def calibrate_with(base_template, X_train, y_train, cfg, min_fit, min_calib, horizon):
     """Replicates calibrate_model's purged prefit split with explicit sizes."""
     from sklearn.calibration import CalibratedClassifierCV
+
     from model.trainer import _fit_classifier
 
     method = cfg["model"]["calibration_method"]
@@ -190,7 +191,7 @@ def main():
 
     from config.loader import load_config
     from data.storage import read_candles
-    from model.trainer import build_training_matrix, _normalize_label_space, train_model
+    from model.trainer import _normalize_label_space, build_training_matrix, train_model
 
     cfg = load_config()
     asset_key = args.asset_key or args.symbol

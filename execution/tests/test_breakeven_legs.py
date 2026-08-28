@@ -19,8 +19,6 @@ Expected behaviour after the fix:
 """
 import types
 
-import pytest
-
 from execution import mt5_trader as trader_mod
 from execution.mt5_trader import MultiAssetMT5Trader
 

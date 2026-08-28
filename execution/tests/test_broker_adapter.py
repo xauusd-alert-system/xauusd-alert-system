@@ -1,19 +1,17 @@
 """
 Tests for Phase 9 Multi-Broker Execution Layer.
 """
-import pytest
 from execution.broker_adapter import (
-    MT5BrokerAdapter,
-    MockFIXBrokerAdapter,
     AccountSnapshot,
-    PositionSnapshot,
+    MockFIXBrokerAdapter,
+    MT5BrokerAdapter,
 )
 
 
 def test_mock_fix_broker_adapter_lifecycle():
     broker = MockFIXBrokerAdapter(initial_balance=50000.0)
     assert broker.connect() is True
-    
+
     acc = broker.get_account_info()
     assert acc.balance == 50000.0
     assert acc.equity == 50000.0

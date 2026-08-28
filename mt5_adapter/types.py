@@ -7,7 +7,7 @@ dataclasses below are available for typed conversions via ``.from_raw()`` /
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 

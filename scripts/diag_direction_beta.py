@@ -60,14 +60,14 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
+from model.ensemble_backtest import EnsembleBacktester
+from scripts.deflated_sharpe import _build_fold_frames
 from scripts.run_backtest import (
-    load_asset_history,
     build_full_df,
+    load_asset_history,
     merge_asset_cfg,
     truncate_before,
 )
-from scripts.deflated_sharpe import _build_fold_frames
-from model.ensemble_backtest import EnsembleBacktester
 
 # A correlation at or above this magnitude means the folds are essentially a
 # geared bet on the sample drift, in one direction or the other.
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         corr = float("nan")
         corr_s = "n/a (too few traded folds)"
-    print(f"\n1. MARKET BETA")
+    print("\n1. MARKET BETA")
     print(f"   corr(fold PnL, buy-and-hold) = {corr_s}")
     for line in beta_verdict(corr):
         print(line)
@@ -243,7 +243,7 @@ def main(argv: list[str] | None = None) -> None:
           f"({'directionally biased' if abs(long_share - 50.0) >= 10.0 else 'roughly balanced'})")
 
     # --- 2. exit policy ---------------------------------------------------
-    print(f"\n2. EXIT POLICY (where the money is actually booked)")
+    print("\n2. EXIT POLICY (where the money is actually booked)")
     ehdr = f"{'exit_reason':<16}{'n':>7}{'share%':>9}{'pnl':>12}{'avg':>10}"
     print(ehdr)
     print("-" * len(ehdr))

@@ -22,7 +22,6 @@ committed. Full procedure: docs/RECOVERY.md.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import shutil

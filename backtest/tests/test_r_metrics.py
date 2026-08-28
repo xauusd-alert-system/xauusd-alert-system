@@ -7,7 +7,6 @@ R = trade pnl / money(|entry - initial_stop|). The grid geometry caps R at
 must be in R, never in raw money.
 """
 
-import math
 import os
 import sys
 from types import SimpleNamespace
@@ -19,11 +18,11 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from backtest.metrics import (
-    trades_to_dataframe,
-    compute_r_metrics,
     block_bootstrap_t,
+    compute_r_metrics,
     fold_sign_test,
     summarize_folds,
+    trades_to_dataframe,
 )
 
 
@@ -152,6 +151,7 @@ def test_compute_metrics_sharpe_annualizes_by_actual_frequency():
     per year), not a fixed sqrt(250), so assets with different trade counts are
     comparable on a common scale."""
     import numpy as np
+
     from backtest.metrics import compute_metrics
 
     def mk(n, step_secs):

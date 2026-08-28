@@ -7,6 +7,7 @@ import pytest
 
 from data.trade_group_store import load_group
 from data.trading_event_ledger import read_trading_events
+from execution.trade_geometry import BrokerSnapshot, CostSnapshot
 from execution.trade_group import GroupState, TradeGroupSpec
 from execution.trade_group_executor import (
     DemoExecutionNotEnabled,
@@ -16,7 +17,6 @@ from execution.trade_group_executor import (
     PaperDriver,
     TradeGroupExecutor,
 )
-from execution.trade_geometry import BrokerSnapshot, CostSnapshot
 
 BROKER = BrokerSnapshot(
     symbol_point=0.01, tick_size=0.01, digits=2,
@@ -321,6 +321,7 @@ def test_paper_execution_never_calls_order_send(executor):
 def test_mt5_trader_live_path_does_not_reference_group_executor():
     """ТЗ §11: mt5_trader.py must stay untouched — no group executor wiring."""
     import inspect
+
     import execution.mt5_trader as trader
     source = inspect.getsource(trader)
     assert "trade_group_executor" not in source

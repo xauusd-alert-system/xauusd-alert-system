@@ -11,9 +11,10 @@ connected plateau, and returns its central/median configuration.
 """
 from __future__ import annotations
 
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional, Tuple
 
 
 def _build_coord_map(param_grid: Dict[str, List[Any]]) -> Tuple[List[str], Dict[Tuple, int], List[Dict[str, Any]]]:
@@ -21,7 +22,7 @@ def _build_coord_map(param_grid: Dict[str, List[Any]]) -> Tuple[List[str], Dict[
     dims = list(param_grid.keys())
     sorted_values = {k: list(v) for k, v in param_grid.items()}
     val_to_idx = {k: {val: idx for idx, val in enumerate(vals)} for k, vals in sorted_values.items()}
-    
+
     return dims, val_to_idx, sorted_values
 
 

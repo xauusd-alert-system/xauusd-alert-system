@@ -1,8 +1,6 @@
-import numpy as np
 import pandas as pd
-import pytest
+
 from backtest.engine import EventDrivenBacktester, Trade
-from model.ensemble_backtest import EnsembleBacktester
 from backtest.metrics import progress_pnl_curve
 from regime.classifier import RegimeLabel
 

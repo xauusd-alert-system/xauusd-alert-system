@@ -30,15 +30,14 @@ _shim_dir = os.path.join(_PROJECT_ROOT, "simulation", "mt5_shim")
 if _shim_dir not in sys.path:
     sys.path.insert(0, _shim_dir)
 
-import numpy as np
+import MetaTrader5 as mt5
 import pandas as pd
 import pytest
 
-import MetaTrader5 as mt5
-from simulation.simulator import MarketSimulator, load_simulation_config
-from simulation.virtual_state import VirtualState, DEAL_ENTRY_IN, DEAL_ENTRY_OUT
 from data import mt5_provider
 from execution.mt5_trader import positions_get_by_magic
+from simulation.simulator import MarketSimulator, load_simulation_config
+from simulation.virtual_state import DEAL_ENTRY_IN, DEAL_ENTRY_OUT, VirtualState
 
 
 # ----------------------------------------------------------------------

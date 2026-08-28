@@ -10,17 +10,16 @@ Usage:
 
 Requires env var: TWELVEDATA_API_KEY
 """
+import argparse
 import os
 import sys
-import argparse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
 from data.ingestion import backfill_historical
 from data.storage import init_schema, upsert_candles
-from data.session_tagger import tag_dataframe
 
 
 def main():

@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
+
 from model.calibration import (
+    calibration_report,
     compute_brier_score,
     compute_ece,
-    calibration_report,
 )
 
 

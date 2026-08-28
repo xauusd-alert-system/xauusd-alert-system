@@ -3,13 +3,12 @@ Tests for Phase 11 Portfolio Allocator & Risk Parity.
 """
 import numpy as np
 import pandas as pd
-import pytest
 
 from execution.portfolio_allocator import (
     calculate_fractional_kelly,
-    inverse_volatility_allocation,
     calculate_lot_size,
     hierarchical_risk_parity,
+    inverse_volatility_allocation,
 )
 
 

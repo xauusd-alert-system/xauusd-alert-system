@@ -2,9 +2,10 @@
 SQLite persistence for executed real-world trades, including features at signal time
 and actual trade outcome (pnl, close_price, outcome label) for weekly ML retraining.
 """
+import json
 import os
 import sqlite3
-import json
+
 import pandas as pd
 
 TABLE_NAME = "executed_trades"

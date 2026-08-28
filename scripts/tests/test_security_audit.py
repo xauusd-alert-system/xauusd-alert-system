@@ -1,8 +1,6 @@
 """ТЗ 10.2 — secrets protection: gitignore hardening, secret scanning,
 file-permission audit, sqlite tracking."""
 import os
-import stat
-import subprocess
 import sys
 from pathlib import Path
 

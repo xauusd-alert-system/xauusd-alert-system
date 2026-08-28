@@ -29,7 +29,7 @@ import pkgutil
 import sqlite3
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Callable, Sequence
 
 from data.storage import get_connection
 

@@ -11,8 +11,6 @@ Used to rank signals and optionally filter low-quality setups.
 from __future__ import annotations
 
 import datetime as dt
-import math
-
 
 # --- Time-of-day scoring ---
 

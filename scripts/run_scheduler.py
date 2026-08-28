@@ -13,16 +13,15 @@ with the "never score an in-progress candle" guarantee in realtime/pipeline.py.
 Runs as a long-lived process (`python -m scripts.run_scheduler`), intended to be
 supervised by systemd/Docker/pm2 in production - this module itself does not daemonize.
 """
-import time
 import logging
-from datetime import datetime, timezone
+import time
 
-from config.loader import load_config, get_env
+from alerts.telegram_bot import TelegramAlertBot
+from config.loader import get_env, load_config
 from data.ingestion import TIMEFRAME_TO_SECONDS
 from data.signal_log import init_schema, log_signal
 from data.trading_event_ledger import append_trading_event
 from realtime.pipeline import RealtimePipeline
-from alerts.telegram_bot import TelegramAlertBot
 
 logging.basicConfig(
     level=logging.INFO,

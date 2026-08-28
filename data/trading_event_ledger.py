@@ -1,10 +1,13 @@
 """Immutable source-of-truth ledger linking signal, decision, broker and PnL."""
 from __future__ import annotations
+
 import hashlib
 import json
 import time
 import uuid
+
 import pandas as pd
+
 from data.storage import get_connection
 
 TABLE = "trading_events"

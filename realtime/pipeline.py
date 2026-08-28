@@ -7,27 +7,29 @@ import hashlib
 import json
 import logging
 import os
-import time
 import uuid
 from datetime import datetime, timezone
+
 import pandas as pd
 
 from config.loader import (
-    load_config,
-    get_signal_grid,
     effective_asset_config,
+    get_signal_grid,
+    load_config,
+)
+from config.loader import (
     resolve_signal_step as _resolve_signal_step,
 )
-from features.indicators import build_all_indicators
+from config.strategy_contract import strategy_identity
+from data.session_tagger import tag_dataframe
 from features.candle_anatomy import candle_anatomy
-from features.structure import detect_structure
+from features.indicators import build_all_indicators
 from features.mtf_confluence import compute_confluence_score
 from features.order_flow import add_order_flow_features
-from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
-from model.predictor import ModelPredictor
+from features.structure import detect_structure
 from model.ensemble import compute_ensemble_signal
-from data.session_tagger import tag_dataframe
-from config.strategy_contract import strategy_identity
+from model.predictor import ModelPredictor
+from regime.classifier import RegimeLabel, add_regime_indicators, classify_regime_series
 
 logger = logging.getLogger("realtime_pipeline")
 
@@ -116,14 +118,14 @@ class RealtimePipeline:
         if self.data_mode == "live":
             from data.mt5_provider import fetch_closed_candles
             raw = fetch_closed_candles(symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles)
-            
+
             # Приводим метку времени к единому формату UTC epoch seconds.
             # Resolution-independent (pandas 3.x stores datetimes at µs, so the
             # legacy `astype("int64") // 10**9` would return milliseconds).
             if "timestamp_utc" not in raw.columns:
                 from data.ingestion import to_epoch_seconds
                 raw["timestamp_utc"] = to_epoch_seconds(raw["timestamp"])
-                
+
             df = tag_dataframe(raw, self.cfg["sessions"])
             return df
         else:
@@ -145,7 +147,7 @@ class RealtimePipeline:
 
         htf_frames = {}
         ref_tfs = self.cfg.get("features", {}).get("mtf_reference_timeframes", ["M15", "H1"])
-        
+
         for htf in ref_tfs:
             try:
                 raw_htf = self._fetch_data_frame(timeframe=htf, n_candles=100)

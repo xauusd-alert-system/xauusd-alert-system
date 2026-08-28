@@ -3,8 +3,6 @@ Bonferroni/DSR multiple-testing correction used by diag scripts so edge
 hunting is not done by hand (which invites noise mining).
 """
 
-import os
-import tempfile
 
 import numpy as np
 import pandas as pd
@@ -13,10 +11,9 @@ import pytest
 from scripts.subset_scan import (
     SubsetScanner,
     _bonferroni,
-    _t_to_p_two_sided,
     _compute_subset_metrics,
+    _t_to_p_two_sided,
 )
-
 
 # ---------------------------------------------------------------------------
 # Statistical primitives

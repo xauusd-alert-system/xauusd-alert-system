@@ -1,6 +1,8 @@
 import glob
 import os
+
 import pandas as pd
+
 
 def main():
     files = sorted(glob.glob('logs/backtest_*.csv'))

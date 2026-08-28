@@ -4,12 +4,11 @@ Retrain all models based on config.yaml.
 - If max_age_hours is exceeded, force retrain.
 - Downloads fresh data first if download_data is true.
 """
-import os
-import sys
-import glob
-import time
-import subprocess
 import logging
+import os
+import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

@@ -26,7 +26,6 @@ exactly the behaviour you want when a feature's support has shifted).
 import argparse
 import json
 import logging
-import sys
 from typing import Optional
 
 import numpy as np

@@ -6,14 +6,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from fastapi.testclient import TestClient
 
-import realtime.app as app_mod
 from contracts.execution_contracts import (
     DEFAULT_PROTOCOL_VERSION,
     OBSERVER_PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
     check_protocol_version,
 )
-from data.ledger_bridge import build_envelope, sign_envelope
+from data.ledger_bridge import build_envelope
 from realtime.app import app
 
 
@@ -48,7 +47,6 @@ def _signed_raw(raw: dict, secret: str) -> tuple[bytes, str]:
 
 def _observer_envelope_dict():
     from contracts.execution_contracts import ExecutionEvent, execution_event_id
-    from data.ledger_bridge import build_envelope
     event = ExecutionEvent(
         event_id=execution_event_id("mt5_observer", "demo:7", "deal", "1"),
         event_type="deal_added", broker_symbol="XAUUSD",
@@ -91,9 +89,8 @@ def test_ingest_accepts_current_protocol_version(tmp_path, monkeypatch):
 
 
 def test_proxy_rejects_unknown_protocol_version():
-    from scripts.run_observer_signing_proxy import validate_observer_envelope
     from contracts.execution_contracts import ExecutionEvent, execution_event_id
-    from data.ledger_bridge import build_envelope
+    from scripts.run_observer_signing_proxy import validate_observer_envelope
     event = ExecutionEvent(
         event_id=execution_event_id("mt5_observer", "demo:7", "deal", "1"),
         event_type="deal_added", broker_symbol="XAUUSD",

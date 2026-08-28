@@ -3,7 +3,6 @@ import copy
 import os
 import sqlite3
 import sys
-import uuid
 
 import pytest
 
@@ -16,7 +15,6 @@ from features.feature_store import (
     compute_snapshot_id,
     features_hash,
 )
-
 
 FEATURES_A = {"ema_21": 4240.5, "atr": 4.25, "rsi_14": 61.0}
 FEATURES_B = {"ema_21": 4241.0, "atr": 4.30, "rsi_14": 55.0}
@@ -217,7 +215,9 @@ def test_pipeline_skips_when_disabled(tmp_path):
 
     # Sanity: even an existing store stays untouched.
     FeatureStore(store_db)
-    from realtime.pipeline import RealtimePipeline as _RP  # noqa: F401 (import stability)
+    from realtime.pipeline import (
+        RealtimePipeline as _RP,  # noqa: F401 (import stability)
+    )
 
     store = FeatureStore(store_db)
     assert store.get_latest(pipeline.asset_key, pipeline.timeframe) is None

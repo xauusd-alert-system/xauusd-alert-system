@@ -34,15 +34,15 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.walk_forward import generate_windows
 from config.loader import load_config
 from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
     _SYNTH_DEFAULTS,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
 )
 from scripts.diag_r_metrics import _mfe_mae, _signal_mask
 from scripts.run_backtest import merge_asset_cfg
-from backtest.walk_forward import generate_windows
 
 
 def calibrate_stop(mfe_mae_df: pd.DataFrame, max_p: float = 0.20) -> dict:
@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> None:
 
     synthetic = False
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[calib] Real data: {len(df)} {timeframe} rows from {db_path}")

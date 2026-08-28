@@ -3,6 +3,7 @@ Order Flow, Cumulative Volume Delta (CVD), and Microstructure features.
 Strictly causal: all rolling windows and aggregations read only historical bars.
 """
 from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 
@@ -105,7 +106,7 @@ def add_order_flow_features(df: pd.DataFrame, cvd_window: int = 100) -> pd.DataF
     out["vwap"] = vwap
     out["vwap_upper"] = vwap_upper
     out["vwap_lower"] = vwap_lower
-    
+
     # Distance from close to VWAP normalized by ATR (or price if ATR missing)
     denom = out["atr"] if "atr" in out.columns else out["close"] * 0.001
     denom = denom.replace(0, np.nan)

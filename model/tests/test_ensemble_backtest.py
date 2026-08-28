@@ -12,8 +12,8 @@ per-asset `slippage_usd` override, mirroring the existing `spread_usd` pattern.
 import pandas as pd
 import pytest
 
-from model.ensemble_backtest import EnsembleBacktester
 from data.ingestion import to_epoch_seconds
+from model.ensemble_backtest import EnsembleBacktester
 
 
 def _cfg(asset_section: dict, bt_slippage_points=5) -> dict:

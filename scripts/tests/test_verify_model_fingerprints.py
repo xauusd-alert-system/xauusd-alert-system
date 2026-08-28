@@ -4,21 +4,17 @@ which the overnight pipeline runs fail-closed so a collapsed model cannot stay
 deployed silently (GBPUSD 0.0002 / XAGUSD 0.475371 constant class).
 """
 
-import os
-import tempfile
 
 import joblib
 import numpy as np
 import pandas as pd
-import pytest
 
 from model.trainer import compute_model_fingerprint
 from scripts.verify_model_fingerprints import (
-    degeneracy_stats,
     _is_degenerate,
+    degeneracy_stats,
     verify_file,
 )
-
 
 # ---------------------------------------------------------------------------
 # Degeneracy helpers

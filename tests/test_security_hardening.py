@@ -106,10 +106,12 @@ def test_no_shell_true():
 
 
 def test_ingest_rejects_oversized_body(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
     import hashlib
     import hmac as hmac_mod
-    from realtime.app import app, INGEST_MAX_BODY_BYTES
+
+    from fastapi.testclient import TestClient
+
+    from realtime.app import INGEST_MAX_BODY_BYTES, app
 
     monkeypatch.setenv("TRADE_LOG_DB_PATH", str(tmp_path / "ledger.sqlite"))
     monkeypatch.setenv("LEDGER_INGEST_TOKEN", "tok")

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pytest
 
+# Reuse the canonical spec fixture shape from the store tests.
+from data.tests.test_trade_group_store import _spec  # noqa: F401
 from execution.schema_registry import (
     CURRENT_INTENT_SCHEMA,
     CURRENT_TRADE_GROUP_SCHEMA,
@@ -13,10 +15,7 @@ from execution.schema_registry import (
     serialize_intent,
     serialize_spec,
 )
-from execution.trade_group import GroupState, TradeGroupSpec
-
-# Reuse the canonical spec fixture shape from the store tests.
-from data.tests.test_trade_group_store import _spec  # noqa: F401
+from execution.trade_group import GroupState
 
 
 def test_deserialize_spec_v1_roundtrip():
@@ -124,9 +123,10 @@ def test_schema_versions_registry_shape():
 def test_trade_group_store_uses_registry(tmp_path, monkeypatch):
     """load_group must deserialize through the registry: unknown versions fail
     loudly instead of being silently validated."""
-    from data.trade_group_store import init_trade_group_store, load_group, save_group
     import json
     import sqlite3
+
+    from data.trade_group_store import init_trade_group_store, load_group, save_group
 
     db = str(tmp_path / "groups.sqlite")
     spec = _spec()

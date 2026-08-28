@@ -19,7 +19,7 @@ price move.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 # Match MetaTrader5.TRADE_RETCODE_DONE (10009) so retcode checks in

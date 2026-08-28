@@ -11,16 +11,13 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import os
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 
-from . import metrics as metrics_mod
-from .analyzer import PairAnalyzer, PairMetrics, BARS_PER_DAY, BARS_PER_YEAR
-from .signal import SignalEngine, Signal
+from .analyzer import PairAnalyzer, PairMetrics
 from .ensemble import EnsembleEngine, EnsembleForecast
-
+from .signal import Signal, SignalEngine
 
 # ============================================================================
 # §4.6 Scanner watchlist integration

@@ -21,9 +21,9 @@ from typing import Any
 
 import pandas as pd
 
-from data.storage import get_connection
-from data.intent_ledger import init_intent_ledger
 from contracts.execution_contracts import ExecutionEvent
+from data.intent_ledger import init_intent_ledger
+from data.storage import get_connection
 
 TABLE = "ledger_events"
 

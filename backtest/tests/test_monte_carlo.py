@@ -2,7 +2,6 @@
 Tests for Monte Carlo Simulation & Stress Testing Engine.
 """
 import numpy as np
-import pytest
 
 from backtest.monte_carlo import MonteCarloSimulator
 

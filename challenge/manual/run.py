@@ -27,9 +27,9 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from challenge.manual import journal as journal_mod
 from challenge.manual import risk as risk_mod
 from challenge.manual import scanner as scanner_mod
-from challenge.manual import journal as journal_mod
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CFG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "manual_config.yaml")

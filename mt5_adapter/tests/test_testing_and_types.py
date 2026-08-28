@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from mt5_adapter.client import MT5Client
-from mt5_adapter.testing import MockMT5Module, TRADE_RETCODE_DONE
+from mt5_adapter.testing import TRADE_RETCODE_DONE, MockMT5Module
 from mt5_adapter.types import (
     AccountInfo,
     DealInfo,

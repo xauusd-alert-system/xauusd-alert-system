@@ -52,11 +52,12 @@ from data.trade_group_store import (
     update_group_state,
 )
 from data.trading_event_ledger import append_trading_event
-from execution.execution_intent import ExecutionIntent, ExecutionIntentMismatch
 from execution import mt5_be_flow as be_flow
 from execution import mt5_compensation as comp
 from execution import mt5_netting_close as netting
 from execution import mt5_tp_transitions as tp_transitions
+from execution import telegram_formatter as tf
+from execution.execution_intent import ExecutionIntent, ExecutionIntentMismatch
 from execution.mt5_common import (
     ACCOUNT_MODE_UNKNOWN,
     AccountModeUnknown,
@@ -69,25 +70,20 @@ from execution.mt5_netting_adapter import MT5NettingDriver
 from execution.reconciliation import (
     classify_broker_close,
     detect_orphan_positions,
-    emit_execution_error,
     inspect_group,
-    latest_out_deal,
 )
 from execution.trade_geometry import (
     CostSnapshot,
     GeometryRejected,
 )
 from execution.trade_group import (
-    BeStatus,
     GroupState,
     TradeGroupSpec,
     check_group_not_expired,
     check_group_risk,
-    floor_to_step,
     new_leg_id,
     require_transition,
 )
-from execution import telegram_formatter as tf
 from execution.trade_group_executor import (
     DemoExecutionNotEnabled,
     DuplicateSubmissionError,

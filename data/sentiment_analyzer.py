@@ -5,8 +5,8 @@ inflation reports (CPI/PCE), and employment data (NFP) to produce
 causal numeric sentiment scores [-1.0, +1.0] for Gold and FX assets.
 """
 from __future__ import annotations
-import re
-from typing import Dict, Any, List
+
+from typing import Any, Dict, List
 
 
 class MacroNewsSentimentAnalyzer:
@@ -115,8 +115,8 @@ class MacroNewsSentimentAnalyzer:
         hard-blocks trading.
         """
         try:
+
             from data.news_filter import fetch_economic_calendar
-            import time
         except Exception:
             return {"score": 0.0, "bias": "neutral", "title": "", "in_red_zone": False}
         if not current_ts_utc:

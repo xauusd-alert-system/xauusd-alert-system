@@ -6,15 +6,15 @@ Run with: pytest alerts/tests/test_formatter.py -v
 import os
 import sys
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config
-from alerts.formatter import format_signal_message, compute_levels, resolve_step
+from alerts.formatter import compute_levels, format_signal_message, resolve_step
 from alerts.telegram_bot import TelegramAlertBot
+from config.loader import load_config
 
 CFG = load_config()
 

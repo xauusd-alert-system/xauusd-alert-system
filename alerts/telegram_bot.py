@@ -2,14 +2,15 @@
 Telegram bot integration - sends alerts for signals AND trade execution/close updates.
 CRITICAL: bot token is read exclusively from environment variable TELEGRAM_BOT_TOKEN.
 """
-import time
 import logging
-import requests
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from config.loader import get_env
+import requests
+
 from alerts.formatter import format_signal_message
+from config.loader import get_env
 
 logger = logging.getLogger("telegram_bot")
 
@@ -19,7 +20,7 @@ class TelegramAlertBot:
         self.cfg = cfg
         self.bot_token = bot_token or get_env("TELEGRAM_BOT_TOKEN", required=False)
         self.chat_id = chat_id or get_env("TELEGRAM_CHAT_ID", required=False)
-        
+
         if self.bot_token:
             self.base_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         else:
@@ -106,4 +107,3 @@ class TelegramAlertBot:
             self._alerts_sent_today += 1
             return True
         return False
-            

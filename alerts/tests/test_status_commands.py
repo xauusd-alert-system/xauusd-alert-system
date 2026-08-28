@@ -561,8 +561,8 @@ def test_metrics_bare_uses_real_pipeline_when_available(monkeypatch):
     """Owner request 2026-08-11: bare /metrics must prefer REAL candles from the
     trader's pipeline (get_frame) and label the source, falling back to synthetic
     only when no live frame is available."""
-    import pandas as pd
     import numpy as np
+    import pandas as pd
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
     monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "4242")
     trader_cfg = {**CFG, "assets": {"XAUUSD": {**CFG["assets"]["XAUUSD"], "enabled": True}}}

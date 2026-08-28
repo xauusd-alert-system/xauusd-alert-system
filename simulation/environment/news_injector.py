@@ -10,9 +10,8 @@ geometrically across subsequent ticks until the next event arrives.
 
 from __future__ import annotations
 
-import math
 import random
-from typing import Callable, Optional
+from typing import Optional
 
 from simulation.environment.clock import SimClock
 

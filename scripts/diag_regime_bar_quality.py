@@ -20,8 +20,7 @@ import numpy as np
 import pandas as pd
 
 from config.loader import load_config, resolve_asset_timeframe
-from scripts.run_backtest import load_asset_history, build_full_df
-from regime.classifier import classify_regime_series, RegimeLabel
+from scripts.run_backtest import build_full_df, load_asset_history
 
 # production timeframe per asset (asset override -> market_data.timeframe)
 ASSET_TF = {

@@ -14,9 +14,9 @@ import json
 from contracts.execution_contracts import (
     ExecutionEvent,
     canonical_event_id_string,
+    event_envelope_from_dict,
     execution_event_from_dict,
 )
-from contracts.execution_contracts import event_envelope_from_dict
 
 FP = "demo:12345678"
 DEAL_TICKET = "1701234567"

@@ -4,6 +4,7 @@ Run with: pytest model/tests/test_trainer.py -v
 """
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,12 +13,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
-from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
-from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
+from features.indicators import build_all_indicators
 from labeling.label_generator import generate_labels_from_config
-from model.trainer import build_training_matrix, time_ordered_split, train_model, calibrate_model, save_model, load_model, FEATURE_COLUMNS
 from model.predictor import ModelPredictor
+from model.trainer import (
+    build_training_matrix,
+    calibrate_model,
+    save_model,
+    time_ordered_split,
+    train_model,
+)
+from regime.classifier import RegimeLabel, add_regime_indicators, classify_regime_series
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -25,6 +32,7 @@ SESSIONS = CFG["sessions"]
 
 # Override labeling barriers to match mock data scale (~0.15 pts/candle drift)
 import copy
+
 CFG = copy.deepcopy(CFG)
 CFG["labeling"]["target_pips_x"] = 3.0
 CFG["labeling"]["stop_pips_y"] = 2.0
@@ -360,8 +368,8 @@ def test_predictor_raises_on_nan_input(tmp_path):
 # ---------------------------------------------------------------------------
 
 from model.trainer import (  # noqa: E402
-    normalize_label_space,
     DegenerateLabelSpaceError,
+    normalize_label_space,
 )
 
 THREE_CLASS_CFG = {

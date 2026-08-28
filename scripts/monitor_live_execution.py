@@ -19,14 +19,12 @@ import os
 import sys
 from datetime import datetime, timezone
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
 from data.trade_logger import read_executed_trades
-
 
 # Pre-lock BTCUSD baseline from the 2026-08-15 gate run.
 BASELINE = {

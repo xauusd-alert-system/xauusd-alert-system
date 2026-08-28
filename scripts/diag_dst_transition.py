@@ -34,8 +34,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 
 import data.mt5_provider as mp
-from data.session_tagger import tag_session_with_weekend
 from config.loader import load_config
+from data.session_tagger import tag_session_with_weekend
 
 
 class _FakeTick:

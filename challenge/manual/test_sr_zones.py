@@ -3,14 +3,16 @@
 import datetime as dt
 import os
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from challenge.manual.sr_zones import (
-    detect_sr_zones, check_proximity, format_zones,
-    SRZone, _resample_5min, _swing_points, _cluster_zones,
+    SRZone,
+    _cluster_zones,
+    check_proximity,
+    detect_sr_zones,
+    format_zones,
 )
 
 

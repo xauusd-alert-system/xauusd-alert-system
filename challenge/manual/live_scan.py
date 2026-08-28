@@ -8,7 +8,6 @@ Usage (run from repo root):
     venv\\Scripts\\python.exe challenge\\manual\\live_scan.py [--symbol AAPL]
 """
 import datetime as dt
-import io
 import json
 import os
 import sys

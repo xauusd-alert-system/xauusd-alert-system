@@ -22,15 +22,14 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
-import pandas as pd
 
 from config.loader import load_config
+from model.calibration import compute_ece
 from model.trainer import (
     build_training_matrix,
     calibrate_model,
     train_model,
 )
-from model.calibration import compute_ece
 from scripts.train_mt5 import build_full_df
 
 

@@ -4,9 +4,6 @@ from __future__ import annotations
 import pytest
 
 from execution.trade_geometry import (
-    BrokerSnapshot,
-    CostSnapshot,
-    GeometryRejected,
     INSUFFICIENT_VOLUME_FOR_THREE_LEGS,
     INVALID_TICK_ALIGNMENT,
     PROFILE_NOT_VALIDATED,
@@ -14,6 +11,9 @@ from execution.trade_geometry import (
     SIGNAL_EXPIRED,
     STOP_BELOW_BROKER_MIN_DISTANCE,
     TP1_TOO_CLOSE_TO_COST,
+    BrokerSnapshot,
+    CostSnapshot,
+    GeometryRejected,
     align_to_tick,
     build_trade_group_from_signal,
     calculate_geometry,
@@ -290,7 +290,6 @@ def test_build_group_from_signal_btc_candidate_blocked():
 def test_signal_ttl_by_timeframe():
     """P0-1: a signal without expires_at gets a per-timeframe TTL
     (M5 -> 2h, H1 -> 24h; unknown TF -> config default 2h), not 24h for all."""
-    from execution.trade_geometry import resolve_signal_ttl_ms
 
     ttl_cfg = {
         "execution": {"signal_ttl_ms": {
@@ -366,7 +365,8 @@ def ttl_cfg_for(asset_key: str, timeframe: str, ttl_ms: int) -> dict:
 def test_signal_ttl_falls_back_to_default():
     """Timeframe missing from the TTL table -> execution.signal_ttl_ms.default."""
     from execution.trade_geometry import (
-        DEFAULT_SIGNAL_TTL_MS, resolve_signal_ttl_ms,
+        DEFAULT_SIGNAL_TTL_MS,
+        resolve_signal_ttl_ms,
     )
 
     cfg = _ttl_cfg("M30", 123456)

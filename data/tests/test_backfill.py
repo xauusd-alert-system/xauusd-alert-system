@@ -6,14 +6,20 @@ Run with: pytest data/tests/test_backfill.py -v
 """
 import os
 import sys
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from data.ingestion import backfill_historical, fetch_live_candles, _request_with_backoff, TWELVE_DATA_MAX_OUTPUTSIZE
+from data.ingestion import (
+    TWELVE_DATA_MAX_OUTPUTSIZE,
+    _request_with_backoff,
+    backfill_historical,
+    fetch_live_candles,
+)
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]

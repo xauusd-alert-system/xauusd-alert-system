@@ -112,7 +112,7 @@ class PairMonitor:
     def _ensure_imports(self):
         if self._pair_analyzer is not None:
             return
-        from pairs_analysis import PairAnalyzer, SignalEngine, EnsembleEngine
+        from pairs_analysis import EnsembleEngine, PairAnalyzer, SignalEngine
         from pairs_analysis import load_config as load_pairs_config
 
         # Reload pairs_config to get fresh thresholds
@@ -351,7 +351,7 @@ class PairMonitor:
 
         # Pair stats if available
         try:
-            from challenge.manual.outcomes import read_journal, compute_stats
+            from challenge.manual.outcomes import compute_stats, read_journal
             rows = read_journal(PAIR_JOURNAL_CSV)
             stats = compute_stats(rows)
             if stats.get("total", 0) > 0:

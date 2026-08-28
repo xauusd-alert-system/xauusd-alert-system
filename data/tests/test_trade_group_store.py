@@ -1,10 +1,7 @@
 """Tests for data/trade_group_store.py — durable TradeGroupSpec persistence."""
 from __future__ import annotations
 
-import pytest
-
 from data.trade_group_store import (
-    init_trade_group_store,
     is_submitted,
     list_groups,
     load_group,

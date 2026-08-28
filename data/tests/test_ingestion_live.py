@@ -5,15 +5,15 @@ and the unified fetch_candles() dispatcher.
 """
 import os
 import sys
-import time
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from data.ingestion import fetch_live_candles, fetch_candles
+from data.ingestion import fetch_candles, fetch_live_candles
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]

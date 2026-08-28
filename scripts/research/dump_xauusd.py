@@ -1,4 +1,5 @@
 import sqlite3
+
 import pandas as pd
 
 DB_PATH = "data/market_data_mt5.sqlite"
@@ -45,7 +46,7 @@ if len(valid) > 0:
     gl = float(-losses["pnl"].sum()) if len(losses) else 0.0
     pf = (gp / gl) if gl > 0 else 999.0
     wr = 100.0 * len(wins) / len(valid)
-    print(f"\nИтог по валидным сделкам:")
+    print("\nИтог по валидным сделкам:")
     print(f"  n = {len(valid)}")
     print(f"  Total PnL = {valid['pnl'].sum():.2f}")
     print(f"  WR = {wr:.1f}%")

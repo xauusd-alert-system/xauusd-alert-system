@@ -4,11 +4,17 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from execution.trade_geometry import (
+    BrokerSnapshot,
+    CostSnapshot,
+    calculate_gross_r,
+    compute_break_even,
+)
 from execution.trade_group import (
     DEFAULT_MAX_FILL_DEVIATION,
     GROUP_SCHEMA_VERSION,
-    GroupState,
     TERMINAL_STATES,
+    GroupState,
     TradeGroupSpec,
     allocate_leg_volumes,
     check_group_not_expired,
@@ -20,8 +26,6 @@ from execution.trade_group import (
     require_transition,
     validate_transition,
 )
-from execution.trade_geometry import compute_break_even, calculate_gross_r
-from execution.trade_geometry import BrokerSnapshot, CostSnapshot
 
 
 def make_spec(**overrides) -> TradeGroupSpec:
@@ -550,7 +554,13 @@ def test_estimated_loss_same_for_long_and_short():
 
 def test_atr_change_does_not_touch_approved_spec():
     from execution.trade_geometry import (
-        BrokerSnapshot as BS, CostSnapshot as CS, build_trade_group_from_signal,
+        BrokerSnapshot as BS,
+    )
+    from execution.trade_geometry import (
+        CostSnapshot as CS,
+    )
+    from execution.trade_geometry import (
+        build_trade_group_from_signal,
     )
     cfg = {"trade_profiles": {"p": {
         "asset": "XAUUSD", "validated": True, "geometry_version": "v1",

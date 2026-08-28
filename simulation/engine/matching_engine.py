@@ -6,8 +6,8 @@ emits Trade objects for each match, applying price-time priority.
 """
 from __future__ import annotations
 
-from uuid import uuid4
 from typing import Callable
+from uuid import uuid4
 
 from simulation.engine.order import Order, Trade
 from simulation.engine.order_book import OrderBook

@@ -17,7 +17,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from pairs_analysis import load_config, PairAnalyzer, EnsembleEngine, SignalEngine
+from pairs_analysis import EnsembleEngine, PairAnalyzer, SignalEngine, load_config
 
 OUT_DEFAULT = os.path.join(ROOT, "data", "backtest", "pairs_dashboard.html")
 
@@ -345,7 +345,7 @@ def _generate_html(data: dict, refresh_minutes: int = 0) -> str:
 
 def _serve(tf: str, refresh_minutes: int, port: int) -> None:
     """Tiny HTTP server: serves the dashboard HTML and /api/data.json."""
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class DashHandler(BaseHTTPRequestHandler):
         def do_GET(self):

@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from scripts.monitor_feature_drift import check_drift, _psi_for_feature
+from scripts.monitor_feature_drift import _psi_for_feature, check_drift
 
 
 def _train_df(n: int = 2000, seed: int = 7) -> pd.DataFrame:

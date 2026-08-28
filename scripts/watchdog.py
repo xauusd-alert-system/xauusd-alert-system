@@ -12,12 +12,12 @@ Env vars:
     WATCHDOG_HEALTH_FILE    — touched every successful heartbeat (default logs/watchdog_heartbeat.json)
 """
 
+import logging
 import os
-import sys
-import time
 import signal
 import subprocess
-import logging
+import sys
+import time
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from model.ensemble import compute_ensemble_signal, EnsembleSignal
+from model.ensemble import compute_ensemble_signal
 from regime.classifier import RegimeLabel
 
 
@@ -147,8 +147,8 @@ def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
     Hard-coded bars went stale twice already (0.85 -> 0.70 owner request ->
     0.78 tightening); the CONTRACT under test is that the effective config
     mirrors the per-asset values, whatever they are."""
-    from scripts.run_backtest import merge_asset_cfg as _merge
     from config.loader import load_config
+    from scripts.run_backtest import merge_asset_cfg as _merge
     cfg = load_config()
     eur_raw = cfg["assets"]["EURUSD"]["ensemble"]
     expected_bar = float(eur_raw["min_confidence_to_alert"])
@@ -162,8 +162,8 @@ def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
 
 def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
     """Same contract for GBPUSD (see EURUSD test: drift-proof expectations)."""
-    from scripts.run_backtest import merge_asset_cfg as _merge
     from config.loader import load_config
+    from scripts.run_backtest import merge_asset_cfg as _merge
     cfg = load_config()
     gbp_raw = cfg["assets"]["GBPUSD"]["ensemble"]
     expected_bar = float(gbp_raw["min_confidence_to_alert"])
@@ -178,8 +178,8 @@ def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
 def test_per_asset_override_effective_cfg_in_pipeline():
     """RealtimePipeline.effective_cfg must mirror the same merge for EUR/GBP
     (audit 2026-08-23: drift-proof — expectations come from the config)."""
-    from realtime.pipeline import RealtimePipeline
     from config.loader import load_config
+    from realtime.pipeline import RealtimePipeline
     cfg = load_config()
 
     eur_pipe = RealtimePipeline(cfg=cfg, asset_key="EURUSD", data_mode="mock")

@@ -1,32 +1,32 @@
 import argparse
+import copy
 import os
 import sqlite3
 import sys
-import copy
 
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config
-from features.indicators import build_all_indicators
+from backtest.walk_forward import generate_windows, run_walk_forward
+from config.loader import effective_asset_config, load_config
+from data.storage import read_candles
 from features.candle_anatomy import candle_anatomy
-from features.structure import detect_structure
+from features.indicators import build_all_indicators
 from features.mtf_confluence import compute_confluence_score
 from features.order_flow import add_order_flow_features
-from regime.classifier import add_regime_indicators, classify_regime_series
+from features.structure import detect_structure
 from labeling.label_generator import generate_labels_from_config, resolve_label_event
-from data.storage import read_candles
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
 from model.trainer import (
+    DegenerateLabelSpaceError,
     build_training_matrix,
-    train_model,
     calibrate_model,
     save_model,
-    DegenerateLabelSpaceError,
+    train_model,
 )
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
-from backtest.walk_forward import run_walk_forward, generate_windows
+from regime.classifier import add_regime_indicators, classify_regime_series
 
 
 def load_asset_history(db_path: str, timeframe: str, asset_key: str) -> pd.DataFrame:
@@ -267,7 +267,7 @@ def strategy_fn_factory(cfg, model_path: str, asset_key: str):
                 test_df_eval["ml_p_long"] = 0.5
                 test_df_eval["ml_p_short"] = 0.5
 
-        from backtest.metrics import trades_to_dataframe, compute_metrics
+        from backtest.metrics import compute_metrics, trades_to_dataframe
 
         engine = EnsembleBacktester(cfg_inner, asset_key=asset_key)
         trades = engine.run(test_df_eval.reset_index(drop=True))
@@ -327,7 +327,7 @@ def main():
     df = build_full_df(cfg, raw, db_path=args.db_path, asset_key=args.asset)
 
     print(f"Loaded {len(df)} rows for {args.asset} from {args.db_path}")
-    print(f"Running Ensemble ML Walk-Forward Backtest...")
+    print("Running Ensemble ML Walk-Forward Backtest...")
 
     from scripts.trial_journal import enforce_locked_holdout
     windows_probe = generate_windows(
@@ -352,7 +352,7 @@ def main():
     # Positive folds MUST be counted over VALID (non-empty) folds; a median
     # PF > 1 with < 50% positive VALID folds means the two statistics refer
     # to different fold sets.
-    from backtest.metrics import summarize_folds, fold_sign_test
+    from backtest.metrics import fold_sign_test, summarize_folds
     summary = summarize_folds(results)
     print(f"\nFold summary: {summary['positive_folds_valid']}/{summary['valid_folds']} "
           f"positive valid folds ({summary['positive_folds_pct_valid']}%) | "

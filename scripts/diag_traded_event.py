@@ -40,16 +40,16 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_signal_grid
-from scripts.run_backtest import (
-    load_asset_history,
-    build_full_df,
-    truncate_before,
-)
+from config.loader import get_signal_grid, load_config
 from labeling.label_generator import (
-    generate_labels_traded_event,
     generate_labels_from_config,
+    generate_labels_traded_event,
     label_distribution_summary,
+)
+from scripts.run_backtest import (
+    build_full_df,
+    load_asset_history,
+    truncate_before,
 )
 
 # Observed on the 12 pre-lock folds (logs/backtest_xauusd.csv, 2026-08-13).
@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> None:
         })
 
     hdr = f"{'side':<7}{'resolved':>10}{'unresolved':>12}{'protect':>9}{'stop':>8}{'protect%':>10}"
-    print(f"\n1. UNCONDITIONAL OUTCOME PER SIDE (every bar, no signal filter)")
+    print("\n1. UNCONDITIONAL OUTCOME PER SIDE (every bar, no signal filter)")
     print(hdr)
     print("-" * len(hdr))
     for r in out_rows:
@@ -176,7 +176,7 @@ def main(argv: list[str] | None = None) -> None:
     both_bad = resolved_both & (l == 0.0) & (s == 0.0)
     defined = int(long_better.sum() + short_better.sum())
 
-    print(f"\n2. DIRECTIONAL INFORMATION")
+    print("\n2. DIRECTIONAL INFORMATION")
     print(f"   both sides protected      : {int(both_ok.sum()):>7}  ({_pct(int(both_ok.sum()), rows):.2f}% of bars)")
     print(f"   both sides stopped        : {int(both_bad.sum()):>7}  ({_pct(int(both_bad.sum()), rows):.2f}%)")
     print(f"   long better than short    : {int(long_better.sum()):>7}  ({_pct(int(long_better.sum()), rows):.2f}%)")
@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> None:
         print("            pick a side here; the fix is the geometry, not the model.")
 
     # --- 3. contrast with the label actually used for training ------------
-    print(f"\n3. LABEL CURRENTLY USED FOR TRAINING (triple barrier, for contrast)")
+    print("\n3. LABEL CURRENTLY USED FOR TRAINING (triple barrier, for contrast)")
     try:
         old = df["label"] if "label" in df.columns else generate_labels_from_config(df, cfg)
         summ = label_distribution_summary(old)
@@ -209,7 +209,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # --- 4. breakdown by regime (short side: the side actually traded) ----
     if "regime" in df.columns:
-        print(f"\n4. SHORT-SIDE PROTECT RATE BY REGIME (the side that traded 96.4% of the time)")
+        print("\n4. SHORT-SIDE PROTECT RATE BY REGIME (the side that traded 96.4% of the time)")
         tmp = pd.DataFrame({"regime": df["regime"].astype(str).values, "lab": s})
         tmp = tmp.dropna(subset=["lab"])
         rhdr = f"{'regime':<20}{'n':>9}{'protect%':>10}"

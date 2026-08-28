@@ -6,6 +6,7 @@ Run with: pytest labeling/tests/test_labels.py -v
 """
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -13,7 +14,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
-from labeling.label_generator import generate_labels, generate_labels_from_config, label_distribution_summary
+from labeling.label_generator import (
+    generate_labels,
+    generate_labels_from_config,
+    label_distribution_summary,
+)
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -23,6 +28,7 @@ SESSIONS = CFG["sessions"]
 # These unit tests exercise the FIXED-barrier path: mock candles carry no "atr"
 # column, and build_all_indicators() is out of scope here (covered in test_trainer).
 import copy
+
 CFG = copy.deepcopy(CFG)
 CFG["labeling"]["method"] = "fixed"
 CFG["labeling"]["target_pips_x"] = 3.0

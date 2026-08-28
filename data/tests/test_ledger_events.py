@@ -9,7 +9,6 @@ import pytest
 from contracts.execution_contracts import ExecutionEvent, execution_event_id
 from data.ledger_events import (
     execution_quality_summary,
-    init_ledger_events,
     latest_ledger_activity_ms,
     lifecycle_trace,
     read_ledger_events,

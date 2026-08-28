@@ -7,10 +7,10 @@ import pandas as pd
 import pytest
 
 from features.order_flow import (
+    add_order_flow_features,
     cumulative_volume_delta,
     order_flow_imbalance,
     volume_weighted_average_price,
-    add_order_flow_features,
 )
 
 

@@ -2,7 +2,6 @@
 import os
 
 import pandas as pd
-import pytest
 
 from realtime import prepost_metrics as pm
 

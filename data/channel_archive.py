@@ -1,7 +1,12 @@
 """Quarantined Telegram archive dataset; never a trading-performance ledger."""
 from __future__ import annotations
-import hashlib, html, json, re
+
+import hashlib
+import html
+import json
+import re
 from pathlib import Path
+
 from data.storage import get_connection
 
 TABLE = "channel_archive_messages"

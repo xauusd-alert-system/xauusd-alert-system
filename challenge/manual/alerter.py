@@ -69,10 +69,10 @@ def acquire_single_instance() -> bool:
 
 import subprocess  # noqa: E402  (used by the instance guard above)
 
-from config.loader import get_env  # loads .env via dotenv
-from challenge.manual import scanner as scanner_mod
-from challenge.manual import risk as risk_mod
 from challenge.manual import outcomes as outcomes_mod
+from challenge.manual import risk as risk_mod
+from challenge.manual import scanner as scanner_mod
+from config.loader import get_env  # loads .env via dotenv
 
 REFRESH_URL = "https://api.utex.io/rest/grpc/com.unitedtraders.luna.sessionservice.api.sso.SsoService.refreshAuthorization"
 GRPC_BASE = "https://demoususdt-api-margin.utex.io/rest/grpc/com.unitedtraders.luna.utex.protocol.mobile."
@@ -153,6 +153,7 @@ def refresh_access():
               f"пробую через Playwright…", file=sys.stderr)
         try:
             import json as _json
+
             from playwright.sync_api import sync_playwright
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True,
@@ -211,6 +212,7 @@ def fetch_candles(access, symbol_id, candles_count=720):
         print(f"getCandles {symbol_id} via requests failed ({type(e).__name__}), "
               f"пробую Playwright…", file=sys.stderr)
         import json as _json
+
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True,

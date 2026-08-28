@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-from challenge.manual.sr_zones import detect_sr_zones, check_proximity
+from challenge.manual.sr_zones import check_proximity, detect_sr_zones
 
 SESSION_START_UTC = dt.time(13, 30)
 SESSION_END_UTC = dt.time(19, 55)

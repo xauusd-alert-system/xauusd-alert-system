@@ -1,4 +1,5 @@
 import sqlite3
+
 import pandas as pd
 
 db_path = "data/market_data_mt5.sqlite"

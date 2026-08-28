@@ -1,12 +1,13 @@
 import sqlite3
-import pandas as pd
+
 import pytest
-from contracts.signal_spec import SignalSpec, SignalState, TargetLeg
+
 from config.deployment import order_routing_allowed
-from data.trading_event_ledger import append_trading_event, verify_event_chain
-from data.news_filter import news_guard_decision
-from data.signal_lifecycle import transition_signal, latest_signal_state
+from contracts.signal_spec import SignalSpec, SignalState, TargetLeg
 from data.channel_archive import import_archive
+from data.news_filter import news_guard_decision
+from data.signal_lifecycle import latest_signal_state, transition_signal
+from data.trading_event_ledger import append_trading_event, verify_event_chain
 
 
 def test_signal_spec_supports_arbitrary_target_legs_and_latency():

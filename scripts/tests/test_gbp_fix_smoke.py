@@ -5,12 +5,12 @@ Must run on mock data (no real SQLite required).
 
 import os
 import sys
-import tempfile
+
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config, get_signal_grid
+from config.loader import get_signal_grid, load_config
 from data.ingestion import to_epoch_seconds
 
 
@@ -31,13 +31,11 @@ def test_get_signal_grid_trailing_default_is_none():
 
 def test_diag_gbp_smoke_runs_without_db(monkeypatch):
     """diag_gbp_profile should not crash on synthetic data."""
-    from scripts.diag_gbp_profile import main as diag_main
     # We can't easily monkey the whole main without side effects; instead import and call core logic lightly.
     # For smoke we just ensure the module imports and a minimal backtester run works.
     from model.ensemble_backtest import EnsembleBacktester
     cfg = load_config()
     # tiny synthetic
-    import numpy as np
     n = 80
     idx = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")
     df = pd.DataFrame({
@@ -208,6 +206,7 @@ def _gbp_three_class_cfg():
 def test_absent_no_trade_downgrades_only_the_effective_fold_config():
     """The policy remains three-class in cfg; only a sparse fold becomes binary."""
     import copy
+
     from scripts.run_backtest import _maybe_downgrade_three_class, merge_asset_cfg
 
     cfg = _gbp_three_class_cfg()
@@ -229,9 +228,8 @@ def test_walk_forward_fold_without_no_trade_class_does_not_crash(capsys):
     """Fold labels are only +1/-1 -> three-class y is {0: short, 2: long} with no
     no_trade row. This used to abort the whole GBP backtest; it must now train and
     return metrics for the fold."""
-    from scripts.run_backtest import strategy_fn_factory
     from model.trainer import build_training_matrix
-    from scripts.run_backtest import merge_asset_cfg
+    from scripts.run_backtest import merge_asset_cfg, strategy_fn_factory
 
     cfg = _gbp_three_class_cfg()
     train_df = _gbp_like_fold_df(400, labels=[1, -1], seed=5)

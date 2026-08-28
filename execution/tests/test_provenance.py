@@ -18,15 +18,14 @@ from execution.provenance import (
     source_id_for,
 )
 from execution.trade_geometry import (
-    BrokerSnapshot,
     COST_DATA_UNAVAILABLE,
+    BrokerSnapshot,
     CostSnapshot,
     GeometryRejected,
     build_trade_group_from_signal,
     calculate_geometry,
 )
 from execution.trade_group import TradeGroupSpec
-
 
 # ==========================================================================
 # §43 Provenance model

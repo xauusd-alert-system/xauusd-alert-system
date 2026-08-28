@@ -16,10 +16,11 @@ must call it instead of re-deriving the boundaries, because a harness that skips
 the purge trains on rows whose labels resolve inside its own test window and
 then reports the result as out-of-sample.
 """
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Callable, List, Dict, Optional, Tuple
-from dataclasses import dataclass
 
 
 @dataclass

@@ -8,8 +8,6 @@ optional one-off manual halt covering unattended stretches.
 import types
 from datetime import datetime, timezone
 
-import pytest
-
 from execution import mt5_trader as trader_mod
 from execution.mt5_trader import MultiAssetMT5Trader
 

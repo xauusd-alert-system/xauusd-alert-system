@@ -2,13 +2,15 @@
 Ensemble-aware backtest wrapper with Multi-TP (Scale-Out) & Auto-Breakeven support.
 Reads asset-specific spreads and simulates commissions/swaps/slippage.
 """
+from dataclasses import dataclass
+from typing import List, Optional
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
-from typing import Optional, List
-from regime.classifier import RegimeLabel
-from model.ensemble import compute_ensemble_signal
+
 from config.loader import get_signal_grid, resolve_signal_step
+from model.ensemble import compute_ensemble_signal
+from regime.classifier import RegimeLabel
 
 
 @dataclass

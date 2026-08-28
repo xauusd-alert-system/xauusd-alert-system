@@ -26,7 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 from enum import Enum
 from typing import Any, Literal
 

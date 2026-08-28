@@ -9,14 +9,13 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from model.ensemble import EnsembleSignal
 from realtime.book_feed import (
     BAR_SECONDS,
     BookFeed,
     bar_ts_of,
     book_features_from_levels,
 )
-from model.ensemble import EnsembleSignal
-
 
 # ---------------------------------------------------------------------------
 # Per-snapshot feature math

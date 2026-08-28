@@ -8,9 +8,13 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from challenge.manual.discipline_report import (
-    compute_adherence, compute_regime_breakdown, compute_time_bucket_stats,
-    compute_commission_drag, compute_streak_analysis, generate_report,
+    compute_adherence,
+    compute_commission_drag,
+    compute_regime_breakdown,
+    compute_streak_analysis,
+    compute_time_bucket_stats,
     format_report,
+    generate_report,
 )
 
 

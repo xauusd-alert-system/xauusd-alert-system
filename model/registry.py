@@ -139,6 +139,7 @@ def _bundle_fingerprint(model_path) -> Optional[str]:
     """
     try:
         import joblib
+
         from model.trainer import compute_model_fingerprint
 
         bundle = joblib.load(model_path)

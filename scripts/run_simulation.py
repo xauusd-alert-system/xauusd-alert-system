@@ -39,16 +39,17 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from simulation.simulator import (
-    MarketSimulator,
-    load_simulation_config,
-    shutdown_mt5_shim,
-)
 # NOTE: must import the shim under its plain top-level name so it is the SAME
 # module object that `import MetaTrader5 as mt5` in execution/data resolves to
 # (a dotted `from simulation.mt5_shim import MetaTrader5` creates a second
 # module object and _inject() would be invisible to the protected modules).
 import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
+
+from simulation.simulator import (
+    MarketSimulator,
+    load_simulation_config,
+    shutdown_mt5_shim,
+)
 from simulation.virtual_state import VirtualState
 
 

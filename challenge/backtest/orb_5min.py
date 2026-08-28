@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """ORB and opening drive on 5-min bars — cleaner signals, less noise."""
-import json, os, datetime as dt
+import datetime as dt
+import json
+import os
 import sys as _sys
+
 _sys.path.insert(0, r"C:\Users\botbo\Desktop\xauusd-alert-system")
 
 BASE = r"C:\Users\botbo\Desktop\xauusd-alert-system\data\backtest"

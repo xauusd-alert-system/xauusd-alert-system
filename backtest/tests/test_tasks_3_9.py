@@ -1,6 +1,6 @@
-import numpy as np
 import pandas as pd
 import pytest
+
 from backtest.metrics import pnl_concentration_report, required_auc_for_pf_target
 
 

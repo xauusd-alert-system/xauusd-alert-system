@@ -4,36 +4,41 @@ correlation matrix, active positions, Monte Carlo risk analytics,
 Macro AI news sentiment, visual charts, and interactive bot controls.
 """
 from __future__ import annotations
+
 import asyncio
-import os
 import json
 import logging
+import os
 import re
 import threading
 import time
-from functools import wraps
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from functools import wraps
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Header
+import numpy as np
+import pandas as pd
+from fastapi import (
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
-import pandas as pd
-import numpy as np
 
-from config.loader import load_config, get_env, get_signal_grid
-from config.deployment import deployment_mode
-from realtime.pipeline import RealtimePipeline
-from realtime.dashboard import DASHBOARD_HTML
-from realtime.prepost_metrics import collect_prepost, collect_prepost_filtered
-from backtest.monte_carlo import MonteCarloSimulator
-from alerts.chart_renderer import ChartRenderer
-from features.smart_money_metrics import compute_institutional_metrics, format_institutional_metrics_report
 from alerts import status_commands as sc
+from alerts.chart_renderer import ChartRenderer
+from backtest.monte_carlo import MonteCarloSimulator
+from config.deployment import deployment_mode
+from config.loader import get_env, get_signal_grid, load_config
 from contracts.execution_contracts import (
     check_protocol_version,
     event_envelope_from_dict,
 )
+from data import news_filter
 from data.ledger_bridge import verify_signature
 from data.ledger_events import (
     execution_quality_summary,
@@ -42,11 +47,17 @@ from data.ledger_events import (
     read_ledger_events,
     upsert_ledger_event,
 )
-from data import news_filter
 from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
+from features.smart_money_metrics import (
+    compute_institutional_metrics,
+    format_institutional_metrics_report,
+)
+from pairs_analysis.integrations import pair_cumulative_stats, read_pair_journal
+from realtime.dashboard import DASHBOARD_HTML
 from realtime.data_envelope import freshness_status, stamp
+from realtime.pipeline import RealtimePipeline
+from realtime.prepost_metrics import collect_prepost, collect_prepost_filtered
 from scripts.pairs_dashboard import _collect_data as pairs_collect_data
-from pairs_analysis.integrations import read_pair_journal, pair_cumulative_stats
 
 logger = logging.getLogger("realtime_app")
 
@@ -395,8 +406,8 @@ def api_health():
     ``monitoring/health.py`` (ports, group counts, tick ages), never
     configuration values such as tokens or connection strings.
     """
-    from services.base import run_checks
     from monitoring.health import build_health_checks
+    from services.base import run_checks
 
     return run_checks(build_health_checks(CFG))
 
@@ -1365,7 +1376,6 @@ def provenance_audit(group_id: str, authorization: str | None = Header(default=N
     db_path = _ledger_db_path()
     try:
         from data.trade_group_store import load_group
-        from execution.provenance import FRESHNESS_VALUES
 
         group = load_group(db_path, group_id)
     except Exception as exc:

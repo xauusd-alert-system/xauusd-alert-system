@@ -9,10 +9,9 @@ in hindsight (see model/trainer.py docstring). This module enforces that by expl
 selecting only the trained feature_cols list saved alongside the model, ignoring any
 extra columns (including 'label' if accidentally present) in the input DataFrame.
 """
-import numpy as np
 import pandas as pd
 
-from model.trainer import load_model, FEATURE_COLUMNS
+from model.trainer import load_model
 
 
 class ModelPredictor:

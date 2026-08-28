@@ -10,28 +10,30 @@ Gives full control over PC/Laptop from your Smartphone:
 - View safe config (/config)
 - View open positions (/positions)
 """
+import logging
 import os
+import subprocess
 import sys
 import time
-import subprocess
-import logging
 from datetime import datetime
+
 import MetaTrader5 as mt5
 import telegram
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_env
-from execution.mt5_trader import positions_get_by_magic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
-    MessageHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
+
+from config.loader import get_env, load_config
+from execution.mt5_trader import positions_get_by_magic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("telegram_remote")

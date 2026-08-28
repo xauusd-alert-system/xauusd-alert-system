@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Final
 
-from mt5_adapter.lazy import get_mt5_module
-
 import pandas as pd
+
+from mt5_adapter.lazy import get_mt5_module
 
 # ТЗ 8.6: the raw module handle is resolved through the adapter (no direct
 # `import MetaTrader5` here). Module-level attribute access in tests

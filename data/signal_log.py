@@ -10,9 +10,10 @@ This is critical for accountability: the project brief requires transparency int
 WHY a signal was or wasn't sent, not just the alerts that went out. Every row here
 answers "what did the system think at time T", regardless of alert_sent status.
 """
-import sqlite3
-import os
 import json
+import os
+import sqlite3
+
 import pandas as pd
 
 TABLE_NAME = "signal_log"

@@ -13,7 +13,6 @@ import pandas as pd
 from scipy import stats
 from statsmodels.tsa.stattools import adfuller
 
-
 # ---------------------------------------------------------------------------
 # Hedge ratio β
 # ---------------------------------------------------------------------------

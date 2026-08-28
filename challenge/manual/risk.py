@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 STAGE = {
     1: {"target_usd": 80.0, "target_pct": 0.08,

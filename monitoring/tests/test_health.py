@@ -8,7 +8,6 @@ Covers:
 from __future__ import annotations
 
 import sqlite3
-import threading
 
 import pytest
 from fastapi.testclient import TestClient

@@ -6,15 +6,14 @@ Run with: pytest scripts/tests/test_scheduler.py -v
 """
 import os
 import sys
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config
-from scripts.run_scheduler import seconds_until_next_candle_close, run_once
-from realtime.pipeline import RealtimePipeline
 from alerts.telegram_bot import TelegramAlertBot
+from config.loader import load_config
+from realtime.pipeline import RealtimePipeline
+from scripts.run_scheduler import run_once, seconds_until_next_candle_close
 
 CFG = load_config()
 
@@ -53,7 +52,7 @@ def test_run_once_logs_signal_and_returns_dict(mock_post, tmp_path):
 
 @patch("alerts.telegram_bot.requests.post")
 def test_run_once_does_not_alert_when_no_trade(mock_post, tmp_path):
-    from data.signal_log import init_schema, read_signal_history
+    from data.signal_log import init_schema
     db_path = str(tmp_path / "test.db")
     init_schema(db_path)
 

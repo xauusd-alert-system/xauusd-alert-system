@@ -1,8 +1,6 @@
 """Unit tests for realtime/data_envelope.py (freshness contract, spec §6.3)."""
 from __future__ import annotations
 
-import pytest
-
 from realtime.data_envelope import (
     FRESH_AFTER_MS,
     STALE_AFTER_MS,

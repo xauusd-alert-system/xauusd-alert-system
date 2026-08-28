@@ -1,6 +1,6 @@
 import pytest
+
 from execution.portfolio_allocator import validate_scaleout_tranches
-from model.ensemble_backtest import EnsembleBacktester
 
 
 def test_task7_scaleout_lot_validation_fails_on_small_lot():

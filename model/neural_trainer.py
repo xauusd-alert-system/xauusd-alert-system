@@ -11,16 +11,15 @@ a dedicated economic A/B and deploy_guard integration. Removal/reintegration
 decision tracked in docs/TODO.md.
 """
 from __future__ import annotations
+
 import logging
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-
-from model.trainer import calibrate_model
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger("neural_trainer")
 

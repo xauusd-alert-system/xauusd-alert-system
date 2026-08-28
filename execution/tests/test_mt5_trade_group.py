@@ -22,7 +22,6 @@ from execution.trade_geometry import BrokerSnapshot, CostSnapshot, GeometryRejec
 from execution.trade_group import GroupState, TradeGroupSpec
 from execution.trade_group_executor import LiveExecutionForbidden
 
-
 # ==========================================================================
 # Deterministic MT5 double (real API surface only)
 # ==========================================================================
@@ -816,8 +815,10 @@ def test_telegram_be_after_confirmation(tmp_path):
 
 
 def test_btc_unvalidated_profile_blocked(tmp_path):
-    from execution.trade_geometry import build_trade_group_from_signal
-    from execution.trade_geometry import PROFILE_NOT_VALIDATED
+    from execution.trade_geometry import (
+        PROFILE_NOT_VALIDATED,
+        build_trade_group_from_signal,
+    )
     cfg = {"trade_profiles": {"btc_m5_scalp_v1": {
         "asset": "BTCUSD", "validated": False, "paper_only": True,
         "step": {"source": "atr", "atr_mult": 1.0,

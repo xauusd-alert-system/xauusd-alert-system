@@ -34,7 +34,7 @@ import itertools
 import math
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
@@ -42,13 +42,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backtest.metrics import block_bootstrap_t
 from backtest.deflated_sharpe import (
-    probabilistic_sharpe_ratio,
     deflated_sharpe_ratio,
-    minimum_track_record_length,
 )
-
+from backtest.metrics import block_bootstrap_t
 
 # ---------------------------------------------------------------------------
 # Statistical helpers
@@ -395,7 +392,7 @@ class SubsetScanner:
         else:
             print("  (none)")
 
-        print(f"\nSIGNIFICANTLY NEGATIVE SUBSETS (robust losers — avoid):")
+        print("\nSIGNIFICANTLY NEGATIVE SUBSETS (robust losers — avoid):")
         neg = [r for r in results if r.verdict == "sig_neg"]
         if neg:
             for r in neg:
@@ -405,7 +402,7 @@ class SubsetScanner:
         else:
             print("  (none)")
 
-        print(f"\nWEAK SUBSETS (suggestive, need more data):")
+        print("\nWEAK SUBSETS (suggestive, need more data):")
         weak = [r for r in results if r.verdict == "weak"]
         if weak:
             for r in weak:

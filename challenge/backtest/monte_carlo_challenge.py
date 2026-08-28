@@ -7,8 +7,13 @@ Uses real R-distribution from backtest data + checklist rules:
 - Target +$80
 - Commission-aware sizing
 """
-import json, os, datetime as dt, random, statistics
+import datetime as dt
+import json
+import os
+import random
+import statistics
 import sys as _sys
+
 _sys.path.insert(0, r"C:\Users\botbo\Desktop\xauusd-alert-system")
 
 BASE = r"C:\Users\botbo\Desktop\xauusd-alert-system\data\backtest"
@@ -256,7 +261,7 @@ def main():
     # Days to target (for passed sims)
     if passed:
         days_to_target = [r["days_used"] for r in passed]
-        print(f"\n  Days to target (passed only):")
+        print("\n  Days to target (passed only):")
         print(f"    Median:   {statistics.median(days_to_target):.0f} days")
         print(f"    Mean:     {statistics.mean(days_to_target):.1f} days")
         print(f"    P25:      {sorted(days_to_target)[len(days_to_target)//4]:.0f} days")
@@ -266,7 +271,7 @@ def main():
 
     # Equity distribution
     all_equity = [r["equity_end"] for r in results]
-    print(f"\n  Final equity distribution:")
+    print("\n  Final equity distribution:")
     print(f"    Median:   ${statistics.median(all_equity):.0f}")
     print(f"    Mean:     ${statistics.mean(all_equity):.0f}")
     print(f"    P10:      ${sorted(all_equity)[len(all_equity)//10]:.0f}")
@@ -279,7 +284,7 @@ def main():
     print(f"\n  Risk of ruin (equity <= ${STARTING_EQUITY - TOTAL_STOP:.0f}): {100 * ruin / len(results):.1f}%")
 
     # Equity percentile curves
-    print(f"\n  Equity percentiles by day:")
+    print("\n  Equity percentiles by day:")
     max_days = max(r["days_used"] for r in results)
     for day in range(1, min(max_days + 1, 31)):
         day_equities = []

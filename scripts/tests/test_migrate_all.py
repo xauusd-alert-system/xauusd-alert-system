@@ -4,11 +4,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
-import pytest
-
-from scripts.migrate_all import registry_check, run_migrate_all
-
 from data.tests.test_trade_group_store import _spec  # noqa: F401
+from scripts.migrate_all import registry_check, run_migrate_all
 
 
 def _make_group_db(db_path: str, *, corrupt: bool = False) -> None:

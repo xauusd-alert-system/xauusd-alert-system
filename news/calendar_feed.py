@@ -24,10 +24,10 @@ import logging
 import os
 import threading
 import time
-import urllib.request
-import requests
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
+
+import requests
 
 logger = logging.getLogger("news.calendar_feed")
 

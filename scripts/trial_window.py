@@ -37,7 +37,6 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-import pandas as pd
 import yaml
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -206,7 +205,7 @@ def stop_trader() -> list[str]:
 
 
 def db_paths() -> tuple[str, str]:
-    from config.loader import load_config, get_env
+    from config.loader import get_env, load_config
     cfg = load_config()
     trade_db = str(get_env("TRADE_LOG_DB_PATH",
                            default=cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
@@ -224,10 +223,10 @@ def _fmt_ts(ts) -> str:
 
 
 def generate_report(state: dict) -> str:
-    from data.trading_event_ledger import read_trading_events, verify_event_chain
-    from data.trade_logger import read_executed_trades
     from data.execution_ledger import read_execution_ledger
     from data.signal_log import read_signal_history
+    from data.trade_logger import read_executed_trades
+    from data.trading_event_ledger import read_trading_events, verify_event_chain
 
     trade_db, signal_db = db_paths()
     started_at = state.get("started_at_utc", _now_utc())
@@ -237,11 +236,11 @@ def generate_report(state: dict) -> str:
 
     lines: list[str] = []
     w = lines.append
-    w(f"# TRIAL WINDOW REPORT — 48h full-power demo run (XAUUSD Alert System)")
+    w("# TRIAL WINDOW REPORT — 48h full-power demo run (XAUUSD Alert System)")
     w("")
     w(f"- **Окно:** {started_at} → {ends_at} UTC")
     w(f"- **Длительность:** {state.get('hours', 48)} ч")
-    w(f"- **Счёт:** FxPro-MT5 Demo (MT5_SERVER из .env)")
+    w("- **Счёт:** FxPro-MT5 Demo (MT5_SERVER из .env)")
     w(f"- **Snapshot config:** `{state.get('snapshot')}`")
     w(f"- **Trade DB:** `{trade_db}`")
     w(f"- **Signal DB:** `{signal_db}`")

@@ -3,13 +3,14 @@ Economic Calendar News Guard - fetches High-Impact USD news events from Forex Fa
 and suppresses trading during volatile news windows in LIVE mode only.
 Completely silent and network-free during historical backtests.
 """
-import time
-import logging
-import requests
 import csv
+import logging
 import os
+import time
 from datetime import datetime, timezone
-from typing import List, Dict
+from typing import Dict, List
+
+import requests
 
 from config.loader import get_env
 

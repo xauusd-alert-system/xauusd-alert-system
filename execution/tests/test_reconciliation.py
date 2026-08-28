@@ -1,8 +1,6 @@
 """Unit tests for execution/reconciliation.py (ТЗ §27/§28)."""
 from __future__ import annotations
 
-import pytest
-
 from execution.reconciliation import (
     classify_broker_close,
     inspect_group,

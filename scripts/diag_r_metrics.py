@@ -36,23 +36,22 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
-from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
-    _build_fold_frames,
-    _SYNTH_DEFAULTS,
-)
-from scripts.exit_profile import classify_path
-from scripts.run_backtest import merge_asset_cfg
 from backtest.metrics import (
-    compute_r_metrics,
     block_bootstrap_t,
+    compute_r_metrics,
     fold_sign_test,
     summarize_folds,
 )
+from config.loader import load_config
 from model.ensemble_backtest import EnsembleBacktester
 from model.trainer import FEATURE_COLUMNS
+from scripts.deflated_sharpe import (
+    _SYNTH_DEFAULTS,
+    _build_fold_frames,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
+)
+from scripts.run_backtest import merge_asset_cfg
 
 
 def _mfe_mae(df: pd.DataFrame, horizon: int, atr_col: str = "atr") -> pd.DataFrame:
@@ -315,7 +314,7 @@ def print_report(d: dict) -> None:
         zone = "OK" if d["cost_ratio_pct"] <= 10 else ("RED" if d["cost_ratio_pct"] > 15 else "borderline")
         print(f"Costs: total {d['cost_total_price']} price units | mean step {d['mean_step']} | "
               f"cost_ratio = {d['cost_ratio_pct']}% ({zone}; norm <8-10%, red >15%)")
-    print(f"Buckets (R contribution):")
+    print("Buckets (R contribution):")
     for b, v in sorted(r["buckets"].items(), key=lambda kv: -abs(kv[1]["r_contribution_pct"])):
         print(f"  {b:<16} n={v['n']:<6} share={v['share_pct']:>5.1f}%  meanR={v['mean_r']:>7.3f}  "
               f"R-contr={v['r_contribution_pct']:>7.1f}%")
@@ -356,7 +355,7 @@ def main(argv: list[str] | None = None) -> None:
 
     synthetic = False
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[diag] Real data: {len(df)} {timeframe} rows from {db_path}")

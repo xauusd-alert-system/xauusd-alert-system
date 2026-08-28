@@ -16,9 +16,10 @@ Computes:
 from __future__ import annotations
 
 import logging
+from typing import Any, Optional
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("model_calibration")
 
@@ -148,8 +149,8 @@ def evaluate_asset_calibration(
     ece_threshold: float = 0.05,
 ) -> dict[str, Any]:
     """Evaluates probability calibration on purged-OOS predictions for a single asset."""
-    from scripts.deflated_sharpe import _score_fold
     from backtest.walk_forward import generate_windows
+    from scripts.deflated_sharpe import _score_fold
 
     wf_cfg = cfg["backtest"]["walk_forward"]
     windows = generate_windows(

@@ -29,14 +29,14 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.walk_forward import generate_windows, run_walk_forward  # noqa: E402
 from config.loader import load_config  # noqa: E402
 from data.provenance import provenance_gate  # noqa: E402
-from backtest.walk_forward import run_walk_forward, generate_windows  # noqa: E402
 from scripts.run_backtest import (  # noqa: E402
+    build_full_df,
+    load_asset_history,
     strategy_fn_factory,
     truncate_before,
-    load_asset_history,
-    build_full_df,
 )
 from scripts.trial_journal import enforce_locked_holdout  # noqa: E402
 

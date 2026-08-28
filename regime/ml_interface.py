@@ -13,6 +13,7 @@ Any concrete ML implementation (e.g. a trained sklearn/XGBoost multi-class model
 should subclass RegimeClassifierBase and implement these two methods.
 """
 from abc import ABC, abstractmethod
+
 import pandas as pd
 
 from regime.classifier import RegimeLabel

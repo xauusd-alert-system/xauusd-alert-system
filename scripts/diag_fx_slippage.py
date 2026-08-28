@@ -19,13 +19,21 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import pandas as pd
 
 from config.loader import load_config
-from scripts.run_backtest import load_asset_history, build_full_df, merge_asset_cfg  # noqa: E402
-from model.trainer import build_training_matrix, train_model, calibrate_model, save_model  # noqa: E402
-from model.predictor import ModelPredictor  # noqa: E402
 from model.ensemble_backtest import EnsembleBacktester  # noqa: E402
+from model.predictor import ModelPredictor  # noqa: E402
+from model.trainer import (  # noqa: E402
+    build_training_matrix,
+    calibrate_model,
+    save_model,
+    train_model,
+)
+from scripts.run_backtest import (  # noqa: E402
+    build_full_df,
+    load_asset_history,
+    merge_asset_cfg,
+)
 
 
 def main():

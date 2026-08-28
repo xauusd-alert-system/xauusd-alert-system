@@ -13,8 +13,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from scripts.exit_profile import classify_path, build_exit_profile, _aggregate
-from scripts.deflated_sharpe import _make_synthetic_wf_df, _inject_biased_probs
+from scripts.deflated_sharpe import _inject_biased_probs, _make_synthetic_wf_df
+from scripts.exit_profile import _aggregate, build_exit_profile, classify_path
 
 
 def test_classify_path_buckets():

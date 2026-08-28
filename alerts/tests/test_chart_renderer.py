@@ -2,6 +2,7 @@
 Tests for Visual Chart Renderer.
 """
 import pandas as pd
+
 from alerts.chart_renderer import ChartRenderer
 
 

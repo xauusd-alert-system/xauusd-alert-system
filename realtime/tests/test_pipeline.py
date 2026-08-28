@@ -9,9 +9,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config, get_signal_grid
+from config.loader import get_signal_grid, load_config
 from realtime.pipeline import RealtimePipeline, resolve_signal_step
-
 
 CFG = load_config()
 

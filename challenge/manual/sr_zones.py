@@ -13,8 +13,7 @@ Output: list of S/R zones with strength classification.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass
 
 # Session boundaries (UTC) — NYSE 13:30-19:55
 SESSION_START_SEC = 13 * 3600 + 30 * 60

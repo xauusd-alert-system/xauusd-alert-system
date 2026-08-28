@@ -41,28 +41,30 @@ Exit codes (consumed by scripts/overnight.py stage 4):
     0  - all enabled assets retrained OK.
     1  - missing real-trade payload (see #27 above).
 """
-import os
-import sys
 import json
 import logging
+import os
+import sys
+
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config
+from config.loader import effective_asset_config, load_config
 from data.storage import read_candles
 from data.trade_logger import read_executed_trades
-from scripts.train_mt5 import (
-    build_full_df, build_artifact_metadata, _purged_oos_calibration,
+from model.trainer import (
+    build_training_matrix,
+    calibrate_model,
+    purged_time_ordered_split,
+    save_model,
+    train_model,
 )
 from model.uniqueness import aligned_uniqueness_weights, average_uniqueness_weights
-from model.trainer import (
-    FEATURE_COLUMNS,
-    build_training_matrix,
-    purged_time_ordered_split,
-    train_model,
-    calibrate_model,
-    save_model,
+from scripts.train_mt5 import (
+    _purged_oos_calibration,
+    build_artifact_metadata,
+    build_full_df,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

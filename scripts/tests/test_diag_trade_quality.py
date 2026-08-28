@@ -5,13 +5,15 @@ import os
 import sys
 
 import numpy as np
-import pandas as pd
-import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from scripts.deflated_sharpe import _make_synthetic_wf_df, _inject_biased_probs, _SYNTH_DEFAULTS
+from scripts.deflated_sharpe import (
+    _SYNTH_DEFAULTS,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
+)
 from scripts.diag_trade_quality import collect_trades_for_variant
 
 

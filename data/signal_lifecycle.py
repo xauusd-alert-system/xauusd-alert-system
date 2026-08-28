@@ -1,6 +1,8 @@
 """Auditable setup lifecycle transitions backed by the primary event ledger."""
 from __future__ import annotations
+
 import json
+
 from data.trading_event_ledger import append_trading_event, read_trading_events
 
 TRANSITIONS = {

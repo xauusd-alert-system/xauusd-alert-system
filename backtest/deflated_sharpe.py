@@ -446,7 +446,7 @@ def decision_gate(res: dict, t_base: float | None = None, t_filtered: float | No
     """
     cur = next((t for t in res.get("trials", []) if t.get("variant") == "current"), None)
     cscv = res.get("cscv", {})
-    
+
     # 8th condition: t_filtered > t_base
     cond8 = None
     if t_filtered is not None and t_base is not None:

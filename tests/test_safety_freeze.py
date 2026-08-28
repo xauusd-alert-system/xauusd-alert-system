@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
+import scripts.trial_window as tw
 from config.loader import load_config
 from execution.mt5_trader import configured_execution_assets
-import scripts.trial_window as tw
 
 TRIAL_ASSETS = ["BTCUSD", "XAUUSD", "XAGUSD", "EURUSD", "GBPUSD"]
 # Baseline (non-trial) trading set. The config no longer freezes execution to

@@ -1,8 +1,6 @@
 """Tests for data/provenance.py (immutable raw-data provenance manifest)."""
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 import pytest
 

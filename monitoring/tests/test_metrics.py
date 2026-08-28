@@ -9,13 +9,11 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
 import threading
 
 import pytest
 
 from monitoring.metrics import MetricsCollector, _percentile
-
 
 # --------------------------------------------------------- collector_counting
 
@@ -111,6 +109,7 @@ def test_flush_summary_disabled_without_path():
 
 def test_endpoint_returns_aggregates(monkeypatch):
     from fastapi.testclient import TestClient
+
     import realtime.app as app_mod
     from realtime.app import app
 
@@ -132,7 +131,7 @@ def test_endpoint_returns_aggregates(monkeypatch):
 def test_endpoint_is_not_public_when_auth_required(monkeypatch):
     """ТЗ 6.1: the endpoint must sit behind the global bearer gate."""
     from fastapi.testclient import TestClient
-    import realtime.app as app_mod
+
     from realtime.app import app
 
     monkeypatch.setenv("API_AUTH_TOKEN", "tok-123")
@@ -165,8 +164,8 @@ def test_rejected_reasons_recorded():
 
 def test_executor_rejection_and_submit_instrumented(tmp_path, monkeypatch):
     """Executor hooks: create_group + submit rejection record metrics."""
-    import sys as _sys
     import os as _os
+    import sys as _sys
 
     _root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", ".."))
     if _root not in _sys.path:

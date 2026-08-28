@@ -40,8 +40,8 @@ Run:
 from __future__ import annotations
 
 import argparse
-import hmac
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -198,7 +198,6 @@ class ObserverSigningProxyHandler(BaseHTTPRequestHandler):
             return
 
         # 4. forward EXACT raw body to remote HTTPS with bearer + HMAC
-        import requests as _requests
 
         headers = {
             "Authorization": f"Bearer {self.ingest_token}",

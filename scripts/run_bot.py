@@ -24,10 +24,10 @@ Telegram commands once running
     /resume      switch back to live
     /closeall    emergency close all positions
 """
+import logging
 import os
 import signal
 import sys
-import logging
 
 # --- sys.path injection (must come first) ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,15 +37,15 @@ _shim_dir = os.path.join(_PROJECT_ROOT, "simulation", "mt5_shim")
 if _shim_dir not in sys.path:
     sys.path.insert(0, _shim_dir)
 
-import threading
 
-from simulation.simulator import MarketSimulator, load_simulation_config, shutdown_mt5_shim
 # NOTE: import the shim under its plain top-level name (see run_simulation.py
 # comment) so _inject() lands on the module object the trader actually uses.
 import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
-from simulation.virtual_state import VirtualState
+
 from alerts.control_bot import TelegramControlBot
-from scripts.run_simulation import SimulationDriver, _bar_timestamp, build_virtual_cfg  # reuse driver
+from scripts.run_simulation import SimulationDriver, build_virtual_cfg  # reuse driver
+from simulation.simulator import MarketSimulator, shutdown_mt5_shim
+from simulation.virtual_state import VirtualState
 
 logging.basicConfig(
     level=logging.INFO,

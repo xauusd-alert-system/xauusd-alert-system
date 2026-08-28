@@ -1,11 +1,11 @@
-import numpy as np
 import pandas as pd
 import pytest
+
 from backtest.portfolio import (
-    daily_r_matrix,
-    strategy_correlation,
-    rank_concurrent_signals,
     calculate_queue_loss,
+    daily_r_matrix,
+    rank_concurrent_signals,
+    strategy_correlation,
 )
 
 

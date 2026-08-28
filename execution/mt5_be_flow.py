@@ -14,11 +14,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from data.trading_event_ledger import append_trading_event
 from data.trade_group_store import mark_action, update_group_state
+from data.trading_event_ledger import append_trading_event
 from execution.mt5_common import ExecutionForbidden, MT5BrokerContext
 from execution.trade_geometry import compute_break_even
-from execution.trade_group import BeStatus, GroupState, TradeGroupSpec, new_leg_id, require_transition
+from execution.trade_group import (
+    BeStatus,
+    GroupState,
+    TradeGroupSpec,
+    new_leg_id,
+    require_transition,
+)
 
 
 def request_be(executor, group: dict[str, Any]) -> str:

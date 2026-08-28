@@ -14,8 +14,8 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from scripts.paper_accumulate_wide_filtered import (
-    init_paper_db,
     clear_paper_trades,
+    init_paper_db,
     save_paper_trades,
 )
 

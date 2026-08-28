@@ -383,6 +383,8 @@ def order_send(request: dict) -> object:
 
     from simulation.virtual_state import (
         TRADE_RETCODE_DONE as V_DONE,
+    )
+    from simulation.virtual_state import (
         VirtualOrderResult,
     )
 

@@ -15,9 +15,11 @@ every parameter result so no downstream consumer can mistake the proxy for a
 real-flow source.
 """
 from __future__ import annotations
+
+from typing import Any, Dict
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Optional, List
 
 # The ONLY source kind this module can truthfully claim (§5): OHLCV proxy.
 SOURCE_KIND = "ohlcv_proxy"
@@ -56,7 +58,7 @@ def calculate_manipulation_index(df: pd.DataFrame, window: int = 20) -> tuple[in
         return 5, "умеренный уровень манипуляций в пределах нормы."
 
     slice_df = df.tail(window).copy()
-    
+
     # 1. Wick ratio
     hl_range = (slice_df["high"] - slice_df["low"]).replace(0, np.nan)
     body = (slice_df["close"] - slice_df["open"]).abs()
@@ -106,15 +108,15 @@ def calculate_zone_strength(df: pd.DataFrame, window: int = 50) -> tuple[int, st
 
     slice_df = df.tail(window).copy()
     current_close = slice_df["close"].iloc[-1]
-    
+
     # Identify nearest swing level
     swing_highs = slice_df["high"].rolling(10, min_periods=1).max()
     swing_lows = slice_df["low"].rolling(10, min_periods=1).min()
-    
+
     # Proximity to support or resistance
     dist_high = abs(current_close - swing_highs.iloc[-1])
     dist_low = abs(current_close - swing_lows.iloc[-1])
-    
+
     # Touch frequency: how many times price hovered in 0.2% vicinity of level
     level_price = swing_highs.iloc[-1] if dist_high < dist_low else swing_lows.iloc[-1]
     threshold = level_price * 0.002
@@ -196,7 +198,7 @@ def calculate_liquidity_grab(df: pd.DataFrame, window: int = 30) -> tuple[int, s
         return 5, "умеренная охота за ликвидностью."
 
     slice_df = df.tail(window).copy()
-    
+
     # 20-bar swing extremes
     sw_high = slice_df["high"].rolling(15, min_periods=1).max().shift(1)
     sw_low = slice_df["low"].rolling(15, min_periods=1).min().shift(1)
@@ -242,7 +244,7 @@ def calculate_delta_confidence(df: pd.DataFrame) -> tuple[str, str]:
 
     signed_delta = (pos_in_bar * 2.0 - 1.0).fillna(0.0) * vol
     cum_delta = signed_delta.cumsum()
-    
+
     # Delta slope
     slope = cum_delta.iloc[-1] - cum_delta.iloc[0]
     total_vol = vol.sum() if vol.sum() > 0 else 1.0
@@ -253,7 +255,7 @@ def calculate_delta_confidence(df: pd.DataFrame) -> tuple[str, str]:
     consistency = direction_bars / len(slice_df)
 
     dir_party = "Покупатели" if slope > 0 else "Продавцы"
-    
+
     # N9 (audit 2026-08-10): VERY HIGH must be checked BEFORE HIGH, otherwise the
     # stricter threshold (norm_slope>0.6, consistency>0.75) is nested inside the
     # looser one (norm_slope>0.4, consistency>0.65) and can never be reached.

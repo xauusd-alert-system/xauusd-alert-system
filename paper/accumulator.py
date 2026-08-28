@@ -2,23 +2,23 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from config.loader import effective_asset_config, get_signal_grid
-from labeling.label_generator import resolve_label_event
 from data.paper_ledger import (
     append_paper_event,
     paper_accumulation_status,
     read_paper_events,
     register_paper_run,
 )
+from labeling.label_generator import resolve_label_event
 from model.trainer import load_model
 from scripts.deflated_sharpe import _apply_variant, _variants_for
 

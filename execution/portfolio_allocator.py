@@ -17,9 +17,11 @@ Kept in execution/ because the live trader calls it for scaleout validation;
 full Kelly/HRP allocation remains OPT-IN (docs/TODO.md).
 """
 from __future__ import annotations
+
+from typing import Dict
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional
 
 
 def calculate_fractional_kelly(

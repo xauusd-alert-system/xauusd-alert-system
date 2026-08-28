@@ -34,7 +34,7 @@ def _import_manual():
         import sys
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
-        from challenge.manual import risk, journal  # noqa: F401
+        from challenge.manual import journal, risk  # noqa: F401
         return (risk, journal), None
     except Exception as exc:
         return None, str(exc)
@@ -169,7 +169,12 @@ def cmd_pairs(send, chat_id, args=()):
         import sys
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
-        from pairs_analysis import load_config, PairAnalyzer, SignalEngine, EnsembleEngine
+        from pairs_analysis import (
+            EnsembleEngine,
+            PairAnalyzer,
+            SignalEngine,
+            load_config,
+        )
     except Exception as exc:
         send(chat_id, f"❌ Pairs module unavailable: {exc}")
         return

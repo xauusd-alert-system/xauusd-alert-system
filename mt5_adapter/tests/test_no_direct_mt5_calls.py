@@ -84,7 +84,7 @@ def test_no_direct_mt5_imports_outside_adapter():
                     offenders.append(f"{rel}:{idx + 1}: {line.strip()}")
     assert not offenders, (
         "Direct MetaTrader5 imports found outside mt5_adapter/ "
-        f"(convert to mt5_adapter.MT5Client):\n" + "\n".join(offenders))
+        "(convert to mt5_adapter.MT5Client):\n" + "\n".join(offenders))
 
 
 _SELF_MT5_RE = re.compile(r"\bself\.mt5\s*\.")
@@ -120,7 +120,7 @@ def test_no_direct_mt5_attr_access_outside_adapter():
                 break
     assert not offenders, (
         "Direct `mt5.*` attribute access found outside mt5_adapter/ "
-        f"(use mt5_adapter.MT5Client or DI):\n" + "\n".join(offenders))
+        "(use mt5_adapter.MT5Client or DI):\n" + "\n".join(offenders))
 
 
 def test_white_list_entries_exist():

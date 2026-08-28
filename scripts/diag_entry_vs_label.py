@@ -55,15 +55,15 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
+from labeling.label_generator import generate_labels_traded_event
+from model.ensemble_backtest import EnsembleBacktester
+from scripts.deflated_sharpe import _build_fold_frames
 from scripts.run_backtest import (
-    load_asset_history,
     build_full_df,
+    load_asset_history,
     merge_asset_cfg,
     truncate_before,
 )
-from scripts.deflated_sharpe import _build_fold_frames
-from model.ensemble_backtest import EnsembleBacktester
-from labeling.label_generator import generate_labels_traded_event
 
 
 def _epoch_array(values) -> np.ndarray:

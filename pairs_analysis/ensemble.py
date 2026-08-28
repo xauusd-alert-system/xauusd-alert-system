@@ -15,11 +15,8 @@ No external dependencies beyond numpy/scipy/statsmodels already in the project.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
-import pandas as pd
-from scipy import stats as sp_stats
 
 from . import metrics as metrics_mod
 from .analyzer import PairMetrics

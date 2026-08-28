@@ -32,7 +32,6 @@ from data.trade_group_store import (
     try_mark_submitted,
     update_group_state,
 )
-from provenance.store import ProvenanceStore, resolve_store_db_path
 from data.trading_event_ledger import append_trading_event
 from execution.trade_geometry import BrokerSnapshot, CostSnapshot, compute_break_even
 from execution.trade_group import (
@@ -42,6 +41,7 @@ from execution.trade_group import (
     new_leg_id,
     require_transition,
 )
+from provenance.store import ProvenanceStore, resolve_store_db_path
 
 
 class LiveExecutionForbidden(RuntimeError):

@@ -29,20 +29,20 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
-from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
-    _build_fold_frames,
-    _SYNTH_DEFAULTS,
-)
-from scripts.run_backtest import merge_asset_cfg
 from backtest.metrics import (
-    compute_r_metrics,
     block_bootstrap_t,
+    compute_r_metrics,
     trades_to_dataframe,
 )
+from config.loader import load_config
 from model.ensemble_backtest import EnsembleBacktester
+from scripts.deflated_sharpe import (
+    _SYNTH_DEFAULTS,
+    _build_fold_frames,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
+)
+from scripts.run_backtest import merge_asset_cfg
 
 
 def run_fill_modes(cfg: dict, asset_key: str, df_full: pd.DataFrame,
@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> None:
 
     synthetic = False
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[timing] Real data: {len(df)} {timeframe} rows from {db_path}")

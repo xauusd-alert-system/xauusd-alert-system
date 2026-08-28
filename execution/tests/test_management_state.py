@@ -4,8 +4,6 @@ restart keeps managing still-open positions instead of dropping them to the
 broker TP/SL."""
 import json
 
-import pytest
-
 from execution.mt5_trader import MultiAssetMT5Trader
 
 

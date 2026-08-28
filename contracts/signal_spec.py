@@ -1,10 +1,10 @@
 """Versioned machine-readable signal/setup contract."""
 from __future__ import annotations
 
-from enum import Enum
 import hashlib
 import json
 import uuid
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator

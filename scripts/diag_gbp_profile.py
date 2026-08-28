@@ -9,7 +9,6 @@ Diagnostic for GBPUSD profile under current FX v4 config (trend-friendly, stop 3
 """
 
 import argparse
-import json
 import os
 import sys
 
@@ -18,10 +17,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_signal_grid
-from scripts.train_mt5 import build_full_df
+from config.loader import load_config
+from data.ingestion import to_epoch_seconds  # for smoke tests / no DB
 from model.ensemble_backtest import EnsembleBacktester
-from data.ingestion import fetch_mock_candles, to_epoch_seconds  # for smoke tests / no DB
+from scripts.train_mt5 import build_full_df
 
 
 def _make_synthetic_gbp_df(n=2000, price=1.30, atr=0.0015, seed=42):

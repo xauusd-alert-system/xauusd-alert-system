@@ -21,15 +21,13 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from execution.trade_group import (
     BreakEvenPolicy,
     EntrySpec,
     Geometry,
     GroupRisk,
-    GroupState,
     Side,
     TargetLegSpec,
     TradeGroupSpec,
@@ -163,7 +161,8 @@ class CostSnapshot:
         return self.status in {"observed", "estimated"}
 
     def data_hash(self) -> str:
-        import hashlib, json
+        import hashlib
+        import json
         payload = json.dumps({
             "round_trip_cost_price": self.round_trip_cost_price,
             "safety_buffer_price": self.safety_buffer_price,

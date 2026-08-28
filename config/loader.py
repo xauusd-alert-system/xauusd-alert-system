@@ -3,9 +3,11 @@ Config loader utility - shared across all modules.
 Ensures a single source of truth: config/config.yaml.
 """
 from dotenv import load_dotenv
+
 load_dotenv()
 import copy
 import os
+
 import yaml
 
 _CONFIG_CACHE = None

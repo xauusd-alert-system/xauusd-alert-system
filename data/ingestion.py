@@ -1,11 +1,11 @@
 import time
+
 import numpy as np
-import requests
 import pandas as pd
+import requests
 
 from config.loader import get_env
 from data.session_tagger import tag_dataframe
-
 
 TIMEFRAME_TO_SECONDS = {
     "M1": 60,

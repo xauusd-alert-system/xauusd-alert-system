@@ -5,12 +5,11 @@ Supports 24/7 Crypto Trading (BTCUSD) in Asia with Extra-High Confidence Thresho
 """
 import logging
 from dataclasses import dataclass
-from typing import Optional
-import pandas as pd
-from regime.classifier import RegimeLabel
+
 from backtest.engine import rule_based_signal
-from data.news_filter import news_guard_decision
 from config.loader import get_signal_grid
+from data.news_filter import news_guard_decision
+from regime.classifier import RegimeLabel
 
 logger = logging.getLogger("ensemble")
 

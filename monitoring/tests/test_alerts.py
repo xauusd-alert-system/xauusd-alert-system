@@ -9,8 +9,6 @@ Covers:
 """
 from __future__ import annotations
 
-import shutil
-
 import pytest
 
 from monitoring.alerts import AlertManager, AlertRule, build_from_config, default_rules

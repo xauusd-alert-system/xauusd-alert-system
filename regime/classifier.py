@@ -14,6 +14,7 @@ changing the contract that regime/classifier.py -> RegimeLabel.
 All thresholds come from config.yaml under `regime:` - nothing hardcoded here.
 """
 from enum import Enum
+
 import numpy as np
 import pandas as pd
 
