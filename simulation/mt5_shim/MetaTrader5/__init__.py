@@ -21,7 +21,7 @@ Injection::
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
 import numpy as np
@@ -181,7 +181,7 @@ def symbols_get(*args, **kwargs) -> tuple:
 
 def _timestamp_now() -> int:
     """Current Unix seconds (UTC), used to anchor newly-closed bars."""
-    return int(datetime.now(timezone.utc).timestamp())
+    return int(datetime.now(UTC).timestamp())
 
 
 def copy_rates_from_pos(

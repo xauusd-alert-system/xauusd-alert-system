@@ -7,8 +7,10 @@ name: CI
 #                the pinned stack installs cleanly on ubuntu-latest and the
 #                suite exercises the MT5 shim (simulation/mt5_shim) — all
 #                tests pass without the real package.
-#   * lint     — ruff check (no strict repo config yet: default ruleset, see
-#                pyproject.toml which currently only holds pytest settings).
+#   * lint     — ruff check gated on .ruff.toml (TZ tasks 2/6). `ruff format
+#                --check` runs non-blocking (continue-on-error): ~390 legacy
+#                files still fail the formatter and a repo-wide reformat is a
+#                separate, dedicated change — see docs/RUFF_POLICY.md.
 #   * security — TZ 10.2 secret/state audit (python -m scripts.security_audit),
 #                must pass. This doubles as the TZ 6.9 secret-scan gate; no
 #                separate gitleaks job is needed.
@@ -73,6 +75,13 @@ jobs:
 
       - name: Ruff check
         run: ruff check .
+
+      # Non-blocking: the legacy codebase is not yet formatted with ruff format
+      # (390 of ~480 files would be reformatted). Track adoption separately;
+      # flip this to a hard gate once the reformat lands.
+      - name: Ruff format check (advisory)
+        run: ruff format --check .
+        continue-on-error: true
 
   security:
     name: security audit (secrets & repo state)
