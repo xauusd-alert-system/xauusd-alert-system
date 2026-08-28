@@ -550,6 +550,16 @@ labeling:
   tp1_atr_multiplier: 1.0
   tp2_atr_multiplier: 1.8
   tp3_atr_multiplier: 2.8
+  # Adaptive holding period (Task 9): per-bar horizon from the bar's
+  # volatility ratio vol_pct = atr / price. vol_pct > adaptive_high_vol_pct
+  # -> horizon // 4; > adaptive_mid_vol_pct -> horizon // 2; else the full
+  # horizon. Default FALSE: prod behaviour is unchanged; flipping it on is an
+  # explicit per-asset (assets.<KEY>.labeling) or global decision and changes
+  # the label space (bump contract_version / re-train before trusting it).
+  adaptive_holding: false
+  adaptive_high_vol_pct: 0.02
+  adaptive_mid_vol_pct: 0.01
+  price_column: close
 
 
 # ---------------------------------------------------------------------------
