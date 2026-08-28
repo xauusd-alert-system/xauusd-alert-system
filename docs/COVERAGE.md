@@ -1,13 +1,14 @@
 # Coverage Report
 
-**Date:** 2026-08-28
+**Date:** 2026-08-28 (re-verified on the same date)
 **Branch:** `refactor/master-plan`
-**Run:** `pytest -q --cov=. --cov-report=term --cov-report=html --cov-report=json` with [`.coveragerc`](../.coveragerc)
+**Run:** `pytest -q --cov=. --cov-report=term-missing --cov-report=html` with [`.coveragerc`](../.coveragerc)
 **Test suite:** 1443 passed / 1 skipped (identical to the plain run — coverage instrumentation changes no outcomes).
 **Total coverage: 57.8%** (12 889 / 22 288 statements).
 
 Measurement excludes non-code and auxiliary surfaces via `.coveragerc`:
-`tests/`, `*/tests/`, `docs/`, `plans/`, `scripts/research/`, one-off tooling
+throwaway `_tmp_*.py` diagnostics at repo root, `tests/`, `*/tests/`, `docs/`,
+`plans/`, `scripts/research/`, one-off tooling
 packages (`backtest/`, `challenge/`, `labeling/`, `news/`, `pairs_analysis/`,
 `paper/`, `usstocks/`), the UI bundle, `deploy/`, `mql5/` and `simulation/`
 (MT5 shim stands in for the real broker API; its behavior is asserted by the

@@ -25,6 +25,7 @@ omit =
     mql5/*
     simulation/*
     setup.py
+    _tmp_*.py
 
 [report]
 precision = 1
