@@ -22,7 +22,7 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -128,7 +128,7 @@ def _fetch_calendar_once() -> list:
 
     soup = BeautifulSoup(html, "html.parser")
     current_day: str | None = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     events: list = []
     for tr in soup.find_all("tr"):
         cls = " ".join(tr.get("class") or [])
@@ -169,7 +169,7 @@ def _fetch_calendar_once() -> list:
             event_dt = event_dt.replace(year=year, tzinfo=ZoneInfo("America/New_York"))
         except Exception:
             continue
-        event_dt = event_dt.astimezone(timezone.utc)
+        event_dt = event_dt.astimezone(UTC)
         events.append({
             "title": ev_span.get_text(strip=True),
             "country": country,
@@ -211,7 +211,7 @@ def main():
         out = {
             "events": [],
             "source": "forexfactory_www_browser",
-            "fetched_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+            "fetched_at_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
         }
         if job.get("cmd") == "calendar":
             watchdog = None

@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -252,7 +252,7 @@ def build_provenance_manifest(
         "timeframe": timeframe.upper(),
         "interval_seconds": _interval_seconds(timeframe),
         "source_window_utc": {"start_ts": start_ts, "end_ts": end_ts},
-        "export_time_utc": datetime.now(timezone.utc).isoformat(),
+        "export_time_utc": datetime.now(UTC).isoformat(),
         "db_file_sha256": file_sha256(db_path),
         "candle_count": int(len(df)),
         "gap_audit": gap_audit(df, timeframe, sessions_config),

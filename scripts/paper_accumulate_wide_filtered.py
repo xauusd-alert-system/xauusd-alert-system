@@ -14,7 +14,7 @@ Metrics stay hidden until the pre-registered threshold is reached.
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -136,7 +136,7 @@ def main() -> None:
     raw = load_asset_history(db_path, timeframe, asset_key)
     full_df = build_full_df(cfg, raw, db_path=db_path, asset_key=asset_key)
 
-    live_start_ts = int(datetime.fromisoformat(LIVE_START_UTC).replace(tzinfo=timezone.utc).timestamp())
+    live_start_ts = int(datetime.fromisoformat(LIVE_START_UTC).replace(tzinfo=UTC).timestamp())
     live_df = full_df[full_df["timestamp_utc"] >= live_start_ts].copy()
 
     if len(live_df) == 0:

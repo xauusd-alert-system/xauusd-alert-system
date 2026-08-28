@@ -18,7 +18,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Config
@@ -72,7 +72,7 @@ def _write_heartbeat(pid: int):
             {
                 "watchdog_pid": os.getpid(),
                 "trader_pid": pid,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "consecutive_crashes": consecutive_crashes,
             },
             f,

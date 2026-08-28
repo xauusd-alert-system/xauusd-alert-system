@@ -298,7 +298,7 @@ def fetch_binance(symbol: str, timeframe: str = "D1",
     tf = _norm_tf(timeframe)
     interval = BINANCE_INTERVALS[tf]
     if end is None:
-        end = dt.datetime.now(dt.timezone.utc)
+        end = dt.datetime.now(dt.UTC)
     if start is None:
         start = end - dt.timedelta(days=lookback_days)
     def _ms(t):

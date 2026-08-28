@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cutoff_epoch(cutoff: str) -> int:
     dt = datetime.datetime.strptime(cutoff, "%Y-%m-%d").replace(
-        tzinfo=datetime.timezone.utc
+        tzinfo=datetime.UTC
     )
     return int(dt.timestamp())
 

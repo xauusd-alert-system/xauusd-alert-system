@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -62,7 +62,7 @@ def main():
     if download_data:
         logger.info("Downloading fresh market data...")
         start_date = "2020-01-01"  # здесь можно взять lookback_days, но для простоты используем 2020
-        end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        end_date = datetime.now(UTC).strftime("%Y-%m-%d")
         # backfill_data --all now resolves per-asset timeframes automatically,
         # but we still pass --timeframe=None to let it use the config chain.
         download_cmd = [

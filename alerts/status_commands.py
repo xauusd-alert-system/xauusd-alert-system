@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger("status_commands")
@@ -213,7 +213,7 @@ def _fmt_price_list(values) -> str:
 def format_position_line(pos, contexts: dict, cfg: dict,
                          now: Optional[datetime] = None) -> str:
     """One open position as a multi-line status block."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     sym2asset = symbol_to_asset_map(cfg)
     symbol = getattr(pos, "symbol", "?")
     asset_key = sym2asset.get(symbol)
@@ -254,7 +254,7 @@ def format_position_line(pos, contexts: dict, cfg: dict,
 def format_positions_report(positions, contexts: dict, cfg: dict,
                             now: Optional[datetime] = None) -> str:
     """The positions section shared by /status."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if not positions:
         return "📭 Открытых позиций нет."
     lines = [f"📂 Открытые позиции ({len(positions)}):"]
@@ -268,7 +268,7 @@ def format_status_report(info, positions, contexts: dict, cfg: dict,
                          now: Optional[datetime] = None) -> str:
     """Full /status: trader mode + account header (the pre-existing summary)
     followed by the per-position detail with floating PnL in $ and R."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     mode = "⏸ DRY-RUN (на паузе)" if dry_run else "▶️ LIVE"
     lines = [f"📊 Статус трейдера — {mode} (UTC {now:%Y-%m-%d %H:%M})"]
     if info is not None:
@@ -453,7 +453,7 @@ def fetch_deals_between(dt_from: datetime, dt_to: datetime) -> list:
 def realized_pnl_today(now: Optional[datetime] = None) -> float:
     """Sum of profit+swap+commission over all of today's (UTC) deals — every
     cash movement booked today, matching how mt5_trader totals closed PnL."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     deals = fetch_deals_between(day_start, now)
     return float(sum(
@@ -482,7 +482,7 @@ PERIOD_KEYS = ["today", "week", "2week", "month", "3month", "all"]
 
 def period_range(kind: str, now: Optional[datetime] = None):
     """(dt_from, dt_to, human_label) for a /metrics period key."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     days = {
         "week": 7,
         "2week": 14,
@@ -655,7 +655,7 @@ def format_metrics_report(deals, contexts: dict, cfg: dict, period_label: str) -
 def format_account_report(info, realized_today: float,
                           now: Optional[datetime] = None) -> str:
     """Balance/equity/margin snapshot + realized PnL for today (UTC)."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if info is None:
         return "❌ Данные счёта недоступны (account_info вернул None — терминал не подключён?)."
     balance = float(getattr(info, "balance", 0.0))

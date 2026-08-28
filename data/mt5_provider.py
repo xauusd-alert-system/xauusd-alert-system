@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Final
 
 import pandas as pd
@@ -150,8 +150,8 @@ def fetch_candles_range(
 
     validate_symbol(symbol)
 
-    start_utc = start_utc.astimezone(timezone.utc)
-    end_utc = end_utc.astimezone(timezone.utc)
+    start_utc = start_utc.astimezone(UTC)
+    end_utc = end_utc.astimezone(UTC)
 
     # N10: MT5's copy_rates_range interprets the datetimes as SERVER time, so the
     # requested UTC bounds must be shifted by the server offset to select the same

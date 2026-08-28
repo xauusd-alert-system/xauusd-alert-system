@@ -58,13 +58,13 @@ def resample(candles, minutes: int):
 
 
 def _utc_time(ts: int) -> dt.time:
-    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).timetz().replace(tzinfo=None)
+    return dt.datetime.fromtimestamp(ts, dt.UTC).timetz().replace(tzinfo=None)
 
 
 def bars_of_day(candles, date) -> list:
     day = []
     for c in candles:
-        utc = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc)
+        utc = dt.datetime.fromtimestamp(c["time"], dt.UTC)
         if utc.date() == date:
             day.append(c)
     return day
@@ -359,12 +359,12 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
     # Dead days (range < atr_min_ratio of normal) are NO-GO: 24w backtest data
     # showed ~100% of the strategy's losses concentrate on atr_ratio < 0.7.
     prior = [c for c in candles_1m if c["time"] < dt.datetime(
-        date.year, date.month, date.day, tzinfo=dt.timezone.utc).timestamp()]
+        date.year, date.month, date.day, tzinfo=dt.UTC).timestamp()]
     prior_days = {}
     for c in prior:
-        d = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc).date()
+        d = dt.datetime.fromtimestamp(c["time"], dt.UTC).date()
         prior_days.setdefault(d, []).append(c)
-    sess_start_dt = dt.datetime.combine(date, session_start_utc, tzinfo=dt.timezone.utc)
+    sess_start_dt = dt.datetime.combine(date, session_start_utc, tzinfo=dt.UTC)
     sess_len_min = (SESSION_END_UTC.hour * 60 + SESSION_END_UTC.minute) - \
                    (session_start_utc.hour * 60 + session_start_utc.minute)
     last_ts = max((c["time"] for c in day), default=0)
@@ -372,7 +372,7 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
                                (last_ts - sess_start_dt.timestamp()) / 60.0))
 
     def _range_in_window(cs, d):
-        s = dt.datetime.combine(d, session_start_utc, tzinfo=dt.timezone.utc).timestamp()
+        s = dt.datetime.combine(d, session_start_utc, tzinfo=dt.UTC).timestamp()
         w = [c for c in cs if s <= c["time"] <= s + elapsed_min * 60]
         if len(w) < 5:
             return None
@@ -389,7 +389,7 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
         atr_normal = True
 
     # Impulse window inside the session (first 60-90 minutes).
-    t_start = dt.datetime.combine(date, session_start_utc, tzinfo=dt.timezone.utc)
+    t_start = dt.datetime.combine(date, session_start_utc, tzinfo=dt.UTC)
     t_end = t_start + dt.timedelta(minutes=IMPULSE_WINDOW_MAX)
     def idx_of(ts):
         for i, b in enumerate(bars5):
@@ -427,7 +427,7 @@ def scan_setup(symbol: str, date, candles_1m, session_start_utc=SESSION_START_UT
 
     # News check at signal time (or, failing that, at the end of the window).
     check_ts = signal_bar["time"] if signal_bar else (t_end.timestamp() if impulse else t_start.timestamp())
-    news = check_news_red_zone(dt.datetime.fromtimestamp(check_ts, dt.timezone.utc), news_zones)
+    news = check_news_red_zone(dt.datetime.fromtimestamp(check_ts, dt.UTC), news_zones)
 
     grade, no_go = _grade(trend15, trend30, impulse,
                           retrace if depth_ok else (None if not pull_bars else 1.0),

@@ -17,6 +17,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+from datetime import UTC
 from typing import Any, Optional
 
 import numpy as np
@@ -178,8 +179,8 @@ def collect_prepost(log_dir: Optional[str] = None) -> dict[str, Any]:
     mtimes = [os.path.getmtime(fp) for fp in files if os.path.exists(fp)]
     as_of = None
     if mtimes:
-        from datetime import datetime, timezone
-        as_of = datetime.fromtimestamp(max(mtimes), tz=timezone.utc).isoformat()
+        from datetime import datetime
+        as_of = datetime.fromtimestamp(max(mtimes), tz=UTC).isoformat()
 
     # Strip the internal bookkeeping key before handing the payload to the API.
     for a in assets.values():

@@ -20,7 +20,7 @@ import csv
 import json
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BASE = "http://127.0.0.1:8000"
@@ -33,7 +33,7 @@ CYCLE_TOKENS = ("New bar detected", "Analyzing newly closed candle",
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+    return datetime.now(UTC).strftime("%H:%M:%S")
 
 
 def fetch_mlprob(asset: str = "XAUUSD") -> dict:

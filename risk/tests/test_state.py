@@ -8,7 +8,7 @@ Covers:
   - atomic save (tmp + replace leaves a single file).
 """
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from risk.state import RiskState
 
@@ -16,7 +16,7 @@ from risk.state import RiskState
 def test_save_load_round_trip(tmp_path):
     path = str(tmp_path / "risk_state.json")
     st = RiskState(path)
-    st.current_day = datetime.now(timezone.utc).date()
+    st.current_day = datetime.now(UTC).date()
     st.starting_equity_today = 10_000.0
     st.starting_balance_today = 9_950.0
     st.hwm = 10_200.0
@@ -39,7 +39,7 @@ def test_legacy_file_without_balance_and_hwm(tmp_path):
     path = str(tmp_path / "risk_state.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({
-            "current_day": datetime.now(timezone.utc).date().isoformat(),
+            "current_day": datetime.now(UTC).date().isoformat(),
             "starting_equity_today": 1000.0,
             "daily_trades_count": {"EURUSD": 1},
             "circuit_breaker_tripped": False,

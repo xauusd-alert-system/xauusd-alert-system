@@ -11,7 +11,7 @@ import copy
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -74,7 +74,7 @@ def main(argv=None) -> None:
         "locked_holdout_read": False,
         "source": "copied_real_sqlite_prelock",
         "mode": "research_only_not_deployed",
-        "as_of_utc": datetime.now(timezone.utc).isoformat(),
+        "as_of_utc": datetime.now(UTC).isoformat(),
         "results": results,
     }
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)

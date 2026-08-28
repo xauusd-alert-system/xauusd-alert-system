@@ -151,7 +151,7 @@ class TestScanner(unittest.TestCase):
         def _bar(ts, o, h, l, c, v):
             return {"time": ts, "open": o, "high": h, "low": l, "close": c, "volume": v}
 
-        start = dt.datetime(2026, 8, 20, 8, 0, tzinfo=dt.timezone.utc)
+        start = dt.datetime(2026, 8, 20, 8, 0, tzinfo=dt.UTC)
         out, price = [], 100.0
         for i in range(960):
             ts = int((start + dt.timedelta(minutes=i)).timestamp())
@@ -164,8 +164,8 @@ class TestScanner(unittest.TestCase):
             price = c
 
         def _override(t_from, t_to, o, h, l, c, v):
-            s = dt.datetime(2026, 8, 20, t_from[0], t_from[1], tzinfo=dt.timezone.utc)
-            e = dt.datetime(2026, 8, 20, t_to[0], t_to[1], tzinfo=dt.timezone.utc)
+            s = dt.datetime(2026, 8, 20, t_from[0], t_from[1], tzinfo=dt.UTC)
+            e = dt.datetime(2026, 8, 20, t_to[0], t_to[1], tzinfo=dt.UTC)
             n = int((e - s).total_seconds() // 60)
             o0 = o
             for i in range(n):
@@ -229,7 +229,7 @@ class TestScanner(unittest.TestCase):
         _random.seed(7)
 
         def _day(d, amp):
-            start = dt.datetime(d.year, d.month, d.day, 8, 0, tzinfo=dt.timezone.utc)
+            start = dt.datetime(d.year, d.month, d.day, 8, 0, tzinfo=dt.UTC)
             out, price = [], 100.0
             for i in range(960):
                 ts = int((start + dt.timedelta(minutes=i)).timestamp())
@@ -253,7 +253,7 @@ class TestScanner(unittest.TestCase):
         base = scanner_mod.scan_setup("SYN", dt.date(2026, 8, 20), day, dt.time(13, 30), {})
         self.assertTrue(base.tradable)
         sig_ts = base.signal_bar["time"]
-        sess0 = dt.datetime(2026, 8, 20, 13, 30, tzinfo=dt.timezone.utc).timestamp()
+        sess0 = dt.datetime(2026, 8, 20, 13, 30, tzinfo=dt.UTC).timestamp()
         sig_min = (sig_ts - sess0) / 60.0
         self.assertTrue(60.0 <= sig_min <= 69.0,
                         f"сигнал на {sig_min:.1f} мин — тест ждёт мёртвую зону 60-69")
@@ -284,7 +284,7 @@ class TestScanner(unittest.TestCase):
 class TestOutcomes(unittest.TestCase):
     @staticmethod
     def _ts(h, m):
-        return int(dt.datetime(2026, 8, 20, h, m, tzinfo=dt.timezone.utc).timestamp())
+        return int(dt.datetime(2026, 8, 20, h, m, tzinfo=dt.UTC).timestamp())
 
     @staticmethod
     def _bar(ts, o, h, l, c):

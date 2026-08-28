@@ -30,7 +30,7 @@ def _make_csv(tmp_path, rows, asset="EURUSD"):
 def _ts(year, month, day, hour, minute=0):
     """Epoch seconds for a UTC timestamp."""
     import datetime as dt
-    return int(dt.datetime(year, month, day, hour, minute, tzinfo=dt.timezone.utc).timestamp())
+    return int(dt.datetime(year, month, day, hour, minute, tzinfo=dt.UTC).timestamp())
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ def test_weekend_tag_on_saturday_not_checked(tmp_path):
     """Weekend tag on Saturday is outside the Sunday 21-24 window -> no violation."""
     import datetime as dt
     # Saturday 22:00 UTC
-    ts = int(dt.datetime(2026, 3, 7, 22, 0, tzinfo=dt.timezone.utc).timestamp())
+    ts = int(dt.datetime(2026, 3, 7, 22, 0, tzinfo=dt.UTC).timestamp())
     _make_csv(tmp_path, [
         {"entry_ts": ts, "session": "weekend", "direction": "long",
          "R": "0.1", "exit_reason": "breakeven"},
@@ -86,7 +86,7 @@ def test_weekend_tag_on_saturday_not_checked(tmp_path):
 def test_weekend_tag_on_monday_not_checked(tmp_path):
     """Weekend tag on Monday is outside the Sunday 21-24 window -> no violation."""
     import datetime as dt
-    ts = int(dt.datetime(2026, 3, 2, 22, 0, tzinfo=dt.timezone.utc).timestamp())
+    ts = int(dt.datetime(2026, 3, 2, 22, 0, tzinfo=dt.UTC).timestamp())
     _make_csv(tmp_path, [
         {"entry_ts": ts, "session": "weekend", "direction": "short",
          "R": "-0.5", "exit_reason": "stop"},
@@ -97,7 +97,7 @@ def test_weekend_tag_on_monday_not_checked(tmp_path):
 def test_weekend_tag_before_21_not_checked(tmp_path):
     """Weekend tag at Sunday 20:00 UTC is before 21 -> no violation."""
     import datetime as dt
-    ts = int(dt.datetime(2026, 3, 1, 20, 0, tzinfo=dt.timezone.utc).timestamp())
+    ts = int(dt.datetime(2026, 3, 1, 20, 0, tzinfo=dt.UTC).timestamp())
     _make_csv(tmp_path, [
         {"entry_ts": ts, "session": "weekend", "direction": "short",
          "R": "-0.1", "exit_reason": "breakeven"},

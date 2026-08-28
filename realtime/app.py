@@ -12,7 +12,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import wraps
 from typing import Any, Dict, List, Optional
 
@@ -451,14 +451,14 @@ def get_status():
     available = account is not None
     balance = float(getattr(account, "balance", 0.0) or 0.0) if available else None
     equity = float(getattr(account, "equity", 0.0) or 0.0) if available else None
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = int(datetime.now(UTC).timestamp() * 1000)
     payload = {
         "status": "online",
         "data_mode": DATA_MODE,
         "available": available,
         "source": "mt5_account" if available else "unavailable",
         "mode": "live_verified" if available and DATA_MODE == "live" else "implemented_not_live_verified",
-        "as_of_utc": datetime.now(timezone.utc).isoformat(),
+        "as_of_utc": datetime.now(UTC).isoformat(),
         "balance": balance,
         "equity": equity,
         "floating_pnl": (equity - balance) if available else None,
@@ -489,23 +489,23 @@ def get_metrics(period: str = "week"):
     """
     if period not in ("today", "week", "2week", "month", "3month", "all"):
         period = "week"
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = int(datetime.now(UTC).timestamp() * 1000)
     if not sc.ensure_mt5_connection():
         return stamp(
             {"period": period, "period_label": sc.PERIODS.get(period, ""),
              "n": 0, "available": False,
-             "as_of_utc": datetime.now(timezone.utc).isoformat()},
+             "as_of_utc": datetime.now(UTC).isoformat()},
             last_activity_ms=None, source="unavailable",
             mode="implemented_not_live_verified", freshness="offline",
         )
     dt_from, dt_to, label = sc.period_range(period)
     deals = sc.fetch_deals_between(dt_from, dt_to) if dt_from else sc.fetch_deals_between(
-        datetime(1970, 1, 1, tzinfo=timezone.utc), dt_to)
+        datetime(1970, 1, 1, tzinfo=UTC), dt_to)
     contexts = sc.load_position_contexts()
     m = sc.compute_deal_metrics(deals, contexts=contexts, cfg=CFG)
     return stamp(
         {"period": period, "period_label": label, "available": True,
-         "as_of_utc": datetime.now(timezone.utc).isoformat(), **m},
+         "as_of_utc": datetime.now(UTC).isoformat(), **m},
         last_activity_ms=now, source="mt5_history_deals", mode="live_verified",
     )
 
@@ -518,19 +518,19 @@ def get_paper_status():
     if not manifest_path:
         return {
             "available": False, "source": "unconfigured",
-            "mode": "paper_frozen", "as_of_utc": datetime.now(timezone.utc).isoformat(),
+            "mode": "paper_frozen", "as_of_utc": datetime.now(UTC).isoformat(),
         }
     try:
         from data.paper_ledger import paper_accumulation_status
         from paper.accumulator import load_frozen_manifest
         manifest = load_frozen_manifest(manifest_path, verify_model=False)
         status = paper_accumulation_status(db_path, manifest["run_id"])
-        return {"available": True, "as_of_utc": datetime.now(timezone.utc).isoformat(), **status}
+        return {"available": True, "as_of_utc": datetime.now(UTC).isoformat(), **status}
     except Exception as exc:
         logger.warning("Paper status unavailable: %s", exc)
         return {
             "available": False, "source": "paper_status_error",
-            "mode": "paper_frozen", "as_of_utc": datetime.now(timezone.utc).isoformat(),
+            "mode": "paper_frozen", "as_of_utc": datetime.now(UTC).isoformat(),
             "error": str(exc),
         }
 
@@ -545,7 +545,7 @@ def get_signal_matrix():
     neutral ``confidence=0.50`` that looks model-computed.
     """
     assets = ["XAUUSD", "XAGUSD", "BTCUSD", "EURUSD", "GBPUSD"]
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     if DATA_MODE != "live":
         return {
             "signals": [{
@@ -613,8 +613,8 @@ threading.Thread(target=_warm_matrix_cache, daemon=True).start()
 @app.get("/api/correlation")
 def get_correlation_matrix():
     """Rolling close-return correlation from real MT5 candles only."""
-    as_of = datetime.now(timezone.utc).isoformat()
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    as_of = datetime.now(UTC).isoformat()
+    now = int(datetime.now(UTC).timestamp() * 1000)
     if DATA_MODE != "live":
         return stamp(
             {"available": False, "assets": [], "matrix": [],
@@ -678,7 +678,7 @@ def get_sentiment():
     stays unavailable — no samples, no synthetic headlines, no numeric
     fallback (W17 honesty contract).
     """
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     try:
         events = news_filter.fetch_economic_calendar() or []
         feed = news_filter.news_feed_status()
@@ -769,7 +769,7 @@ def get_sentiment():
 @_ttl_cache(30)
 def get_monte_carlo():
     """Monte Carlo from persisted executed-trade PnL only; no hypothetical sample."""
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     db_path = str(get_env(
         "TRADE_LOG_DB_PATH",
         default=CFG.get("general", {}).get("db_path", "data/market_data_mt5.sqlite"),
@@ -814,7 +814,7 @@ def get_monte_carlo():
         horizon_trades=100,
     )
     result = mc.run_simulation()
-    last_activity = int(datetime.now(timezone.utc).timestamp() * 1000)
+    last_activity = int(datetime.now(UTC).timestamp() * 1000)
     return stamp(
         {"available": True, "as_of_utc": as_of, "n_trades": int(len(pnls)), **result},
         last_activity_ms=last_activity,
@@ -829,7 +829,7 @@ def get_asset_chart(asset: str = "XAUUSD"):
         raise HTTPException(status_code=503, detail={
             "available": False, "source": "unavailable", "mode": DATA_MODE,
             "reason": "real_market_data_required",
-            "as_of_utc": datetime.now(timezone.utc).isoformat(),
+            "as_of_utc": datetime.now(UTC).isoformat(),
         })
     if asset not in CFG.get("assets", {}):
         raise HTTPException(status_code=404, detail=f"Unknown asset: {asset}")
@@ -843,7 +843,7 @@ def get_asset_chart(asset: str = "XAUUSD"):
     except Exception as exc:
         raise HTTPException(status_code=503, detail={
             "available": False, "source": "mt5_closed_candles", "mode": "live",
-            "reason": str(exc), "as_of_utc": datetime.now(timezone.utc).isoformat(),
+            "reason": str(exc), "as_of_utc": datetime.now(UTC).isoformat(),
         }) from exc
 
     latest = df.iloc[-1]
@@ -874,7 +874,7 @@ def get_asset_chart(asset: str = "XAUUSD"):
         content=svg, media_type="image/svg+xml",
         headers={"X-Data-Source": "mt5-closed-candles",
                  "X-Data-Mode": "live-verified",
-                 "X-As-Of-UTC": datetime.now(timezone.utc).isoformat()},
+                 "X-As-Of-UTC": datetime.now(UTC).isoformat()},
     )
 
 
@@ -899,21 +899,21 @@ def get_prepost(
                 session=session if session and session != "all" else None,
                 direction=direction if direction and direction != "all" else None,
             )
-            result["as_of_utc"] = datetime.now(timezone.utc).isoformat()
+            result["as_of_utc"] = datetime.now(UTC).isoformat()
             return result
         # No specific asset: return overview for all assets
         overview = collect_prepost()
-        overview["as_of_utc"] = datetime.now(timezone.utc).isoformat()
+        overview["as_of_utc"] = datetime.now(UTC).isoformat()
         return overview
     except Exception as exc:
         return {"available": False, "error": str(exc),
-                "as_of_utc": datetime.now(timezone.utc).isoformat()}
+                "as_of_utc": datetime.now(UTC).isoformat()}
 
 
 @app.get("/api/institutional-metrics")
 def get_institutional_metrics():
     """Institutional metrics computed from real closed candles only."""
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     if DATA_MODE != "live":
         return {"available": False, "metrics": {}, "report_text": None,
                 "source": "unavailable", "mode": DATA_MODE, "as_of_utc": as_of,
@@ -937,8 +937,8 @@ def get_institutional_metrics():
 @app.get("/api/positions")
 def get_positions():
     """Read-only real MT5 positions; never return a synthetic empty portfolio."""
-    as_of = datetime.now(timezone.utc).isoformat()
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    as_of = datetime.now(UTC).isoformat()
+    now = int(datetime.now(UTC).timestamp() * 1000)
     if not sc.ensure_mt5_connection():
         return stamp(
             {"available": False, "positions": [], "as_of_utc": as_of},
@@ -981,12 +981,12 @@ def get_pairs(timeframe: str = "H1"):
     Uses the pairs_analysis module (PairAnalyzer + SignalEngine + EnsembleEngine).
     Cached for 60s — expensive multi-pair computation.
     """
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     try:
         data = pairs_collect_data(timeframe)
         return stamp(
             {"available": True, **data, "as_of_utc": as_of},
-            last_activity_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+            last_activity_ms=int(datetime.now(UTC).timestamp() * 1000),
             source="pairs_analysis",
             mode="live_verified" if DATA_MODE == "live" else DATA_MODE,
         )
@@ -1005,7 +1005,7 @@ def get_pairs_equity():
 
     Reads from data/manual/pair_journal.csv (written by pair_outcomes / pair_monitor).
     """
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     try:
         rows = read_pair_journal()
         if not rows:
@@ -1037,7 +1037,7 @@ def get_pairs_equity():
         return stamp(
             {"available": True, "trades": len(equity), "equity": equity,
              "stats": stats, "as_of_utc": as_of},
-            last_activity_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+            last_activity_ms=int(datetime.now(UTC).timestamp() * 1000),
             source="pair_journal", mode="live_verified",
         )
     except Exception as exc:
@@ -1057,7 +1057,7 @@ def book_status():
     asset entry reports subscription, snapshot health and the last finalized
     M5-bar features when the feed is healthy.
     """
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     if BOOK_FEED is None:
         return {"available": False, "assets": {}, "as_of_utc": as_of}
     return {"available": True, "assets": BOOK_FEED.overview(), "as_of_utc": as_of}
@@ -1131,7 +1131,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None):
             if events:
                 # strictly-after cursor: read_ledger_events uses >= since_ms
                 last_sent_ms = max(int(e["received_at_utc_ms"]) for e in events) + 1
-            now = int(datetime.now(timezone.utc).timestamp() * 1000)
+            now = int(datetime.now(UTC).timestamp() * 1000)
             await websocket.send_json({
                 "type": "events",
                 "count": len(events),
@@ -1263,7 +1263,7 @@ async def ledger_ingest(request: Request, authorization: str | None = Header(def
     db_path = _ledger_db_path()
     accepted = 0
     duplicates = 0
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now = int(datetime.now(UTC).timestamp() * 1000)
     for event in envelope.events:
         _, inserted = upsert_ledger_event(
             db_path, event, signature_valid=signature_valid, received_at_utc_ms=now

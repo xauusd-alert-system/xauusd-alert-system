@@ -10,7 +10,7 @@ stubbing TelegramControlBot._send.
 """
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace as NS
 
 import pytest
@@ -48,7 +48,7 @@ def make_position(**kw):
     base = dict(
         ticket=101, symbol="GOLD", type=0, volume=0.01,
         price_open=2000.0, price_current=2010.0, profit=10.0,
-        time=int(datetime.now(timezone.utc).timestamp()) - 5400,  # 1h30m ago
+        time=int(datetime.now(UTC).timestamp()) - 5400,  # 1h30m ago
         sl=1998.0, tp=2014.0, magic=777111,
     )
     base.update(kw)
@@ -59,7 +59,7 @@ def make_deal(**kw):
     base = dict(
         ticket=1, position_id=101, symbol="GOLD", type=1, entry=1,
         volume=0.01, price=2010.0, profit=50.0, swap=0.0, commission=0.0,
-        magic=777111, comment="", time=int(datetime.now(timezone.utc).timestamp()) - 600,
+        magic=777111, comment="", time=int(datetime.now(UTC).timestamp()) - 600,
     )
     base.update(kw)
     return NS(**base)
@@ -126,7 +126,7 @@ def test_ensure_mt5_connection_false_when_package_missing(monkeypatch):
 
 def test_format_status_report_contains_direction_pnl_and_r():
     # entry 2000, stop 1990, volume 0.01, pvl 100 -> risk $10; profit +$10 -> +1.00 R
-    fixed_now = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
     pos = make_position(time=int(fixed_now.timestamp()) - 5400)  # opened 1h30m ago
     contexts = {"101": ENTRY_CTX}
     msg = sc.format_status_report(
@@ -203,7 +203,7 @@ def test_why_without_position_reports_none_open():
 # ---------------------------------------------------------------------------
 
 def _metrics_deals():
-    now_ts = int(datetime.now(timezone.utc).timestamp())
+    now_ts = int(datetime.now(UTC).timestamp())
     return [
         make_deal(ticket=1, position_id=101, entry=0, profit=0.0, price=2000.0,
                   time=now_ts - 7000),                      # IN — excluded from trade stats
@@ -264,7 +264,7 @@ def test_format_metrics_report_no_deals():
 
 
 def test_fetch_deals_between_filters_client_side(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inside = make_deal(time=int((now - timedelta(hours=1)).timestamp()))
     outside = make_deal(ticket=99, time=int((now - timedelta(days=10)).timestamp()))
 
@@ -280,7 +280,7 @@ def test_fetch_deals_between_shim_fallback(monkeypatch):
     """The bundled shim binds the first positional arg to `position` and knows
     no date ranges -> returns None for the dated call; we must then re-fetch
     everything (shim exposes _inject) and filter by time client-side."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inside = make_deal(time=int((now - timedelta(hours=1)).timestamp()))
     outside = make_deal(ticket=99, time=int((now - timedelta(days=10)).timestamp()))
 
@@ -296,9 +296,9 @@ def test_fetch_deals_between_shim_fallback(monkeypatch):
 
 
 def test_period_range_today_and_week():
-    now = datetime(2026, 8, 8, 15, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 8, 15, 30, tzinfo=UTC)
     dt_from, dt_to, label = sc.period_range("today", now=now)
-    assert (dt_from, dt_to) == (datetime(2026, 8, 8, 0, 0, tzinfo=timezone.utc), now)
+    assert (dt_from, dt_to) == (datetime(2026, 8, 8, 0, 0, tzinfo=UTC), now)
     assert "сегодня" in label
     dt_from, dt_to, label = sc.period_range("week", now=now)
     assert dt_to - dt_from == timedelta(days=7)
@@ -446,8 +446,8 @@ def test_metrics_command_today_end_to_end(monkeypatch, tmp_path):
     deals = _metrics_deals()
     # Widen the period window so the test does not depend on the wall clock
     # (period_range itself is unit-tested separately).
-    wide = lambda kind, now=None: (datetime.now(timezone.utc) - timedelta(days=7),
-                                   datetime.now(timezone.utc), "сегодня (UTC)")
+    wide = lambda kind, now=None: (datetime.now(UTC) - timedelta(days=7),
+                                   datetime.now(UTC), "сегодня (UTC)")
     monkeypatch.setattr(sc, "period_range", wide)
     monkeypatch.setattr(sc, "_mt5", NS(
         terminal_info=lambda: {"connected": True},
@@ -469,7 +469,7 @@ def test_metrics_command_bad_period(monkeypatch):
 def test_realized_pnl_today_sums_all_deals(monkeypatch):
     """Deterministic, fixed-clock check: realized = profit+swap+commission
     over every deal of the current UTC day, outside-day deals excluded."""
-    fixed_now = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
     deals = [
         make_deal(entry=1, profit=-50.0, swap=-5.0, commission=0.0,
                   time=int((fixed_now - timedelta(hours=2)).timestamp())),   # -55 today
@@ -536,7 +536,7 @@ def test_status_module_is_read_only():
 
 def test_period_range_extended_periods():
     """Owner request 2026-08-11: /metrics supports 2week/month/3month/all."""
-    now = datetime(2026, 8, 8, 15, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 8, 15, 30, tzinfo=UTC)
     assert sc.period_range("2week", now=now)[2] == "последние 14 дней (UTC)"
     assert sc.period_range("month", now=now)[2] == "последние 30 дней (UTC)"
     assert sc.period_range("3month", now=now)[2] == "последние 90 дней (UTC)"

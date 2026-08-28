@@ -200,7 +200,7 @@ class PairMonitor:
         self._ensure_imports()
 
         pair_sent = _load_json(PAIR_SENT_FILE)
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         alerts = []
 
         for pair in self.pairs_cfg.get("pairs", []):
@@ -267,7 +267,7 @@ class PairMonitor:
         # Check pair signals
         alerts = self._check_signals()
         pair_sent = _load_json(PAIR_SENT_FILE)
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
 
         for pair_name, text, meta in alerts:
             try:

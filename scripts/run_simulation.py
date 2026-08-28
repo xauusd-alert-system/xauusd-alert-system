@@ -36,7 +36,7 @@ if _shim_dir not in sys.path:
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
 # NOTE: must import the shim under its plain top-level name so it is the SAME
@@ -156,7 +156,7 @@ class SimulationDriver:
 def _bar_timestamp(bar: dict) -> str:
     """Format a bar's Unix-second ``time`` field as a readable UTC string."""
     try:
-        return datetime.fromtimestamp(bar["time"], tz=timezone.utc).strftime(
+        return datetime.fromtimestamp(bar["time"], tz=UTC).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
     except Exception:  # pragma: no cover - defensive

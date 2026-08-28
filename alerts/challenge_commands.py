@@ -237,7 +237,7 @@ def cmd_pairs(send, chat_id, args=()):
 
 def cmd_alert(send, chat_id, args=()):
     """/alert — статус алертера и отправленные сегодня сетапы."""
-    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    today = dt.datetime.now(dt.UTC).date().isoformat()
     lines = []
     if os.path.exists(SENT_FILE):
         try:

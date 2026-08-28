@@ -761,7 +761,7 @@ def compute_model_fingerprint(model, feature_cols: list) -> str:
                 for key in ("a_", "b_"):
                     val = getattr(cal, key, None)
                     if val is not None:
-                        parts.append(f"{key}={val!r}".encode("utf-8"))
+                        parts.append(f"{key}={val!r}".encode())
 
     return hashlib.sha256(b"\x00".join(parts)).hexdigest()
 

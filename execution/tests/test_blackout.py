@@ -6,7 +6,7 @@ The trader must be OFF while the market is inactive: weekend window
 optional one-off manual halt covering unattended stretches.
 """
 import types
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from execution import mt5_trader as trader_mod
 from execution.mt5_trader import MultiAssetMT5Trader
@@ -35,7 +35,7 @@ def _trader(cfg):
 
 
 def _utc(s):
-    return datetime.strptime(s, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+    return datetime.strptime(s, "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
 
 
 def test_weekend_window_halts_and_resumes():

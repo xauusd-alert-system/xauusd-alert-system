@@ -27,7 +27,7 @@ def load_candles(ticker):
 def build_days(candles):
     days = {}
     for c in candles:
-        utc = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc)
+        utc = dt.datetime.fromtimestamp(c["time"], dt.UTC)
         if utc.weekday() >= 5:
             continue
         sec = utc.hour * 3600 + utc.minute * 60 + utc.second
@@ -53,7 +53,7 @@ def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0,
              target=80.0, min_days=5):
     day_pnl = {}
     for tr in all_trades:
-        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.timezone.utc).date()
+        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.UTC).date()
         day_pnl.setdefault(d, 0.0)
         day_pnl[d] += tr["pnl"]
     equity = start
@@ -132,7 +132,7 @@ def run_vwap_breakout(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0,
         cum_v_live = cum_v
         for i, b in enumerate(bars):
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
 
             # Update live VWAP
@@ -243,7 +243,7 @@ def run_opening_drive(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
 
         for b in bars[drive_bars:]:
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if open_pos is None:
                 break
@@ -325,7 +325,7 @@ def run_drive_vwap(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
 
         for b in bars[drive_bars:]:
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if open_pos is None:
                 break
@@ -393,7 +393,7 @@ def run_orb_baseline(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0):
                     took = True
             if open_pos is None or t == open_pos["bar"]:
                 continue
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if sec >= FLAT_SEC:
                 _close(open_pos, b["close"], t, SLIP, "eod")
@@ -513,7 +513,7 @@ def main():
         all_trades += run_opening_drive(c)
     day_pnl = {}
     for tr in all_trades:
-        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.timezone.utc).date()
+        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.UTC).date()
         day_pnl.setdefault(d, 0.0)
         day_pnl[d] += tr["pnl"]
     equity = 1000.0

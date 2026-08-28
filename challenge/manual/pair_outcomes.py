@@ -90,7 +90,7 @@ def resolve_pair_outcomes(tf: str = "D1") -> int:
     Returns the number of newly resolved outcomes."""
     sent = load_pair_sent()
     resolved = load_pair_resolved()
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     changed = 0
 
     for key, rec in sorted(sent.items()):

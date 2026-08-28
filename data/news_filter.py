@@ -7,7 +7,7 @@ import csv
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Dict, List
 
 import requests
@@ -30,7 +30,7 @@ _FF_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 def _build_event(title: str, country: str, event_dt: datetime) -> Dict:
-    event_dt = event_dt.astimezone(timezone.utc)
+    event_dt = event_dt.astimezone(UTC)
     return {
         "title": title,
         "country": country,

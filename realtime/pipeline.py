@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -314,7 +314,7 @@ class RealtimePipeline:
             "feature_snapshot_id": feature_snapshot_id,
             "book_gate": book_gate,
             "book_features": book_features,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
     def _store_feature_snapshot(self, feature_dict: dict, bar_ts_utc_seconds: int) -> str | None:
@@ -427,5 +427,5 @@ class RealtimePipeline:
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
             "timestamp_utc": signal_ts,
             "session": str(latest["session"]),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }

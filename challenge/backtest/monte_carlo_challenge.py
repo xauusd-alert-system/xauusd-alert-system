@@ -39,7 +39,7 @@ def load_candles(ticker):
 def build_days(candles):
     days = {}
     for c in candles:
-        utc = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc)
+        utc = dt.datetime.fromtimestamp(c["time"], dt.UTC)
         if utc.weekday() >= 5:
             continue
         sec = utc.hour * 3600 + utc.minute * 60 + utc.second
@@ -96,7 +96,7 @@ def run_opening_drive_all(candles, drive_bars=3, stop_pct=0.005, tp_ratio=3.5,
                     "stop": stop, "tp": tp, "bar": bars[drive_bars - 1]["time"]}
         for b in bars[drive_bars:]:
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if open_pos is None:
                 break

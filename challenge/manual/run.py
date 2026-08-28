@@ -167,16 +167,16 @@ def cmd_scan(args) -> int:
               f"grade={res.grade} bias={res.bias} rr={res.rr}")
         if res.impulse_bar:
             ib = res.impulse_bar
-            print(f"  impulse: {dt.datetime.fromtimestamp(ib['time'], dt.timezone.utc).strftime('%H:%M')} "
+            print(f"  impulse: {dt.datetime.fromtimestamp(ib['time'], dt.UTC).strftime('%H:%M')} "
                   f"O{ib['open']:.2f} H{ib['high']:.2f} L{ib['low']:.2f} C{ib['close']:.2f} V{ib.get('volume',0):.0f}")
         if res.signal_bar:
             sb = res.signal_bar
-            print(f"  signal:  {dt.datetime.fromtimestamp(sb['time'], dt.timezone.utc).strftime('%H:%M')} "
+            print(f"  signal:  {dt.datetime.fromtimestamp(sb['time'], dt.UTC).strftime('%H:%M')} "
                   f"O{sb['open']:.2f} H{sb['high']:.2f} L{sb['low']:.2f} C{sb['close']:.2f}")
         if res.pullback_bars:
             print(f"  pullback: {len(res.pullback_bars)} bars, "
-                  f"{dt.datetime.fromtimestamp(res.pullback_bars[0]['time'], dt.timezone.utc).strftime('%H:%M')} - "
-                  f"{dt.datetime.fromtimestamp(res.pullback_bars[-1]['time'], dt.timezone.utc).strftime('%H:%M')}")
+                  f"{dt.datetime.fromtimestamp(res.pullback_bars[0]['time'], dt.UTC).strftime('%H:%M')} - "
+                  f"{dt.datetime.fromtimestamp(res.pullback_bars[-1]['time'], dt.UTC).strftime('%H:%M')}")
         if res.tradable:
             print(f"  ENTRY {res.bias.upper()} @ {res.entry:.2f} stop {res.stop:.2f} "
                   f"target {res.target:.2f} (R:R {res.rr})")

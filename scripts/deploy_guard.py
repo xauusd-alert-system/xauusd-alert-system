@@ -155,8 +155,8 @@ def is_improvement(
         d_val = _num((deployed or {}).get("total_pnl"))
         c_val = _num((candidate or {}).get("total_pnl"))
 
-    cand_trades = int(((candidate or {}).get("n_trades") or 0))
-    dep_trades = int(((deployed or {}).get("n_trades") or 0))
+    cand_trades = int((candidate or {}).get("n_trades") or 0)
+    dep_trades = int((deployed or {}).get("n_trades") or 0)
     thin_cand = cand_trades is not None and cand_trades < min_trades
     thin_dep = dep_trades is not None and dep_trades < min_trades
 

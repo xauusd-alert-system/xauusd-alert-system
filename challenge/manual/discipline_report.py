@@ -303,7 +303,7 @@ def generate_report(journal_path: str = DEFAULT_JOURNAL, date_filter: str = "") 
         rows = [r for r in rows if r.get("date") == date_filter]
 
     return {
-        "as_of": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "as_of": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "trade_count": len(rows),
         "adherence": compute_adherence(rows),
         "checklist": compute_checklist_stats(date_filter),

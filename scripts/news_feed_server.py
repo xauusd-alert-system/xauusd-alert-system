@@ -28,7 +28,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 
@@ -157,7 +157,7 @@ def _serve_calendar(self: BaseHTTPRequestHandler):
         "source": "forexfactory_www_browser",
         "fetched_at_utc": result.get(
             "fetched_at_utc",
-            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")),
+            datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")),
     }
     with LAST_GOOD_LOCK:
         LAST_GOOD.clear()

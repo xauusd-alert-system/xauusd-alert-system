@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -180,7 +180,7 @@ def build_artifact_metadata(
     return {
         "bundle_schema_version": 2,
         **identity,
-        "trained_at_utc": datetime.now(timezone.utc).isoformat(),
+        "trained_at_utc": datetime.now(UTC).isoformat(),
         "asset_key": asset_key,
         "timeframe": timeframe,
         "data_period": {

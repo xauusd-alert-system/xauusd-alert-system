@@ -17,7 +17,7 @@ Usage:
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> None:
 
     os.makedirs(args.out_dir, exist_ok=True)
     daily = _daily_metrics(df)
-    fname = f"live_execution_{args.asset.lower()}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    fname = f"live_execution_{args.asset.lower()}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.csv"
     out_csv = os.path.join(args.out_dir, fname)
     daily.to_csv(out_csv, index=False)
     print(f"\nSaved daily summary to {out_csv}")

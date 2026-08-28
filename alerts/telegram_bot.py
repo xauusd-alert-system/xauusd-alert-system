@@ -4,7 +4,7 @@ CRITICAL: bot token is read exclusively from environment variable TELEGRAM_BOT_T
 """
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
 import requests
@@ -28,7 +28,7 @@ class TelegramAlertBot:
 
         self._last_alert_ts: Optional[float] = None
         self._alerts_sent_today = 0
-        self._current_day = datetime.now(timezone.utc).date()
+        self._current_day = datetime.now(UTC).date()
 
     def _redact(self, text: str) -> str:
         """Strip the bot token from a log/exception message.
@@ -61,7 +61,7 @@ class TelegramAlertBot:
             return False
 
     def _reset_daily_counter_if_needed(self):
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         if today != self._current_day:
             self._current_day = today
             self._alerts_sent_today = 0

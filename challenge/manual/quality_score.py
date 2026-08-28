@@ -38,7 +38,7 @@ def _time_of_day_score(signal_ts: int) -> float:
     Late (>180 min): 10 pts — fatigue setting in
     Degraded (last 45 min): 0 pts — avoid
     """
-    utc = dt.datetime.fromtimestamp(signal_ts, dt.timezone.utc)
+    utc = dt.datetime.fromtimestamp(signal_ts, dt.UTC)
     sec = utc.hour * 3600 + utc.minute * 60 + utc.second
 
     if sec < SESSION_START_SEC or sec > SESSION_END_SEC:

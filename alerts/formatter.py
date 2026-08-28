@@ -24,6 +24,7 @@ Message layout (clean format):
     Стоп: 4268.42
 """
 import warnings
+from datetime import UTC
 from typing import Optional
 
 from execution.trade_group import GROUP_SCHEMA_VERSION, TradeGroupSpec
@@ -280,8 +281,8 @@ def format_trade_group_message(spec: TradeGroupSpec | dict) -> str:
         "SL остатка → BE + cost buffer",
     ]
     if spec.expires_at_utc_ms:
-        from datetime import datetime, timezone
-        expires = datetime.fromtimestamp(spec.expires_at_utc_ms / 1000, tz=timezone.utc)
+        from datetime import datetime
+        expires = datetime.fromtimestamp(spec.expires_at_utc_ms / 1000, tz=UTC)
         lines.append(f"Срок идеи: {expires.strftime('%H:%M')} UTC")
     lines.append(f"Profile: {spec.profile_id}")
     return "\n".join(lines)

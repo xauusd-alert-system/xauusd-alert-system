@@ -9,7 +9,7 @@ import argparse
 import logging
 import os
 import sys
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 
 import pandas as pd
 
@@ -30,12 +30,12 @@ def _utc_bounds(start_date: str, end_date: str) -> tuple[datetime, datetime]:
     start = datetime.combine(
         datetime.strptime(start_date, "%Y-%m-%d").date(),
         time.min,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
     end = datetime.combine(
         datetime.strptime(end_date, "%Y-%m-%d").date(),
         time.max,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
     return start, end
 

@@ -296,8 +296,8 @@ def compute_ensemble_signal(
             regime=regime.value if hasattr(regime, "value") else str(regime),
             suppressed_by_meta_filter=False,
             reasoning_summary=(
-                "Hard divergence veto (#41): rule_vote={rule_vote}, ml_vote={ml_vote} "
-                "are opposite -> forced no_trade".format(rule_vote=rule_vote, ml_vote=ml_vote)
+                f"Hard divergence veto (#41): rule_vote={rule_vote}, ml_vote={ml_vote} "
+                "are opposite -> forced no_trade"
             ),
         )
 

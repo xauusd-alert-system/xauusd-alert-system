@@ -46,7 +46,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -99,7 +99,7 @@ def hr(title="", char="="):
 
 
 def fmt_ts(ts):
-    return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.fromtimestamp(int(ts), tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def table(headers, rows):
@@ -628,7 +628,7 @@ def main():
     scratch = None
     try:
         hr("LAYER 0 (A1-A3) VALIDATION")
-        print(f"generated      : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        print(f"generated      : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC")
         print(f"repo root      : {REPO_ROOT}")
         print(f"python         : {sys.version.split()[0]} on {platform.platform()}")
         for mod_name in ("numpy", "pandas", "sklearn", "xgboost", "scipy", "joblib", "pytest"):

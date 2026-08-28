@@ -303,7 +303,7 @@ def log_pair_trade(path: str, date: str, time_str: str,
             "ensemble_direction": ensemble_direction,
             "ensemble_confidence": ensemble_confidence,
             "z_on_exit": z_on_exit,
-            "resolved_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "resolved_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         })
     return num
 

@@ -17,7 +17,7 @@ from challenge.manual.quality_score import (
 
 
 def _ts(h, m=0):
-    return int(dt.datetime(2026, 8, 20, h, m, tzinfo=dt.timezone.utc).timestamp())
+    return int(dt.datetime(2026, 8, 20, h, m, tzinfo=dt.UTC).timestamp())
 
 
 class TestTimeOfDay(unittest.TestCase):

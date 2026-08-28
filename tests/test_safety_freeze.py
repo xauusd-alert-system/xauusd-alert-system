@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import scripts.trial_window as tw
 from config.loader import load_config
@@ -23,7 +23,7 @@ def _trial_active() -> bool:
         ends = datetime.fromisoformat(state["ends_at_utc"])
     except (KeyError, TypeError, ValueError):
         return False
-    return ends > datetime.now(timezone.utc)
+    return ends > datetime.now(UTC)
 
 
 def test_geometry_revalidation_safety_freeze_is_fail_closed():

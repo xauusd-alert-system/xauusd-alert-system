@@ -56,7 +56,7 @@ def audit_weekend_tags(log_dir: str = "logs") -> list[dict]:
                     if row.get("session") != "weekend":
                         continue
                     ts = int(row["entry_ts"])
-                    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+                    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
                     # Sunday 21:00-24:00 UTC = the invalid window
                     if dt.weekday() == 6 and dt.hour >= 21:
                         violations.append({

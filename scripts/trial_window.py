@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import yaml
 
@@ -73,12 +73,12 @@ ASSETS_EDIT = ("  enabled_assets: []", "  enabled_assets: [BTCUSD, XAUUSD, XAGUS
 def _log(line: str) -> None:
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now(timezone.utc).isoformat()} {line}\n")
+        f.write(f"{datetime.now(UTC).isoformat()} {line}\n")
     print(line)
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _read_text(path: str) -> str:
@@ -145,7 +145,7 @@ def apply_trial_config() -> list[str]:
 
 def snapshot_config() -> str:
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     snap = os.path.join(BACKUP_DIR, f"config.yaml.pre_trial_48h_{ts}.yaml")
     shutil.copy2(CONFIG_PATH, snap)
     return snap
@@ -217,7 +217,7 @@ def _fmt_ts(ts) -> str:
     if ts is None:
         return "—"
     try:
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(int(ts), tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     except Exception:
         return str(ts)
 
@@ -424,7 +424,7 @@ def generate_report(state: dict) -> str:
     except Exception as exc:
         w(f"Ошибка: {exc}")
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     report_path = os.path.join(REPORT_DIR, f"TRIAL_WINDOW_REPORT_{ts}.md")
     _write_text(report_path, "\n".join(lines) + "\n")
     _log(f"Report written: {report_path}")
@@ -445,7 +445,7 @@ def cmd_start(args) -> int:
     _log("Trial config applied:")
     for s in statuses:
         _log(f"  {s}")
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     ends = started + timedelta(hours=args.hours)
     state = {
         "snapshot": snap,
@@ -472,7 +472,7 @@ def cmd_watch(args) -> int:
     _log(f"Watcher started; ends_at={state['ends_at_utc']}")
     while True:
         _write_text(HEARTBEAT_PATH, f"alive {_now_utc()} ends_at={state['ends_at_utc']}\n")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         end = datetime.fromisoformat(state["ends_at_utc"])
         if now >= end:
             _log("Window ended; finalizing (stop trader -> report -> revert config)")

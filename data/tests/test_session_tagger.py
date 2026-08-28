@@ -68,7 +68,7 @@ class TestTagSessionWithWeekend:
 
     def test_accepts_epoch_seconds(self):
         """Function accepts epoch seconds (int)."""
-        ts = int(dt.datetime(2026, 3, 1, 22, 0, tzinfo=dt.timezone.utc).timestamp())
+        ts = int(dt.datetime(2026, 3, 1, 22, 0, tzinfo=dt.UTC).timestamp())
         result = tag_session_with_weekend(ts, SESSIONS)
         assert result != "weekend"
 

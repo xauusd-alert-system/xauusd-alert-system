@@ -5,7 +5,7 @@ import copy
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +104,7 @@ def create_frozen_manifest(
         )
     if not feature_columns:
         raise ValueError("frozen model bundle has no feature manifest")
-    created = datetime.now(timezone.utc).isoformat()
+    created = datetime.now(UTC).isoformat()
     identity = {
         "asset_key": asset_key,
         "variant": variant,

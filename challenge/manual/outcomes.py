@@ -45,7 +45,7 @@ OUTCOME_LABELS = {
 
 
 def _utc(ts) -> dt.datetime:
-    return dt.datetime.fromtimestamp(ts, dt.timezone.utc)
+    return dt.datetime.fromtimestamp(ts, dt.UTC)
 
 
 def simulate_outcome(signal_ts, entry, stop, target, bias, candles,
@@ -64,7 +64,7 @@ def simulate_outcome(signal_ts, entry, stop, target, bias, candles,
     sig = _utc(signal_ts)
     sig_date = sig.date()
     h, m = map(int, day_end.split(":"))
-    day_end_dt = dt.datetime.combine(sig_date, dt.time(h, m), tzinfo=dt.timezone.utc)
+    day_end_dt = dt.datetime.combine(sig_date, dt.time(h, m), tzinfo=dt.UTC)
     day_end_ts = int(day_end_dt.timestamp())
     now_ts = int(time.time()) if now_ts is None else int(now_ts)
 
@@ -144,7 +144,7 @@ def read_journal(path) -> list:
 
 def compute_stats(rows: list) -> dict:
     """Cumulative per-grade aggregates. Rows without a numeric `r` are skipped."""
-    out = {"as_of": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
+    out = {"as_of": dt.datetime.now(dt.UTC).isoformat(timespec="seconds")}
     for label, grade in (("A", "A"), ("B", "B"), ("total", None)):
         rs = rows if grade is None else [r for r in rows if r.get("grade") == grade]
         vals = []

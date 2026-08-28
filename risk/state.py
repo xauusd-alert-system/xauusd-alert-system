@@ -41,7 +41,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, Optional
 
 logger = logging.getLogger("risk.state")
@@ -128,7 +128,7 @@ class RiskState:
         ``current_balance`` defaults to the equity value for legacy callers
         that cannot supply a balance (P0-5 note in risk/limits.py).
         """
-        self.current_day = datetime.now(timezone.utc).date()
+        self.current_day = datetime.now(UTC).date()
         self.starting_equity_today = current_equity
         self.starting_balance_today = (
             current_equity if current_balance is None else current_balance)
@@ -156,4 +156,4 @@ class RiskState:
 
     def is_today(self) -> bool:
         """True when the persisted budget belongs to today (UTC)."""
-        return self.current_day == datetime.now(timezone.utc).date()
+        return self.current_day == datetime.now(UTC).date()

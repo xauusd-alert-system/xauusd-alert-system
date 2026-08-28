@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -63,12 +63,12 @@ def _patch_tick(offset_hours: float):
 def main() -> int:
     cfg = load_config()
     sessions = cfg["sessions"]
-    print(f"today (UTC): {datetime.now(timezone.utc).isoformat()}  "
-          f"weekday={datetime.now(timezone.utc).weekday()}")
+    print(f"today (UTC): {datetime.now(UTC).isoformat()}  "
+          f"weekday={datetime.now(UTC).weekday()}")
 
     print("\n[1] offset detection flip")
     # Ensure the weekend guard is inert on this run (weekday 0-4).
-    assert datetime.now(timezone.utc).weekday() < 5, "run on a weekday"
+    assert datetime.now(UTC).weekday() < 5, "run on a weekday"
     for label, off in (("EEST (summer)", 3.0), ("EET (winter)", 2.0)):
         _patch_tick(off)
         got, info = mp.detect_server_offset_hours_detailed(fallback=3.0)
@@ -126,7 +126,7 @@ def main() -> int:
     class _StubDt:
         @staticmethod
         def now(tz=None):
-            return datetime(2026, 10, 24, 12, 0, 0, tzinfo=tz or timezone.utc)
+            return datetime(2026, 10, 24, 12, 0, 0, tzinfo=tz or UTC)
 
     orig_now = mp.datetime
     mp.datetime = _StubDt

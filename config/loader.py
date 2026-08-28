@@ -111,7 +111,7 @@ def get_env(key: str, default=None, required: bool = False):
     """
     val = os.environ.get(key, default)
     if required and val is None:
-        raise EnvironmentError(f"Required environment variable '{key}' is not set.")
+        raise OSError(f"Required environment variable '{key}' is not set.")
     return val
 
 

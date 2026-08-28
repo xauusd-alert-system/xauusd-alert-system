@@ -86,12 +86,12 @@ def main():
     if "--symbol" in sys.argv:
         only = sys.argv[sys.argv.index("--symbol") + 1].upper()
 
-    today = dt.datetime.now(dt.timezone.utc).date()
+    today = dt.datetime.now(dt.UTC).date()
     sess = dt.time(*map(int, cfg.get("session_start_utc", "13:30").split(":")))
 
     rt = load_refresh_token()
     access = refresh_access(rt)
-    print(f"UTC now: {dt.datetime.now(dt.timezone.utc):%Y-%m-%d %H:%M:%S}  "
+    print(f"UTC now: {dt.datetime.now(dt.UTC):%Y-%m-%d %H:%M:%S}  "
           f"session date: {today}", file=sys.stderr)
 
     hits = 0
@@ -111,11 +111,11 @@ def main():
         line = f"{sym}: trend15={res.trend15} trend30={res.trend30} grade={res.grade} bias={res.bias} rr={res.rr}"
         if res.impulse_bar:
             ib = res.impulse_bar
-            line += f" | impulse {dt.datetime.fromtimestamp(ib['time'], dt.timezone.utc):%H:%M} "
+            line += f" | impulse {dt.datetime.fromtimestamp(ib['time'], dt.UTC):%H:%M} "
             line += f"H{ib['high']:.2f} L{ib['low']:.2f}"
         if res.signal_bar:
             sb = res.signal_bar
-            line += f" | signal {dt.datetime.fromtimestamp(sb['time'], dt.timezone.utc):%H:%M} C{sb['close']:.2f}"
+            line += f" | signal {dt.datetime.fromtimestamp(sb['time'], dt.UTC):%H:%M} C{sb['close']:.2f}"
         if res.tradable:
             hits += 1
             print(f"TRADE {res.bias.upper()} {sym} @ {res.entry:.2f} stop {res.stop:.2f} "

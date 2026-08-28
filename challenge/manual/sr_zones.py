@@ -39,12 +39,12 @@ class SRZone:
 
 def _utc_sec(ts: int) -> int:
     """Extract seconds-since-midnight UTC from a timestamp."""
-    utc = dt.datetime.fromtimestamp(ts, dt.timezone.utc)
+    utc = dt.datetime.fromtimestamp(ts, dt.UTC)
     return utc.hour * 3600 + utc.minute * 60 + utc.second
 
 
 def _utc_date(ts: int) -> dt.date:
-    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).date()
+    return dt.datetime.fromtimestamp(ts, dt.UTC).date()
 
 
 def _session_bars(candles, date: dt.date) -> list:

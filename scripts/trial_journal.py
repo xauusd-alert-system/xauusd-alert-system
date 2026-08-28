@@ -15,7 +15,7 @@ window overlapping the lock is rejected unless the runner is invoked with
 import csv
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 JOURNAL_PATH = os.path.join(LOGS_DIR, "trial_journal.csv")
@@ -37,7 +37,7 @@ def log_trial(experiment: str, asset: str, params: dict, metrics: dict) -> None:
     """Append one immutable row to the journal."""
     os.makedirs(LOGS_DIR, exist_ok=True)
     row = {
-        "ts_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ts_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "experiment": experiment,
         "asset": asset,
         "params_json": json.dumps(params, sort_keys=True, default=str),
@@ -116,7 +116,7 @@ def pd_timestamp_epoch(iso_or_date: str) -> float:
 
 
 def _fmt_utc(epoch_s: int) -> str:
-    return datetime.fromtimestamp(int(epoch_s), tz=timezone.utc).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(int(epoch_s), tz=UTC).strftime("%Y-%m-%d")
 
 
 def enforce_locked_holdout(cfg: dict, windows, runner: str, allow: bool = False) -> None:

@@ -310,7 +310,7 @@ def _generate_html(data: dict, refresh_minutes: int = 0) -> str:
             '<div id="refreshBar" style="position:fixed;top:0;right:0;padding:4px 12px;'
             'background:var(--panel);border:1px solid var(--border);border-radius:0 0 0 4px;'
             'font-size:10px;color:var(--dim);z-index:999;">'
-            '<span id="refreshStatus">● auto-refresh: ${0}m</span></div>'.format(refresh_minutes))
+            f'<span id="refreshStatus">● auto-refresh: ${refresh_minutes}m</span></div>')
         inject = (
             f'<script>\n'
             f'const REFRESH_MS = {refresh_minutes} * 60 * 1000;\n'

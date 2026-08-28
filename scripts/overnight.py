@@ -81,7 +81,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -200,7 +200,7 @@ def _kill_process_tree(expired: subprocess.TimeoutExpired) -> None:
 
 def _backfill_window() -> tuple[str, str]:
     days = int(get_env("OVERNIGHT_BACKFILL_DAYS", default="45"))
-    today = datetime.now(timezone.utc)
+    today = datetime.now(UTC)
     start = (today - timedelta(days=days)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
     return start, end

@@ -21,7 +21,7 @@ def _bar(ts, o, h, l, c, v=1000):
 
 
 def _ts(y, m, d, h, mi=0):
-    return int(dt.datetime(y, m, d, h, mi, tzinfo=dt.timezone.utc).timestamp())
+    return int(dt.datetime(y, m, d, h, mi, tzinfo=dt.UTC).timestamp())
 
 
 class TestSRZoneDetection(unittest.TestCase):

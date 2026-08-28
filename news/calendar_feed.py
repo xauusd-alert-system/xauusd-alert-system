@@ -81,7 +81,7 @@ def _parse_event(raw: dict) -> Optional[CalendarEvent]:
         # Format: "2026-08-18T08:30:00-04:00"
         dt_obj = dt.datetime.fromisoformat(date_str)
         # Convert to UTC
-        dt_utc = dt_obj.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        dt_utc = dt_obj.astimezone(dt.UTC).replace(tzinfo=None)
 
         return CalendarEvent(
             title=title,

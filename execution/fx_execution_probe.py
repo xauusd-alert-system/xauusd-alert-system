@@ -10,7 +10,7 @@ import argparse
 import csv
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mt5_adapter.lazy import get_mt5_module
@@ -32,7 +32,7 @@ CSV_FIELDS = [
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _is_demo_account() -> bool:
@@ -196,7 +196,7 @@ class FXProbeScheduler:
         self.next_index = 0
 
     def _eligible_session(self) -> bool:
-        hour = datetime.now(timezone.utc).hour
+        hour = datetime.now(UTC).hour
         # The application tags London 08:00-13:00 and NY 13:00-22:00 UTC.
         return 8 <= hour < 22
 
@@ -204,7 +204,7 @@ class FXProbeScheduler:
         if not self.enabled or not self.assets or not self._eligible_session():
             return None
         now = time.time()
-        day = datetime.now(timezone.utc).date().isoformat()
+        day = datetime.now(UTC).date().isoformat()
         for _ in range(len(self.assets)):
             asset = self.assets[self.next_index % len(self.assets)]
             self.next_index += 1

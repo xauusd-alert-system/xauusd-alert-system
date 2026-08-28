@@ -23,7 +23,7 @@ def resample_5min(candles_1m):
     """Resample 1-min candles to 5-min bars."""
     days = {}
     for c in candles_1m:
-        utc = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc)
+        utc = dt.datetime.fromtimestamp(c["time"], dt.UTC)
         if utc.weekday() >= 5:
             continue
         sec = utc.hour * 3600 + utc.minute * 60 + utc.second
@@ -51,7 +51,7 @@ def resample_5min(candles_1m):
 def build_days_5min(bars5):
     days = {}
     for b in bars5:
-        utc = dt.datetime.fromtimestamp(b["time"], dt.timezone.utc)
+        utc = dt.datetime.fromtimestamp(b["time"], dt.UTC)
         days.setdefault(utc.date(), []).append(b)
     return days
 
@@ -72,7 +72,7 @@ def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0,
              target=80.0, min_days=5):
     day_pnl = {}
     for tr in all_trades:
-        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.timezone.utc).date()
+        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.UTC).date()
         day_pnl.setdefault(d, 0.0)
         day_pnl[d] += tr["pnl"]
     equity = start
@@ -137,7 +137,7 @@ def _run_orb(bars5, range_bars=6, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5
         open_pos = None; took = False
         for b in bars[range_bars:]:
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if open_pos is None and not took:
                 if b["high"] >= rng_high:
@@ -215,7 +215,7 @@ def _run_opening_drive(bars5, drive_bars=3, stop_pct=0.005, tp_ratio=1.5,
                     "stop": stop, "tp": tp, "bar": bars[drive_bars - 1]["time"]}
         for b in bars[drive_bars:]:
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if open_pos is None:
                 break
@@ -350,7 +350,7 @@ def main():
     print(f"  Strategy: {best_label}\n")
     day_pnl = {}
     for tr in best_trades:
-        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.timezone.utc).date()
+        d = dt.datetime.fromtimestamp(tr["exit_ts"], dt.UTC).date()
         day_pnl.setdefault(d, 0.0)
         day_pnl[d] += tr["pnl"]
     equity = 1000.0

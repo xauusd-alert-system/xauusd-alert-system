@@ -33,7 +33,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -171,7 +171,7 @@ def _iso_to_utc_ms(iso: str) -> Optional[int]:
     try:
         dt = datetime.fromisoformat(str(iso))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return int(dt.timestamp() * 1000)
     except (TypeError, ValueError):
         return None

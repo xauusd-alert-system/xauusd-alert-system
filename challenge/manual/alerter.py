@@ -262,7 +262,7 @@ def format_setup(res) -> str:
     stop_dist = abs(res.entry - res.stop)
     qty = risk_usd / stop_dist if stop_dist > 0 else 0.0
     sb = res.signal_bar or res.impulse_bar or {}
-    st = f"{dt.datetime.fromtimestamp(sb['time'], dt.timezone.utc):%H:%M}" if sb else "?"
+    st = f"{dt.datetime.fromtimestamp(sb['time'], dt.UTC):%H:%M}" if sb else "?"
     end = SESSION_END.strftime("%H:%M")
     return (
         f"СЕТАП {res.bias.upper()} {res.symbol} — класс {res.grade} (сигнал {st} UTC)\n"
@@ -280,7 +280,7 @@ def resolve_open_setups(access) -> int:
     journal + cumulative stats. Returns the number newly resolved."""
     sent = load_sent()
     resolved = outcomes_mod.load_resolved(RESOLVED_FILE)
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     changed = 0
     for key, rec in sorted(sent.items()):
         if key in resolved or not isinstance(rec, dict):
@@ -330,7 +330,7 @@ def resolve_open_setups(access) -> int:
 
 
 def scan_watchlist(access, only_sym=None) -> list:
-    today = dt.datetime.now(dt.timezone.utc).date()
+    today = dt.datetime.now(dt.UTC).date()
     tasks = []
     for sym, sid in SYMBOLS.items():
         if only_sym and sym != only_sym:
@@ -371,7 +371,7 @@ def main() -> int:
     test = "--test" in sys.argv
 
     if test:
-        ok = tg_send(f"Алертер ручной системы: тест (UTC {dt.datetime.now(dt.timezone.utc):%H:%M:%S}). "
+        ok = tg_send(f"Алертер ручной системы: тест (UTC {dt.datetime.now(dt.UTC):%H:%M:%S}). "
                      f"\n{day_line()}")
         print("sent:", ok)
         return 0 if ok else 1
@@ -397,7 +397,7 @@ def main() -> int:
     refresh_failures = 0
     last_dead_alert = 0.0
     while True:
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         t = now.time()
         end_plus = (dt.datetime.combine(now.date(), SESSION_END)
                     + dt.timedelta(minutes=FINALIZE_MINUTES)).time()
