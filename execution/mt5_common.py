@@ -37,6 +37,16 @@ class AccountModeUnknown(RuntimeError):
     """Account margin mode cannot be determined; execution is forbidden."""
 
 
+class ExecutionForbidden(RuntimeError):
+    """Deployment/account conditions forbid execution.
+
+    P2-1.1: canonical home is mt5_common so the extracted flow modules
+    (mt5_be_flow / mt5_compensation / ...) raise the SAME exception class as
+    the executor (identity preserved for except/isinstance checks).
+    ``execution.mt5_trade_group`` re-exports it for backward compatibility.
+    """
+
+
 def _align(price: float, tick_size: float) -> float:
     if tick_size <= 0.0:
         return float(price)
