@@ -23,6 +23,7 @@ ALLOWED_ROOT_FILES = {
     ".gitignore",
     ".env.example",
     ".ruff.toml",
+    "mypy.ini",
     "Dockerfile",
     "docker-compose.yml",
     "Makefile",
