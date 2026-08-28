@@ -493,6 +493,18 @@ features:
     d: 0.4
     thres: 1.0e-5
     price_columns: [close]
+  # Задача 3.2: two-sided CUSUM change-point features on log returns.
+  # P2 regime/abstention feature — NOT direction alpha (see
+  # features/cusum.py and docs/MQL5_OBSERVER_PLAN.md). Default OFF ->
+  # build_full_df adds nothing (byte-identical baseline). The h/k pair
+  # below is PREREGISTERED (owner, 2026-08-29) per the MQL5-plan rule:
+  # fix h/k + false-alarm budget before any OOS look; recalibration is a
+  # separate registered study, never tuned against backtest outcomes.
+  cusum:
+    enabled: false
+    roll_sigma_window: 96   # M15 = 24h
+    threshold_sigma: 3.0
+    drift_sigma: 0.5
   # ТЗ 8.3: Feature Store — SQLite catalog of computed feature snapshots
   # (features/feature_store.py). Default OFF: no snapshots are written and the
   # pipeline behaviour is identical to the pre-store baseline. When enabled,

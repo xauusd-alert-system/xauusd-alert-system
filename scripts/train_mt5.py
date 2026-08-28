@@ -71,6 +71,16 @@ def build_full_df(
             thresh=float(fd_cfg.get("thres", 1e-5)),
         )
         df["close_fd"] = fd_series
+    # Задача 3.2: optional two-sided CUSUM change-point features on log
+    # returns (P2 regime/abstention feature — NOT direction alpha, see
+    # features/cusum.py). Config-gated: when features.cusum.enabled is false
+    # or absent (the default) NOTHING is added and the frame is byte-identical
+    # to the baseline pipeline. h/k defaults (96/3.0/0.5) are preregistered.
+    cusum_cfg = cfg.get("features", {}).get("cusum", {}) or {}
+    if cusum_cfg.get("enabled", False):
+        from features.cusum import cusum_features
+
+        df = cusum_features(df, cfg)
     df = add_order_flow_features(df)
     df = candle_anatomy(df)
     df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
