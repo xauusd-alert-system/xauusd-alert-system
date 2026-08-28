@@ -481,6 +481,18 @@ features:
     std_dev: 2.0
   structure_lookback: 20
   mtf_reference_timeframes: ["M15", "H1"]
+  # Задача 3.1: fractional differentiation (FFd, Lopez de Prado ch.5) of the
+  # close price. Default OFF -> build_full_df adds nothing (byte-identical
+  # baseline). When enabled, a `close_fd` column is appended right after
+  # build_all_indicators; admission to the MODEL happens via
+  # model.feature_subset in research runs (Задача 3.3) — FEATURE_COLUMNS is
+  # NOT touched. d/thres are preregistered by the owner (2026-08-29); do not
+  # tune them against backtest outcomes.
+  fractional_diff:
+    enabled: false
+    d: 0.4
+    thres: 1.0e-5
+    price_columns: [close]
   # ТЗ 8.3: Feature Store — SQLite catalog of computed feature snapshots
   # (features/feature_store.py). Default OFF: no snapshots are written and the
   # pipeline behaviour is identical to the pre-store baseline. When enabled,

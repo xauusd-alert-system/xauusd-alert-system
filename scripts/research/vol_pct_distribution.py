@@ -34,8 +34,8 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from features.indicators import atr  # noqa: E402
 from data.storage import read_candles  # noqa: E402
+from features.indicators import atr  # noqa: E402
 
 ASSETS = ["XAUUSD", "EURUSD", "GBPUSD"]
 DEFAULT_DB = "data/market_data_mt5.sqlite"

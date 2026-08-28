@@ -54,6 +54,23 @@ def build_full_df(
         cfg = effective_asset_config(cfg, asset_key)
     df = df.copy()
     df = build_all_indicators(df, cfg)
+    # Задача 3.1: optional fractional-differentiated close (FFd, Lopez de Prado
+    # ch.5). Config-gated: when features.fractional_diff.enabled is false or
+    # absent (the default), NOTHING is added and the frame is byte-identical
+    # to the baseline pipeline. When true, a `close_fd` column (d/thres from
+    # config) is appended BEFORE any downstream feature consumer, so the
+    # research feature-selection (Задача 3.3) can admit it via
+    # model.feature_subset without touching FEATURE_COLUMNS.
+    fd_cfg = cfg.get("features", {}).get("fractional_diff", {}) or {}
+    if fd_cfg.get("enabled", False):
+        from features.fractional_diff import frac_diff
+
+        fd_series = frac_diff(
+            df["close"],
+            d=float(fd_cfg.get("d", 0.4)),
+            thresh=float(fd_cfg.get("thres", 1e-5)),
+        )
+        df["close_fd"] = fd_series
     df = add_order_flow_features(df)
     df = candle_anatomy(df)
     df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
