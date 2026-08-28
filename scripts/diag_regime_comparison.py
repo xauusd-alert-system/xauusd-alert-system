@@ -96,9 +96,11 @@ def _hit_rate(df: pd.DataFrame, regime_col: str, ret_col: str,
         reg = r[regime_col]
         ret = r[ret_col]
         if reg in bullish_regimes and ret > 0:
-            hits += 1; total += 1
+            hits += 1
+            total += 1
         elif reg in bearish_regimes and ret < 0:
-            hits += 1; total += 1
+            hits += 1
+            total += 1
         elif reg in neutral_regimes:
             total += 1
     return {"hits": hits, "total directional": total,

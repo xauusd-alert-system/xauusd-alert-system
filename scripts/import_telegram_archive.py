@@ -14,4 +14,5 @@ def main(argv=None):
     print("No performance metrics computed. Link to immutable signal/broker events first.")
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

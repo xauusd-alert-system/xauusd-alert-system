@@ -132,15 +132,20 @@ def read_ledger_events(
     params: list[Any] = []
     clauses = []
     if source:
-        clauses.append("source = ?"); params.append(source)
+        clauses.append("source = ?")
+        params.append(source)
     if event_type:
-        clauses.append("event_type = ?"); params.append(event_type)
+        clauses.append("event_type = ?")
+        params.append(event_type)
     if asset_key:
-        clauses.append("asset_key = ?"); params.append(asset_key)
+        clauses.append("asset_key = ?")
+        params.append(asset_key)
     if intent_id:
-        clauses.append("intent_id = ?"); params.append(intent_id)
+        clauses.append("intent_id = ?")
+        params.append(intent_id)
     if since_ms is not None:
-        clauses.append("received_at_utc_ms >= ?"); params.append(int(since_ms))
+        clauses.append("received_at_utc_ms >= ?")
+        params.append(int(since_ms))
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY received_at_utc_ms, event_id LIMIT ?"

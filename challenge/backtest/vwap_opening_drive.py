@@ -63,11 +63,14 @@ def simulate(all_trades, start=1000.0, daily_stop=25.0, total_stop=60.0,
         equity += day_pnl[d]
         days_used += 1
         if equity <= start - total_stop:
-            failed = True; break
+            failed = True
+            break
         if day_pnl[d] <= -daily_stop:
-            failed = True; break
+            failed = True
+            break
         if equity >= start + target and days_used >= min_days:
-            passed = True; break
+            passed = True
+            break
     return {"equity_end": round(equity, 2), "passed": passed, "failed": failed, "days_used": days_used}
 
 
@@ -178,17 +181,21 @@ def run_vwap_breakout(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0,
             if s["side"] == 1:
                 if b["low"] * (1 - SLIP) <= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["high"] * (1 + SLIP) >= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
             else:
                 if b["high"] * (1 + SLIP) >= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["low"] * (1 - SLIP) <= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
         if open_pos is not None:
             _close(open_pos, bars[-1]["close"], bars[-1]["time"], SLIP, "eod")
             trades.append(open_pos)
@@ -249,22 +256,28 @@ def run_opening_drive(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
                 break
             if sec >= FLAT_SEC:
                 _close(open_pos, b["close"], t, SLIP, "eod")
-                trades.append(open_pos); open_pos = None; break
+                trades.append(open_pos)
+                open_pos = None
+                break
             s = open_pos
             if s["side"] == 1:
                 if b["low"] * (1 - SLIP) <= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["high"] * (1 + SLIP) >= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
             else:
                 if b["high"] * (1 + SLIP) >= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["low"] * (1 - SLIP) <= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
         if open_pos is not None:
             _close(open_pos, bars[-1]["close"], bars[-1]["time"], SLIP, "eod")
             trades.append(open_pos)
@@ -331,22 +344,28 @@ def run_drive_vwap(candles, drive_bars=5, stop_pct=0.005, tp_ratio=1.5,
                 break
             if sec >= FLAT_SEC:
                 _close(open_pos, b["close"], t, SLIP, "eod")
-                trades.append(open_pos); open_pos = None; break
+                trades.append(open_pos)
+                open_pos = None
+                break
             s = open_pos
             if s["side"] == 1:
                 if b["low"] * (1 - SLIP) <= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["high"] * (1 + SLIP) >= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
             else:
                 if b["high"] * (1 + SLIP) >= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["low"] * (1 - SLIP) <= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
         if open_pos is not None:
             _close(open_pos, bars[-1]["close"], bars[-1]["time"], SLIP, "eod")
             trades.append(open_pos)
@@ -371,7 +390,8 @@ def run_orb_baseline(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0):
         rng_low = min(b["low"] for b in rb)
         if rng_high <= rng_low:
             continue
-        open_pos = None; took = False
+        open_pos = None
+        took = False
         for b in bars:
             t = b["time"]
             if t < range_end:
@@ -397,22 +417,28 @@ def run_orb_baseline(candles, stop_pct=0.005, tp_ratio=1.5, risk_per_trade=5.0):
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if sec >= FLAT_SEC:
                 _close(open_pos, b["close"], t, SLIP, "eod")
-                trades.append(open_pos); open_pos = None; break
+                trades.append(open_pos)
+                open_pos = None
+                break
             s = open_pos
             if s["side"] == 1:
                 if b["low"] * (1 - SLIP) <= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["high"] * (1 + SLIP) >= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
             else:
                 if b["high"] * (1 + SLIP) >= s["stop"]:
                     _close(open_pos, s["stop"], t, SLIP, "stop")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
                 elif b["low"] * (1 - SLIP) <= s["tp"]:
                     _close(open_pos, s["tp"], t, SLIP, "target")
-                    trades.append(open_pos); open_pos = None
+                    trades.append(open_pos)
+                    open_pos = None
         if open_pos is not None:
             _close(open_pos, bars[-1]["close"], bars[-1]["time"], SLIP, "eod")
             trades.append(open_pos)

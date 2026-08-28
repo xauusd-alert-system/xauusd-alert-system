@@ -19,10 +19,12 @@ EVENT_FOR_STATE = {
 
 def latest_signal_state(db_path: str, signal_id: str) -> str | None:
     events = read_trading_events(db_path, signal_id)
-    if events.empty: return None
+    if events.empty:
+        return None
     for row in reversed(events.to_dict("records")):
         payload = json.loads(row["payload_json"])
-        if payload.get("state"): return payload["state"]
+        if payload.get("state"):
+            return payload["state"]
     return None
 
 
@@ -32,7 +34,8 @@ def transition_signal(db_path: str, *, signal_id: str, new_state: str, asset_key
     current = latest_signal_state(db_path, signal_id)
     if new_state not in TRANSITIONS.get(current, set()):
         raise ValueError(f"invalid signal transition {current!r} -> {new_state!r}")
-    body = dict(payload or {}); body["state"] = new_state
+    body = dict(payload or {})
+    body["state"] = new_state
     return append_trading_event(
         db_path, event_type=EVENT_FOR_STATE[new_state], signal_id=signal_id,
         asset_key=asset_key, strategy_version=strategy_version, config_hash=config_hash,

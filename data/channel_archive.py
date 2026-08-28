@@ -23,11 +23,13 @@ def init_channel_archive(db_path: str) -> None:
             linked_signal_id TEXT, linked_position_ticket INTEGER,
             PRIMARY KEY(archive_sha256, message_id))""")
         conn.commit()
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def parse_telegram_html(path: str) -> list[dict]:
-    raw = Path(path).read_bytes(); text = raw.decode("utf-8", errors="replace")
+    raw = Path(path).read_bytes()
+    text = raw.decode("utf-8", errors="replace")
     archive_hash = hashlib.sha256(raw).hexdigest()
     starts = list(re.finditer(r'<div class="message[^>]*"[^>]*id="message([^\"]+)"', text))
     rows = []
@@ -35,7 +37,8 @@ def parse_telegram_html(path: str) -> list[dict]:
         block = text[match.start(): starts[i + 1].start() if i + 1 < len(starts) else len(text)]
         date = re.search(r'class="date details"[^>]*title="([^"]+)"', block)
         body = re.search(r'<div class="text">(.*?)</div>', block, re.S)
-        if not body: continue
+        if not body:
+            continue
         clean = re.sub(r'<br\s*/?>', '\n', body.group(1), flags=re.I)
         clean = html.unescape(re.sub(r'<[^>]+>', '', clean)).strip()
         tags = sorted(set(re.findall(r'#[\w_]+', clean, re.UNICODE)))
@@ -47,7 +50,8 @@ def parse_telegram_html(path: str) -> list[dict]:
 
 
 def import_archive(db_path: str, path: str) -> int:
-    init_channel_archive(db_path); rows = parse_telegram_html(path)
+    init_channel_archive(db_path)
+    rows = parse_telegram_html(path)
     conn = get_connection(db_path)
     try:
         before = conn.total_changes
@@ -56,5 +60,7 @@ def import_archive(db_path: str, path: str) -> int:
             VALUES (?,?,?,?,?,?)""", [(r["archive_sha256"], r["message_id"], r["timestamp_text"],
                 r["text"], json.dumps(r["tags"], ensure_ascii=False),
                 json.dumps(r["symbols"])) for r in rows])
-        conn.commit(); return conn.total_changes - before
-    finally: conn.close()
+        conn.commit()
+        return conn.total_changes - before
+    finally:
+        conn.close()

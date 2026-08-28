@@ -125,11 +125,14 @@ def read_trading_events(db_path: str, signal_id: str | None = None) -> pd.DataFr
     query = f"SELECT * FROM {TABLE}"
     params = []
     if signal_id:
-        query += " WHERE signal_id=?"; params.append(signal_id)
+        query += " WHERE signal_id=?"
+        params.append(signal_id)
     query += " ORDER BY sequence"
     conn = get_connection(db_path)
-    try: return pd.read_sql_query(query, conn, params=params)
-    finally: conn.close()
+    try:
+        return pd.read_sql_query(query, conn, params=params)
+    finally:
+        conn.close()
 
 
 def closed_position_pnls(db_path: str) -> list[float]:
@@ -148,7 +151,8 @@ def verify_event_chain(db_path: str) -> bool:
     for row in df.to_dict("records"):
         nullable = lambda value: None if pd.isna(value) else value
         row_previous = nullable(row["previous_event_hash"])
-        if row_previous != previous: return False
+        if row_previous != previous:
+            return False
         material = json.dumps({"event_id": row["event_id"], "sequence": int(row["sequence"]),
             "event_type": row["event_type"], "timestamp": int(row["event_timestamp_utc"]),
             "signal_id": row["signal_id"], "asset": row["asset_key"],
@@ -163,6 +167,8 @@ def verify_event_chain(db_path: str) -> bool:
             "observed_at_utc_ms": nullable(row.get("observed_at_utc_ms")),
             "previous": previous}, sort_keys=True, separators=(",", ":"))
         expected = hashlib.sha256(material.encode()).hexdigest()
-        if expected != row["event_hash"] or hashlib.sha256(row["payload_json"].encode()).hexdigest() != row["payload_hash"]: return False
+        if expected != row["event_hash"] or hashlib.sha256(
+                row["payload_json"].encode()).hexdigest() != row["payload_hash"]:
+            return False
         previous = row["event_hash"]
     return True

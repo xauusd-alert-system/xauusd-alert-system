@@ -183,7 +183,8 @@ def news_guard_decision(current_ts_utc: int, buffer_before_minutes: int = 30,
         before, after = buffer_before_minutes * 60, buffer_after_minutes * 60
         with open(historical_calendar_path, encoding="utf-8", newline="") as handle:
             for event in csv.DictReader(handle):
-                if event.get("impact") not in {None, "", "High"}: continue
+                if event.get("impact") not in {None, "", "High"}:
+                    continue
                 event_ts = int(event["timestamp_utc"])
                 if event_ts - before <= int(current_ts_utc) <= event_ts + after:
                     return True, f"HISTORICAL RED ZONE: {event.get('title', 'High Impact News')}", True

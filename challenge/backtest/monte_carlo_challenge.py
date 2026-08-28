@@ -106,14 +106,22 @@ def run_opening_drive_all(candles, drive_bars=3, stop_pct=0.005, tp_ratio=3.5,
             s = open_pos
             if s["side"] == 1:
                 if b["low"] * (1 - SLIP) <= s["stop"]:
-                    _close(open_pos, s["stop"], t, SLIP, "stop"); open_pos = None; break
+                    _close(open_pos, s["stop"], t, SLIP, "stop")
+                    open_pos = None
+                    break
                 elif b["high"] * (1 + SLIP) >= s["tp"]:
-                    _close(open_pos, s["tp"], t, SLIP, "target"); open_pos = None; break
+                    _close(open_pos, s["tp"], t, SLIP, "target")
+                    open_pos = None
+                    break
             else:
                 if b["high"] * (1 + SLIP) >= s["stop"]:
-                    _close(open_pos, s["stop"], t, SLIP, "stop"); open_pos = None; break
+                    _close(open_pos, s["stop"], t, SLIP, "stop")
+                    open_pos = None
+                    break
                 elif b["low"] * (1 - SLIP) <= s["tp"]:
-                    _close(open_pos, s["tp"], t, SLIP, "target"); open_pos = None; break
+                    _close(open_pos, s["tp"], t, SLIP, "target")
+                    open_pos = None
+                    break
         if open_pos is not None:
             _close(open_pos, bars[-1]["close"], bars[-1]["time"], SLIP, "eod")
         if open_pos is not None:

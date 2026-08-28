@@ -384,13 +384,16 @@ class TestClusterCapAndEarnings(unittest.TestCase):
         cal = {"2026-08-27": ["NVDA"], "2026-08-20": "*"}
         d = dt.date(2026, 8, 27)
         blocked, src = earnings_blackout("NVDA", d, cal, block_days=2)      # report day
-        self.assertTrue(blocked); self.assertEqual(src, "2026-08-27")
+        self.assertTrue(blocked)
+        self.assertEqual(src, "2026-08-27")
         blocked2, src2 = earnings_blackout("NVDA", d + dt.timedelta(days=1), cal, 2)  # gap day
-        self.assertTrue(blocked2); self.assertEqual(src2, "2026-08-27")
+        self.assertTrue(blocked2)
+        self.assertEqual(src2, "2026-08-27")
         blocked3, _ = earnings_blackout("NVDA", d + dt.timedelta(days=2), cal, 2)     # window over
         self.assertFalse(blocked3)
         wildcard, wsrc = earnings_blackout("ANY", dt.date(2026, 8, 21), cal, 2)       # "*" next day
-        self.assertTrue(wildcard); self.assertEqual(wsrc, "2026-08-20")
+        self.assertTrue(wildcard)
+        self.assertEqual(wsrc, "2026-08-20")
 
 
 class TestJournal(unittest.TestCase):
