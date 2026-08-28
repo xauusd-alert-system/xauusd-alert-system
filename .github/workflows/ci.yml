@@ -18,9 +18,13 @@ name: CI
 #                `continue-on-error: true`: known-but-unfixed vulnerabilities
 #                in transitive dependencies must not block the refactoring
 #                branch. Findings still surface in the job log for triage.
-#
-# mypy is intentionally NOT a CI gate (many pre-existing typing errors in the
-# codebase); it is deferred to the final phase (Фаза 7).
+#   * type-check — mypy (TZ Задача 4) gated on mypy.ini. BLOCKING on the
+#                clean targets (mt5_adapter, mql5, news — 0 errors, quality
+#                bar for new code); ADDITIONALLY a non-blocking
+#                (continue-on-error) run over the 7 TZ packages
+#                (execution/model/features/data/risk/mt5_adapter/provenance)
+#                whose pre-existing legacy debt is tracked in
+#                docs/MYPY_ISSUES.md (class A fixed, class B planned).
 
 on:
   push:
@@ -123,3 +127,38 @@ jobs:
 
       - name: Audit installed environment against requirements
         run: pip-audit -r requirements.txt --strict
+
+  type-check:
+    name: mypy (clean targets — blocking, 7-package debt — advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # MetaTrader5 is guarded by a platform marker in requirements.txt,
+          # so it is skipped on Linux (same as the test job); mypy.ini has an
+          # ignore_missing_imports section for it.
+          pip install -r requirements.txt
+          pip install mypy
+
+      # BLOCKING: clean targets are the type-check quality bar for new code —
+      # any regression in mt5_adapter/mql5/news breaks the build.
+      - name: Run mypy on clean targets
+        run: python -m mypy --explicit-package-bases mt5_adapter/ mql5/ news/
+
+      # ADVISORY (non-blocking): the 7-package set from TZ Task 4 still carries
+      # ~350 pre-existing legacy typing errors. Fixed class-A (Implicit
+      # Optional) on 2026-08-28; indexes/attr/union-attr debt is tracked in
+      # docs/MYPY_ISSUES.md. Keep continue-on-error until the plan lands.
+      - name: Run mypy on 7-package legacy set (advisory)
+        run: python -m mypy --explicit-package-bases execution/ model/ features/ data/ risk/ mt5_adapter/ provenance/
+        continue-on-error: true
