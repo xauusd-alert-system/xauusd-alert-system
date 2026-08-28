@@ -18,9 +18,11 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Files that are ALLOWED in the repository root (whitelist, exact names).
 ALLOWED_ROOT_FILES = {
     # tooling / project meta
+    ".coveragerc",
     ".dockerignore",
     ".gitignore",
     ".env.example",
+    ".ruff.toml",
     "Dockerfile",
     "docker-compose.yml",
     "Makefile",

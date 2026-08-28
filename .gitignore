@@ -109,3 +109,9 @@ backups/
 # TZ 6.6: logs/setup.py is real source code (structured logging setup), not a
 # scratch script — the logs/*.py rule above targets one-off diagnostics only.
 !logs/setup.py
+
+# TZ task 1: coverage artifacts stay out of git
+htmlcov/
+.coverage
+.coverage.*
+coverage.json

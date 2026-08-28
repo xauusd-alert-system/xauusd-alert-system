@@ -1,0 +1,32 @@
+# Coverage configuration (TZ task 1).
+#
+# Measure production code only: tests, docs, UI bundle, migrations scaffolding
+# and git tooling are excluded so the reported percentages reflect real
+# executable surface, not test plumbing.
+[run]
+source = .
+omit =
+    tests/*
+    */tests/*
+    */test_*.py
+    conftest.py
+    docs/*
+    plans/*
+    scripts/research/*
+    backtest/*
+    challenge/*
+    labeling/*
+    news/*
+    pairs_analysis/*
+    paper/*
+    usstocks/*
+    "UI 3.7 flsah updated v3"/*
+    deploy/*
+    mql5/*
+    simulation/*
+    setup.py
+
+[report]
+precision = 1
+show_missing = false
+sort = cover
