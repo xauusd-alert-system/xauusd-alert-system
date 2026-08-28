@@ -18,6 +18,8 @@ logs/*.csv
 logs/*.json
 logs/*.log
 logs/backtest_archive/
+# Research run artifacts (adaptive barrier comparison etc.)
+results/
 # Live position entry-context journal for the Telegram status commands
 # (already covered by logs/*.json; listed explicitly as it contains trade context)
 logs/live_positions.json
