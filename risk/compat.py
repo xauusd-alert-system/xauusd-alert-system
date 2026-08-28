@@ -25,6 +25,8 @@ Example::
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from risk.limits import RiskLimits
 from risk.state import RiskState
 
@@ -43,7 +45,7 @@ class InstitutionalRiskManager(RiskLimits):
     """Historical API name for the daily risk gates (thin compat wrapper
     around :class:`risk.limits.RiskLimits`; see module docstring)."""
 
-    def __init__(self, cfg: dict, magic: int = None,
+    def __init__(self, cfg: dict, magic: Optional[int] = None,
                  state_path: str = "logs/risk_state.json"):
         state = RiskState(state_path)
         super().__init__(cfg, magic=magic, state=state)

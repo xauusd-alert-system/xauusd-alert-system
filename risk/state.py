@@ -122,7 +122,7 @@ class RiskState:
 
     # ------------------------------------------------------------- mutators
     def reset_for_new_day(self, current_equity: float,
-                          current_balance: float = None) -> None:
+                          current_balance: Optional[float] = None) -> None:
         """Anchor a fresh daily budget (UTC date changed or first anchor).
 
         ``current_balance`` defaults to the equity value for legacy callers

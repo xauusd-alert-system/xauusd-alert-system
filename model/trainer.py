@@ -42,6 +42,7 @@ Now supports multiple model backends:
 """
 import logging
 import os
+from typing import Optional
 
 import joblib
 import numpy as np
@@ -86,7 +87,8 @@ FEATURE_COLUMNS = [
 ]
 
 
-def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict = None) -> tuple:
+def build_training_matrix(df: pd.DataFrame, label_col: str = "label",
+                          cfg: Optional[dict] = None) -> tuple:
     """
     Extracts (X, y) from a fully-featured, labeled DataFrame.
     Drops rows with NaN in required feature columns or NaN label (label is NaN
@@ -184,7 +186,7 @@ _CLS_NO_TRADE = 1
 _CLS_LONG = 2
 
 
-def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
+def _normalize_label_space(y: pd.Series, cfg: Optional[dict] = None) -> tuple:
     """
     Map the semantic label space onto a CONTIGUOUS, decodable one.
 
@@ -286,7 +288,7 @@ def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
     )
 
 
-def normalize_label_space(y: pd.Series, cfg: dict = None) -> pd.Series:
+def normalize_label_space(y: pd.Series, cfg: Optional[dict] = None) -> pd.Series:
     """
     Public wrapper around _normalize_label_space returning only the labels.
     See _normalize_label_space for the full rationale and mapping table.

@@ -52,7 +52,7 @@ class RiskLimits:
     circuit-breaker budget. Mirrors the historical ``InstitutionalRiskManager``
     behaviour exactly (W8/W9/W10 + P0-5)."""
 
-    def __init__(self, cfg: dict, magic: int = None,
+    def __init__(self, cfg: dict, magic: Optional[int] = None,
                  state: Optional[RiskState] = None,
                  state_path: str = "logs/risk_state.json"):
         self.cfg = cfg
@@ -86,7 +86,7 @@ class RiskLimits:
 
     # --------------------------------------------------- daily-budget gate
     def _reset_daily_stats_if_needed(self, current_equity: float,
-                                     current_balance: float = None) -> None:
+                                     current_balance: Optional[float] = None) -> None:
         """Anchor/reset the daily budget when the UTC date rolls over."""
         st = self.state
         if not st.is_today() or st.starting_equity_today is None:
@@ -154,8 +154,8 @@ class RiskLimits:
 
     # ------------------------------------------------------------ gates
     def check_concurrency(self, asset_key: str,
-                          groups_by_asset: dict = None,
-                          singles_by_asset: dict = None) -> tuple[bool, str]:
+                          groups_by_asset: Optional[dict] = None,
+                          singles_by_asset: Optional[dict] = None) -> tuple[bool, str]:
         """Concurrent groups/positions caps (group-aware; legacy raw-count
         fallback when no grouping info is supplied)."""
         if groups_by_asset is not None and singles_by_asset is not None:
@@ -193,8 +193,8 @@ class RiskLimits:
                 f"({asset_trades}/{self.max_daily_trades_per_asset})")
         return True, "OK"
 
-    def can_trade(self, asset_key: str, groups_by_asset: dict = None,
-                  singles_by_asset: dict = None) -> tuple[bool, str]:
+    def can_trade(self, asset_key: str, groups_by_asset: Optional[dict] = None,
+                  singles_by_asset: Optional[dict] = None) -> tuple[bool, str]:
         """Aggregate the limit gates; the circuit breaker MUST be evaluated
         first (it anchors the daily budget as a side effect of the reset)."""
         if not mt5.initialize():

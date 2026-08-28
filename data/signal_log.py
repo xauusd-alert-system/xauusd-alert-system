@@ -13,6 +13,7 @@ answers "what did the system think at time T", regardless of alert_sent status.
 import json
 import os
 import sqlite3
+from typing import Optional
 
 import pandas as pd
 
@@ -127,9 +128,9 @@ def log_signal(db_path: str, signal: dict, alert_sent: bool, symbol: str = "XAUU
 
 def read_signal_history(
     db_path: str,
-    start_ts: int = None,
-    end_ts: int = None,
-    symbol: str = None,
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
+    symbol: Optional[str] = None,
 ) -> pd.DataFrame:
     """Read logged signals for auditing/reporting, sorted ascending by timestamp."""
     conn = get_connection(db_path)

@@ -156,8 +156,8 @@ class EnsembleBacktester:
         """Convert a price-space PnL to account money using lot size and contract multiplier."""
         return price_pnl * self.volume * self.point_value_lot
 
-    def run(self, df: pd.DataFrame, forced_direction: int = None,
-            max_trades: int = None) -> List[Trade]:
+    def run(self, df: pd.DataFrame, forced_direction: Optional[int] = None,
+            max_trades: Optional[int] = None) -> List[Trade]:
         """Run the backtest over `df`.
 
         forced_direction: if set (1/-1), a trade is opened at the first bar

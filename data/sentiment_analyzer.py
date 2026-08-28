@@ -6,7 +6,7 @@ causal numeric sentiment scores [-1.0, +1.0] for Gold and FX assets.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class MacroNewsSentimentAnalyzer:
@@ -101,7 +101,7 @@ class MacroNewsSentimentAnalyzer:
         scores = [self.analyze_headline(h)["score"] for h in headlines]
         return float(sum(scores) / len(scores))
 
-    def red_zone_event_sentiment(self, current_ts_utc: int = None,
+    def red_zone_event_sentiment(self, current_ts_utc: Optional[int] = None,
                                  buffer_before_minutes: int = 30,
                                  buffer_after_minutes: int = 30,
                                  assets: tuple = ("USD", "ALL")) -> dict:

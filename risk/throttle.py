@@ -46,7 +46,7 @@ class RateThrottle:
     """Sliding-window rate limiter: at most ``max_orders_per_minute`` orders
     per asset (P2-10: frequency only — no daily limits here)."""
 
-    def __init__(self, cfg: dict = None,
+    def __init__(self, cfg: Optional[dict] = None,
                  max_orders_per_minute: Optional[int] = None):
         tc = (cfg or {}).get("risk_throttle", {}) or {}
         if max_orders_per_minute is None:

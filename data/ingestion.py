@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -37,7 +38,7 @@ _MIN_SECONDS_BETWEEN_REQUESTS = 60 / 8  # 8 requests/minute free-tier limit
 
 
 def fetch_mock_candles(timeframe: str, n_candles: int, sessions_config: dict,
-                        end_ts: int = None, seed: int = 42) -> pd.DataFrame:
+                        end_ts: Optional[int] = None, seed: int = 42) -> pd.DataFrame:
     """
     Generate a deterministic, reproducible synthetic OHLCV series for offline testing.
     Uses a random walk around a plausible XAUUSD price level (~2000-2600 range as of 2026).

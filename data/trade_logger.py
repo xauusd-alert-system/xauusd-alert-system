@@ -5,6 +5,7 @@ and actual trade outcome (pnl, close_price, outcome label) for weekly ML retrain
 import json
 import os
 import sqlite3
+from typing import Optional
 
 import pandas as pd
 
@@ -114,7 +115,7 @@ def log_trade_close(db_path: str, ticket: int, close_time: int, close_price: flo
         conn.close()
 
 
-def read_executed_trades(db_path: str, symbol: str = None) -> pd.DataFrame:
+def read_executed_trades(db_path: str, symbol: Optional[str] = None) -> pd.DataFrame:
     """
     Reads executed trades dataframe for ML retraining.
     """

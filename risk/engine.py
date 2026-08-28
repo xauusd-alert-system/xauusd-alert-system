@@ -63,7 +63,7 @@ _NO_ENTRY_DD = -0.08
 class RiskEngine:
     """Facade aggregating all risk gates behind ``can_open``/``can_trade``."""
 
-    def __init__(self, cfg: dict, magic: int = None,
+    def __init__(self, cfg: dict, magic: Optional[int] = None,
                  state: Optional[RiskState] = None,
                  state_path: str = "logs/risk_state.json",
                  rate_throttle: Optional[RateThrottle] = None,
@@ -132,11 +132,14 @@ class RiskEngine:
 
     # ------------------------------------------------------------- public
     def can_open(self, asset_key: str, equity: float = 0.0,
-                 balance: float = None, side: str = None,
-                 groups_by_asset: dict = None, singles_by_asset: dict = None,
-                 current_risk_by_cluster: dict = None, cluster: str = None,
-                 add_risk_pct: float = None,
-                 cluster_cap: float = None, total_cap: float = None,
+                 balance: Optional[float] = None, side: Optional[str] = None,
+                 groups_by_asset: Optional[dict] = None,
+                 singles_by_asset: Optional[dict] = None,
+                 current_risk_by_cluster: Optional[dict] = None,
+                 cluster: Optional[str] = None,
+                 add_risk_pct: Optional[float] = None,
+                 cluster_cap: Optional[float] = None,
+                 total_cap: Optional[float] = None,
                  use_legacy_throttle: bool = True) -> tuple[bool, str]:
         """Single pre-trade gate. Returns ``(allowed, reason)``.
 
@@ -211,7 +214,7 @@ class RiskEngine:
         return self.can_open(asset_key, **kwargs)
 
     # ----------------------------------------------------------- recording
-    def record_trade(self, asset_key: str, equity: float = None) -> None:
+    def record_trade(self, asset_key: str, equity: Optional[float] = None) -> None:
         """Record an executed trade: daily counter + persist (HWM ratchet
         happens on the next can_open with fresh equity)."""
         self.limits.record_trade_executed(asset_key)
