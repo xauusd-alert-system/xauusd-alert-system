@@ -131,3 +131,9 @@ fc logs\backtest_xauusd_traded.csv <baseline>\logs\backtest_xauusd_traded.csv
 
 Сырые CSV обеих версий сохранены вне git в `results_baseline_*.csv`
 и `logs/backtest_xauusd_traded.csv` (обе директории в .gitignore).
+
+| Версия | HEAD | Дата прогона | Result |
+|--------|------|--------------|--------|
+| Baseline | cb5ce46 | 2026-08-28 | baseline |
+| Current #1 | 72c2577 | 2026-08-28 | fc IDENTICAL |
+| Current #2 | c8a113a | 2026-08-29 | fc IDENTICAL (после ruff format + E701/E702 fix) |
