@@ -1,0 +1,1049 @@
+{
+  "asset_key": "XAUUSD",
+  "config_snapshot": {
+    "alerts": {
+      "cooldown_minutes": 10,
+      "include_signal_meta": false,
+      "max_alerts_per_day": 40
+    },
+    "assets": {
+      "BTCUSD": {
+        "display_name": "BTC/USD",
+        "enabled": true,
+        "ensemble": {
+          "crypto_night_min_probability": 0.6,
+          "ev_threshold": 0,
+          "min_confidence_to_alert": 0.66,
+          "min_ml_probability": 0.55,
+          "ml_confidence_floor": 0.6,
+          "ml_weight": 0.9,
+          "rule_weight": 0.1,
+          "suppress_regimes": [
+            "compression",
+            "reversal_watch"
+          ],
+          "suppress_sessions": []
+        },
+        "model_path": "output/models/btcusd_direction_model.joblib",
+        "mt5_symbol": "BITCOIN",
+        "point_value_lot": 1,
+        "signal_grid": {
+          "step_max_points": 350.0,
+          "step_min_points": 250.0
+        },
+        "spread_usd": 3.0
+      },
+      "EURUSD": {
+        "display_name": "EUR/USD",
+        "enabled": true,
+        "ensemble": {
+          "min_confidence_to_alert": 0.78,
+          "ml_weight": 0.9,
+          "rule_weight": 0.1,
+          "suppress_regimes": [
+            "compression",
+            "reversal_watch"
+          ],
+          "suppress_sessions": [
+            "asia",
+            "off_session"
+          ]
+        },
+        "labeling": {
+          "atr_column": "atr",
+          "horizon_candles_n": 48,
+          "stop_atr_multiplier": 1.0,
+          "target_atr_multiplier": 1.2,
+          "tp1_atr_multiplier": 1.0,
+          "tp2_atr_multiplier": 1.8,
+          "tp3_atr_multiplier": 2.8
+        },
+        "model_path": "output/models/eurusd_direction_model.joblib",
+        "mt5_symbol": "EURUSD",
+        "point_value_lot": 100000,
+        "signal_grid": {
+          "breakeven_trigger_atr": 0.5,
+          "step_max_points": 0.0012,
+          "step_min_points": 0.001,
+          "stop_mult": 2.0
+        },
+        "slippage_usd": 0.0002,
+        "spread_usd": 0.00012,
+        "timeframe": "H1"
+      },
+      "GBPUSD": {
+        "display_name": "GBP/USD",
+        "enabled": false,
+        "ensemble": {
+          "min_confidence_to_alert": 0.58,
+          "ml_weight": 0.9,
+          "rule_weight": 0.1,
+          "suppress_regimes": [
+            "compression",
+            "reversal_watch"
+          ],
+          "suppress_sessions": [
+            "asia",
+            "off_session"
+          ]
+        },
+        "labeling": {
+          "atr_column": "atr",
+          "horizon_candles_n": 36,
+          "stop_atr_multiplier": 1.0,
+          "target_atr_multiplier": 1.2,
+          "tp1_atr_multiplier": 1.0,
+          "tp2_atr_multiplier": 1.8,
+          "tp3_atr_multiplier": 2.8
+        },
+        "model": {
+          "include_zero_class": true,
+          "use_regime_feature": true
+        },
+        "model_path": "output/models/gbpusd_direction_model.joblib",
+        "mt5_symbol": "GBPUSD",
+        "point_value_lot": 100000,
+        "signal_grid": {
+          "breakeven_trigger_atr": 1.0,
+          "regime_overrides": {
+            "range": {
+              "breakeven_trigger_atr": 0.5,
+              "scaleout": {
+                "tp1_ratio": 0.6,
+                "tp2_ratio": 0.4
+              },
+              "stop_mult": 2.0
+            },
+            "trend_down": {
+              "breakeven_trigger_atr": 1.0,
+              "scaleout": {
+                "tp1_ratio": 0.3,
+                "tp2_ratio": 0.3
+              },
+              "stop_mult": 4.0,
+              "tp2_mult": 2.5,
+              "tp3_mult": 4.0
+            },
+            "trend_up": {
+              "breakeven_trigger_atr": 1.0,
+              "scaleout": {
+                "tp1_ratio": 0.3,
+                "tp2_ratio": 0.3
+              },
+              "stop_mult": 4.0,
+              "tp2_mult": 2.5,
+              "tp3_mult": 4.0
+            }
+          },
+          "step_max_points": 0.0014,
+          "step_min_points": 0.0012,
+          "stop_mult": 3.0,
+          "tp2_mult": 2.5,
+          "tp3_mult": 3.0
+        },
+        "slippage_usd": 0.0002,
+        "spread_usd": 0.00015,
+        "timeframe": "H1"
+      },
+      "XAGUSD": {
+        "display_name": "XAG/USD",
+        "enabled": false,
+        "ensemble": {
+          "min_confidence_to_alert": 0.7,
+          "ml_weight": 0.85,
+          "rule_weight": 0.15,
+          "suppress_regimes": [
+            "compression",
+            "reversal_watch"
+          ],
+          "suppress_sessions": [
+            "asia",
+            "off_session"
+          ]
+        },
+        "model_path": "output/models/xagusd_direction_model.joblib",
+        "mt5_symbol": "SILVER",
+        "point_value_lot": 5000,
+        "signal_grid": {
+          "step_max_points": 0.08,
+          "step_min_points": 0.06
+        },
+        "slippage_usd": 0.02,
+        "spread_usd": 0.02,
+        "timeframe": "M15"
+      },
+      "XAUUSD": {
+        "display_name": "XAU/USD",
+        "enabled": true,
+        "ensemble": {
+          "min_confidence_to_alert": 0.66,
+          "ml_weight": 0.9,
+          "rule_weight": 0.1,
+          "suppress_regimes": [
+            "compression",
+            "reversal_watch"
+          ],
+          "suppress_sessions": [
+            "asia",
+            "off_session"
+          ]
+        },
+        "features": {
+          "cusum": {
+            "drift_sigma": 0.5,
+            "enabled": true,
+            "roll_sigma_window": 96,
+            "threshold_sigma": 3.0
+          },
+          "fractional_diff": {
+            "d": 0.4,
+            "enabled": true,
+            "price_columns": [
+              "close"
+            ],
+            "thres": 1e-05
+          }
+        },
+        "labeling": {
+          "event": "traded"
+        },
+        "model_path": "output/models/xauusd_direction_model.joblib",
+        "mt5_symbol": "GOLD",
+        "signal_grid": {
+          "step_max_points": 4.0,
+          "step_min_points": 3.0,
+          "stop_mult": 1.5
+        },
+        "slippage_usd": 0.05,
+        "spread_usd": 0.25,
+        "timeframe": "M15"
+      }
+    },
+    "backtest": {
+      "commission_per_trade": 0.07,
+      "initial_balance": 100.0,
+      "max_daily_loss_pct": 5.0,
+      "risk_per_trade_pct": 2.0,
+      "slippage_points": 5,
+      "spread_points": 25,
+      "swap_per_night": 0.0,
+      "volume": 0.1,
+      "walk_forward": {
+        "embargo_candles": 100,
+        "step_days": 50,
+        "test_window_days": 50,
+        "train_window_days": 300
+      }
+    },
+    "book_gate": {
+      "assets": {
+        "BTCUSD": {
+          "enabled": true
+        },
+        "EURUSD": {
+          "enabled": false
+        },
+        "GBPUSD": {
+          "enabled": false
+        },
+        "XAGUSD": {
+          "enabled": false
+        },
+        "XAUUSD": {
+          "enabled": false
+        }
+      },
+      "boost_confidence": 0.05,
+      "enabled": true,
+      "poll_interval_s": 3.0,
+      "veto_imbalance": 0.35
+    },
+    "challenge": {
+      "browser": {
+        "headless": false,
+        "profile_dir": "data/challenge_browser_profile"
+      },
+      "platform": {
+        "auto_start_challenge": false,
+        "login_wait_seconds": 900,
+        "markets_url": "https://markets-app.hashhedge.com/stocks-usdt",
+        "poll_seconds": 5,
+        "session_id": "770216147",
+        "url": "https://app.hashhedge.com/ru/app/dashboard?challengeId=f0622a04-2724-42c8-87cb-8473793533ad"
+      },
+      "risk": {
+        "daily_loss_stop": 25,
+        "daily_profit_lock": 20,
+        "max_leverage": 5,
+        "max_open_positions": 2,
+        "per_trade_risk_usd": 5,
+        "stop_pct": 0.005,
+        "total_loss_stop": 60,
+        "tp_ratio": 1.5
+      },
+      "session": {
+        "end_local": "00:55",
+        "flatten_local": "00:45",
+        "min_trading_days": 5,
+        "start_local": "18:30"
+      },
+      "strategy": {
+        "range_minutes": 30,
+        "type": "opening_range_breakout",
+        "watchlist": [
+          "AAPL",
+          "NVDA",
+          "TSLA",
+          "SPY",
+          "GLD",
+          "COIN",
+          "AMD",
+          "MU",
+          "MRVL",
+          "PLTR",
+          "SHOP",
+          "SMCI",
+          "RDDT",
+          "RKLB",
+          "ABNB",
+          "BA",
+          "CAT",
+          "KO",
+          "MRK",
+          "CSCO"
+        ]
+      }
+    },
+    "correlation_filter": {
+      "enabled": true,
+      "history_bars": 500,
+      "threshold": 0.8,
+      "update_interval_minutes": 60
+    },
+    "deploy_guard": {
+      "backup_suffix": ".deploy_guard.bak",
+      "enabled": true,
+      "fallback_metrics": [
+        "sharpe_ratio",
+        "win_rate",
+        "total_pnl"
+      ],
+      "min_trades": 20,
+      "primary_metric": "expectancy",
+      "tolerance": 0.0
+    },
+    "deployment": {
+      "live_approval_id": null,
+      "mode": "demo_systematic",
+      "require_telegram_admin_for_execution": true
+    },
+    "ensemble": {
+      "apply_news_guard_in_backtest": false,
+      "bifurcation_filter": {
+        "enabled": true,
+        "quorum_max": 0.7
+      },
+      "crypto_night_min_probability": 0.58,
+      "dynamic_edge_credit": 0.1,
+      "dynamic_edge_gain": 2.0,
+      "dynamic_min_confidence": false,
+      "dynamic_min_confidence_scale": 1.0,
+      "ev_threshold": 0,
+      "hard_divergence_veto": false,
+      "historical_news_calendar_path": null,
+      "min_confidence_to_alert": 0.6,
+      "min_ml_probability": 0.55,
+      "min_regime_confidence": 0.6,
+      "ml_confidence_floor": 0.62,
+      "ml_weight": 0.8,
+      "news_buffer_after_min": 30,
+      "news_buffer_before_min": 30,
+      "news_feed_failure_policy_live": "fail_closed",
+      "news_feed_max_age_minutes": 360,
+      "normalize_probs": false,
+      "reject_threshold": null,
+      "rule_weight": 0.2,
+      "sentiment_veto_threshold": 0.5,
+      "suppress_regimes": [
+        "compression",
+        "reversal_watch"
+      ],
+      "suppress_sessions": [
+        "asia",
+        "off_session"
+      ],
+      "use_news_guard": true,
+      "use_sentiment_guard": false
+    },
+    "execution": {
+      "enabled_assets": [
+        "BTCUSD",
+        "XAUUSD",
+        "EURUSD"
+      ],
+      "fx_execution_probes": {
+        "assets": [
+          "EURUSD",
+          "GBPUSD"
+        ],
+        "enabled": true,
+        "hold_seconds": 2,
+        "log_path": "logs/fx_execution_probes.csv",
+        "max_probes_per_asset_per_day": 4,
+        "max_spread_pips": {
+          "EURUSD": 0.8,
+          "GBPUSD": 1.2
+        },
+        "min_interval_minutes": 120,
+        "volume": 1
+      },
+      "max_concurrent_positions_global": 6,
+      "max_daily_trades_per_asset": 15,
+      "max_open_positions_mode": "per_asset",
+      "max_open_positions_per_asset": 2,
+      "require_demo_account": true,
+      "signal_ranking_metric": "confidence",
+      "signal_ttl_ms": {
+        "H1": 86400000,
+        "M1": 1800000,
+        "M15": 21600000,
+        "M5": 7200000,
+        "default": 7200000
+      },
+      "trading_blackout": {
+        "daily_break_utc": [
+          "22:00",
+          "08:00"
+        ],
+        "enabled": true,
+        "flatten_before_minutes": 10,
+        "manual_halt_until_utc": null,
+        "weekend": {
+          "end_dow": 6,
+          "end_utc": "21:00",
+          "start_dow": 4,
+          "start_utc": "21:00"
+        }
+      },
+      "volume": 0.03
+    },
+    "features": {
+      "atr_period": 14,
+      "bollinger": {
+        "period": 20,
+        "std_dev": 2.0
+      },
+      "cusum": {
+        "drift_sigma": 0.5,
+        "enabled": false,
+        "roll_sigma_window": 96,
+        "threshold_sigma": 3.0
+      },
+      "ema_periods": [
+        9,
+        21,
+        50,
+        200
+      ],
+      "fractional_diff": {
+        "d": 0.4,
+        "enabled": false,
+        "price_columns": [
+          "close"
+        ],
+        "thres": 1e-05
+      },
+      "macd": {
+        "fast": 12,
+        "signal": 9,
+        "slow": 26
+      },
+      "mtf_reference_timeframes": [
+        "M15",
+        "H1"
+      ],
+      "rsi_period": 14,
+      "store": {
+        "db_path": null,
+        "enabled": false
+      },
+      "structure_lookback": 20
+    },
+    "general": {
+      "db_path": "data/market_data_mt5.sqlite"
+    },
+    "labeling": {
+      "adaptive_high_vol_pct": 0.02,
+      "adaptive_holding": false,
+      "adaptive_mid_vol_pct": 0.01,
+      "atr_column": "atr",
+      "contract_version": 2,
+      "event": "barrier",
+      "horizon_candles_n": 36,
+      "method": "atr_scaled",
+      "price_column": "close",
+      "stop_atr_multiplier": 1.0,
+      "target_atr_multiplier": 1.2,
+      "tp1_atr_multiplier": 1.0,
+      "tp2_atr_multiplier": 1.8,
+      "tp3_atr_multiplier": 2.8
+    },
+    "market_data": {
+      "closed_candles_only": true,
+      "provider": "mt5",
+      "server_time_offset_hours": 0,
+      "timeframe": "M5"
+    },
+    "model": {
+      "calibration_method": "sigmoid",
+      "calibration_weight_mode": "same_as_training",
+      "ensemble_method": "soft_voting",
+      "include_zero_class": false,
+      "random_seed": 42,
+      "sample_weight_mode": "uniqueness",
+      "train_ratio": 0.8,
+      "type": "xgboost",
+      "use_regime_feature": false
+    },
+    "monitoring": {
+      "alerts": {
+        "disk_min_free_mb": 500,
+        "enabled": false,
+        "feed_stale_after_s": 30,
+        "mt5_disconnect_threshold": 5,
+        "telegram": true
+      },
+      "backup": {
+        "dir": "backups",
+        "keep": 7
+      },
+      "calibration": {
+        "ece_threshold": 0.1,
+        "enabled": false,
+        "input_path": null
+      },
+      "drift": {
+        "drifted_psi_threshold": 0.2,
+        "enabled": false,
+        "live_csv": null,
+        "train_csv": null
+      },
+      "logging": {
+        "backup_count": 5,
+        "format": "text",
+        "max_bytes": 10485760
+      },
+      "metrics": {
+        "jsonl_path": "logs/metrics.jsonl"
+      }
+    },
+    "mt5_adapter": {
+      "cache": {
+        "ttl_ms": 500
+      },
+      "rate_limit": {
+        "max_calls_per_second": null
+      }
+    },
+    "paper_forward": {
+      "enabled": false,
+      "ledger_db_path": "data/paper_forward.sqlite",
+      "manifest_path": "config/paper/xauusd_wide_trend_filtered.json",
+      "min_closed_trades": 50,
+      "outcome_metrics_visible_during_accumulation": false
+    },
+    "provenance": {
+      "max_snapshot_age_ms": null,
+      "store": {
+        "db_path": null,
+        "enabled": false
+      }
+    },
+    "regime": {
+      "adx_trend_threshold": 20,
+      "atr_spike_multiplier": 1.8,
+      "bb_width_compression_pctile": 20,
+      "min_candles_for_regime": 50,
+      "no_trade_volatility_floor": 0.0001
+    },
+    "retraining": {
+      "assets": [
+        "XAUUSD",
+        "XAGUSD",
+        "BTCUSD",
+        "EURUSD",
+        "GBPUSD"
+      ],
+      "download_data": true,
+      "enabled": false,
+      "lookback_days": 730,
+      "max_age_hours": 24,
+      "real_trade_merge_enabled": false,
+      "retrain_on_startup": false,
+      "schedule": {
+        "day_of_week": "monday",
+        "enabled": false,
+        "hour": 3,
+        "minute": 0
+      }
+    },
+    "risk": {
+      "circuit_breaker": {
+        "exclude_swaps": true
+      },
+      "cluster_risk_cap": 0.02,
+      "drawdown_throttle": [
+        [
+          -0.04,
+          0.75
+        ],
+        [
+          -0.06,
+          0.5
+        ],
+        [
+          -0.08,
+          0.0
+        ]
+      ],
+      "enabled": true,
+      "leverage_hi": 1.25,
+      "leverage_lo": 0.5,
+      "min_lot": 1,
+      "risk_per_trade_pct": 0.005,
+      "same_direction_multiplier": 0.35,
+      "total_open_risk_cap": 0.03,
+      "vol_target": 0.1
+    },
+    "risk_throttle": {
+      "cooldown_minutes": 45,
+      "hard_stop_streak": 99,
+      "loss_streak_threshold": 2,
+      "max_daily_loss_pct": 99,
+      "max_daily_loss_usd": 999999,
+      "max_trades_per_day": 30,
+      "reset_on_utc_midnight": true,
+      "risk_step_down_map": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.25
+      },
+      "stub": true
+    },
+    "security": {
+      "api": {
+        "require_auth": false
+      }
+    },
+    "services": {
+      "ledger_bridge": {
+        "health_port": 8791,
+        "watermark_max_age_min": 30
+      },
+      "news_feed": {
+        "health_port": 8793,
+        "max_cache_age_hours": 6,
+        "refresh_interval_seconds": 900
+      },
+      "telegram_bot": {
+        "health_port": 8792
+      }
+    },
+    "sessions": {
+      "asia": {
+        "end": 8,
+        "start": 0
+      },
+      "london": {
+        "end": 13,
+        "start": 8
+      },
+      "newyork": {
+        "end": 22,
+        "start": 13
+      }
+    },
+    "signal_grid": {
+      "breakeven_trigger_atr": 1.0,
+      "step_max_points": null,
+      "step_min_points": null,
+      "step_points": null,
+      "stop_mult": 2.0,
+      "tp1_mult": 1.0,
+      "tp2_mult": 2.0,
+      "tp3_mult": 3.0
+    },
+    "strategy": {
+      "spec_path": "config/strategy_spec.yaml",
+      "version": "xauusd-system-v3-signalbar-2026-08-16"
+    },
+    "trade_profiles": {
+      "btc_m5_scalp_v1": {
+        "allocation": {
+          "tp1": 0.333333,
+          "tp2": 0.333333,
+          "tp3": 0.333334
+        },
+        "asset": "BTCUSD",
+        "break_even": {
+          "apply_to": [
+            2,
+            3
+          ],
+          "protected_price_policy": "actual_fill_plus_cost_buffer",
+          "raw_price_policy": "actual_fill",
+          "trigger": "tp1_filled"
+        },
+        "geometry_version": "btc_m5_scalp_v1_candidate",
+        "paper_only": true,
+        "risk": {
+          "currency": "USD",
+          "max_cash": 25.0,
+          "max_pct": 0.5
+        },
+        "step": {
+          "atr_mult": 1.0,
+          "max_price_distance": 6.0,
+          "min_price_distance": 4.0,
+          "source": "atr"
+        },
+        "stop": {
+          "multiplier": 2.0,
+          "source": "structure_or_validated_multiple"
+        },
+        "targets": {
+          "multipliers": {
+            "tp1": 1.0,
+            "tp2": 2.0,
+            "tp3": 3.0
+          }
+        },
+        "timeframe": "M5",
+        "unit": "price",
+        "validated": false,
+        "validation_status": "pending_btc_validation",
+        "volume": {
+          "total": 0.01
+        }
+      },
+      "xau_m15_intraday_v1": {
+        "allocation": {
+          "tp1": 0.333333,
+          "tp2": 0.333333,
+          "tp3": 0.333334
+        },
+        "asset": "XAUUSD",
+        "break_even": {
+          "apply_to": [
+            2,
+            3
+          ],
+          "protected_price_policy": "actual_fill_plus_cost_buffer",
+          "raw_price_policy": "actual_fill",
+          "trigger": "tp1_filled"
+        },
+        "geometry_version": "xau_m15_intraday_v1",
+        "paper_only": true,
+        "risk": {
+          "currency": "USD",
+          "max_cash": 50.0,
+          "max_pct": 0.5
+        },
+        "step": {
+          "atr_mult": 1.0,
+          "max_price_distance": 9.0,
+          "min_price_distance": 3.0,
+          "source": "atr"
+        },
+        "stop": {
+          "multiplier": 2.0,
+          "source": "validated_multiple"
+        },
+        "targets": {
+          "multipliers": {
+            "tp1": 1.0,
+            "tp2": 1.5,
+            "tp3": 2.0
+          }
+        },
+        "timeframe": "M15",
+        "unit": "price",
+        "validated": false,
+        "validation_status": "pending_xau_validation",
+        "volume": {
+          "total": 0.06
+        }
+      }
+    },
+    "validation": {
+      "locked_holdout": {
+        "enabled": true,
+        "end": null,
+        "start": "2026-08-08"
+      },
+      "provenance_manifest_path": null,
+      "require_provenance_manifest": false
+    }
+  },
+  "config_snapshot_sha256": "8025887e111ef1c63a8d58ebd0d571811e1eca1fd0c29c0f7f6d04ea960444b4",
+  "created_at_utc": "2026-08-29T17:48:49.943186+00:00",
+  "feature_columns": [
+    "ema_9",
+    "ema_21",
+    "ema_50",
+    "ema_200",
+    "rsi",
+    "macd_line",
+    "macd_signal",
+    "macd_hist",
+    "atr",
+    "bb_width",
+    "body_ratio",
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "candle_direction",
+    "adx",
+    "plus_di",
+    "minus_di",
+    "atr_ratio",
+    "mtf_confluence_score",
+    "return_1",
+    "return_4",
+    "volume_ratio",
+    "atr_pct",
+    "dist_asia_high_atr",
+    "dist_asia_low_atr",
+    "garman_klass_vol",
+    "dist_ema50_atr",
+    "dist_ema200_atr",
+    "macd_accel",
+    "sin_hour",
+    "cos_hour",
+    "dist_pdh_atr",
+    "dist_pdl_atr",
+    "obv",
+    "mfi",
+    "rsi_slope",
+    "volume_zscore",
+    "dist_donchian_high_atr",
+    "dist_donchian_low_atr",
+    "bb_width_percentile",
+    "atr_percentile",
+    "cvd",
+    "cvd_slope_10",
+    "order_flow_imbalance_14",
+    "order_flow_imbalance_50",
+    "dist_vwap_atr",
+    "break_score",
+    "break_intensity",
+    "agent_long_ratio",
+    "close_fd",
+    "cp_bars_since",
+    "cp_last_sign",
+    "cusum_up_norm",
+    "cusum_down_norm"
+  ],
+  "manifest_sha256": "9111177e0569a5aa0965c3e86142c120da3455284d70eb5482ba315edbbf77af",
+  "min_closed_trades": 20,
+  "model_metadata": {
+    "asset_key": "XAUUSD",
+    "bundle_schema_version": 2,
+    "calibration_policy": {
+      "method": "sigmoid",
+      "sample_weight_mode": "uniqueness",
+      "split": "purged_time_ordered"
+    },
+    "calibration_report_oos": {
+      "asset": "XAUUSD",
+      "available": true,
+      "brier_score": 0.2518,
+      "class_encoding": [
+        0,
+        1
+      ],
+      "ece": 0.0375,
+      "ece_threshold": 0.05,
+      "gate_passed": true,
+      "n_samples": 10553,
+      "reliability_diagram": [
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.05,
+          "bin": 0,
+          "bin_lower": 0.0,
+          "bin_upper": 0.1,
+          "count": 0
+        },
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.15,
+          "bin": 1,
+          "bin_lower": 0.1,
+          "bin_upper": 0.2,
+          "count": 0
+        },
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.25,
+          "bin": 2,
+          "bin_lower": 0.2,
+          "bin_upper": 0.3,
+          "count": 0
+        },
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.35,
+          "bin": 3,
+          "bin_lower": 0.3,
+          "bin_upper": 0.4,
+          "count": 0
+        },
+        {
+          "abs_error": 0.0087,
+          "actual_rate": 0.4778,
+          "avg_predicted": 0.4865,
+          "bin": 4,
+          "bin_lower": 0.4,
+          "bin_upper": 0.5,
+          "count": 2405
+        },
+        {
+          "abs_error": 0.0444,
+          "actual_rate": 0.488,
+          "avg_predicted": 0.5325,
+          "bin": 5,
+          "bin_lower": 0.5,
+          "bin_upper": 0.6,
+          "count": 8098
+        },
+        {
+          "abs_error": 0.2886,
+          "actual_rate": 0.32,
+          "avg_predicted": 0.6086,
+          "bin": 6,
+          "bin_lower": 0.6,
+          "bin_upper": 0.7,
+          "count": 50
+        },
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.75,
+          "bin": 7,
+          "bin_lower": 0.7,
+          "bin_upper": 0.8,
+          "count": 0
+        },
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.85,
+          "bin": 8,
+          "bin_lower": 0.8,
+          "bin_upper": 0.9,
+          "count": 0
+        },
+        {
+          "abs_error": 0.0,
+          "actual_rate": 0.0,
+          "avg_predicted": 0.95,
+          "bin": 9,
+          "bin_lower": 0.9,
+          "bin_upper": 1.0,
+          "count": 0
+        }
+      ],
+      "scope": "purged_production_holdout",
+      "warning": null
+    },
+    "class_counts": {
+      "0": 25053,
+      "1": 27710
+    },
+    "config_hash": "2881d2f5014266445fe7bfaf21b038e12b3fb39dd4962ee4d9f6e37f9ae69ec6",
+    "data_period": {
+      "cutoff_exclusive_utc": "2026-08-08",
+      "end_timestamp_utc": 1786135500,
+      "start_timestamp_utc": 1701388800
+    },
+    "effective_config_sha256": "2881d2f5014266445fe7bfaf21b038e12b3fb39dd4962ee4d9f6e37f9ae69ec6",
+    "execution_cost_assumptions": {
+      "slippage_per_side_price_units": 0.05,
+      "source": "static_config",
+      "spread_price_units": 0.25
+    },
+    "label_event": "traded",
+    "labeling": {
+      "adaptive_high_vol_pct": 0.02,
+      "adaptive_holding": false,
+      "adaptive_mid_vol_pct": 0.01,
+      "atr_column": "atr",
+      "contract_version": 2,
+      "event": "traded",
+      "horizon_candles_n": 36,
+      "method": "atr_scaled",
+      "price_column": "close",
+      "stop_atr_multiplier": 1.0,
+      "target_atr_multiplier": 1.2,
+      "tp1_atr_multiplier": 1.0,
+      "tp2_atr_multiplier": 1.8,
+      "tp3_atr_multiplier": 2.8
+    },
+    "model_hash": "ae70336f2c80b6621df61c543aabc9530987eb7b918a16cdb4a4dbeaf007cd3a",
+    "rows": {
+      "featured": 63286,
+      "labeled": 52763,
+      "test": 10553,
+      "train": 42074
+    },
+    "sample_weight_mode": "uniqueness",
+    "signal_grid": {
+      "breakeven_trigger_atr": 1.0,
+      "step_max_points": 4.0,
+      "step_min_points": 3.0,
+      "step_points": null,
+      "stop_mult": 1.5,
+      "tp1_mult": 1.0,
+      "tp2_mult": 2.0,
+      "tp3_mult": 3.0,
+      "trailing_atr_mult": null
+    },
+    "strategy_spec_hash": "e43f07b9172debc6a9161afcb144ea894355ef324b9d5e9c589609a5200c7b20",
+    "strategy_version": "xauusd-system-v3-signalbar-2026-08-16",
+    "timeframe": "M15",
+    "trained_at_utc": "2026-08-29T16:30:16.863276+00:00"
+  },
+  "model_path": "C:\\Users\\botbo\\Desktop\\xauusd-alert-system\\output\\models\\xauusd_holdout_candidate.joblib",
+  "model_sha256": "e1877019d6c1e9cc35d3d2edae1052aee5c791aa76887f93926964cfe8d1378c",
+  "policy": {
+    "fill_mode": "next_open",
+    "intrabar_double_touch": "stop_first",
+    "ledger": "append_only_event_sourced",
+    "validation_reads_allowed_before_minimum": 0
+  },
+  "run_id": "xauusd-subset_ext_holdout-b07680065309",
+  "start_timestamp_utc": 1786147200,
+  "variant": "subset_ext_holdout",
+  "variant_overrides": {
+    "features": {
+      "cusum": {
+        "drift_sigma": 0.5,
+        "enabled": true,
+        "roll_sigma_window": 96,
+        "threshold_sigma": 3.0
+      },
+      "fractional_diff": {
+        "d": 0.4,
+        "enabled": true,
+        "price_columns": [
+          "close"
+        ],
+        "thres": 1e-05
+      }
+    }
+  }
+}
