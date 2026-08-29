@@ -156,12 +156,36 @@ def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: Optio
     # into the model bundle via available_cols, and ModelPredictor selects
     # exactly its saved feature_cols at inference, so all consumers work
     # unchanged. Unknown names in the subset are ignored with a warning.
+    #
+    # Задача 3.3 (2026-08-29): the subset may ALSO name config-gated research
+    # features that exist on the frame but are not in the static
+    # FEATURE_COLUMNS whitelist (e.g. `close_fd` from features.fractional_diff
+    # or the four `cusum_*` columns from features.cusum, both added by
+    # build_full_df when their feature flags are enabled). Such entries are
+    # admitted when present in df.columns. This lets a research run pass the
+    # FULL whitelist + the new features as an explicit list without touching
+    # FEATURE_COLUMNS. No prod config sets feature_subset, so prod behaviour
+    # is unchanged.
     subset = model_cfg.get("feature_subset")
     if subset:
-        unknown = [f for f in subset if f not in available_cols]
+        known = set(available_cols) | set(df.columns)
+        unknown = [f for f in subset if f not in known]
         if unknown:
             print(f"[trainer] WARNING: feature_subset entries not available, ignored: {unknown}")
-        available_cols = [f for f in subset if f in available_cols] or available_cols
+        resolved = [f for f in subset if f in known]
+        # Preserve subset order but keep the NaN-drop semantics: a subset that
+        # names zero resolvable columns falls back to the whitelist-derived set.
+        available_cols = resolved or available_cols
+    # Задача 3.3: EXTENSION list — appends config-gated research features
+    # (present on the frame, not in FEATURE_COLUMNS) WITHOUT having to spell
+    # out the full whitelist in YAML. No prod config sets it.
+    subset_ext = model_cfg.get("feature_subset_ext")
+    if subset_ext:
+        extra = [f for f in subset_ext if f in df.columns and f not in available_cols]
+        missing = [f for f in subset_ext if f not in df.columns]
+        if missing:
+            print(f"[trainer] WARNING: feature_subset_ext entries not on the frame, skipped: {missing}")
+        available_cols = available_cols + extra
     if use_regime:
         # Phase 3: expand the causal `regime` column (already computed by
         # classify_regime_series upstream) into one-hot columns and append them to

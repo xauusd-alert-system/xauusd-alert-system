@@ -93,6 +93,22 @@ def build_full_df(cfg: dict, raw_df: pd.DataFrame, db_path: str, asset_key: str)
     cfg = merge_asset_cfg(cfg, asset_key, "labeling")
     df = raw_df.copy()
     df = build_all_indicators(df, cfg)
+    # Задача 3.1/3.2: config-gated research features, same contract as
+    # scripts/train_mt5.build_full_df (enabled=false/absent -> unchanged).
+    fd_cfg = cfg.get("features", {}).get("fractional_diff", {}) or {}
+    if fd_cfg.get("enabled", False):
+        from features.fractional_diff import frac_diff
+
+        df["close_fd"] = frac_diff(
+            df["close"],
+            d=float(fd_cfg.get("d", 0.4)),
+            thresh=float(fd_cfg.get("thres", 1e-5)),
+        )
+    cusum_cfg = cfg.get("features", {}).get("cusum", {}) or {}
+    if cusum_cfg.get("enabled", False):
+        from features.cusum import cusum_features
+
+        df = cusum_features(df, cfg)
     df = add_order_flow_features(df)
     df = candle_anatomy(df)
     df = detect_structure(df, lookback=cfg["features"]["structure_lookback"])
