@@ -164,6 +164,16 @@ def retrain_asset(asset_key: str, cfg: dict) -> dict:
         logger.warning(f"No historical candles found for {asset_key}. Skipping.")
         return {"asset": asset_key, "ok": False, "samples": 0, "real_trades": 0, "reason": "no_candles"}
 
+    # Locked holdout = the single source of truth for the training cutoff.
+    # The in-process retrain path bypasses train_mt5's --end-date handling,
+    # so the truncation is applied HERE, identically.
+    from scripts.train_mt5 import locked_holdout_end_date, truncate_raw_before
+
+    holdout_end = locked_holdout_end_date(cfg)
+    if holdout_end:
+        logger.info("nightly retrain respects locked holdout, end-date=%s", holdout_end)
+        raw_candles = truncate_raw_before(raw_candles, holdout_end, asset_key)
+
     full_df = build_full_df(
         raw_candles,
         cfg,

@@ -16,6 +16,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from config.loader import load_config
 
 
+def locked_holdout_end_date_for_cmd(cfg: dict) -> list:
+    """The --end-date segment for the train_mt5 subprocess command, derived
+    from the locked holdout (single source of truth). Empty when the lock is
+    off so the command is byte-identical to the pre-lock behaviour."""
+    from scripts.train_mt5 import locked_holdout_end_date
+
+    end = locked_holdout_end_date(cfg)
+    return ["--end-date", end] if end else []
+
+
 def register_in_registry(model_path: str, asset: str, timeframe: str) -> str:
     """Catalog one freshly trained artifact; returns registry_id.
 
@@ -35,6 +45,13 @@ def main():
     assets = cfg.get("assets", {})
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     timeframe = cfg.get("market_data", {}).get("timeframe", "M5")
+    # Locked holdout = the single source of truth for the training cutoff.
+    # Nightly retrains must never silently consume the reserved period.
+    from scripts.train_mt5 import locked_holdout_end_date
+
+    holdout_end = locked_holdout_end_date(cfg)
+    if holdout_end:
+        print(f"nightly retrain respects locked holdout, end-date={holdout_end}")
 
     enabled_assets = [k for k, v in assets.items() if v.get("enabled", False)]
     print(f"🚀 Starting Multi-Asset Model Training for: {enabled_assets}")
@@ -61,6 +78,7 @@ def main():
             "--output",
             model_path,
         ]
+        cmd.extend(locked_holdout_end_date_for_cmd(cfg))
         subprocess.run(cmd, check=True)
 
         # Model Registry (ТЗ 8.4): catalog the artifact after a successful

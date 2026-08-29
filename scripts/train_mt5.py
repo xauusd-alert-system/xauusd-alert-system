@@ -123,6 +123,23 @@ def build_full_df(
     return df
 
 
+def locked_holdout_end_date(cfg: dict) -> "str | None":
+    """The single source of truth for training cutoffs: the locked holdout.
+
+    Returns validation.locked_holdout.start (YYYY-MM-DD) when the lock is
+    enabled and carries a start date, else None (lock disabled -> all history
+    is trainable, exactly the pre-lock behaviour). Every training entry point
+    (nightly train_all_assets, retrain_with_real_trades, run_backtest callers)
+    must derive its cutoff from HERE — a new config flag for the same purpose
+    is deliberately not introduced: giving data back to prod means the owner
+    MOVES the lock, which is a conscious, journalled act.
+    """
+    lock = cfg.get("validation", {}).get("locked_holdout", {}) or {}
+    if lock.get("enabled", False) and lock.get("start"):
+        return str(lock["start"])
+    return None
+
+
 def truncate_raw_before(df: pd.DataFrame, end_date: str, asset_key: str) -> pd.DataFrame:
     """Return raw candles strictly before a UTC cutoff, before feature building."""
     cutoff = pd.Timestamp(end_date)
