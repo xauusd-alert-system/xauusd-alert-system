@@ -245,6 +245,30 @@ GBP_VARIANTS: dict = {
 }
 
 XAUUSD_THRESHOLD_VARIANTS: dict = {
+    # Phase 4 holdout validation (owner-approved 2026-08-29): the candidate
+    # bundle output/models/xauusd_holdout_candidate.joblib was trained with
+    # fractional_diff + cusum feature flags ON (preregistered d/h/k), so its
+    # frozen config_snapshot must carry the SAME flags ON for the live
+    # pipeline to build the 5 extra columns at inference. No threshold or
+    # grid overrides — the candidate differs from prod ONLY by the feature
+    # extension baked into the bundle (54 feature_cols). Prod config keeps
+    # the flags OFF; this override lives only inside the frozen manifest.
+    "subset_ext_holdout": {
+        "features": {
+            "fractional_diff": {
+                "enabled": True,
+                "d": 0.4,
+                "thres": 1.0e-5,
+                "price_columns": ["close"],
+            },
+            "cusum": {
+                "enabled": True,
+                "roll_sigma_window": 96,
+                "threshold_sigma": 3.0,
+                "drift_sigma": 0.5,
+            },
+        },
+    },
     "conf_073": {"ensemble": {"min_confidence_to_alert": 0.73}},
     "conf_075": {"ensemble": {"min_confidence_to_alert": 0.75}},
     "floor_064": {"ensemble": {"ml_confidence_floor": 0.64}},
