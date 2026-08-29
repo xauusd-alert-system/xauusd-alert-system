@@ -117,3 +117,5 @@ htmlcov/
 .coverage
 .coverage.*
 coverage.json
+ruff_*.txt
+results_baseline_*.csv
