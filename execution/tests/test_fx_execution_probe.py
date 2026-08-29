@@ -397,9 +397,7 @@ class TestExecuteProbeRoundTrip:
             )
 
         mock_mt5.order_send_handler = handler
-        row = execute_probe(
-            SYMBOL, "buy", 0.01, 2.0, str(csv_path), execute=True, manage_connection=True
-        )
+        row = execute_probe(SYMBOL, "buy", 0.01, 2.0, str(csv_path), execute=True, manage_connection=True)
 
         assert row["status"] == "closed"
         assert row["entry_retcode"] == TRADE_RETCODE_DONE
@@ -436,13 +434,20 @@ class TestExecuteProbeRoundTrip:
         csv_path = tmp_path / CSV
         mock_mt5.set_symbol_info(SYMBOL, digits=5, point=0.00001)
         mock_mt5.set_tick(SYMBOL, bid=1.1000, ask=1.1002)
+
         # Foreign position (different magic) exists after the fill.
         def handler(request):
             if "position" not in request:
                 mock_mt5.add_position(SYMBOL, type=0, volume=0.01, magic=42)
             return _OrderResultTuple(
-                retcode=TRADE_RETCODE_DONE, deal=1, order=1, volume=0.01,
-                price=1.0, comment="", request_id=1, retcode_external=0,
+                retcode=TRADE_RETCODE_DONE,
+                deal=1,
+                order=1,
+                volume=0.01,
+                price=1.0,
+                comment="",
+                request_id=1,
+                retcode_external=0,
             )
 
         mock_mt5.order_send_handler = handler
@@ -460,8 +465,14 @@ class TestExecuteProbeRoundTrip:
                 state["entry_done"] = True
                 mock_mt5.add_position(SYMBOL, type=0, volume=0.01, magic=PROBE_MAGIC)
                 return _OrderResultTuple(
-                    retcode=TRADE_RETCODE_DONE, deal=1, order=1, volume=0.01,
-                    price=1.0, comment="", request_id=1, retcode_external=0,
+                    retcode=TRADE_RETCODE_DONE,
+                    deal=1,
+                    order=1,
+                    volume=0.01,
+                    price=1.0,
+                    comment="",
+                    request_id=1,
+                    retcode_external=0,
                 )
             return _rejecting_result(request)
 
@@ -480,8 +491,14 @@ class TestExecuteProbeRoundTrip:
                 state["entry_done"] = True
                 mock_mt5.add_position(SYMBOL, type=0, volume=0.01, magic=PROBE_MAGIC)
                 return _OrderResultTuple(
-                    retcode=TRADE_RETCODE_DONE, deal=1, order=1, volume=0.01,
-                    price=1.0, comment="", request_id=1, retcode_external=0,
+                    retcode=TRADE_RETCODE_DONE,
+                    deal=1,
+                    order=1,
+                    volume=0.01,
+                    price=1.0,
+                    comment="",
+                    request_id=1,
+                    retcode_external=0,
                 )
             return _rejecting_result(request)
 
@@ -533,8 +550,14 @@ class TestExecuteProbeEdgeCases:
         mock_mt5.set_tick(SYMBOL, bid=1.1000, ask=1.1020)  # 20 pips
         with pytest.raises(RuntimeError, match="exceeds"):
             execute_probe(
-                SYMBOL, "buy", 0.01, 1.0, CSV, execute=True,
-                manage_connection=False, max_spread_pips=3.0,
+                SYMBOL,
+                "buy",
+                0.01,
+                1.0,
+                CSV,
+                execute=True,
+                manage_connection=False,
+                max_spread_pips=3.0,
             )
 
     def test_dry_run_records_row_without_orders(self, mock_mt5, tmp_path):

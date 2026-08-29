@@ -266,9 +266,7 @@ class TestMT5AdapterModifyPosition:
 
 class TestMT5AdapterGetPositions:
     def test_maps_fields(self, mock_mt5, adapter):
-        mock_mt5.add_position(
-            XAU, type=0, volume=0.10, price_open=2400.0, magic=777111, sl=2390.0, tp=2420.0
-        )
+        mock_mt5.add_position(XAU, type=0, volume=0.10, price_open=2400.0, magic=777111, sl=2390.0, tp=2420.0)
         positions = adapter.get_positions(XAU)
         assert len(positions) == 1
         p = positions[0]
