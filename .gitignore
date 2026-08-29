@@ -120,3 +120,4 @@ coverage.json
 ruff_*.txt
 results_baseline_*.csv
 data/signal_log.db
+data/signal_log.db
