@@ -6,11 +6,14 @@ The trader must be OFF while the market is inactive: weekend window
 optional one-off manual halt covering unattended stretches.
 """
 
+import logging
 import types
 from datetime import UTC, datetime
 
 from execution import mt5_trader as trader_mod
 from execution.mt5_trader import MultiAssetMT5Trader
+
+TRADER_LOG = "multi_asset_trader"
 
 
 def _cfg(**blackout_overrides):
@@ -80,6 +83,90 @@ def test_daily_break_plain_window_without_midnight_crossing():
     assert t._in_daily_break(_utc("2026-08-20 10:59")) is False
     assert t._in_daily_break(_utc("2026-08-20 12:00")) is True
     assert t._in_daily_break(_utc("2026-08-20 13:00")) is False
+
+
+# ---------------------------------------------------------------------------
+# _dow_utc: the pure weekday/time anchor behind the weekend window.
+# Reference instant for these cases: Wed 2026-08-19 12:00 UTC.
+# ---------------------------------------------------------------------------
+
+
+def test_dow_utc_returns_the_most_recent_past_weekday():
+    now = _utc("2026-08-19 12:00")  # Wed
+    # Fri 21:00 of the same week is already in the past -> returned as-is.
+    assert MultiAssetMT5Trader._dow_utc(now, 4, "21:00") == _utc("2026-08-14 21:00")
+
+
+def test_dow_utc_steps_back_a_week_when_the_target_time_is_later_today():
+    now = _utc("2026-08-19 12:00")  # Wed
+    # Wed 21:00 today is still ahead -> roll back a full week.
+    assert MultiAssetMT5Trader._dow_utc(now, 2, "21:00") == _utc("2026-08-12 21:00")
+
+
+def test_dow_utc_keeps_today_when_the_target_time_already_passed():
+    now = _utc("2026-08-19 12:00")  # Wed
+    assert MultiAssetMT5Trader._dow_utc(now, 2, "09:00") == _utc("2026-08-19 09:00")
+
+
+def test_dow_utc_is_inclusive_at_the_exact_boundary():
+    now = _utc("2026-08-19 09:00")  # Wed
+    # cand == now is not "in the future", so the instant itself is returned.
+    assert MultiAssetMT5Trader._dow_utc(now, 2, "09:00") == _utc("2026-08-19 09:00")
+
+
+def test_dow_utc_wraps_around_the_week_for_a_sunday_target():
+    now = _utc("2026-08-19 12:00")  # Wed; (2 - 6) % 7 == 3 -> Sun 2026-08-16
+    assert MultiAssetMT5Trader._dow_utc(now, 6, "21:00") == _utc("2026-08-16 21:00")
+
+
+# ---------------------------------------------------------------------------
+# Window boundaries and configuration defaults
+# ---------------------------------------------------------------------------
+
+
+def test_default_weekend_config_runs_friday_to_monday():
+    """With no explicit weekend block, _init_blackout defaults to
+    Fri 21:00 -> Mon 21:00 (end_dow defaults to 0, not 6)."""
+    t = _trader(_cfg(weekend={}))
+    assert t.blackout_weekend == (4, "21:00", 0, "21:00")
+    halted, reason, resume = t._blackout_status(_utc("2026-08-21 22:00"))  # Fri
+    assert halted is True
+    assert "weekend blackout" in reason
+    assert resume == _utc("2026-08-24 21:00")  # Mon
+    assert t._blackout_status(_utc("2026-08-22 12:00"))[0] is True  # Sat
+
+
+def test_weekend_window_is_half_open():
+    """The window start is inclusive and its end exclusive: trading resumes at
+    the resume instant, not one minute later."""
+    t = _trader(_cfg())
+    assert t._blackout_status(_utc("2026-08-21 21:00"))[0] is True  # == start
+    assert t._blackout_status(_utc("2026-08-23 20:59"))[0] is True  # just before end
+    assert t._blackout_status(_utc("2026-08-23 21:00"))[0] is False  # == end
+
+
+def test_manual_halt_ends_at_its_own_instant():
+    t = _trader(_cfg(manual_halt_until_utc="2026-08-19 12:00"))
+    assert t._blackout_status(_utc("2026-08-19 11:59"))[0] is True
+    assert t._blackout_status(_utc("2026-08-19 12:00"))[0] is False
+    assert t._blackout_status(_utc("2026-08-19 12:01"))[0] is False
+
+
+def test_unparseable_manual_halt_is_ignored(caplog):
+    """A typo in manual_halt_until_utc must disable the manual halt, not crash
+    the trader at startup."""
+    t = object.__new__(MultiAssetMT5Trader)
+    t.cfg = _cfg(manual_halt_until_utc="tomorrow")
+    with caplog.at_level(logging.WARNING, logger=TRADER_LOG):
+        t._init_blackout()
+    assert t.blackout_manual_until is None
+    assert "manual_halt_until_utc" in caplog.text
+
+
+def test_daily_break_without_a_window_never_triggers():
+    t = _trader(_cfg(daily_break_utc=[]))
+    assert t.blackout_daily_break is None
+    assert t._in_daily_break(_utc("2026-08-19 23:00")) is False
 
 
 def test_flatten_all_positions_closes_every_position(monkeypatch):
