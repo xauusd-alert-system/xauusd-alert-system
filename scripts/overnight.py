@@ -258,23 +258,34 @@ def main() -> int:
 
     # ---- Stage 2: walk-forward backtest per asset --------------------------
     if _env_flag("OVERNIGHT_NO_BACKTEST"):
+        # Locked holdout = the single source of truth for the data cutoff.
+        # Passing --end-date keeps the nightly health-check's test windows
+        # strictly before the lock, so the stage stops failing on
+        # LOCKED HOLD-OUT VIOLATION every night. This does NOT weaken the
+        # guard: enforce_locked_holdout stays active for any other runner,
+        # and the nightly report simply never asks for locked data.
+        from scripts.train_mt5 import locked_holdout_end_date
+
+        holdout_end = locked_holdout_end_date(cfg)
+        if holdout_end:
+            logger.info("nightly backtest respects locked holdout, end-date=%s", holdout_end)
         all_ok = True
         for asset in enabled_assets:
             asset_tf = cfg["assets"][asset].get("timeframe") or timeframe
-            ok = _run(
-                f"walk_forward_backtest:{asset}",
-                [
-                    sys.executable,
-                    "-m",
-                    "scripts.run_backtest",
-                    "--asset",
-                    asset,
-                    "--timeframe",
-                    asset_tf,
-                    "--db-path",
-                    db_path,
-                ],
-            )
+            cmd = [
+                sys.executable,
+                "-m",
+                "scripts.run_backtest",
+                "--asset",
+                asset,
+                "--timeframe",
+                asset_tf,
+                "--db-path",
+                db_path,
+            ]
+            if holdout_end:
+                cmd.extend(["--end-date", holdout_end])
+            ok = _run(f"walk_forward_backtest:{asset}", cmd)
             all_ok = all_ok and ok
         status.append(("walk_forward_backtest", all_ok))
     else:
