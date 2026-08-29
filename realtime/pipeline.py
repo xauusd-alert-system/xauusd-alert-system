@@ -138,6 +138,34 @@ class RealtimePipeline:
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = build_all_indicators(df, self.cfg)
+        # Задача 3.1 (Phase 4 parity): optional fractional-differentiated close
+        # (FFd, Lopez de Prado ch.5). Config-gated: when
+        # features.fractional_diff.enabled is false or absent (the default),
+        # NOTHING is added and the frame is byte-identical to the baseline
+        # pipeline. When true, a `close_fd` column is appended right here —
+        # the SAME position and semantics as scripts/train_mt5.build_full_df
+        # and scripts/run_backtest.build_full_df, so a model trained with the
+        # feature can actually serve (train/serve consistency). The flags
+        # reach this code through the frozen manifest's config_snapshot; the
+        # prod config keeps them OFF.
+        fd_cfg = self.cfg.get("features", {}).get("fractional_diff", {}) or {}
+        if fd_cfg.get("enabled", False):
+            from features.fractional_diff import frac_diff
+
+            df["close_fd"] = frac_diff(
+                df["close"],
+                d=float(fd_cfg.get("d", 0.4)),
+                thresh=float(fd_cfg.get("thres", 1e-5)),
+            )
+        # Задача 3.2 (Phase 4 parity): optional two-sided CUSUM change-point
+        # features on log returns (P2 regime/abstention feature — NOT
+        # direction alpha). Config-gated, default OFF -> no-op; identical to
+        # the train/backtest pipelines (h/k 96/3.0/0.5 preregistered).
+        cusum_cfg = self.cfg.get("features", {}).get("cusum", {}) or {}
+        if cusum_cfg.get("enabled", False):
+            from features.cusum import cusum_features
+
+            df = cusum_features(df, self.cfg)
         df = add_order_flow_features(df)
         df = candle_anatomy(df)
         df = detect_structure(df, lookback=self.cfg["features"]["structure_lookback"])
