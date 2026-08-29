@@ -30,6 +30,7 @@ from __future__ import annotations
 import time
 import types
 
+import pandas as pd
 import pytest
 
 from execution import mt5_trader as trader_mod
@@ -1032,3 +1033,370 @@ def test_execute_signal_survives_a_failing_position_context_write(mock_mt5, sink
         t.execute_signal(ASSET, _signal())
     assert "Position context logging failed" in caplog.text
     assert mock_mt5.call_count("order_send") == 3
+
+
+# ---------------------------------------------------------------------------
+# check_and_move_breakeven — SHORT-side mirrors (step 2e-ext)
+#
+# Every branch below is the mirror image of a long-side test already covered
+# above: the current price is read from the ASK for a short (bid for a long)
+# and every clamp flips direction.
+# ---------------------------------------------------------------------------
+
+
+def _short_trade(ticket, *, tp1=None, tp2=None, tp3=None, entry=ENTRY, volume=0.09, tp1_hit=False, tp2_hit=False):
+    return {
+        "symbol": SYMBOL,
+        "type": "short",
+        "entry_price": entry,
+        "original_volume": volume,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+        "tp1_hit": tp1_hit,
+        "tp2_hit": tp2_hit,
+    }
+
+
+def test_be_check_fires_early_breakeven_for_a_short(mock_mt5, sinks, caplog):
+    """Mirror of the long early-BE test: the trigger fires on the ASK side and
+    the SL is clamped UP to current + min_dist."""
+    t = _be_trader({11000: _short_trade(11000, tp1=2398.00)}, be_trigger_by_symbol={SYMBOL: 0.5})
+    _add(mock_mt5, 11000, type=1, sl=2402.00, tp=2397.00)
+    # step_dist = |2398 - 2400| = 2.00; trigger 0.5 -> fires at ask <= 2399.00
+    mock_mt5.set_tick(SYMBOL, bid=2398.70, ask=2399.00)
+
+    with caplog.at_level("INFO", logger=TRADER_LOG):
+        t.check_and_move_breakeven()
+
+    mods = _sent(mock_mt5, TRADE_ACTION_SLTP)
+    assert len(mods) == 1
+    # target 2399.99; min_sl = ask 2399.00 + 0.60 = 2399.60 -> clamped up
+    assert mods[0]["sl"] == pytest.approx(2399.60)
+    assert "EARLY BREAKEVEN" in caplog.text
+    assert t.active_trades[11000]["be_done"] is True
+    assert _sent(mock_mt5, TRADE_ACTION_DEAL) == []  # nothing closed yet
+
+
+def test_be_check_reaches_a_true_early_breakeven_for_a_short(mock_mt5, sinks):
+    """With a small enough step the broker minimum does not bind and the SL
+    lands exactly on entry - 1 tick."""
+    t = _be_trader({11100: _short_trade(11100, tp1=2399.00)}, be_trigger_by_symbol={SYMBOL: 0.5})
+    _add(mock_mt5, 11100, type=1, sl=2402.00, tp=2397.00)
+    # step_dist = 1.00; trigger 0.5 -> fires at ask <= 2399.50
+    mock_mt5.set_tick(SYMBOL, bid=2399.15, ask=2399.45)
+
+    t.check_and_move_breakeven()
+    # target 2399.99; min_sl = 2399.45 + 0.60 = 2400.05 -> no clamp
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP)[0]["sl"] == pytest.approx(2399.99)
+
+
+def test_be_check_does_not_fire_early_breakeven_for_a_short_before_the_trigger(mock_mt5, sinks):
+    t = _be_trader({11200: _short_trade(11200, tp1=2399.00)}, be_trigger_by_symbol={SYMBOL: 0.5})
+    _add(mock_mt5, 11200, type=1, sl=2402.00, tp=2397.00)
+    mock_mt5.set_tick(SYMBOL, bid=2399.30, ask=2399.60)  # above the 2399.50 trigger
+    t.check_and_move_breakeven()
+    assert _sent(mock_mt5) == []
+    assert t.active_trades[11200].get("be_done", False) is False
+
+
+def test_be_check_trails_a_short_into_profit(mock_mt5, sinks, caplog):
+    """Mirror of the long profit trail: the stop moves DOWN toward the price,
+    locking in lock_pct of the unrealized profit."""
+    t = _be_trader({11300: _short_trade(11300, volume=0.09)})
+    t.active_trades[11300]["be_done"] = True
+    t._get_profit_trail_config = lambda symbol: {"activation_atr": 0.5, "lock_pct": 0.60, "min_profit_price": 0}
+    t._latest_causal_atr = lambda asset_key: 1.0
+    _add(mock_mt5, 11300, type=1, sl=2402.00, tp=2397.00)
+    mock_mt5.set_tick(SYMBOL, bid=2399.00, ask=2399.30)  # unrealized = 0.70
+
+    with caplog.at_level("INFO", logger=TRADER_LOG):
+        t.check_and_move_breakeven()
+
+    mods = _sent(mock_mt5, TRADE_ACTION_SLTP)
+    assert len(mods) == 1
+    # trail_sl = 2399.30 + 0.70 * (1 - 0.60) = 2399.58
+    assert mods[0]["sl"] == pytest.approx(2399.58)
+    assert "PROFIT TRAIL" in caplog.text
+    assert t.active_trades[11300]["trailing_active"] is True
+
+
+def test_be_check_clamps_a_short_trail_to_the_broker_minimum(mock_mt5, sinks):
+    """A large unrealized profit pushes the trail below the broker minimum, so
+    it is clamped back UP to current + min_dist."""
+    t = _be_trader({11400: _short_trade(11400, volume=0.09)})
+    t.active_trades[11400]["be_done"] = True
+    t._get_profit_trail_config = lambda symbol: {"activation_atr": 0.5, "lock_pct": 0.60, "min_profit_price": 0}
+    t._latest_causal_atr = lambda asset_key: 1.0
+    _add(mock_mt5, 11400, type=1, sl=2402.00, tp=2397.00)
+    mock_mt5.set_tick(SYMBOL, bid=2397.70, ask=2398.00)  # unrealized = 2.00
+
+    t.check_and_move_breakeven()
+    # trail_sl = 2398.00 + 0.80 = 2398.80; min_sl = 2398.00 + 0.60 = 2398.60
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP)[0]["sl"] == pytest.approx(2398.60)
+
+
+def test_be_check_never_trails_a_short_back_out(mock_mt5, sinks):
+    """A trailing stop that would sit above the current SL is not sent."""
+    t = _be_trader({11500: _short_trade(11500, volume=0.09)})
+    t.active_trades[11500]["be_done"] = True
+    t._get_profit_trail_config = lambda symbol: {"activation_atr": 0.5, "lock_pct": 0.60, "min_profit_price": 0}
+    t._latest_causal_atr = lambda asset_key: 1.0
+    _add(mock_mt5, 11500, type=1, sl=2398.00, tp=2397.00)  # already tighter
+    mock_mt5.set_tick(SYMBOL, bid=2397.70, ask=2398.00)
+    t.check_and_move_breakeven()
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
+    assert t.active_trades[11500].get("trailing_active", False) is False
+
+
+def test_be_check_short_ladder_advances_to_tp2(mock_mt5, sinks):
+    t = _be_trader({11600: _short_trade(11600, tp1=2399.00, tp2=2398.00, tp1_hit=True)})
+    _add(mock_mt5, 11600, type=1, sl=2402.00, tp=2397.00)
+    mock_mt5.set_tick(SYMBOL, bid=2397.70, ask=2398.00)  # current price (ask) <= tp2
+
+    t.check_and_move_breakeven()
+    closes = _sent(mock_mt5, TRADE_ACTION_DEAL)
+    assert len(closes) == 1
+    assert closes[0]["comment"] == "TP2 (30%) close"
+    assert closes[0]["volume"] == pytest.approx(0.02)  # 30% of 0.09, floored
+    assert closes[0]["type"] == ORDER_TYPE_BUY  # a short is closed by a buy
+    assert closes[0]["price"] == pytest.approx(2398.00)  # at ask
+    assert t.active_trades[11600]["tp2_hit"] is True
+
+
+def test_be_check_short_ladder_closes_the_remainder_at_tp3(mock_mt5, sinks):
+    t = _be_trader({11700: _short_trade(11700, tp1=2399.50, tp2=2399.00, tp3=2397.00, tp1_hit=True, tp2_hit=True)})
+    _add(mock_mt5, 11700, type=1, sl=2402.00, tp=2397.00)
+    mock_mt5.set_tick(SYMBOL, bid=2396.70, ask=2397.00)  # current price (ask) <= tp3
+
+    t.check_and_move_breakeven()
+    closes = _sent(mock_mt5, TRADE_ACTION_DEAL)
+    assert len(closes) == 1
+    assert closes[0]["comment"] == "TP3 (20%) close"
+    assert closes[0]["volume"] == pytest.approx(0.09)  # the whole remainder
+    assert closes[0]["price"] == pytest.approx(2397.00)
+
+
+# ---------------------------------------------------------------------------
+# v4b trailing after TP2 (long path only — see the dead-code note below)
+# ---------------------------------------------------------------------------
+
+
+def test_be_check_v4b_trails_a_long_after_tp2(mock_mt5, sinks, caplog):
+    """trailing_atr_mult set + both TP1 and TP2 hit -> the stop trails the live
+    ATR distance below the current price."""
+    t = _be_trader(
+        {12000: _legacy_trade(12000, tp1=2401.00, tp2=2402.00, tp3=None, tp1_hit=True, tp2_hit=True)},
+        trailing_atr_mult_by_symbol={SYMBOL: 0.5},
+    )
+    t._latest_causal_atr = lambda asset_key: 1.0  # trail_dist = 0.5 * 1.0
+    _add(mock_mt5, 12000, sl=2400.50, tp=2403.00)
+    mock_mt5.set_tick(SYMBOL, bid=2403.00, ask=2403.30)
+
+    t.check_and_move_breakeven()
+    mods = _sent(mock_mt5, TRADE_ACTION_SLTP)
+    assert len(mods) == 1
+    # new_sl = 2403.00 - 0.50 = 2402.50; min_sl = 2403.00 - 0.60 = 2402.40 -> ok
+    assert mods[0]["sl"] == pytest.approx(2402.50)
+    assert t.active_trades[12000]["trailing_active"] is True
+
+
+def test_be_check_v4b_skips_when_the_new_sl_is_inside_the_broker_minimum(mock_mt5, sinks):
+    """A wide ATR trail lands inside the broker's minimum distance, so the
+    modify is withheld rather than rejected."""
+    t = _be_trader(
+        {12100: _legacy_trade(12100, tp1=2401.00, tp2=2402.00, tp3=None, tp1_hit=True, tp2_hit=True)},
+        trailing_atr_mult_by_symbol={SYMBOL: 1.5},
+    )
+    t._latest_causal_atr = lambda asset_key: 1.0  # trail_dist = 1.5
+    _add(mock_mt5, 12100, sl=2400.50, tp=2403.00)
+    mock_mt5.set_tick(SYMBOL, bid=2403.00, ask=2403.30)
+
+    t.check_and_move_breakeven()
+    # new_sl = 2403.00 - 1.50 = 2401.50 < min_sl 2402.40 -> withheld
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
+    assert t.active_trades[12100].get("trailing_active", False) is False
+
+
+def test_be_check_v4b_skips_when_the_new_sl_is_not_an_improvement(mock_mt5, sinks):
+    """The stop only ever moves in our favour."""
+    t = _be_trader(
+        {12200: _legacy_trade(12200, tp1=2401.00, tp2=2402.00, tp3=None, tp1_hit=True, tp2_hit=True)},
+        trailing_atr_mult_by_symbol={SYMBOL: 0.5},
+    )
+    t._latest_causal_atr = lambda asset_key: 1.0
+    _add(mock_mt5, 12200, sl=2403.00, tp=2403.00)  # already at/above the trail
+    mock_mt5.set_tick(SYMBOL, bid=2403.00, ask=2403.30)
+
+    t.check_and_move_breakeven()
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
+
+
+def test_be_check_v4b_requires_both_tp1_and_tp2(mock_mt5, sinks):
+    """The v4b trail is armed only after TP2 — TP1 alone is not enough."""
+    t = _be_trader(
+        {12300: _legacy_trade(12300, tp1=2401.00, tp2=2402.00, tp3=None, tp1_hit=True, tp2_hit=False)},
+        trailing_atr_mult_by_symbol={SYMBOL: 0.5},
+    )
+    t._latest_causal_atr = lambda asset_key: 1.0
+    _add(mock_mt5, 12300, sl=2400.50, tp=2403.00)
+    mock_mt5.set_tick(SYMBOL, bid=2403.00, ask=2403.30)
+    t.check_and_move_breakeven()
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
+
+
+def test_be_check_v4b_logs_an_unavailable_causal_atr(mock_mt5, sinks, caplog):
+    """A failing ATR lookup must not break the breakeven pass."""
+    t = _be_trader(
+        {12400: _legacy_trade(12400, tp1=2401.00, tp2=2402.00, tp3=None, tp1_hit=True, tp2_hit=True)},
+        trailing_atr_mult_by_symbol={SYMBOL: 0.5},
+    )
+
+    def boom(asset_key):
+        raise RuntimeError("no live pipeline")
+
+    t._latest_causal_atr = boom
+    _add(mock_mt5, 12400, sl=2400.50, tp=2403.00)
+    mock_mt5.set_tick(SYMBOL, bid=2403.00, ask=2403.30)
+
+    with caplog.at_level("ERROR", logger=TRADER_LOG):
+        t.check_and_move_breakeven()
+    assert "trailing skipped" in caplog.text
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
+
+
+def test_be_check_v4b_short_branch_is_unreachable_dead_code():
+    """DEAD CODE (pinned) — the v4b trailing block sits INSIDE
+    `if pos.type == 0:` (mt5_trader.py:787), yet at line 816 it tests
+    `pos.type == 0` again and keeps an `else:` branch for shorts (828-836).
+    That else can never execute, so short positions never get the v4b ATR
+    trail. Reported, not fixed: execution/mt5_trader.py is owner WIP.
+    """
+    src = open("execution/mt5_trader.py", encoding="utf-8").read().splitlines()
+    assert src[786].strip() == "if pos.type == 0:"  # 787
+    assert src[815].strip() == "if pos.type == 0:"  # 816, nested one level deeper
+    assert src[827].strip() == "else:"  # 828
+    # Same condition, deeper indent -> the else is unreachable.
+    assert (len(src[815]) - len(src[815].lstrip())) > (len(src[786]) - len(src[786].lstrip()))
+
+
+# ---------------------------------------------------------------------------
+# Close detector — history fallbacks
+# ---------------------------------------------------------------------------
+
+
+def test_close_detector_uses_the_last_deal_when_there_is_no_out_deal(mock_mt5, sinks):
+    """With history but no OUT deal (entry == 1), the last deal's time/price is
+    used rather than the cached entry."""
+    t = _be_trader({13000: _legacy_trade(13000)})
+    mock_mt5.deals[13000] = [_deal(profit=5.0, price=2399.00, entry=0, time=1_700_000_900)]
+    t.check_and_move_breakeven()
+
+    assert sinks.close.count == 1
+    assert sinks.close.calls[0][0][2] == 1_700_000_900  # close time
+    assert sinks.close.calls[0][0][3] == pytest.approx(2399.00)  # close price
+    assert t.trade_throttle.closed_pnls == [pytest.approx(5.0)]
+
+
+def test_close_detector_defaults_a_missing_close_price_to_zero(mock_mt5, sinks):
+    """A trade with no known entry and no history must not write None."""
+    t = _be_trader({13100: {"symbol": SYMBOL, "type": "long", "tp1": None, "tp2": None, "tp3": None}})
+    t.check_and_move_breakeven()
+    assert sinks.close.count == 1
+    assert sinks.close.calls[0][0][3] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# ATR / profit-trail config helpers (live-pipeline stubs)
+# ---------------------------------------------------------------------------
+
+
+def _bare_trader(**overrides):
+    t = object.__new__(MultiAssetMT5Trader)
+    t.cfg = {}
+    t.pipelines = {}
+    t.trade_db_path = "test-only.db"
+    for name, value in overrides.items():
+        setattr(t, name, value)
+    return t
+
+
+def _atr_pipeline(*values):
+    frame = pd.DataFrame({"atr": list(values)})
+    return types.SimpleNamespace(get_frame=lambda n_candles=120, build_features=True: frame)
+
+
+def test_latest_causal_atr_reads_the_last_row_of_the_pipeline_frame():
+    t = _bare_trader(pipelines={ASSET: _atr_pipeline(1.0, 1.2, 1.5)})
+    assert t._latest_causal_atr(ASSET) == pytest.approx(1.5)
+
+
+def test_latest_causal_atr_fails_without_a_pipeline():
+    t = _bare_trader()
+    with pytest.raises(RuntimeError, match="no live pipeline for ATR"):
+        t._latest_causal_atr(ASSET)
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf")])
+def test_latest_causal_atr_rejects_a_non_usable_atr(bad):
+    t = _bare_trader(pipelines={ASSET: _atr_pipeline(1.0, bad)})
+    with pytest.raises(RuntimeError, match="invalid live ATR"):
+        t._latest_causal_atr(ASSET)
+
+
+def test_get_profit_trail_config_prefers_the_asset_grid():
+    cfg = {"assets": {ASSET: {"mt5_symbol": SYMBOL, "signal_grid": {"profit_trail": {"activation_atr": 0.7}}}}}
+    assert _bare_trader(cfg=cfg)._get_profit_trail_config(SYMBOL) == {"activation_atr": 0.7}
+
+
+def test_get_profit_trail_config_falls_back_to_the_global_grid():
+    cfg = {"assets": {ASSET: {"mt5_symbol": SYMBOL}}, "signal_grid": {"profit_trail": {"lock_pct": 0.5}}}
+    assert _bare_trader(cfg=cfg)._get_profit_trail_config(SYMBOL) == {"lock_pct": 0.5}
+
+
+def test_get_profit_trail_config_returns_none_when_unconfigured():
+    cfg = {"assets": {ASSET: {"mt5_symbol": SYMBOL}}}
+    assert _bare_trader(cfg=cfg)._get_profit_trail_config(SYMBOL) is None
+
+
+def test_enqueue_execution_fact_swallows_outbox_failures(caplog, monkeypatch):
+    """The durable outbox must never raise into the trading path."""
+    monkeypatch.setattr(trader_mod, "enqueue_event", lambda *a, **k: (_ for _ in ()).throw(OSError("outbox down")))
+    t = _bare_trader()
+    with caplog.at_level("ERROR", logger=TRADER_LOG):
+        t._enqueue_execution_fact(types.SimpleNamespace(event_id="evt-1"))
+    assert "Ledger outbox enqueue failed" in caplog.text
+
+
+def test_be_check_skips_a_tracked_leg_without_a_broker_position(mock_mt5, sinks):
+    """When leg 1 closes, a tracked leg 2/3 that has already vanished from the
+    broker must be skipped rather than crash the close handling."""
+    t = _be_trader({13200: _leg_trade(13200, 1), 13300: _leg_trade(13300, 2)})
+    # Neither leg is at the broker any more: leg 1 closes first, and at that
+    # moment leg 2 is still tracked but has no position to modify.
+    t.check_and_move_breakeven()
+    assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
+    assert t.active_trades == {}
+
+
+def test_be_check_ignores_a_position_whose_ticket_is_not_an_integer(mock_mt5, sinks):
+    """A position whose ticket cannot be coerced to int is skipped while the
+    ticket -> position map is built; the surviving legs are still managed."""
+    t = _be_trader({13400: _leg_trade(13400, 1), 13500: _leg_trade(13500, 2)})
+    _add(mock_mt5, 13500, sl=2398.00)
+    mock_mt5.positions.append(
+        types.SimpleNamespace(
+            ticket="not-an-int",
+            symbol=SYMBOL,
+            type=0,
+            volume=0.01,
+            price_open=ENTRY,
+            sl=2398.00,
+            tp=2403.00,
+            magic=MAGIC,
+        )
+    )
+    t.check_and_move_breakeven()
+    # Leg 1 closed -> the still-open leg 2 is pulled to entry.
+    assert [r["position"] for r in _sent(mock_mt5, TRADE_ACTION_SLTP)] == [13500]
+    assert t.active_trades[13500]["be_done"] is True
