@@ -1,3 +1,6 @@
 [tool.pytest.ini_options]
 pythonpath = [".", "simulation/mt5_shim"]
 testpaths = ["."]
+markers = [
+    "chunk_c: Phase 5 part 2 Chunk C tests (pair_monitor.query_all + _ensure_imports)",
+]
