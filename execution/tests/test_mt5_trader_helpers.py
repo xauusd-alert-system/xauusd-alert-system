@@ -32,7 +32,6 @@ import types
 
 import pandas as pd
 import pytest
-from pydantic import ValidationError
 
 from contracts.execution_contracts import build_signal_intent, execution_event_id
 from execution import mt5_trader as trader_mod
@@ -607,28 +606,139 @@ def test_intent_created_fact_carries_the_intent_identity(mock_mt5):
     assert event.event_id == execution_event_id("mt5_python_sender", "demo:12345", "intent", intent.intent_id)
 
 
-def test_intent_created_fact_breaks_on_an_unknown_account_mode(mock_mt5):
-    """DEFECT (pinned, not endorsed) — reported during phase 5 / step 2c.
+def test_intent_created_fact_breaks_on_an_unknown_account_mode(mock_mt5, monkeypatch, caplog):
+    """FIXED (D1, phase 5 part 2) — _request_result_fact is now guarded in
+    execute_signal.
 
-    _account_fingerprint() falls back to the mode string "unknown" whenever
-    mt5.account_info() is unavailable (terminal disconnected) or reports a
-    trade_mode outside ACCOUNT_TRADE_MODE_{DEMO,CONTEST,REAL}. ExecutionEvent
-    constrains account_mode to Literal["demo", "real", "contest"], so building
-    the fact raises instead of recording it.
+    mt5.account_info() fails on the call that builds the request_result fact
+    (the 3rd fingerprint call inside execute_signal: throttle equity, then the
+    intent fact, then the per-leg request_result facts). _account_fingerprint()
+    then falls back to mode "unknown", ExecutionEvent raises ValidationError —
+    but the new try/except around the _request_result_fact enqueue swallows it
+    with a WARNING and the order path keeps going: retcode handling, position
+    registration and the remaining-leg Telegram alerts all still run.
 
-    Blast radius today: _intent_created_fact is called inside a try/except at
-    mt5_trader.py:1646-1650, so the intent fact is silently dropped. The
-    _request_result_fact call at mt5_trader.py:1714-1723 is NOT guarded — it
-    runs right after order_send, so a raise there skips the retcode handling,
-    the position registration and the Telegram alert for every remaining leg.
-
-    execution/mt5_trader.py is owner-WIP in this phase and must not be
-    modified, so the fix is deferred. When it lands, replace this pin with an
-    assertion that the fact is built with a coerced/valid account_mode.
+    The previous pin asserted the unguarded raise propagated; that was the
+    defect. The fix lives in execution/mt5_trader.py.
     """
-    mock_mt5.account = mock_mt5.account._replace(trade_mode=42)
-    with pytest.raises(ValidationError, match="account_mode"):
-        _trader()._intent_created_fact(_intent())
+    # --- hermetic side-channel stubs (execute_signal reaches disk/network) ---
+    monkeypatch.setattr(trader_mod, "append_signal_intent", lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "enqueue_event", lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "log_execution_attempt", lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "log_trade_entry", lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "record_position_context", lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "append_trading_event", lambda *a, **k: None)
+    monkeypatch.setattr(trader_mod, "validate_symbol", lambda *a, **k: None)
+    monkeypatch.setattr(
+        trader_mod, "order_routing_allowed", lambda cfg, confirmed_by=None: (True, "live_systematic")
+    )
+    monkeypatch.setattr(
+        trader_mod,
+        "get_signal_grid",
+        lambda *a, **k: {"tp1_mult": 1.0, "tp2_mult": 2.0, "tp3_mult": 3.0, "stop_mult": 2.0},
+    )
+    monkeypatch.setattr(trader_mod, "positions_get_by_magic", lambda *a, **k: [])
+
+    # account_info succeeds for the throttle + intent fingerprint calls, then
+    # fails on the per-leg request_result fingerprint calls.
+    orig = mock_mt5.account_info
+    state = {"calls": 0}
+
+    def account_info():
+        state["calls"] += 1
+        if state["calls"] <= 2:
+            return orig()
+        raise RuntimeError("terminal disconnected")
+
+    mock_mt5.account_info = account_info
+
+    # symbol geometry the order path reads
+    mock_mt5.set_symbol_info("XAUUSD", digits=2, point=0.01, trade_stops_level=10, trade_freeze_level=5)
+    mock_mt5.set_tick("XAUUSD", bid=2400.00, ask=2400.30)
+
+    class _Bot:
+        def __init__(self):
+            self.messages = []
+            self.alerts = []
+
+        def send_text_message(self, text):
+            self.messages.append(text)
+            return True
+
+        def send_alert_if_qualified(self, signal, asset_key):
+            self.alerts.append((asset_key, signal))
+            return True
+
+    class _RiskManager:
+        def can_trade(self, asset_key, groups_by_asset, singles_by_asset):
+            return True, ""
+
+        def record_trade_executed(self, asset_key):
+            pass
+
+    class _Throttle:
+        def can_trade(self, equity):
+            return True, ""
+
+        def risk_multiplier(self):
+            return 1.0
+
+    t = object.__new__(MultiAssetMT5Trader)
+    t.cfg = {
+        "assets": {
+            "XAUUSD": {
+                "enabled": True,
+                "mt5_symbol": "XAUUSD",
+                "ensemble": {"min_confidence_to_alert": 0.60},
+            }
+        },
+        "ensemble": {"min_confidence_to_alert": 0.60},
+        "execution": {"trading_blackout": {"enabled": False}},
+    }
+    t.magic_number = 777111
+    t.volume = 0.09
+    t.dry_run = False
+    t.bot = _Bot()
+    t.risk_manager = _RiskManager()
+    t.trade_throttle = _Throttle()
+    t.active_trades = {}
+    t.signal_features = {}
+    t.streak_losses = {}
+    t.execution_assets = {"XAUUSD"}
+    t.order_routing_enabled = True
+    t.strategy_identity = {"strategy_version": "sv-1", "config_hash": "cfg-hash-1"}
+    t.deployment_mode = types.SimpleNamespace(value="demo_systematic")
+    t.trade_db_path = "test-only.db"
+    t.corr_filter_cfg = {"enabled": False}
+    t.corr_threshold = 0.80
+    t.corr_matrix = {}
+    t.corr_history_bars = 500
+    t.corr_update_interval = 60
+    t.corr_last_update = time.time()
+    t._init_blackout()
+    t.saves = []
+    t._save_management_state = lambda: t.saves.append(1)
+    t._has_correlated_position = lambda asset_key, bias: False
+
+    signal = {
+        "bias": "long",
+        "confidence": 0.90,
+        "regime": "trend_up",
+        "step": 1.0,
+        "signal_id": "sig-1",
+        "timestamp_utc": 1_700_000_000,
+        "features": {"atr": 1.5},
+        "signal_state": None,
+    }
+
+    with caplog.at_level(logging.WARNING, logger=TRADER_LOG):
+        t.execute_signal("XAUUSD", signal)
+
+    # Order path completed: all 3 legs were sent despite the fact build failing.
+    assert mock_mt5.call_count("order_send") == 3
+    # The unguarded raise is gone: the request_result fact is skipped with a
+    # WARNING, not a crash that kills the remaining legs.
+    assert any("Order result fact skipped" in r.message for r in caplog.records)
 
 
 def _result(retcode=TRADE_RETCODE_DONE, order=555, deal=666, volume=0.09, price=2401.5, comment=""):

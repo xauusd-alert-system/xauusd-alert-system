@@ -801,41 +801,6 @@ class MultiAssetMT5Trader:
                             trade_data["tp2_hit"] = True
                     elif tp3 is not None and tp2_hit and current_price >= tp3:
                         self._close_partial_position(pos, tick.bid, pos.volume, "TP3 (20%)")
-
-                    # v4b TRAILING after TP2 (only if trailing_atr_mult set and not yet trailed)
-                    trailing_mult = self.trailing_atr_mult_by_symbol.get(symbol)
-                    if (
-                        trailing_mult is not None
-                        and tp1_hit
-                        and tp2_hit
-                        and not trade_data.get("trailing_active", False)
-                    ):
-                        try:
-                            atr_now = self._latest_causal_atr(trade_data.get("symbol", symbol))
-                            trail_dist = float(trailing_mult) * atr_now
-                            if pos.type == 0:
-                                new_sl = round(
-                                    pos.price_open + (current_price - pos.price_open) * 0.7, digits
-                                )  # conservative
-                                # Prefer dynamic trail using recent high
-                                if current_price > pos.price_open:
-                                    new_sl = round(current_price - trail_dist, digits)
-                                if new_sl > pos.sl:
-                                    min_sl = current_price - self._get_min_dist(symbol, tick, info)
-                                    if new_sl >= min_sl:
-                                        self._modify_sl_tp(pos, new_sl, pos.tp)
-                                        trade_data["trailing_active"] = True
-                            else:
-                                new_sl = round(pos.price_open - (pos.price_open - current_price) * 0.7, digits)
-                                if current_price < pos.price_open:
-                                    new_sl = round(current_price + trail_dist, digits)
-                                if new_sl < pos.sl:
-                                    min_sl = current_price + self._get_min_dist(symbol, tick, info)
-                                    if new_sl <= min_sl:
-                                        self._modify_sl_tp(pos, new_sl, pos.tp)
-                                        trade_data["trailing_active"] = True
-                        except Exception as exc:
-                            logger.error("[%s] trailing skipped: causal ATR unavailable: %s", symbol, exc)
                 else:
                     if tp1 is not None and not tp1_hit and current_price <= tp1:
                         close_vol = self._scaleout_volume(symbol, info, original_volume, 0.5)
@@ -853,6 +818,44 @@ class MultiAssetMT5Trader:
                             trade_data["tp2_hit"] = True
                     elif tp3 is not None and tp2_hit and current_price <= tp3:
                         self._close_partial_position(pos, tick.ask, pos.volume, "TP3 (20%)")
+
+                # v4b TRAILING after TP2 (both long and short; only if trailing_atr_mult
+                # set and not yet trailed). Now a sibling of the long/short partial-close
+                # ladders, so its if/else dispatches on pos.type correctly — shorts can
+                # reach the ATR trail instead of the old dead else branch.
+                trailing_mult = self.trailing_atr_mult_by_symbol.get(symbol)
+                if (
+                    trailing_mult is not None
+                    and tp1_hit
+                    and tp2_hit
+                    and not trade_data.get("trailing_active", False)
+                ):
+                    try:
+                        atr_now = self._latest_causal_atr(trade_data.get("symbol", symbol))
+                        trail_dist = float(trailing_mult) * atr_now
+                        if pos.type == 0:
+                            new_sl = round(
+                                pos.price_open + (current_price - pos.price_open) * 0.7, digits
+                            )  # conservative
+                            # Prefer dynamic trail using recent high
+                            if current_price > pos.price_open:
+                                new_sl = round(current_price - trail_dist, digits)
+                            if new_sl > pos.sl:
+                                min_sl = current_price - self._get_min_dist(symbol, tick, info)
+                                if new_sl >= min_sl:
+                                    self._modify_sl_tp(pos, new_sl, pos.tp)
+                                    trade_data["trailing_active"] = True
+                        else:
+                            new_sl = round(pos.price_open - (pos.price_open - current_price) * 0.7, digits)
+                            if current_price < pos.price_open:
+                                new_sl = round(current_price + trail_dist, digits)
+                            if new_sl < pos.sl:
+                                min_sl = current_price + self._get_min_dist(symbol, tick, info)
+                                if new_sl <= min_sl:
+                                    self._modify_sl_tp(pos, new_sl, pos.tp)
+                                    trade_data["trailing_active"] = True
+                    except Exception as exc:
+                        logger.error("[%s] trailing skipped: causal ATR unavailable: %s", symbol, exc)
 
         # W10: persist any management-state changes (partial closes, BE, trailing)
         # so a restart keeps managing open positions correctly.
@@ -891,6 +894,13 @@ class MultiAssetMT5Trader:
                 close_price = float(getattr(history_deals[-1], "price", close_price or 0.0) or close_price or 0.0)
             # pnl from history_deals (money, broker-adjusted) - most accurate.
             realized_pnl = total_pnl if history_deals else self.last_close_pnl.get(ticket, 0.0)
+            # D2 (phase 5 part 2): the effective realized close pnl is computed
+            # exactly once. Broker history wins; otherwise the cached
+            # last_close_pnl we recorded at close time; otherwise 0.0. The loss
+            # streak, the TradeThrottle and the Telegram header must all consume
+            # THIS value, so a cached loss actually advances the streak and reads
+            # "LOSS" instead of being displayed while the streak stays at zero.
+            effective_close_pnl = realized_pnl
             if close_price is None:
                 close_price = 0.0
             try:
@@ -920,15 +930,15 @@ class MultiAssetMT5Trader:
                 except Exception as e:
                     logger.error(f"Position context purge failed for #{ticket}: {e}")
 
-            if total_pnl < 0:
+            if effective_close_pnl < 0:
                 self.streak_losses[symbol] = self.streak_losses.get(symbol, 0) + 1
             else:
                 self.streak_losses[symbol] = 0
 
             # TradeThrottle: update cooldown/hard-stop counters
-            self.trade_throttle.on_trade_closed(total_pnl)
+            self.trade_throttle.on_trade_closed(effective_close_pnl)
 
-            status_emoji = "💵 PROFIT" if total_pnl >= 0 else "🛑 LOSS/BREAKEVEN"
+            status_emoji = "💵 PROFIT" if effective_close_pnl >= 0 else "🛑 LOSS/BREAKEVEN"
             leg_label = f" (Leg {trade_info.get('leg')})" if trade_info.get("leg") else ""
             close_msg = (
                 f"✅ [{symbol}] TRADE CLOSED #{ticket}{leg_label}\n"
@@ -1711,16 +1721,29 @@ class MultiAssetMT5Trader:
             )
             requested_at = now_ms()
             result = mt5.order_send(request)
-            self._enqueue_execution_fact(
-                self._request_result_fact(
-                    intent_id=intent.intent_id,
-                    asset_key=asset_key,
-                    broker_symbol=mt5_symbol,
-                    request=request,
-                    result=result,
-                    requested_at_ms=requested_at,
+            # D1 (phase 5 part 2): the request_result fact is built right after
+            # order_send. If mt5.account_info() is unavailable its fingerprint
+            # falls back to mode "unknown", which makes ExecutionEvent raise
+            # ValidationError. That must NOT abort the rest of the trading path
+            # (retcode handling, position registration, remaining-leg alerts) the
+            # way the unguarded call used to — mirror the intent-fact guard.
+            try:
+                self._enqueue_execution_fact(
+                    self._request_result_fact(
+                        intent_id=intent.intent_id,
+                        asset_key=asset_key,
+                        broker_symbol=mt5_symbol,
+                        request=request,
+                        result=result,
+                        requested_at_ms=requested_at,
+                    )
                 )
-            )
+            except Exception as exc:
+                logger.warning(
+                    "[%s] Order result fact skipped (account_mode unknown / fact build failed): %s",
+                    asset_key,
+                    exc,
+                )
             if result.retcode != mt5.TRADE_RETCODE_DONE:
                 self._append_trade_event(
                     "order_rejected",
