@@ -733,5 +733,60 @@ def save_model(model, feature_cols: list, path: str, metadata: dict | None = Non
     joblib.dump(bundle, path)
 
 
+class LogitMarginEstimator(BaseEstimator, ClassifierMixin):
+    """Expose a binary classifier's log-odds margin as ``decision_function``.
+
+    Canonical Platt scaling fits the sigmoid ``1/(1+exp(a*x+b))`` on the
+    log-odds margin ``logit(p) = ln(p/(1-p))``. XGBoost exposes no
+    ``decision_function``, so sklearn's ``_SigmoidCalibration`` was historically
+    fed raw probabilities (already squashed near 0.5), which collapsed the
+    calibrated spread and killed the minority direction (audit 2026-08-25).
+    Wrapping the base classifier with this estimator restores the canonical
+    input space.
+
+    IMPORTANT (artifact compatibility): production joblib bundles pickle this
+    class by reference (module path ``model.trainer.LogitMarginEstimator``);
+    removing or renaming it breaks unpickling of every previously saved model.
+    """
+
+    def __init__(self, estimator=None, base_estimator=None):
+        self.estimator = base_estimator if base_estimator is not None else estimator
+
+    @property
+    def base_estimator(self):
+        return self.estimator_
+
+    def fit(self, X, y, **kwargs):
+        self.estimator.fit(X, y, **kwargs)
+        self.estimator_ = self.estimator
+        return self
+
+    @property
+    def classes_(self):
+        if hasattr(self, "classes_ref") and self.classes_ref is not None:
+            return self.classes_ref
+        est = getattr(self, "estimator_", None) or self.estimator
+        return est.classes_
+
+    def _margin(self, proba):
+        p = np.clip(np.asarray(proba, dtype=float), 1e-6, 1 - 1e-6)
+        return np.log(p / (1 - p))
+
+    def decision_function(self, X):
+        """Return the raw log-odds margin of the positive class."""
+        proba = self._inner().predict_proba(X)
+        return self._margin(proba[:, 1])
+
+    def predict_proba(self, X):
+        return self._inner().predict_proba(X)
+
+    def predict(self, X):
+        return self._inner().predict(X)
+
+    def _inner(self):
+        """Fitted estimator if present, otherwise the unfitted template."""
+        return getattr(self, "estimator_", None) or self.estimator
+
+
 def load_model(path: str):
     return joblib.load(path)

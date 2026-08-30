@@ -81,3 +81,16 @@ UI 3.7 flsah updated v3/ui_server.log
 
 # Forex trial-window heartbeat
 logs/trial_window_heartbeat.txt
+# Runtime / generated
+.hypothesis/
+.workbuddy-ai/
+artifacts/
+results/
+coverage.json
+ruff_*.txt
+data/ohlcv.db
+results_baseline_*.csv
+
+# Local launchers with Telegram tokens
+scripts/run_trader.bat
+scripts/run_scanner.bat

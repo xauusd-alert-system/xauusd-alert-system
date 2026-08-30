@@ -1,3 +1,4 @@
 [tool.pytest.ini_options]
 pythonpath = [".", "simulation/mt5_shim"]
 testpaths = ["."]
+addopts = "--ignore=logs/ws_live_test.py"
