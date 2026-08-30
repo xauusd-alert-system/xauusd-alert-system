@@ -51,6 +51,9 @@ class StrategyConfig:
     max_atr_pct: Optional[float] = None    # volatility filter: maximum ATR %
     max_climax_volume_ratio: Optional[float] = None  # volume spike filter: max single pullback candle vol ratio
     slippage_cushion_cents: float = 0.0    # adaptive sizing: extra slippage buffer
+    use_adaptive_vwap_tolerance: bool = True
+    atr_tolerance_multiplier: float = 0.1  # 10% of ATR as tolerance
+    max_impulse_counter_moves: int = 1     # allow 1 counter-move candle in impulse
 
     @classmethod
     def from_cfg(cls, cfg: dict) -> "StrategyConfig":
@@ -62,7 +65,7 @@ class StrategyConfig:
             min_impulse_volume_ratio=float(s.get("min_impulse_volume_ratio", 1.5)),
             max_pullback_volume_ratio=float(s.get("max_pullback_volume_ratio", 0.90)),
             vwap_touch_tolerance_pct=float(s.get("vwap_touch_tolerance_pct", 0.10)),
-            stop_buffer=float(s.get("stop_buffer_cents", 0.03)),
+            stop_buffer=float(s.get("stop_buffer", s.get("stop_buffer_cents", 0.03))),
             min_room_to_level_r=float(s.get("min_room_to_level_r", 1.8)),
             tp1_r=float(s.get("tp1_r", 1.0)),
             tp2_r=float(s.get("tp2_r", 2.0)),
@@ -75,6 +78,9 @@ class StrategyConfig:
             max_atr_pct=float(s["max_atr_pct"]) if "max_atr_pct" in s and s["max_atr_pct"] is not None else None,
             max_climax_volume_ratio=float(s["max_climax_volume_ratio"]) if "max_climax_volume_ratio" in s and s["max_climax_volume_ratio"] is not None else None,
             slippage_cushion_cents=float(s.get("slippage_cushion_cents", 0.0)),
+            use_adaptive_vwap_tolerance=bool(s.get("use_adaptive_vwap_tolerance", True)),
+            atr_tolerance_multiplier=float(s.get("atr_tolerance_multiplier", 0.1)),
+            max_impulse_counter_moves=int(s.get("max_impulse_counter_moves", 1)),
         )
 
 
@@ -95,6 +101,20 @@ def _avg_vol_ratio(bars: List[Bar], idxs: List[int], ref_avg: float) -> float:
     if not idxs or ref_avg <= 0:
         return 0.0
     return sum(bars[i].volume for i in idxs) / len(idxs) / ref_avg
+
+
+def _effective_vwap_tol(cfg: StrategyConfig, bars5: List[Bar]) -> float:
+    """Calculate effective VWAP touch tolerance (adaptive or fixed).
+
+    When adaptive is enabled, tolerance = max(config 0.10%, ATR% * multiplier).
+    """
+    if cfg.use_adaptive_vwap_tolerance and len(bars5) >= 6:
+        from usstocks.indicators import calculate_atr
+        atr_val = calculate_atr(bars5, period=min(14, len(bars5) - 1))
+        atr_pct = (atr_val / bars5[-1].close * 100.0) if bars5[-1].close > 0 else 0.0
+        adaptive_tol_pct = max(cfg.vwap_touch_tolerance_pct, atr_pct * cfg.atr_tolerance_multiplier)
+        return adaptive_tol_pct / 100.0
+    return cfg.vwap_touch_tolerance_pct / 100.0
 
 
 def _find_structure(bars: List[Bar], vwap: List[float], cfg: StrategyConfig,
@@ -121,11 +141,13 @@ def _find_structure(bars: List[Bar], vwap: List[float], cfg: StrategyConfig,
                 continue
             window = bars[w_start:j + 1]
 
-            # --- impulse: directed closes, cumulative move, volume expansion ---
+            # --- impulse: directed closes (with tolerance for counter-moves), cumulative move, volume expansion ---
             closes = [b.close for b in window]
-            directed = all(
-                (closes[k + 1] > closes[k]) if up else (closes[k + 1] < closes[k])
-                for k in range(len(closes) - 1))
+            counter_moves = sum(
+                1 for k in range(len(closes) - 1)
+                if (closes[k + 1] > closes[k]) != up
+            )
+            directed = counter_moves <= cfg.max_impulse_counter_moves
             if not directed:
                 continue
             pre_avg = average_volume(bars, w_start)
@@ -160,8 +182,8 @@ def _find_structure(bars: List[Bar], vwap: List[float], cfg: StrategyConfig,
             if net_retrace <= 0:
                 continue
 
-            # --- VWAP touch within tolerance during pullback ---
-            tol = cfg.vwap_touch_tolerance_pct / 100.0
+            # --- VWAP touch within tolerance during pullback (adaptive) ---
+            tol = _effective_vwap_tol(cfg, bars)
             touched = any(
                 bars[i].low <= vwap[i] * (1 + tol) if up
                 else bars[i].high >= vwap[i] * (1 - tol)
@@ -189,7 +211,9 @@ def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
              extra_levels: Optional[List[float]] = None,
              risk_per_trade_usd: float = 10.0,
              max_notional_usd: float = 5000.0,
-             news_blocked: bool = False) -> Evaluation:
+             news_blocked: bool = False,
+             vwap_cache_fn=None,
+             or_cache_fn=None) -> Evaluation:
     """Run the full checklist for one direction; never raises on data gaps."""
     passed: List[str] = []
     failed: List[str] = []
@@ -222,7 +246,14 @@ def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
         vol_ok = atr_pct >= cfg.min_atr_pct and (cfg.max_atr_pct is None or atr_pct <= cfg.max_atr_pct)
         check("VOLATILITY_FILTER", vol_ok, f"ATR {atr_pct:.2f}% (min={cfg.min_atr_pct:.2f}%, max={cfg.max_atr_pct})")
 
-    vwap = session_vwap_series(bars5)
+    # VWAP with optional caching callback
+    if vwap_cache_fn is not None:
+        try:
+            vwap = vwap_cache_fn(bars5)
+        except Exception:
+            vwap = session_vwap_series(bars5)
+    else:
+        vwap = session_vwap_series(bars5)
     bvwap = session_vwap_series(bench5) if bench5 else []
     ci = len(bars5) - 1
     confirm_bar = bars5[ci]
@@ -257,7 +288,7 @@ def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
     check("PULLBACK_VOLUME", st["pb_vr"] <= cfg.max_pullback_volume_ratio,
           f"x{st['pb_vr']:.2f}")
 
-    tol = cfg.vwap_touch_tolerance_pct / 100.0
+    tol = _effective_vwap_tol(cfg, bars5)
     touched = any(
         bars5[i].low <= vwap[i] * (1 + tol) if up
         else bars5[i].high >= vwap[i] * (1 - tol)
@@ -271,7 +302,13 @@ def evaluate(symbol: str, bars_1m: List[Bar], bench_1m: List[Bar], *,
     check("STRUCTURE_HL_LH", higher_low,
           f"{'HL' if up else 'LH'} {pb_extreme:.2f} vs swing {swing_extreme:.2f}")
 
-    or_mid = opening_range_mid(bars5, cfg.opening_range_minutes)
+    if or_cache_fn is not None:
+        try:
+            or_mid = or_cache_fn(bars5, cfg.opening_range_minutes)
+        except Exception:
+            or_mid = opening_range_mid(bars5, cfg.opening_range_minutes)
+    else:
+        or_mid = opening_range_mid(bars5, cfg.opening_range_minutes)
     or_ok = or_mid is not None and (
         confirm_bar.close >= or_mid if up else confirm_bar.close <= or_mid)
     check("OPENING_RANGE_FILTER", or_ok,

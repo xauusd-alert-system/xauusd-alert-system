@@ -111,6 +111,7 @@ class RiskState:
     active_symbol: Optional[str] = None     # open position OR pending accepted signal
     day_stopped: bool = False
     has_partial_fill: bool = False
+    last_loss_time: Optional[datetime] = None  # in-memory only; resets on restart
 
 
 @dataclass

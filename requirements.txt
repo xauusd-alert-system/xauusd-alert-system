@@ -47,3 +47,4 @@ MetaTrader5==5.0.6070; platform_system == "Windows"
 # UTEX data feed + challenge browser automation (challenge/browser.py,
 # challenge/manual/alerter.py). Declared here: it was an undeclared dependency.
 playwright==1.62.0
+hypothesis==6.121.1  # property-based tests for sizing/risk engine

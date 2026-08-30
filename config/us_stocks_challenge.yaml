@@ -31,6 +31,7 @@ risk:
   personal_daily_stop_usd: -20.0
   max_trades_per_day: 2
   max_consecutive_losses: 2
+  consecutive_losses_cooldown_minutes: 30
   daily_profit_lock_usd: 20.0
   no_new_entries_minutes_before_close: 25
   force_flat_alert_minutes_before_close: 30
@@ -46,6 +47,9 @@ scanner:
   max_watchlist_size: 3
   benchmark_symbols: [SPY, QQQ]
   poll_seconds: 60
+  max_parallel_workers: 3
+  cache_ttl_seconds: 30
+  warn_latency_threshold_s: 2.0
 
 strategy:
   name: vwap_pullback_continuation
@@ -58,7 +62,10 @@ strategy:
   min_impulse_volume_ratio: 1.5
   max_pullback_volume_ratio: 0.90
   vwap_touch_tolerance_pct: 0.10
-  stop_buffer_cents: 0.03
+  use_adaptive_vwap_tolerance: true
+  atr_tolerance_multiplier: 0.1
+  max_impulse_counter_moves: 1
+  stop_buffer: 0.03
   min_room_to_level_r: 1.8
   tp1_r: 1.0
   tp2_r: 2.0

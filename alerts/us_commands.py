@@ -213,8 +213,17 @@ class UsCommandsController:
             self.state.trades_taken += 1
             if amount > 0:
                 self.state.consecutive_losses = 0
+                # Clear cooldown on win
+                if hasattr(self.state, "last_loss_time"):
+                    self.state.last_loss_time = None
             elif amount < 0:
                 self.state.consecutive_losses += 1
+                if hasattr(self.state, "last_loss_time"):
+                    try:
+                        from datetime import datetime
+                        self.state.last_loss_time = datetime.now().astimezone()
+                    except Exception:
+                        pass
             row = self.journal.latest_signal(
                 symbol=self.state.active_symbol or None)
             if row is not None:

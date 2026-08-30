@@ -83,7 +83,7 @@ def test_allow_on_clean_state():
 
 
 def test_personal_daily_stop_blocks():
-    d = _allow(_state(realized_pnl_usd=-15.0, unrealized_pnl_usd=-5.5))
+    d = _allow(_state(realized_pnl_usd=-15.0, unrealized_pnl_usd=-5.5, active_symbol="AMD"))
     assert not d.allowed and d.code == "PERSONAL_DAILY_STOP"
 
 

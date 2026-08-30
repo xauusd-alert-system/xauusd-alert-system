@@ -256,7 +256,7 @@ def test_two_confirmed_losses_block_next_scan(env):
     assert sigs == []                        # engine now denies every entry
     codes = [r["code"] for r in env["journal"]._conn.execute(
         "SELECT code FROM us_risk_events")]
-    assert "MAX_CONSECUTIVE_LOSSES" in codes
+    assert any(c in ("MAX_CONSECUTIVE_LOSSES", "MAX_CONSECUTIVE_LOSSES_COOLDOWN") for c in codes)
 
 
 def test_runner_persists_sent_signal_to_journal():

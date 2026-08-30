@@ -22,12 +22,14 @@ class RiskEngine:
                  max_trades_per_day: int = 2,
                  max_consecutive_losses: int = 2,
                  daily_profit_lock_usd: float = 20.0,
-                 no_new_entries_minutes_before_close: float = 25.0):
+                 no_new_entries_minutes_before_close: float = 25.0,
+                 consecutive_losses_cooldown_minutes: float = 30.0):
         self.personal_daily_stop_usd = personal_daily_stop_usd
         self.max_trades_per_day = max_trades_per_day
         self.max_consecutive_losses = max_consecutive_losses
         self.daily_profit_lock_usd = daily_profit_lock_usd
         self.no_new_entries_minutes_before_close = no_new_entries_minutes_before_close
+        self.consecutive_losses_cooldown_minutes = consecutive_losses_cooldown_minutes
 
     @classmethod
     def from_cfg(cls, cfg: dict) -> "RiskEngine":
@@ -39,13 +41,19 @@ class RiskEngine:
             daily_profit_lock_usd=float(risk.get("daily_profit_lock_usd", 20.0)),
             no_new_entries_minutes_before_close=float(
                 risk.get("no_new_entries_minutes_before_close", 25)),
+            consecutive_losses_cooldown_minutes=float(
+                risk.get("consecutive_losses_cooldown_minutes", 30.0)),
         )
 
     def evaluate(self, state: RiskState, now: datetime,
                  session_close_at: datetime,
                  symbol: Optional[str] = None) -> RiskDecision:
         """Return the first blocking rule (deterministic order below)."""
-        total_pnl = state.realized_pnl_usd + state.unrealized_pnl_usd
+        # Only include unrealized PnL if there's an active position (signal-only: no position otherwise)
+        if getattr(state, "active_symbol", None) and getattr(state, "unrealized_pnl_usd", 0) != 0:
+            total_pnl = state.realized_pnl_usd + state.unrealized_pnl_usd
+        else:
+            total_pnl = state.realized_pnl_usd
 
         if state.day_stopped:
             return RiskDecision(False, "DAY_STOPPED",
@@ -64,9 +72,23 @@ class RiskEngine:
                 False, "MAX_TRADES_REACHED",
                 f"{state.trades_taken}/{self.max_trades_per_day} trades today")
         if state.consecutive_losses >= self.max_consecutive_losses:
-            return RiskDecision(
-                False, "MAX_CONSECUTIVE_LOSSES",
-                f"{state.consecutive_losses} losses in a row")
+            # Cooldown: allow trading after N minutes, instead of blocking whole day
+            ll_time = getattr(state, "last_loss_time", None)
+            if ll_time is not None:
+                try:
+                    cooldown_elapsed = (now - ll_time).total_seconds() / 60.0
+                except Exception:
+                    cooldown_elapsed = 0.0
+                if cooldown_elapsed < self.consecutive_losses_cooldown_minutes:
+                    return RiskDecision(
+                        False, "MAX_CONSECUTIVE_LOSSES_COOLDOWN",
+                        f"{state.consecutive_losses} losses, "
+                        f"cooldown {cooldown_elapsed:.0f}/{self.consecutive_losses_cooldown_minutes:.0f} min")
+                # else: cooldown elapsed -> allow through, keep count until win resets it
+            else:
+                return RiskDecision(
+                    False, "MAX_CONSECUTIVE_LOSSES",
+                    f"{state.consecutive_losses} losses in a row")
         if state.realized_pnl_usd >= self.daily_profit_lock_usd:
             return RiskDecision(
                 False, "DAILY_PROFIT_LOCK",

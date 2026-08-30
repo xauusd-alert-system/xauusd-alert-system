@@ -177,9 +177,74 @@ def calculate_atr(bars: List[Bar], period: int = 14) -> float:
     return sum(trs[-calc_period:]) / float(calc_period)
 
 
+def anchored_vwap(bars: List[Bar], anchor_idx: int) -> List[float]:
+    """
+    Calculate VWAP anchored to a specific bar (e.g., swing low/high).
+    Util for future strategy variants (not integrated in evaluate yet).
+
+    Args:
+        bars: List of closed bars
+        anchor_idx: Index of the anchor bar (VWAP starts here)
+
+    Returns:
+        List of VWAP values from anchor to end
+    """
+    if anchor_idx < 0 or anchor_idx >= len(bars):
+        raise ValueError(f"Invalid anchor_idx: {anchor_idx}")
+    cumulative_pv = 0.0
+    cumulative_v = 0.0
+    vwap: List[float] = []
+    for i in range(anchor_idx, len(bars)):
+        bar = bars[i]
+        cumulative_pv += bar.typical_price * max(bar.volume, 0.0)
+        cumulative_v += max(bar.volume, 0.0)
+        if cumulative_v > 1e-9:
+            vwap.append(cumulative_pv / cumulative_v)
+        else:
+            vwap.append(bar.typical_price)
+    return vwap
+
+
+def find_swing_low(bars: List[Bar], lookback: int = 20) -> int:
+    """Find the index of the lowest low in the last N bars."""
+    if not bars:
+        raise ValueError("bars must not be empty")
+    if lookback <= 0:
+        raise ValueError("lookback must be positive")
+    if len(bars) < lookback:
+        lookback = len(bars)
+    start_idx = len(bars) - lookback
+    min_low = float("inf")
+    min_idx = start_idx
+    for i in range(start_idx, len(bars)):
+        if bars[i].low < min_low:
+            min_low = bars[i].low
+            min_idx = i
+    return min_idx
+
+
+def find_swing_high(bars: List[Bar], lookback: int = 20) -> int:
+    """Find the index of the highest high in the last N bars."""
+    if not bars:
+        raise ValueError("bars must not be empty")
+    if lookback <= 0:
+        raise ValueError("lookback must be positive")
+    if len(bars) < lookback:
+        lookback = len(bars)
+    start_idx = len(bars) - lookback
+    max_high = float("-inf")
+    max_idx = start_idx
+    for i in range(start_idx, len(bars)):
+        if bars[i].high > max_high:
+            max_high = bars[i].high
+            max_idx = i
+    return max_idx
+
+
 __all__ = [
     "NY", "SESSION_OPEN", "SESSION_CLOSE", "DEFAULT_RANGE_MINUTES", "ensure_ny",
     "is_regular_session", "filter_regular_session", "session_open_dt",
     "drop_unclosed_1m", "aggregate_to_5m", "session_vwap_series", "opening_range",
     "opening_range_mid", "average_volume", "volume_ratio", "minutes_until", "calculate_atr",
+    "anchored_vwap", "find_swing_low", "find_swing_high",
 ]

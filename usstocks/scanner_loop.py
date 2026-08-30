@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Protocol
 
 from config.loader import load_config
@@ -71,6 +73,11 @@ class SignalOnlyRunner:
         self.on_event = on_event
         self.warn_latency_threshold_s = float(
             cfg.get("scanner", {}).get("warn_latency_threshold_s", 2.0))
+        self.max_workers = int(cfg.get("scanner", {}).get("max_parallel_workers", 3))
+        self._cache_ttl_seconds = float(cfg.get("scanner", {}).get("cache_ttl_seconds", 30.0))
+        self._vwap_cache: Dict[str, tuple] = {}
+        self._or_cache: Dict[str, tuple] = {}
+        self._cache_lock = threading.Lock()
         self.metrics: Dict[str, float] = {
             "last_scan_duration_ms": 0.0,
             "total_scans": 0,
@@ -88,6 +95,39 @@ class SignalOnlyRunner:
             self.benchmark_cache[bench] = (
                 self.provider.get_bars(bench, 600) if bid else [])
         return self.benchmark_cache[bench]
+
+    def _get_vwap_cached(self, symbol: str, bars: List[Bar], session_date: str) -> List[float]:
+        """Get VWAP with caching (invalidate on new bar or TTL)."""
+        from usstocks.indicators import session_vwap_series
+        cache_key = f"{symbol}_{session_date}"
+        bars_hash = hash(tuple((b.ts, b.close, b.volume) for b in bars[-10:]))
+        now_ts = time.time()
+        with self._cache_lock:
+            if cache_key in self._vwap_cache:
+                cached_hash, cached_vwap, cached_time = self._vwap_cache[cache_key]
+                if cached_hash == bars_hash and (now_ts - cached_time) < self._cache_ttl_seconds:
+                    return cached_vwap
+        vwap = session_vwap_series(bars)
+        with self._cache_lock:
+            self._vwap_cache[cache_key] = (bars_hash, vwap, time.time())
+        return vwap
+
+    def _get_or_mid_cached(self, symbol: str, bars: List[Bar], session_date: str,
+                           opening_range_minutes: int) -> Optional[float]:
+        """Get OR mid with caching."""
+        from usstocks.indicators import opening_range_mid
+        cache_key = f"{symbol}_{session_date}_{opening_range_minutes}"
+        bars_hash = hash(tuple((b.ts, b.close) for b in bars[:3]))
+        now_ts = time.time()
+        with self._cache_lock:
+            if cache_key in self._or_cache:
+                cached_hash, cached_or, cached_time = self._or_cache[cache_key]
+                if cached_hash == bars_hash and (now_ts - cached_time) < self._cache_ttl_seconds:
+                    return cached_or
+        or_mid = opening_range_mid(bars, opening_range_minutes)
+        with self._cache_lock:
+            self._or_cache[cache_key] = (bars_hash, or_mid, time.time())
+        return or_mid
 
     def _gate(self, now, symbol: str) -> bool:
         from usstocks.models import RiskEvent
@@ -119,50 +159,110 @@ class SignalOnlyRunner:
     # -- core --------------------------------------------------------------
 
     def scan_once(self, now) -> List[TradeSignal]:
-        """One scan cycle over the watchlist; sends at most one signal."""
+        """One scan cycle over the watchlist; sends at most one signal.
+
+        Parallelizes per-symbol evaluation (network + strategy) while keeping
+        risk gate serial for state consistency. Single-active-position rule
+        enforced: first ALLOW wins.
+        """
         if not self.signals_enabled:
             logger.info("signals disabled via /us_signals off — skip cycle")
             return []
         start_t = time.perf_counter()
         signals: List[TradeSignal] = []
-        for sym in self.watchlist:
+
+        # Prefetch benchmarks serially to avoid cache races
+        unique_benches = {self._benchmark_for(s) for s in self.watchlist if s in self.symbol_ids}
+        for bench in unique_benches:
+            try:
+                self._bench_bars(bench)
+            except Exception as e:
+                logger.error("benchmark %s prefetch error %s", bench, e)
+
+        # Cache session_date for VWAP/OR caching
+        session_date = self.state.session_date or now.date().isoformat()
+
+        def evaluate_symbol(sym: str):
             sym_start = time.perf_counter()
             if sym not in self.symbol_ids:
                 logger.warning("%s: нет symbolId в symbols.json — пропуск", sym)
-                continue
+                return None
             try:
                 bars = self.provider.get_bars(sym, 600)
-                bench = self._bench_bars(self._benchmark_for(sym))
+                # Use prefetched benchmark if available
+                bench_sym = self._benchmark_for(sym)
+                bench = self.benchmark_cache.get(bench_sym, [])
+                if not bench:
+                    bench = self._bench_bars(bench_sym)
             except Exception as e:
                 logger.error("%s: provider error %s", sym, e)
-                continue
-
-            ev_long = evaluate(sym, bars, bench, side="long",
-                               in_watchlist=True, cfg=self.strategy_cfg,
-                               asof=now,
-                               risk_per_trade_usd=self.risk_per_trade_usd,
-                               max_notional_usd=self.max_notional_usd)
-            ev_short = evaluate(sym, bars, bench, side="short",
-                                in_watchlist=True, cfg=self.strategy_cfg,
-                                asof=now,
-                                risk_per_trade_usd=self.risk_per_trade_usd,
-                                max_notional_usd=self.max_notional_usd)
+                return None
+            try:
+                ev_long = evaluate(
+                    sym, bars, bench, side="long",
+                    in_watchlist=True, cfg=self.strategy_cfg,
+                    asof=now,
+                    risk_per_trade_usd=self.risk_per_trade_usd,
+                    max_notional_usd=self.max_notional_usd,
+                    vwap_cache_fn=lambda b, s=sym: self._get_vwap_cached(s, b, session_date),
+                    or_cache_fn=lambda b, m, s=sym: self._get_or_mid_cached(s, b, session_date, m),
+                )
+                ev_short = evaluate(
+                    sym, bars, bench, side="short",
+                    in_watchlist=True, cfg=self.strategy_cfg,
+                    asof=now,
+                    risk_per_trade_usd=self.risk_per_trade_usd,
+                    max_notional_usd=self.max_notional_usd,
+                    vwap_cache_fn=lambda b, s=sym: self._get_vwap_cached(s, b, session_date),
+                    or_cache_fn=lambda b, m, s=sym: self._get_or_mid_cached(s, b, session_date, m),
+                )
+            except Exception as e:
+                logger.error("%s: evaluation error %s", sym, e)
+                return None
             sym_elapsed = time.perf_counter() - sym_start
             if sym_elapsed > self.warn_latency_threshold_s:
                 logger.warning("Latency alert: %s evaluation took %.3fs (> %.1fs threshold)",
                                sym, sym_elapsed, self.warn_latency_threshold_s)
-
             best = max([ev_long, ev_short], key=lambda e: (e.ok, -len(e.failed)))
             logger.info("%s long failed=%s | short failed=%s",
                         sym, ev_long.failed, ev_short.failed)
+            return (sym, best, sym_elapsed)
+
+        max_workers = min(self.max_workers, len(self.watchlist)) if self.watchlist else 1
+        # Use parallel only when beneficial
+        if max_workers <= 1 or len(self.watchlist) <= 1:
+            # Sequential fallback (preserves order)
+            results = []
+            for sym in self.watchlist:
+                r = evaluate_symbol(sym)
+                if r is not None:
+                    results.append(r)
+        else:
+            # Parallel execution
+            futures = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for sym in self.watchlist:
+                    futures[executor.submit(evaluate_symbol, sym)] = sym
+                results = []
+                for future in as_completed(futures):
+                    sym = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        logger.error("%s: evaluation failed: %s", sym, e)
+                        continue
+                    if result is not None:
+                        results.append(result)
+            # Preserve watchlist order for deterministic gate priority
+            order = {s: i for i, s in enumerate(self.watchlist)}
+            results.sort(key=lambda x: order.get(x[0], 999))
+
+        for sym, best, _elapsed in results:
             if not best.ok:
                 continue
-
             signal = best.signal
             if not self._gate(now, sym):
                 continue
-            # Single-active-position rule is part of the engine; reaching here
-            # means we may announce ONE trade — mark active and stop scanning.
             signals.append(signal)
             self.state.active_symbol = sym
             self.notifier.send_signal(signal)
