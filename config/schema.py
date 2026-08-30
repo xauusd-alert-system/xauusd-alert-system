@@ -294,6 +294,9 @@ LEGACY_TOP_LEVEL_SECTIONS = {
     "strategy",
     "trade_profiles",
     "validation",
+    # Rolling hold-out lock policy (Step 2, 2026-08-30): preregistered
+    # cadence/step/tolerance/baseline constants for the conscious lock shift.
+    "holdout_roll",
 }
 
 KNOWN_TOP_LEVEL_KEYS = set(SECTION_MODELS) | set(SUBSECTION_MODELS) | LEGACY_TOP_LEVEL_SECTIONS

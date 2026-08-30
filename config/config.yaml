@@ -897,6 +897,42 @@ validation:
   #   python -m scripts.build_provenance_manifest --asset XAUUSD --timeframe M15 \
   #       --broker <BROKER> --broker-symbol GOLD --out config/provenance/xauusd_m15.json
   require_provenance_manifest: false
+
+
+# ===== ROLLING HOLD-OUT (Rolling Holdout policy, Step 2, 2026-08-30) =====
+# When the nightly retrain is frozen on data up to validation.locked_holdout.start
+# (see scripts/overnight.py post-fix), the production model silently ages on
+# the live-forward accumulation. Shifting the lock must be a CONSCIOUS,
+# PREREGISTERED, JOURNALLED act - not a silent edit.
+#
+# These are the preregistered policy constants. The gate logic in
+# scripts/holdout_roll.py reads them from here; there are NO bare magic numbers
+# in the gate code. Cadence/step/tolerance are fixed up front (no fitting to
+# outcomes) and only changed by an explicit, reviewed config edit.
+holdout_roll:
+  # The lock start this policy was bootstrapped from. The CI guard
+  # (scripts/check_holdout_roll.py) treats this as the acceptable config value
+  # when the journal is empty, so an out-of-band reset to the original lock is
+  # not flagged as drift.
+  baseline_start: "2026-08-08"
+
+  # How often a lock shift MAY be proposed (days). Preregistered: ~monthly.
+  cadence_days: 30
+  # How far the lock advances each shift (days). Preregistered: +14d, leaving a
+  # 14-day overlap so each new candidate is still validated partly on already
+  # released data before the next shift.
+  step_days: 14
+
+  # Gate comparison against the incumbent (current production model), via
+  # deploy_guard.is_improvement. Same metric contract as deploy_guard.
+  primary_metric: expectancy
+  fallback_metrics: [sharpe_ratio, win_rate, total_pnl]
+  # Allowed degradation of the candidate vs the incumbent on the released slice.
+  # 0.0 = the candidate must be at least as good (strictly conservative).
+  tolerance: 0.0
+  # Minimum OOS trades on the released slice for the comparison to be trusted.
+  # A candidate (or incumbent) with fewer trades NEVER drives a lock shift.
+  released_min_trades: 20
   provenance_manifest_path: null
 
 # ===== TRADE PROFILES (TradeGroupSpec v1, ТЗ §8/§9) =====

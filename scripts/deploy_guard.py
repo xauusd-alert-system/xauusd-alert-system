@@ -67,7 +67,7 @@ from model.trainer import (
     save_model,
     train_model,
 )
-from scripts.train_mt5 import build_full_df
+from scripts.train_mt5 import build_full_df, locked_holdout_end_date, truncate_raw_before
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("deploy_guard")
@@ -451,6 +451,19 @@ def guard_asset(cfg: dict, asset_key: str, deployed_path: str) -> dict:
             "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
         }
 
+    # R2 fix (2026-08-30): the deploy guard previously validated the freshly
+    # retrained candidate against the incumbent on the FULL backfilled history,
+    # which included the locked hold-out window (validation.locked_holdout.start)
+    # - i.e. it scored live-forward data RESEARCH is forbidden to look at. The
+    # incumbent is a static file and the candidate is trained per fold; neither
+    # side may be scored on data at/after the lock. Truncate the RAW frame
+    # (before feature building) to strictly-before the cutoff. `end_date` is
+    # normally validation.locked_holdout.start; an --end-date override (below)
+    # rewrites that in cfg so this stays the single truncation point.
+    end_date = locked_holdout_end_date(cfg)
+    if end_date is not None:
+        raw = truncate_raw_before(raw, end_date, asset_key)
+
     df = build_full_df(raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe)
     df["timestamp_utc"] = df["timestamp_utc"].astype("int64")
     windows = generate_windows(df, train_days, test_days, step_days)
@@ -662,6 +675,13 @@ def main(argv=None) -> int:
         "--check", action="store_true", help="Validate newly retrained models and roll back regressions."
     )
     group.add_argument("--status", action="store_true", help="Print the deploy-guard configuration.")
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Override the evaluation cutoff (YYYY-MM-DD). Default: "
+        "validation.locked_holdout.start. Backwards compatible; used for ad-hoc "
+        "validation ranges without editing config. (R2 fix 2026-08-30)",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config()
@@ -687,6 +707,17 @@ def main(argv=None) -> int:
         return 0
 
     # --check
+    # R2 fix (2026-08-30): an explicit --end-date overrides the lock cutoff for
+    # this run only (rewritten into cfg in-memory; config on disk is untouched).
+    # guard_asset reads validation.locked_holdout.start as its truncation point,
+    # so this single edit is enough to keep it from scoring post-cutoff data.
+    if args.end_date:
+        cfg.setdefault("validation", {})["locked_holdout"] = {
+            "enabled": True,
+            "start": args.end_date,
+            "end": None,
+        }
+
     # Pre-flight: configuration consistency (2026-08-27)
     # execution.enabled_assets must be a strict subset of assets.*.enabled;
     # a phantom asset in the execution list silently produces trade proposals
