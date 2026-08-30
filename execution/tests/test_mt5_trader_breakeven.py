@@ -877,19 +877,24 @@ def test_close_detector_reports_a_loss_and_advances_the_streak(mock_mt5, sinks):
 
 
 def test_close_detector_falls_back_to_the_cached_pnl_only_for_reporting(mock_mt5, sinks):
-    """QUIRK (pinned, not endorsed): with no broker history the loss streak and
-    the throttle are driven by ``total_pnl`` (0.0), while the Telegram message
-    and the executed_trades row report ``last_close_pnl``. So a cached loss is
-    shown to the operator but does NOT advance the streak.
+    """FIXED (D2, phase 5 part 2): with no broker history the cached
+    last_close_pnl is the single source of truth for the realized close pnl.
 
-    execution/mt5_trader.py is owner-WIP in this phase and must not be
-    modified, so this is documented rather than fixed.
+    It now drives the loss streak AND the TradeThrottle (previously both were
+    fed total_pnl == 0.0 and silently ignored the cached loss) and stays
+    consistent with the Telegram header + the executed_trades row (which always
+    reported it). So a cached loss advances the streak, trips the throttle and
+    reads "LOSS" — not "PROFIT" with a zeroed streak.
     """
     t = _be_trader({1: _legacy_trade(1)}, last_close_pnl={1: -7.5})
     t.check_and_move_breakeven()
-    assert t.trade_throttle.closed_pnls == [pytest.approx(0.0)]
-    assert t.streak_losses[SYMBOL] == 0
+    # cached loss now flows into the throttle (previously [0.0])
+    assert t.trade_throttle.closed_pnls == [pytest.approx(-7.5)]
+    # and advances the loss streak (previously 0)
+    assert t.streak_losses[SYMBOL] == 1
+    # header + body are consistent: LOSS header, same $-7.50 in the body
     assert "$-7.50" in t.bot.messages[0]
+    assert "LOSS" in t.bot.messages[0]
     assert sinks.close.calls[0][0][4] == pytest.approx(-7.5)
 
 
@@ -1265,19 +1270,32 @@ def test_be_check_v4b_logs_an_unavailable_causal_atr(mock_mt5, sinks, caplog):
     assert _sent(mock_mt5, TRADE_ACTION_SLTP) == []
 
 
-def test_be_check_v4b_short_branch_is_unreachable_dead_code():
-    """DEAD CODE (pinned) — the v4b trailing block sits INSIDE
-    `if pos.type == 0:` (mt5_trader.py:787), yet at line 816 it tests
-    `pos.type == 0` again and keeps an `else:` branch for shorts (828-836).
-    That else can never execute, so short positions never get the v4b ATR
-    trail. Reported, not fixed: execution/mt5_trader.py is owner WIP.
+def test_be_check_v4b_short_branch_is_unreachable_dead_code(mock_mt5, sinks):
+    """FIXED (D3, phase 5 part 2): the short v4b ATR trail is now reachable.
+
+    The v4b block used to sit INSIDE `if pos.type == 0:` and re-test
+    `pos.type == 0` before its `else:` (shorts) — making that else dead code, so
+    shorts never trailed. It is now a sibling of the long/short partial-close
+    ladders, so the if/else dispatches on pos.type. A short that has both TP1 and
+    TP2 hit now gets the ATR trail: the SL moves DOWN toward the live ask (locking
+    profit), mirroring the long path exactly (sides correct: ask for a short).
     """
-    src = open("execution/mt5_trader.py", encoding="utf-8").read().splitlines()
-    assert src[786].strip() == "if pos.type == 0:"  # 787
-    assert src[815].strip() == "if pos.type == 0:"  # 816, nested one level deeper
-    assert src[827].strip() == "else:"  # 828
-    # Same condition, deeper indent -> the else is unreachable.
-    assert (len(src[815]) - len(src[815].lstrip())) > (len(src[786]) - len(src[786].lstrip()))
+    t = _be_trader(
+        {12500: _legacy_trade(12500, tp1=2399.00, tp2=2398.00, tp3=None, tp1_hit=True, tp2_hit=True)},
+        trailing_atr_mult_by_symbol={SYMBOL: 0.5},
+    )
+    t.active_trades[12500]["type"] = "short"  # _legacy_trade hardcodes "long"
+    t._latest_causal_atr = lambda asset_key: 1.0  # trail_dist = 0.5 * 1.0
+    _add(mock_mt5, 12500, type=1, sl=2400.50, tp=2397.00, price_open=2400.00)
+    # short in profit: current_price (ask) sits below the entry
+    mock_mt5.set_tick(SYMBOL, bid=2396.70, ask=2397.00)
+
+    t.check_and_move_breakeven()
+    mods = _sent(mock_mt5, TRADE_ACTION_SLTP)
+    assert len(mods) == 1
+    # new_sl = 2397.00 + 0.50 = 2397.50; min_sl = 2397.00 + 0.60 = 2397.60 -> ok
+    assert mods[0]["sl"] == pytest.approx(2397.50)
+    assert t.active_trades[12500]["trailing_active"] is True
 
 
 # ---------------------------------------------------------------------------
