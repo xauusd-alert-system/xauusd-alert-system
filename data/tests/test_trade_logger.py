@@ -1,14 +1,21 @@
 """
 Unit tests for data/trade_logger.py
 """
+
 import os
 import sys
 import tempfile
+
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close, read_executed_trades
+from data.trade_logger import (
+    init_trade_log_schema,
+    log_trade_close,
+    log_trade_entry,
+    read_executed_trades,
+)
 
 
 def test_trade_logger_flow():

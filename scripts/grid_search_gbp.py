@@ -25,23 +25,24 @@ look like PF 6-30 / 27/27 positive folds — that path is deleted).
 Works on synthetic mock data for tests (no real DB required).
 """
 
+import itertools
 import os
 import sys
-import itertools
-import pandas as pd
-import numpy as np
 from copy import deepcopy
+
+import numpy as np
+import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.walk_forward import run_walk_forward
 from config.loader import load_config
+from data.ingestion import to_epoch_seconds
 from scripts.run_backtest import (
-    load_asset_history,
     build_full_df,
+    load_asset_history,
     strategy_fn_factory,
 )
-from data.ingestion import to_epoch_seconds
-from backtest.walk_forward import run_walk_forward
 
 
 def _make_synthetic_gbp_wf_df(n=4800, start_price=1.28):
@@ -56,26 +57,34 @@ def _make_synthetic_gbp_wf_df(n=4800, start_price=1.28):
     opens = closes + np.random.randn(n) * 0.00025
     highs = np.maximum(opens, closes) + np.abs(np.random.randn(n)) * 0.0007
     lows = np.minimum(opens, closes) - np.abs(np.random.randn(n)) * 0.0007
-    df = pd.DataFrame({
-        "timestamp_utc": to_epoch_seconds(idx),
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": (2000 + np.random.randint(-400, 400, n)).astype(float),
-        "session": np.random.choice(["london", "newyork"], n),
-        "regime": np.random.choice(
-            ["trend_up", "trend_down", "range", "compression"], n,
-            p=[0.3, 0.3, 0.3, 0.1]),
-        "atr": 0.0014,
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": to_epoch_seconds(idx),
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": (2000 + np.random.randint(-400, 400, n)).astype(float),
+            "session": np.random.choice(["london", "newyork"], n),
+            "regime": np.random.choice(["trend_up", "trend_down", "range", "compression"], n, p=[0.3, 0.3, 0.3, 0.1]),
+            "atr": 0.0014,
+        }
+    )
     df["timestamp"] = idx
     return df
 
 
-def _run_single_config(cfg_base: dict, asset_key: str, df_full: pd.DataFrame,
-                       stop_mult: float, be_atr: float, tp2m: float, tp3m: float,
-                       min_conf: float, horizon: int) -> dict:
+def _run_single_config(
+    cfg_base: dict,
+    asset_key: str,
+    df_full: pd.DataFrame,
+    stop_mult: float,
+    be_atr: float,
+    tp2m: float,
+    tp3m: float,
+    min_conf: float,
+    horizon: int,
+) -> dict:
     """Run HONEST walk-forward for one hyper-param combination (per-fold XGBoost
     training via run_backtest.strategy_fn_factory, no look-ahead). Returns
     aggregate metrics."""
@@ -145,8 +154,7 @@ def main():
 
     # Try to load real-ish data; fall back to synthetic that can produce ~24 folds
     try:
-        raw = load_asset_history(cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite"),
-                                 "H1", asset_key)
+        raw = load_asset_history(cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite"), "H1", asset_key)
         df_full = raw
         print(f"[grid] Loaded real H1 data: {len(df_full)} rows")
     except Exception:
@@ -165,23 +173,51 @@ def main():
     print(f"[grid] Stage 1: coarse grid {len(coarse_combos)} combos (stop×BE×tp3)")
 
     from scripts.trial_journal import log_trial
+
     records = []
     for stop, be, tp3 in coarse_combos:
         # fix tp2 to 2.5 for coarse, vary later if needed
-        res = _run_single_config(cfg, asset_key, df_full,
-                                 stop_mult=stop, be_atr=be, tp2m=2.5, tp3m=tp3,
-                                 min_conf=0.85, horizon=48)
-        rec = {"stage": "coarse", "stop_mult": stop, "breakeven_trigger_atr": be,
-               "tp2_mult": 2.5, "tp3_mult": tp3, "min_confidence_to_alert": 0.85,
-               "horizon_candles_n": 48, **res}
+        res = _run_single_config(
+            cfg, asset_key, df_full, stop_mult=stop, be_atr=be, tp2m=2.5, tp3m=tp3, min_conf=0.85, horizon=48
+        )
+        rec = {
+            "stage": "coarse",
+            "stop_mult": stop,
+            "breakeven_trigger_atr": be,
+            "tp2_mult": 2.5,
+            "tp3_mult": tp3,
+            "min_confidence_to_alert": 0.85,
+            "horizon_candles_n": 48,
+            **res,
+        }
         records.append(rec)
-        log_trial(experiment="grid_search_gbp", asset="GBPUSD",
-                  params={k: rec[k] for k in ("stage", "stop_mult", "breakeven_trigger_atr",
-                                              "tp2_mult", "tp3_mult", "min_confidence_to_alert",
-                                              "horizon_candles_n")},
-                  metrics={"median_pf": rec.get("median_pf"), "pos_folds": rec.get("pos_folds"),
-                           "total_pnl": rec.get("total_pnl"), "last6_pos": rec.get("last6_pos")})
-        print(f"  coarse stop={stop} be={be} tp3={tp3} -> medPF={res.get('median_pf')} pos={res.get('pos_folds')}/{res.get('valid_folds')} last6+={res.get('last6_pos')}")
+        log_trial(
+            experiment="grid_search_gbp",
+            asset="GBPUSD",
+            params={
+                k: rec[k]
+                for k in (
+                    "stage",
+                    "stop_mult",
+                    "breakeven_trigger_atr",
+                    "tp2_mult",
+                    "tp3_mult",
+                    "min_confidence_to_alert",
+                    "horizon_candles_n",
+                )
+            },
+            metrics={
+                "median_pf": rec.get("median_pf"),
+                "pos_folds": rec.get("pos_folds"),
+                "total_pnl": rec.get("total_pnl"),
+                "last6_pos": rec.get("last6_pos"),
+            },
+        )
+        print(
+            f"  coarse stop={stop} be={be} tp3={tp3} -> "
+            f"medPF={res.get('median_pf')} pos={res.get('pos_folds')}/"
+            f"{res.get('valid_folds')} last6+={res.get('last6_pos')}"
+        )
 
     # Stage 2: fine search on top coarse by median_pf + pos_folds
     df_coarse = pd.DataFrame(records)
@@ -197,24 +233,50 @@ def main():
     print(f"[grid] Stage 2: refining {len(candidates)} promising coarse candidates on conf×horizon")
     for _, row in candidates.iterrows():
         for conf, hor in itertools.product(conf_vals, horizon_vals):
-            res = _run_single_config(cfg, asset_key, df_full,
-                                     stop_mult=row["stop_mult"],
-                                     be_atr=row["breakeven_trigger_atr"],
-                                     tp2m=row["tp2_mult"],
-                                     tp3m=row["tp3_mult"],
-                                     min_conf=conf,
-                                     horizon=hor)
-            rec = {"stage": "fine", "stop_mult": row["stop_mult"],
-                   "breakeven_trigger_atr": row["breakeven_trigger_atr"],
-                   "tp2_mult": row["tp2_mult"], "tp3_mult": row["tp3_mult"],
-                   "min_confidence_to_alert": conf, "horizon_candles_n": hor, **res}
+            res = _run_single_config(
+                cfg,
+                asset_key,
+                df_full,
+                stop_mult=row["stop_mult"],
+                be_atr=row["breakeven_trigger_atr"],
+                tp2m=row["tp2_mult"],
+                tp3m=row["tp3_mult"],
+                min_conf=conf,
+                horizon=hor,
+            )
+            rec = {
+                "stage": "fine",
+                "stop_mult": row["stop_mult"],
+                "breakeven_trigger_atr": row["breakeven_trigger_atr"],
+                "tp2_mult": row["tp2_mult"],
+                "tp3_mult": row["tp3_mult"],
+                "min_confidence_to_alert": conf,
+                "horizon_candles_n": hor,
+                **res,
+            }
             records.append(rec)
-            log_trial(experiment="grid_search_gbp", asset="GBPUSD",
-                      params={k: rec[k] for k in ("stage", "stop_mult", "breakeven_trigger_atr",
-                                                  "tp2_mult", "tp3_mult", "min_confidence_to_alert",
-                                                  "horizon_candles_n")},
-                      metrics={"median_pf": rec.get("median_pf"), "pos_folds": rec.get("pos_folds"),
-                               "total_pnl": rec.get("total_pnl"), "last6_pos": rec.get("last6_pos")})
+            log_trial(
+                experiment="grid_search_gbp",
+                asset="GBPUSD",
+                params={
+                    k: rec[k]
+                    for k in (
+                        "stage",
+                        "stop_mult",
+                        "breakeven_trigger_atr",
+                        "tp2_mult",
+                        "tp3_mult",
+                        "min_confidence_to_alert",
+                        "horizon_candles_n",
+                    )
+                },
+                metrics={
+                    "median_pf": rec.get("median_pf"),
+                    "pos_folds": rec.get("pos_folds"),
+                    "total_pnl": rec.get("total_pnl"),
+                    "last6_pos": rec.get("last6_pos"),
+                },
+            )
 
     res_df = pd.DataFrame(records)
     os.makedirs("logs", exist_ok=True)
@@ -224,13 +286,25 @@ def main():
 
     # Top-5 by our criteria
     res_df["score"] = res_df["median_pf"] * 10 + res_df["pos_folds"]
-    top = (res_df[res_df["valid_folds"] >= 8]
-           .sort_values(["median_pf", "pos_folds", "last6_pos"], ascending=[False, False, False])
-           .head(5))
+    top = (
+        res_df[res_df["valid_folds"] >= 8]
+        .sort_values(["median_pf", "pos_folds", "last6_pos"], ascending=[False, False, False])
+        .head(5)
+    )
     print("\n=== TOP-5 CANDIDATES (median PF >~1, pos folds, last6 >=4) ===")
-    cols = ["stop_mult", "breakeven_trigger_atr", "tp2_mult", "tp3_mult",
-            "min_confidence_to_alert", "horizon_candles_n",
-            "median_pf", "pos_folds", "last6_pos", "expectancy", "total_pnl"]
+    cols = [
+        "stop_mult",
+        "breakeven_trigger_atr",
+        "tp2_mult",
+        "tp3_mult",
+        "min_confidence_to_alert",
+        "horizon_candles_n",
+        "median_pf",
+        "pos_folds",
+        "last6_pos",
+        "expectancy",
+        "total_pnl",
+    ]
     print(top[cols].to_string(index=False))
 
     print("\n[grid] Done. Recommend manual inspection of logs/grid_search_gbp.csv before picking v4a/v4b.")

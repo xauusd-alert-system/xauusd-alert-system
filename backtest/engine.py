@@ -12,13 +12,15 @@ The engine processes candles strictly in order (no vectorized shortcuts), mainta
 at most ONE open position at a time (consistent with small-deposit, no-leverage-blowup
 risk context), and applies spread/slippage on both entry and exit.
 """
+
+from dataclasses import dataclass
+from typing import List, Optional
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import Optional, List
 
-from regime.classifier import RegimeLabel
 from config.loader import get_signal_grid, resolve_signal_step
+from regime.classifier import RegimeLabel
 
 
 @dataclass
@@ -80,9 +82,7 @@ class EventDrivenBacktester:
         # (price_pnl * volume * point_value_lot), making baseline vs ensemble
         # tables incomparable. Align it: money = price_pnl * volume * pvl.
         self.volume = float(bt_cfg.get("volume", 0.10))
-        self.point_value_lot = float(
-            asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0))
-        )
+        self.point_value_lot = float(asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0)))
 
         # Barrier distances come from the SIGNAL GRID (signal_grid:, per-asset
         # overrides allowed) so backtest exits mirror the live Telegram/MT5 grid
@@ -97,12 +97,8 @@ class EventDrivenBacktester:
         method = lab_cfg.get("method", "fixed")
         if method == "atr_scaled":
             self.use_atr_scaled = True
-            self.target_x_mult = float(
-                grid_cfg.get("tp1_mult", lab_cfg.get("tp1_atr_multiplier", 1.0))
-            )
-            self.stop_y_mult = float(
-                grid_cfg.get("stop_mult", lab_cfg.get("stop_atr_multiplier", 1.0))
-            )
+            self.target_x_mult = float(grid_cfg.get("tp1_mult", lab_cfg.get("tp1_atr_multiplier", 1.0)))
+            self.stop_y_mult = float(grid_cfg.get("stop_mult", lab_cfg.get("stop_atr_multiplier", 1.0)))
             self.atr_col = lab_cfg.get("atr_column", "atr")
             # Legacy fixed-barrier fallbacks for when the ATR column is absent.
             self.target_x = float(lab_cfg.get("target_pips_x", 0.0))
@@ -198,15 +194,21 @@ class EventDrivenBacktester:
                 # Early breakeven (configurable): move the stop to entry once price reaches
                 # be_trigger_mult * target-distance in our favor.
                 if not getattr(open_position, "_be_triggered", False):
-                    be_level = (open_position.entry_price
-                                + direction * getattr(open_position, "_be_trigger_mult", self.be_trigger_mult)
-                                * (open_position.target_price - open_position.entry_price))
+                    be_level = open_position.entry_price + direction * getattr(
+                        open_position, "_be_trigger_mult", self.be_trigger_mult
+                    ) * (open_position.target_price - open_position.entry_price)
                     if (direction == 1 and highs[i] >= be_level) or (direction == -1 and lows[i] <= be_level):
                         open_position.stop_price = open_position.entry_price
                         open_position._be_triggered = True
 
-                hit_target = (highs[i] >= open_position.target_price) if direction == 1 else (lows[i] <= open_position.target_price)
-                hit_stop = (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
+                hit_target = (
+                    (highs[i] >= open_position.target_price)
+                    if direction == 1
+                    else (lows[i] <= open_position.target_price)
+                )
+                hit_stop = (
+                    (lows[i] <= open_position.stop_price) if direction == 1 else (highs[i] >= open_position.stop_price)
+                )
 
                 candles_held = self._candles_since(df, open_position.entry_ts, timestamps[i])
 
@@ -215,7 +217,11 @@ class EventDrivenBacktester:
                     progress_bars = int(self.horizon_n * self.progress_stop_ratio)
                     if candles_held >= progress_bars:
                         atr_val = atrs[i] if (atrs is not None and not np.isnan(atrs[i])) else 1.0
-                        prog = (highs[i] - open_position.entry_price) if direction == 1 else (open_position.entry_price - lows[i])
+                        prog = (
+                            (highs[i] - open_position.entry_price)
+                            if direction == 1
+                            else (open_position.entry_price - lows[i])
+                        )
                         prog_atr = prog / max(atr_val, 1e-6)
                         if prog_atr < self.progress_stop_atr:
                             hit_progress_stop = True
@@ -235,11 +241,13 @@ class EventDrivenBacktester:
                     exit_reason, exit_price = "timeout", closes[i]
 
                 if exit_reason is not None:
-                    exit_price += (-self.slippage if direction == 1 else self.slippage)
+                    exit_price += -self.slippage if direction == 1 else self.slippage
                     open_position.exit_ts = int(timestamps[i])
                     open_position.exit_price = exit_price
                     open_position.exit_reason = exit_reason
-                    open_position.pnl = direction * (exit_price - open_position.entry_price) * self.volume * self.point_value_lot
+                    open_position.pnl = (
+                        direction * (exit_price - open_position.entry_price) * self.volume * self.point_value_lot
+                    )
                     self.balance += open_position.pnl
                     self.equity_curve.append(self.balance)
                     self.trades.append(open_position)

@@ -10,6 +10,7 @@ data/mt5_provider.py:_normalize_rates(), which reads df["time"] from the
 numpy structured array produced by the MT5 shim and renames it to
 "timestamp". Keeping "timestamp" here guarantees compatibility.
 """
+
 from __future__ import annotations
 
 from typing import TypedDict
@@ -38,8 +39,8 @@ class OHLCVAggregator:
         bar_interval_ticks: int = 12,
         tick_duration_seconds: int = 5,
         start_tick: int = 0,
-        start_timestamp: int = 0,   # <-- NEW: accepted but used only for
-                                     # absolute wall-clock offset if provided
+        start_timestamp: int = 0,  # <-- NEW: accepted but used only for
+        # absolute wall-clock offset if provided
     ) -> None:
         self.bar_interval_ticks = bar_interval_ticks
         self.tick_duration_seconds = tick_duration_seconds
@@ -48,7 +49,7 @@ class OHLCVAggregator:
         # we anchor bar times to that instead of tick-relative 0.
         self._wall_anchor: int = int(start_timestamp) if start_timestamp else 0
         self.last_price: float | None = None
-        self._bars: dict[int, Bar] = {}            # bar_index -> Bar
+        self._bars: dict[int, Bar] = {}  # bar_index -> Bar
         self._current_bar_tick: int | None = None
         self._current_bar: Bar | None = None
 
@@ -83,11 +84,14 @@ class OHLCVAggregator:
         """Unix seconds (int) for the opening time of a bar index."""
         if self._wall_anchor:
             # Absolute mode: anchor to the wall-clock start_timestamp.
-            offset_ticks = (self.start_tick // self.bar_interval_ticks + bar_index)
+            offset_ticks = self.start_tick // self.bar_interval_ticks + bar_index
             return self._wall_anchor + offset_ticks * self.bar_interval_ticks * self.tick_duration_seconds
         # Relative mode (legacy): pure tick arithmetic.
-        return (self.start_tick // self.bar_interval_ticks + bar_index) * \
-            self.bar_interval_ticks * self.tick_duration_seconds
+        return (
+            (self.start_tick // self.bar_interval_ticks + bar_index)
+            * self.bar_interval_ticks
+            * self.tick_duration_seconds
+        )
 
     # ------------------------------------------------------------------
     # Accessors
@@ -108,8 +112,7 @@ class OHLCVAggregator:
             return pd.DataFrame(columns=columns)
 
         if bar_interval == self.bar_interval_ticks:
-            bars: list[tuple[int, Bar]] = sorted(self._bars.items(),
-                                                 key=lambda kv: kv[0])
+            bars: list[tuple[int, Bar]] = sorted(self._bars.items(), key=lambda kv: kv[0])
         else:
             bars = self._rebuild_bars(bar_interval)
 
@@ -157,8 +160,7 @@ class OHLCVAggregator:
         """Unix seconds (int) for the open time of a resampled bar."""
         if self._wall_anchor:
             return self._wall_anchor + target_index * bar_interval * self.tick_duration_seconds
-        base_time = (self.start_tick // self.bar_interval_ticks) * \
-            self.bar_interval_ticks * self.tick_duration_seconds
+        base_time = (self.start_tick // self.bar_interval_ticks) * self.bar_interval_ticks * self.tick_duration_seconds
         return base_time + target_index * bar_interval * self.tick_duration_seconds
 
     def reset(self, new_start_tick: int = 0) -> None:

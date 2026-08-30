@@ -13,7 +13,9 @@ changing the contract that regime/classifier.py -> RegimeLabel.
 
 All thresholds come from config.yaml under `regime:` - nothing hardcoded here.
 """
+
 from enum import Enum
+
 import numpy as np
 import pandas as pd
 
@@ -41,15 +43,26 @@ def _compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
 
     prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
 
     atr_smooth = tr.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    plus_di = 100 * pd.Series(plus_dm, index=df.index).ewm(alpha=1 / period, adjust=False, min_periods=period).mean() / atr_smooth.replace(0, np.nan)
-    minus_di = 100 * pd.Series(minus_dm, index=df.index).ewm(alpha=1 / period, adjust=False, min_periods=period).mean() / atr_smooth.replace(0, np.nan)
+    plus_di = (
+        100
+        * pd.Series(plus_dm, index=df.index).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        / atr_smooth.replace(0, np.nan)
+    )
+    minus_di = (
+        100
+        * pd.Series(minus_dm, index=df.index).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        / atr_smooth.replace(0, np.nan)
+    )
 
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
     adx = dx.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
@@ -186,11 +199,15 @@ def regime_onehot_df(df: pd.DataFrame, regimes=None) -> pd.DataFrame:
     for r in regimes:
         # Accept both the enum member and its .value string; NaN/unmatched -> 0.
         encoded[f"regime_{r.value}"] = (
-            raw.map(lambda v: 1 if (isinstance(v, RegimeLabel) and v is r)
+            raw.map(
+                lambda v: (
+                    1
+                    if (isinstance(v, RegimeLabel) and v is r)
                     or (not isinstance(v, RegimeLabel) and str(v if v is not None else "") == r.value)
-                    else 0).astype(int)
+                    else 0
+                )
+            ).astype(int)
             if len(raw)
             else pd.Series(0, index=df.index, dtype=int)
         )
     return pd.DataFrame(encoded, index=df.index, columns=names)
-

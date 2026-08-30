@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from model.ensemble import compute_ensemble_signal, EnsembleSignal
+from model.ensemble import compute_ensemble_signal
 from regime.classifier import RegimeLabel
 
 
@@ -147,8 +147,9 @@ def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
     Hard-coded bars went stale twice already (0.85 -> 0.70 owner request ->
     0.78 tightening); the CONTRACT under test is that the effective config
     mirrors the per-asset values, whatever they are."""
-    from scripts.run_backtest import merge_asset_cfg as _merge
     from config.loader import load_config
+    from scripts.run_backtest import merge_asset_cfg as _merge
+
     cfg = load_config()
     eur_raw = cfg["assets"]["EURUSD"]["ensemble"]
     expected_bar = float(eur_raw["min_confidence_to_alert"])
@@ -162,8 +163,9 @@ def test_per_asset_eurusd_ensemble_override_via_merge_asset_cfg():
 
 def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
     """Same contract for GBPUSD (see EURUSD test: drift-proof expectations)."""
-    from scripts.run_backtest import merge_asset_cfg as _merge
     from config.loader import load_config
+    from scripts.run_backtest import merge_asset_cfg as _merge
+
     cfg = load_config()
     gbp_raw = cfg["assets"]["GBPUSD"]["ensemble"]
     expected_bar = float(gbp_raw["min_confidence_to_alert"])
@@ -178,8 +180,9 @@ def test_per_asset_gbpusd_ensemble_override_via_merge_asset_cfg():
 def test_per_asset_override_effective_cfg_in_pipeline():
     """RealtimePipeline.effective_cfg must mirror the same merge for EUR/GBP
     (audit 2026-08-23: drift-proof — expectations come from the config)."""
-    from realtime.pipeline import RealtimePipeline
     from config.loader import load_config
+    from realtime.pipeline import RealtimePipeline
+
     cfg = load_config()
 
     eur_pipe = RealtimePipeline(cfg=cfg, asset_key="EURUSD", data_mode="mock")
@@ -198,6 +201,7 @@ def test_sentiment_veto_blocks_opposing_signal_when_enabled(monkeypatch):
 
     def fake_sentiment(self, *a, **k):
         return {"score": -0.8, "bias": "bearish", "title": "hawkish Fed", "in_red_zone": True}
+
     monkeypatch.setattr(MacroNewsSentimentAnalyzer, "red_zone_event_sentiment", fake_sentiment)
 
     # Enabled -> long vetoed by bearish sentiment.
@@ -205,12 +209,64 @@ def test_sentiment_veto_blocks_opposing_signal_when_enabled(monkeypatch):
     cfg_on["ensemble"]["use_sentiment_guard"] = True
     cfg_on["ensemble"]["news_buffer_before_min"] = 30
     cfg_on["ensemble"]["news_buffer_after_min"] = 30
-    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_on,
-                                  session="london", timestamp_utc=1000000000)
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_on, session="london", timestamp_utc=1000000000)
     assert sig.bias == "no_trade"
 
     # Disabled -> baseline long preserved.
     cfg_off = _base_cfg()
-    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_off,
-                                   session="london", timestamp_utc=1000000000)
+    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.9, 0.1, cfg_off, session="london", timestamp_utc=1000000000)
     assert sig2.bias == "long"
+
+
+# ---------------------------------------------------------------------------
+# P2-47 / TZ 5.3: ensemble hard reject on low confidence (reject_threshold)
+# ---------------------------------------------------------------------------
+
+
+def test_ensemble_rejects_low_confidence():
+    """All models below reject_threshold -> no signal with reason
+    ALL_MODELS_LOW_CONFIDENCE."""
+    cfg = _base_cfg()
+    cfg["ensemble"]["reject_threshold"] = 0.60
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.55, 0.45, cfg, session="london")
+    assert sig.bias == "no_trade"
+    assert sig.confidence == 0.0
+    assert "ALL_MODELS_LOW_CONFIDENCE" in sig.reasoning_summary
+
+
+def test_ensemble_accepts_mixed_confidence():
+    """At least one directional probability >= reject_threshold -> the signal
+    flows exactly as before (threshold does not veto on max(p_long, p_short))."""
+    cfg = _base_cfg()
+    cfg["ensemble"]["reject_threshold"] = 0.60
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.85, 0.15, cfg, session="london")
+    assert sig.bias == "long"
+    assert "ALL_MODELS_LOW_CONFIDENCE" not in sig.reasoning_summary
+
+
+def test_reject_threshold_disabled_by_default():
+    """reject_threshold null/absent -> feature off, behaviour unchanged even
+    for very weak model probabilities."""
+    cfg = _base_cfg()  # no reject_threshold key at all
+    sig = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.52, 0.48, cfg, session="london")
+    # Without the gate this is the ordinary weak-probability path (no hard
+    # reject reason), NOT the ALL_MODELS_LOW_CONFIDENCE reject.
+    assert "ALL_MODELS_LOW_CONFIDENCE" not in sig.reasoning_summary
+
+    cfg_null = _base_cfg()
+    cfg_null["ensemble"]["reject_threshold"] = None
+    sig2 = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.52, 0.48, cfg_null, session="london")
+    assert "ALL_MODELS_LOW_CONFIDENCE" not in sig2.reasoning_summary
+
+
+def test_reject_threshold_respected():
+    """A high threshold (0.8) blocks a signal that previously passed."""
+    cfg_off = _base_cfg()
+    sig_before = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.75, 0.25, cfg_off, session="london")
+    assert sig_before.bias == "long"  # passes without the gate
+
+    cfg_on = _base_cfg()
+    cfg_on["ensemble"]["reject_threshold"] = 0.80
+    sig_after = compute_ensemble_signal(RegimeLabel.TREND_UP, 0.75, 0.25, cfg_on, session="london")
+    assert sig_after.bias == "no_trade"
+    assert "ALL_MODELS_LOW_CONFIDENCE" in sig_after.reasoning_summary

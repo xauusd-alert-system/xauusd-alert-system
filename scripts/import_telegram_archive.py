@@ -1,5 +1,7 @@
 """Import Telegram HTML as an unlinked descriptive dataset (never computes WR)."""
+
 import argparse
+
 from data.channel_archive import import_archive
 
 
@@ -13,4 +15,5 @@ def main(argv=None):
     print("No performance metrics computed. Link to immutable signal/broker events first.")
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

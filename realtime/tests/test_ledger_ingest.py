@@ -1,4 +1,5 @@
 """Tests for the Signal Desk ledger endpoints in realtime/app.py."""
+
 from __future__ import annotations
 
 import json
@@ -43,8 +44,7 @@ def _deal_event(deal: int, **overrides) -> ExecutionEvent:
     return ExecutionEvent(**base)
 
 
-def _post(client, envelope: dict, *, token: str | None = "ingest-token",
-          signature: str | None = None):
+def _post(client, envelope: dict, *, token: str | None = "ingest-token", signature: str | None = None):
     headers = {}
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
@@ -58,17 +58,18 @@ def test_ingest_fails_closed_without_token(tmp_path, monkeypatch):
     monkeypatch.delenv("LEDGER_INGEST_TOKEN", raising=False)
     monkeypatch.delenv("LEDGER_INGEST_SECRET", raising=False)
     client = TestClient(app)
-    envelope = build_envelope([_deal_event(1)], producer="mt5_observer",
-                              account_mode="demo", account_login=7).model_dump(mode="json")
+    envelope = build_envelope(
+        [_deal_event(1)], producer="mt5_observer", account_mode="demo", account_login=7
+    ).model_dump(mode="json")
     # no token AND no secret -> 503 (signing policy unavailable takes precedence)
     assert _post(client, envelope).status_code == 503
     assert _post(client, envelope, token="wrong").status_code == 503
 
 
 def test_ingest_accepts_and_dedupes(client):
-    env_obj = build_envelope([_deal_event(1), _deal_event(2)],
-                             producer="mt5_observer", account_mode="demo",
-                             account_login=7)
+    env_obj = build_envelope(
+        [_deal_event(1), _deal_event(2)], producer="mt5_observer", account_mode="demo", account_login=7
+    )
     body = env_obj.model_dump_json().encode("utf-8")
     sig = sign_envelope(env_obj, "test-hmac-secret")
     res = _post(client, json.loads(body), signature=sig)
@@ -84,18 +85,19 @@ def test_ingest_accepts_and_dedupes(client):
 
 def test_ingest_rejects_malformed_envelope(client):
     # signed with valid HMAC, but invalid schema -> 422 (schema checked AFTER signature)
-    import hashlib, hmac as _hmac
+    import hashlib
+    import hmac as _hmac
+
     raw = b'{"schema_version": 1, "events": "nope"}'
     sig = _hmac.new(b"test-hmac-secret", raw, hashlib.sha256).hexdigest()
-    res = client.post("/api/ledger/ingest", content=raw,
-                      headers={"Authorization": "Bearer ingest-token",
-                               "X-Ledger-Signature": sig})
+    res = client.post(
+        "/api/ledger/ingest", content=raw, headers={"Authorization": "Bearer ingest-token", "X-Ledger-Signature": sig}
+    )
     assert res.status_code == 422
 
 
 def test_ingest_requires_signature_when_secret_configured(client):
-    envelope = build_envelope([_deal_event(1)], producer="mt5_observer",
-                              account_mode="demo", account_login=7)
+    envelope = build_envelope([_deal_event(1)], producer="mt5_observer", account_mode="demo", account_login=7)
     payload = envelope.model_dump(mode="json")
     # unsigned -> 401 (bearer-only is never accepted)
     assert _post(client, payload).status_code == 401
@@ -113,8 +115,7 @@ def test_owner_reads_require_token(client):
     assert client.get("/api/ledger/events").status_code == 403
     assert client.get("/api/ledger/execution-quality").status_code == 403
     assert client.get("/api/ledger/lifecycle/abc").status_code == 403
-    assert client.get("/api/ledger/events",
-                      headers={"Authorization": "Bearer owner-token"}).status_code == 200
+    assert client.get("/api/ledger/events", headers={"Authorization": "Bearer owner-token"}).status_code == 200
 
 
 def _signed_post_ok(client, envelope_obj):
@@ -126,13 +127,17 @@ def _signed_post_ok(client, envelope_obj):
 
 def test_execution_quality_endpoint(client):
     envelope_obj = build_envelope(
-        [_deal_event(1, spread_points=20.0), _deal_event(2, spread_points=30.0),
-         _deal_event(3, precision="probe", spread_points=10.0)],
-        producer="mt5_observer", account_mode="demo", account_login=7,
+        [
+            _deal_event(1, spread_points=20.0),
+            _deal_event(2, spread_points=30.0),
+            _deal_event(3, precision="probe", spread_points=10.0),
+        ],
+        producer="mt5_observer",
+        account_mode="demo",
+        account_login=7,
     )
     _signed_post_ok(client, envelope_obj)
-    res = client.get("/api/ledger/execution-quality",
-                     headers={"Authorization": "Bearer owner-token"})
+    res = client.get("/api/ledger/execution-quality", headers={"Authorization": "Bearer owner-token"})
     assert res.status_code == 200
     data = res.json()
     assert data["available"] is True
@@ -143,20 +148,29 @@ def test_execution_quality_endpoint(client):
 
 def test_lifecycle_trace_endpoint(client):
     intent_id = "b" * 32
-    envelope_obj = build_envelope([
-        ExecutionEvent(
-            event_id=execution_event_id("mt5_python_sender", "demo:7", "intent", intent_id),
-            event_type="intent_created", intent_id=intent_id,
-            source="mt5_python_sender", account_mode="demo",
-            broker_symbol="GOLD", asset_key="XAUUSD", magic_number=777111,
-            volume_requested=0.1, precision="request",
-            received_at_utc_ms=1_700_000_000_000,
-        ),
-        _deal_event(9, intent_id=intent_id, received_at_utc_ms=1_700_000_000_100),
-    ], producer="mt5_python_sender", account_mode="demo", account_login=7)
+    envelope_obj = build_envelope(
+        [
+            ExecutionEvent(
+                event_id=execution_event_id("mt5_python_sender", "demo:7", "intent", intent_id),
+                event_type="intent_created",
+                intent_id=intent_id,
+                source="mt5_python_sender",
+                account_mode="demo",
+                broker_symbol="GOLD",
+                asset_key="XAUUSD",
+                magic_number=777111,
+                volume_requested=0.1,
+                precision="request",
+                received_at_utc_ms=1_700_000_000_000,
+            ),
+            _deal_event(9, intent_id=intent_id, received_at_utc_ms=1_700_000_000_100),
+        ],
+        producer="mt5_python_sender",
+        account_mode="demo",
+        account_login=7,
+    )
     _signed_post_ok(client, envelope_obj)
-    res = client.get(f"/api/ledger/lifecycle/{intent_id}",
-                     headers={"Authorization": "Bearer owner-token"})
+    res = client.get(f"/api/ledger/lifecycle/{intent_id}", headers={"Authorization": "Bearer owner-token"})
     assert res.status_code == 200
     trace = res.json()
     assert trace["available"] is True
@@ -164,12 +178,14 @@ def test_lifecycle_trace_endpoint(client):
 
 
 def test_events_endpoint_filters(client):
-    envelope_obj = build_envelope([_deal_event(1), _deal_event(2)],
-                                  producer="mt5_observer", account_mode="demo",
-                                  account_login=7)
+    envelope_obj = build_envelope(
+        [_deal_event(1), _deal_event(2)], producer="mt5_observer", account_mode="demo", account_login=7
+    )
     _signed_post_ok(client, envelope_obj)
-    res = client.get("/api/ledger/events?source=mt5_observer&event_type=deal_added&asset_key=XAUUSD",
-                     headers={"Authorization": "Bearer owner-token"})
+    res = client.get(
+        "/api/ledger/events?source=mt5_observer&event_type=deal_added&asset_key=XAUUSD",
+        headers={"Authorization": "Bearer owner-token"},
+    )
     assert res.status_code == 200
     body = res.json()
     assert body["count"] == 2
@@ -177,13 +193,19 @@ def test_events_endpoint_filters(client):
 
 
 def test_events_endpoint_includes_freshness(client):
-    envelope_obj = build_envelope([_deal_event(1)], producer="mt5_observer",
-                                  account_mode="demo", account_login=7)
+    envelope_obj = build_envelope([_deal_event(1)], producer="mt5_observer", account_mode="demo", account_login=7)
     _signed_post_ok(client, envelope_obj)
     res = client.get("/api/ledger/events", headers={"Authorization": "Bearer owner-token"})
     body = res.json()
-    for key in ("freshness_status", "as_of_utc_ms", "ingest_lag_ms",
-                "last_successful_at_utc_ms", "source", "mode", "coverage"):
+    for key in (
+        "freshness_status",
+        "as_of_utc_ms",
+        "ingest_lag_ms",
+        "last_successful_at_utc_ms",
+        "source",
+        "mode",
+        "coverage",
+    ):
         assert key in body, key
     assert body["freshness_status"] == "fresh"
     assert body["as_of_utc_ms"] is not None
@@ -206,8 +228,7 @@ def test_ws_rejects_missing_or_wrong_token(client):
 
 
 def test_ws_streams_ledger_events_for_owner(client):
-    envelope_obj = build_envelope([_deal_event(1)], producer="mt5_observer",
-                                  account_mode="demo", account_login=7)
+    envelope_obj = build_envelope([_deal_event(1)], producer="mt5_observer", account_mode="demo", account_login=7)
     _signed_post_ok(client, envelope_obj)
     with client.websocket_connect("/ws?token=owner-token") as ws:
         msg = ws.receive_json()
@@ -228,44 +249,64 @@ def test_provenance_audit_endpoint(tmp_path, monkeypatch):
     """P1.6 §39: the provenance audit returns the group lineage with explicit
     missing nodes — never synthetic placeholders."""
     from data.trade_group_store import save_group
-    from execution.trade_group import TradeGroupSpec, GroupState
+    from execution.trade_group import GroupState, TradeGroupSpec
 
     monkeypatch.setenv("LEDGER_INGEST_TOKEN", "ingest-token")
     monkeypatch.setenv("LEDGER_OWNER_TOKEN", "owner-token")
     monkeypatch.setenv("TRADE_LOG_DB_PATH", str(tmp_path / "prov.sqlite"))
 
     spec = TradeGroupSpec(
-        group_id="TG-PROV-1", signal_id="SGL-PROV-1", intent_id="INT-PROV-1",
-        asset_key="XAUUSD", broker_symbol="GOLD", mode="paper", side="long",
+        group_id="TG-PROV-1",
+        signal_id="SGL-PROV-1",
+        intent_id="INT-PROV-1",
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        mode="paper",
+        side="long",
         entry={"low": 99.0, "high": 101.0, "reference": 100.0},
-        geometry={"version": "v1", "unit": "price", "step_price": 4.0,
-                  "tp1": 104.0, "tp2": 108.0, "tp3": 112.0, "sl": 90.0},
-        targets=[{"leg": 1, "price": 104.0, "allocation": 1 / 3},
-                 {"leg": 2, "price": 108.0, "allocation": 1 / 3},
-                 {"leg": 3, "price": 112.0, "allocation": 1 / 3}],
-        break_even={"trigger": "tp1_filled",
-                    "raw_price_policy": "actual_fill",
-                    "protected_price_policy": "actual_fill_plus_cost_buffer",
-                    "apply_to": [2, 3]},
-        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
-              "estimated_loss_at_sl": 30.0, "total_volume": 0.03},
-        profile_id="p1", model_version="v3", model_hash="m" * 64,
-        config_hash="c" * 64, strategy_version="s3",
-        expires_at_utc_ms=1_900_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        geometry={
+            "version": "v1",
+            "unit": "price",
+            "step_price": 4.0,
+            "tp1": 104.0,
+            "tp2": 108.0,
+            "tp3": 112.0,
+            "sl": 90.0,
+        },
+        targets=[
+            {"leg": 1, "price": 104.0, "allocation": 1 / 3},
+            {"leg": 2, "price": 108.0, "allocation": 1 / 3},
+            {"leg": 3, "price": 112.0, "allocation": 1 / 3},
+        ],
+        break_even={
+            "trigger": "tp1_filled",
+            "raw_price_policy": "actual_fill",
+            "protected_price_policy": "actual_fill_plus_cost_buffer",
+            "apply_to": [2, 3],
+        },
+        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5, "estimated_loss_at_sl": 30.0, "total_volume": 0.03},
+        profile_id="p1",
+        model_version="v3",
+        model_hash="m" * 64,
+        config_hash="c" * 64,
+        strategy_version="s3",
+        expires_at_utc_ms=1_900_000_000_000,
+        created_at_utc_ms=1_700_000_000_000,
         provenance={
             "market_snapshot_id": "MARKET:XAU:1",
             "feature_snapshot_id": "FEATURE:XAU:1",
             "model_inference_id": "INFERENCE:XAU:1",
-            "model_hash": "m" * 64, "profile_id": "p1",
+            "model_hash": "m" * 64,
+            "profile_id": "p1",
             "broker_snapshot_id": "BROKER:XAU:1",
             "cost_snapshot_id": "COST:XAU:1",
-            "geometry_hash": "G" * 64, "provenance_hash": "P" * 64,
+            "geometry_hash": "G" * 64,
+            "provenance_hash": "P" * 64,
         },
     )
     save_group(str(tmp_path / "prov.sqlite"), spec, state=GroupState.VALIDATED)
     client = TestClient(app)
-    res = client.get("/api/provenance/TG-PROV-1",
-                     headers={"Authorization": "Bearer owner-token"})
+    res = client.get("/api/provenance/TG-PROV-1", headers={"Authorization": "Bearer owner-token"})
     assert res.status_code == 200
     body = res.json()
     assert body["available"] is True
@@ -275,8 +316,7 @@ def test_provenance_audit_endpoint(tmp_path, monkeypatch):
     assert lineage["cost_snapshot"]["source_id"] == "COST:XAU:1"
     assert "ledger_events" in lineage
     # a missing group is an explicit missing node
-    res = client.get("/api/provenance/TG-NOPE",
-                     headers={"Authorization": "Bearer owner-token"})
+    res = client.get("/api/provenance/TG-NOPE", headers={"Authorization": "Bearer owner-token"})
     assert res.status_code == 200
     assert res.json()["lineage"]["group"]["status"] == "missing"
     # owner gate
@@ -286,8 +326,6 @@ def test_provenance_audit_endpoint(tmp_path, monkeypatch):
 # ==========================================================================
 # Strict signed ingress (security contract) — P1 finding regression tests
 # ==========================================================================
-
-from data.ledger_bridge import sign_envelope
 
 
 @pytest.fixture
@@ -301,14 +339,14 @@ def signed_client(tmp_path, monkeypatch):
 
 
 def _signed_envelope(deal: int = 1, producer="mt5_observer", mode="demo"):
-    envelope = build_envelope([_deal_event(deal)], producer=producer,
-                              account_mode=mode, account_login=7)
+    envelope = build_envelope([_deal_event(deal)], producer=producer, account_mode=mode, account_login=7)
     body = envelope.model_dump_json().encode("utf-8")
     return json.loads(body), body, envelope
 
 
 def _ledger_count(db_path: str) -> int:
     from data.ledger_events import read_ledger_events
+
     return len(read_ledger_events(db_path))
 
 
@@ -365,6 +403,7 @@ def test_ingest_accepts_valid_signed_envelope(signed_client, tmp_path):
     assert res.status_code == 200
     assert res.json()["accepted"] == 1
     from data.ledger_events import read_ledger_events
+
     rows = read_ledger_events(db)
     assert len(rows) == 1
     # signature_valid=True ONLY after real HMAC verification

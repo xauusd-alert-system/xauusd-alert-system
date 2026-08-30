@@ -2,6 +2,7 @@
 Candle anatomy features: body ratio, upper/lower wick ratios, candle direction.
 All computed row-wise from that row's own OHLC only - inherently causal, zero look-ahead risk.
 """
+
 import numpy as np
 import pandas as pd
 

@@ -2,6 +2,7 @@
 Unit tests for realtime/book_feed.py (Phase 0 collection + Phase 1 gate math).
 Run with: pytest realtime/tests/test_book_feed.py -v
 """
+
 import os
 import sys
 
@@ -9,18 +10,18 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from model.ensemble import EnsembleSignal
 from realtime.book_feed import (
     BAR_SECONDS,
     BookFeed,
     bar_ts_of,
     book_features_from_levels,
 )
-from model.ensemble import EnsembleSignal
-
 
 # ---------------------------------------------------------------------------
 # Per-snapshot feature math
 # ---------------------------------------------------------------------------
+
 
 def test_book_features_imbalance_signs():
     """+1.0 = ask-heavy; balanced book must give ~0.0; ask-heavy must be positive."""
@@ -82,6 +83,7 @@ def test_bar_ts_of():
 # BookFeed aggregation + causality (fake MT5, no threads)
 # ---------------------------------------------------------------------------
 
+
 class FakeLevel:
     def __init__(self, price, volume):
         self.price = price
@@ -98,8 +100,11 @@ class FakeMT5:
         self.added = []
         self.removed = []
         self.levels = [
-            FakeLevel(102.0, 100), FakeLevel(101.5, 5), FakeLevel(101.0, 5),   # asks
-            FakeLevel(100.5, 5), FakeLevel(100.0, 5),                          # asks (<= 100.25 -> bid)
+            FakeLevel(102.0, 100),
+            FakeLevel(101.5, 5),
+            FakeLevel(101.0, 5),  # asks
+            FakeLevel(100.5, 5),
+            FakeLevel(100.0, 5),  # asks (<= 100.25 -> bid)
         ]
 
     def market_book_add(self, symbol):
@@ -121,8 +126,10 @@ def _feed_with_fake_mt5(**kwargs) -> BookFeed:
     persist = kwargs.pop("persist", False)
     out_dir = kwargs.pop("out_dir", None)
     feed = BookFeed(
-        {"assets": {"BTCUSD": {"mt5_symbol": "BITCOIN", "enabled": True}},
-         "book_gate": {"assets": {"BTCUSD": {"enabled": True}}}},
+        {
+            "assets": {"BTCUSD": {"mt5_symbol": "BITCOIN", "enabled": True}},
+            "book_gate": {"assets": {"BTCUSD": {"enabled": True}}},
+        },
         persist=persist,
         out_dir=out_dir,
         **kwargs,
@@ -184,6 +191,7 @@ def test_book_feed_overview_status():
 # Pipeline gate math (fail-open contract)
 # ---------------------------------------------------------------------------
 
+
 def _ensemble(bias="long", confidence=0.7) -> EnsembleSignal:
     return EnsembleSignal(
         bias=bias,
@@ -201,6 +209,7 @@ def _pipe_with_book_gate(bg: dict):
     """RealtimePipeline built on the real config with an overridden book_gate."""
     from config.loader import load_config
     from realtime.pipeline import RealtimePipeline
+
     cfg = load_config()
     cfg["book_gate"] = bg
     return RealtimePipeline(cfg=cfg, model_path=None, asset_key="BTCUSD", data_mode="mock")

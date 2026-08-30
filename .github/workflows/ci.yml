@@ -1,8 +1,31 @@
 name: CI
 
-# Runs the test suite on every push to master and on every pull request so that
-# dependency drift or a regression is caught automatically rather than only on a
-# maintainer's machine.
+# TZ 6.8 / 6.9: CI for the refactor — tests, lint, security audit.
+#
+#   * test     — pytest on Python 3.12. MetaTrader5 is guarded by the
+#                `platform_system == "Windows"` marker in requirements.txt, so
+#                the pinned stack installs cleanly on ubuntu-latest and the
+#                suite exercises the MT5 shim (simulation/mt5_shim) — all
+#                tests pass without the real package.
+#   * lint     — ruff check gated on .ruff.toml (TZ tasks 2/6). `ruff format
+#                --check` runs non-blocking (continue-on-error): ~390 legacy
+#                files still fail the formatter and a repo-wide reformat is a
+#                separate, dedicated change — see docs/RUFF_POLICY.md.
+#   * security — TZ 10.2 secret/state audit (python -m scripts.security_audit),
+#                must pass. This doubles as the TZ 6.9 secret-scan gate; no
+#                separate gitleaks job is needed.
+#   * pip-audit — TZ 10.7 dependency vulnerability scan, deliberately
+#                `continue-on-error: true`: known-but-unfixed vulnerabilities
+#                in transitive dependencies must not block the refactoring
+#                branch. Findings still surface in the job log for triage.
+#   * type-check — mypy (TZ Задача 4) gated on mypy.ini. BLOCKING on the
+#                clean targets (mt5_adapter, mql5, news — 0 errors, quality
+#                bar for new code); ADDITIONALLY a non-blocking
+#                (continue-on-error) run over the 7 TZ packages
+#                (execution/model/features/data/risk/mt5_adapter/provenance)
+#                whose pre-existing legacy debt is tracked in
+#                docs/MYPY_ISSUES.md (class A fixed, class B planned).
+
 on:
   push:
     branches: [master]
@@ -37,3 +60,132 @@ jobs:
 
       - name: Run test suite
         run: pytest -q
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check
+        run: ruff check .
+
+      # Non-blocking: the legacy codebase is not yet formatted with ruff format
+      # (390 of ~480 files would be reformatted). Track adoption separately;
+      # flip this to a hard gate once the reformat lands.
+      - name: Ruff format check (advisory)
+        run: ruff format --check .
+        continue-on-error: true
+
+  security:
+    name: security audit (secrets & repo state)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          # Full history so the git ls-files / tracked-secret checks see everything.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run repository security audit
+        run: python -m scripts.security_audit
+
+  pip-audit:
+    name: pip-audit (dependencies, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # transitive CVEs must not block the refactor branch
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      - name: Audit installed environment against requirements
+        run: pip-audit -r requirements.txt --strict
+
+  type-check:
+    name: mypy (clean targets — blocking, 7-package debt — advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # MetaTrader5 is guarded by a platform marker in requirements.txt,
+          # so it is skipped on Linux (same as the test job); mypy.ini has an
+          # ignore_missing_imports section for it.
+          pip install -r requirements.txt
+          pip install mypy
+
+      # BLOCKING: clean targets are the type-check quality bar for new code —
+      # any regression in mt5_adapter/mql5/news breaks the build.
+      - name: Run mypy on clean targets
+        run: python -m mypy --explicit-package-bases mt5_adapter/ mql5/ news/
+
+      # ADVISORY (non-blocking): the 7-package set from TZ Task 4 still carries
+      # ~350 pre-existing legacy typing errors. Fixed class-A (Implicit
+      # Optional) on 2026-08-28; indexes/attr/union-attr debt is tracked in
+      # docs/MYPY_ISSUES.md. Keep continue-on-error until the plan lands.
+      - name: Run mypy on 7-package legacy set (advisory)
+        run: python -m mypy --explicit-package-bases execution/ model/ features/ data/ risk/ mt5_adapter/ provenance/
+        continue-on-error: true
+
+  holdout-roll-guard:
+    # Rolling Hold-out lock consistency gate (Rolling Holdout policy, Step 2).
+    # config.validation.locked_holdout.start MUST equal the journal's effective
+    # current start (logs/holdout_roll_journal.csv) or the preregistered
+    # baseline. Catches a lock moved out-of-band (edited in config but not
+    # journalled, or journalled but never applied). BLOCKING: a drift means the
+    # honest-research contract (never look at live-forward data) is broken.
+    name: holdout-roll guard (lock == journal)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify locked hold-out matches journal
+        run: python scripts/check_holdout_roll.py

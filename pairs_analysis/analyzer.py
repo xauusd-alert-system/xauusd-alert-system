@@ -6,9 +6,9 @@ timeframe, aligns on the common timestamp index, computes the log-spread
 with a point-in-time Kalman β (OLS rolling as fallback), z-score, ADF,
 OU half-life, σ and the price ratio — plus the math-board subset.
 """
+
 from __future__ import annotations
 
-import datetime as dt
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -24,6 +24,7 @@ BARS_PER_YEAR = {"M5": 72576.0, "M15": 24192.0, "H1": 6048.0, "H4": 1512.0, "D1"
 @dataclass
 class PairMetrics:
     """Full result of one pair analysis (stage 1 core, ТЗ §4.1-§4.2)."""
+
     name: str
     timeframe: str
     n_bars: int
@@ -57,16 +58,27 @@ class PairMetrics:
 
     def summary(self) -> dict:
         return {
-            "name": self.name, "timeframe": self.timeframe, "n_bars": self.n_bars,
-            "start": self.start, "end": self.end,
-            "beta": self.beta, "beta_method": self.beta_method,
+            "name": self.name,
+            "timeframe": self.timeframe,
+            "n_bars": self.n_bars,
+            "start": self.start,
+            "end": self.end,
+            "beta": self.beta,
+            "beta_method": self.beta_method,
             "z": float(self.zscore.dropna().iloc[-1]) if len(self.zscore.dropna()) else float("nan"),
-            "mu": self.mu, "sigma": self.sigma, "sigma_annual": self.sigma_annual,
-            "adf_p": self.adf_p, "theta": self.theta,
-            "half_life_bars": self.half_life_bars, "half_life_days": self.half_life_days,
-            "ratio": self.ratio, "hurst": self.hurst,
-            "skew": self.skew, "ex_kurtosis": self.ex_kurtosis,
-            "acf1": self.acf1, "realized_vol_pct": self.realized_vol_pct,
+            "mu": self.mu,
+            "sigma": self.sigma,
+            "sigma_annual": self.sigma_annual,
+            "adf_p": self.adf_p,
+            "theta": self.theta,
+            "half_life_bars": self.half_life_bars,
+            "half_life_days": self.half_life_days,
+            "ratio": self.ratio,
+            "hurst": self.hurst,
+            "skew": self.skew,
+            "ex_kurtosis": self.ex_kurtosis,
+            "acf1": self.acf1,
+            "realized_vol_pct": self.realized_vol_pct,
         }
 
 
@@ -82,12 +94,10 @@ class PairAnalyzer:
         self.cfg = cfg or {}
 
     # ---- data loading ----
-    def _load_leg(self, symbol: str, timeframe: str,
-                  start=None, end=None) -> pd.DataFrame:
+    def _load_leg(self, symbol: str, timeframe: str, start=None, end=None) -> pd.DataFrame:
         source = self.pair.get("source", "mt5")
         if source == "mt5":
-            return data_mod.load_mt5(symbol, timeframe,
-                                     db_path=self.cfg.get("mt5_db", data_mod.DEFAULT_DB))
+            return data_mod.load_mt5(symbol, timeframe, db_path=self.cfg.get("mt5_db", data_mod.DEFAULT_DB))
         if source == "csv":
             paths = self.pair.get("paths") or {}
             path = paths.get(symbol) or paths.get(str(self.pair.get("symbols", [symbol])[0]))
@@ -96,8 +106,8 @@ class PairAnalyzer:
             return data_mod.load_csv(path, timeframe)
         if source == "binance":
             return data_mod.fetch_binance(
-                symbol, timeframe, start=start, end=end,
-                cache_path=self.cfg.get("cache_db", data_mod.DEFAULT_CACHE))
+                symbol, timeframe, start=start, end=end, cache_path=self.cfg.get("cache_db", data_mod.DEFAULT_CACHE)
+            )
         raise ValueError(f"неизвестный source={source!r} (mt5 | csv | binance)")
 
     def analyze(self, timeframe: str | None = None) -> PairMetrics:
@@ -145,31 +155,44 @@ class PairAnalyzer:
         hl_days = hl_bars / BARS_PER_DAY.get(tf, 1.0) if np.isfinite(hl_bars) else float("inf")
         ratio = float(p1["close"].iloc[-1] / p2["close"].iloc[-1])
 
-        formula = (f"e_t = ln({ln1.iloc[-1]:.4f}) − {beta:.4f}·ln({ln2.iloc[-1]:.4f}) "
-                   f"= {e.iloc[-1]:.4f}")
+        formula = f"e_t = ln({ln1.iloc[-1]:.4f}) − {beta:.4f}·ln({ln2.iloc[-1]:.4f}) = {e.iloc[-1]:.4f}"
 
         # math board on the spread-return series (Hurst is R/S on the RETURNS —
         # on levels plain R/S mislabels mean-reverting series, see metrics.hurst_rs)
         r = e.diff().dropna()
         return PairMetrics(
-            name=name, timeframe=tf, n_bars=len(p1),
-            start=str(p1.index[0].date()), end=str(p1.index[-1].date()),
-            beta=beta, beta_method=beta_method, beta_series=beta_series,
-            spread=e, zscore=z, mu=mu, sigma=sigma, sigma_annual=sigma_ann,
-            adf_p=adf_p, theta=theta, half_life_bars=hl_bars, half_life_days=hl_days,
-            ratio=ratio, p1_last=float(p1["close"].iloc[-1]),
-            p2_last=float(p2["close"].iloc[-1]), formula_str=formula,
+            name=name,
+            timeframe=tf,
+            n_bars=len(p1),
+            start=str(p1.index[0].date()),
+            end=str(p1.index[-1].date()),
+            beta=beta,
+            beta_method=beta_method,
+            beta_series=beta_series,
+            spread=e,
+            zscore=z,
+            mu=mu,
+            sigma=sigma,
+            sigma_annual=sigma_ann,
+            adf_p=adf_p,
+            theta=theta,
+            half_life_bars=hl_bars,
+            half_life_days=hl_days,
+            ratio=ratio,
+            p1_last=float(p1["close"].iloc[-1]),
+            p2_last=float(p2["close"].iloc[-1]),
+            formula_str=formula,
             hurst=metrics_mod.hurst_rs(r),
             skew=metrics_mod.skew(r),
             ex_kurtosis=metrics_mod.excess_kurtosis(r),
             acf1=metrics_mod.acf1(e),
             realized_vol_pct=metrics_mod.realized_vol_pct(e, window),
-            p1=p1, p2=p2,
+            p1=p1,
+            p2=p2,
         )
 
 
-def analyze_all(cfg: dict, timeframe: str | None = None,
-                only: str | None = None) -> list[PairMetrics]:
+def analyze_all(cfg: dict, timeframe: str | None = None, only: str | None = None) -> list[PairMetrics]:
     """Run every pair in the config (or a named subset) and return metrics."""
     out = []
     for pair in cfg.get("pairs", []):

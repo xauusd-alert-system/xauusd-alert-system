@@ -2,18 +2,25 @@
 Phase 7: Neural Network and Hybrid Ensemble Trainer.
 Provides multi-layer perceptron (MLP) classification with purged time-ordered
 calibration and hybrid blending with tree-based models.
+
+Status: @experimental (P2-36, TZ Часть 7 п.7.1).
+NOT called from train_all_assets / run_backtest production pipelines —
+kept as a research prototype with its own unit tests
+(model/tests/test_neural_trainer.py). Do NOT wire into production without
+a dedicated economic A/B and deploy_guard integration. Removal/reintegration
+decision tracked in docs/TODO.md.
 """
+
 from __future__ import annotations
+
 import logging
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-
-from model.trainer import calibrate_model
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger("neural_trainer")
 
@@ -52,10 +59,12 @@ class NeuralSequenceClassifier:
             validation_fraction=0.15,
             n_iter_no_change=10,
         )
-        self.pipeline = Pipeline([
-            ("scaler", scaler),
-            ("mlp", mlp),
-        ])
+        self.pipeline = Pipeline(
+            [
+                ("scaler", scaler),
+                ("mlp", mlp),
+            ]
+        )
         self.pipeline.fit(X, y)
         self.classes_ = mlp.classes_
         return self

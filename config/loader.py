@@ -2,18 +2,63 @@
 Config loader utility - shared across all modules.
 Ensures a single source of truth: config/config.yaml.
 """
+
 from dotenv import load_dotenv
+
 load_dotenv()
 import copy
 import os
+
 import yaml
 
 _CONFIG_CACHE = None
+
+# Global default trading timeframe. Used by resolve_asset_timeframe() as the
+# final fallback when neither the explicit override, nor the per-asset entry,
+# nor market_data.timeframe provide a value. Must stay "M5" (see
+# config/tests/test_resolve_asset_timeframe.py::test_missing_market_data_falls_back_to_constant).
+DEFAULT_TIMEFRAME = "M5"
+
+
+def resolve_asset_timeframe(cfg: dict, asset_key: str | None, override: str | None = None) -> str:
+    """Single source of truth for an asset's effective trading timeframe.
+
+    Priority chain (first non-empty wins):
+      1. explicit ``override`` argument,
+      2. ``assets.<asset_key>.timeframe``,
+      3. ``market_data.timeframe``,
+      4. module constant :data:`DEFAULT_TIMEFRAME`.
+
+    Tolerates ``cfg=None``/``{}``, unknown asset keys and falsy overrides —
+    diagnostics scripts historically re-implemented this chain with divergent
+    hardcoded fallbacks, which made research run on a different tier than
+    production for assets without an explicit per-asset timeframe.
+    """
+    cfg = cfg or {}
+    if override:  # falsy ("", None) behaves like "not provided"
+        return override
+    assets = cfg.get("assets") or {}
+    per_asset_cfg = assets.get(asset_key) or {} if asset_key else {}
+    tf = per_asset_cfg.get("timeframe")
+    if tf:
+        return tf
+    tf = (cfg.get("market_data") or {}).get("timeframe")
+    if tf:
+        return tf
+    return DEFAULT_TIMEFRAME
 
 
 def load_config(path: str = None) -> dict:
     """
     Load and cache the master YAML config with explicit UTF-8 encoding.
+
+    ТЗ 7.9 / P2-59: after loading, the config is validated against the
+    pydantic models in ``config/schema.py``. The validation mode is resolved
+    per :func:`config.schema.resolve_validation_mode` (env
+    ``CONFIG_VALIDATE_MODE`` -> top-level ``config_validation.mode`` ->
+    ``warn``); the default ``warn`` mode only logs WARNING messages for
+    unknown keys (e.g. a typo like ``max_daily_trades_per_asst``), keeping
+    loading backward compatible with minimal/test configs.
     """
     global _CONFIG_CACHE
     if _CONFIG_CACHE is not None:
@@ -24,6 +69,13 @@ def load_config(path: str = None) -> dict:
 
     with open(path, "r", encoding="utf-8") as f:  # <-- Добавлен encoding="utf-8"
         _CONFIG_CACHE = yaml.safe_load(f)
+
+    # ТЗ 7.9 / P2-59: schema validation with unknown-key detection. Lazy
+    # import keeps the module import light and defers the pydantic
+    # dependency to actual config loading.
+    from config.schema import resolve_validation_mode, validate_config
+
+    validate_config(_CONFIG_CACHE, mode=resolve_validation_mode(_CONFIG_CACHE))
 
     return _CONFIG_CACHE
 
@@ -61,7 +113,7 @@ def get_env(key: str, default=None, required: bool = False):
     """
     val = os.environ.get(key, default)
     if required and val is None:
-        raise EnvironmentError(f"Required environment variable '{key}' is not set.")
+        raise OSError(f"Required environment variable '{key}' is not set.")
     return val
 
 
@@ -118,9 +170,7 @@ def get_signal_grid(cfg: dict, asset_cfg: dict = None, regime: str = None) -> di
     }
     grid.update({k: v for k, v in cfg.get("signal_grid", {}).items() if v is not None})
     if asset_cfg:
-        grid.update(
-            {k: v for k, v in asset_cfg.get("signal_grid", {}).items() if v is not None}
-        )
+        grid.update({k: v for k, v in asset_cfg.get("signal_grid", {}).items() if v is not None})
     # trailing_atr_mult (for v4b "trailing-runner"): None = legacy (no trailing)
     # When set (e.g. 2.0), after TP2 the remaining 20% position is trailed at trailing*ATR
     # from the most recent high (long) / low (short).

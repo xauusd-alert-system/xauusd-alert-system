@@ -14,10 +14,13 @@ institutional participation. ``SOURCE_KIND = "ohlcv_proxy"`` is attached to
 every parameter result so no downstream consumer can mistake the proxy for a
 real-flow source.
 """
+
 from __future__ import annotations
+
+from typing import Any, Dict
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Optional, List
 
 # The ONLY source kind this module can truthfully claim (§5): OHLCV proxy.
 SOURCE_KIND = "ohlcv_proxy"
@@ -56,7 +59,7 @@ def calculate_manipulation_index(df: pd.DataFrame, window: int = 20) -> tuple[in
         return 5, "умеренный уровень манипуляций в пределах нормы."
 
     slice_df = df.tail(window).copy()
-    
+
     # 1. Wick ratio
     hl_range = (slice_df["high"] - slice_df["low"]).replace(0, np.nan)
     body = (slice_df["close"] - slice_df["open"]).abs()
@@ -77,15 +80,15 @@ def calculate_manipulation_index(df: pd.DataFrame, window: int = 20) -> tuple[in
     fakeout_count = (swept_high | swept_low).sum()
 
     # Score calculation (1 to 10)
-    raw_score = (
-        (mean_wick * 4.0) +
-        (absorption_bars * 1.2) +
-        (fakeout_count * 1.5)
-    )
+    raw_score = (mean_wick * 4.0) + (absorption_bars * 1.2) + (fakeout_count * 1.5)
     score = int(np.clip(round(raw_score), 1, 10))
 
     if score >= 7:
-        text = "высокий уровень манипулятивного паттерна по свечному прокси (фитили/ложные пробои). Контекст-скор, не подтверждение реального потока."
+        text = (
+            "высокий уровень манипулятивного паттерна по свечному прокси "
+            "(фитили/ложные пробои). Контекст-скор, не подтверждение "
+            "реального потока."
+        )
     elif score >= 5:
         text = "умеренная манипулятивная активность на локальных уровнях."
     else:
@@ -106,15 +109,15 @@ def calculate_zone_strength(df: pd.DataFrame, window: int = 50) -> tuple[int, st
 
     slice_df = df.tail(window).copy()
     current_close = slice_df["close"].iloc[-1]
-    
+
     # Identify nearest swing level
     swing_highs = slice_df["high"].rolling(10, min_periods=1).max()
     swing_lows = slice_df["low"].rolling(10, min_periods=1).min()
-    
+
     # Proximity to support or resistance
     dist_high = abs(current_close - swing_highs.iloc[-1])
     dist_low = abs(current_close - swing_lows.iloc[-1])
-    
+
     # Touch frequency: how many times price hovered in 0.2% vicinity of level
     level_price = swing_highs.iloc[-1] if dist_high < dist_low else swing_lows.iloc[-1]
     threshold = level_price * 0.002
@@ -141,7 +144,11 @@ def calculate_zone_strength(df: pd.DataFrame, window: int = 50) -> tuple[int, st
     elif strength <= 60:
         text = "зона умеренной силы. Возможна локальная консолидация перед импульсом."
     else:
-        text = "сильная структурная зона по свечному прокси (частые касания уровня, объём у уровня). Прокси-скор, не подтверждение ликвидности."
+        text = (
+            "сильная структурная зона по свечному прокси (частые касания "
+            "уровня, объём у уровня). Прокси-скор, не подтверждение "
+            "ликвидности."
+        )
 
     return strength, text
 
@@ -178,7 +185,11 @@ def calculate_smf_ratio(df: pd.DataFrame, window: int = 30) -> tuple[float, str]
     dir_word = "вниз" if recent_delta <= 0 else "вверх"
 
     if ratio >= 2.0:
-        text = f"объёмный прокси направленного потока с коэффициентом {ratio:.1f} к 1 (крупные бары vs мелкие). Не является реальным торговым потоком."
+        text = (
+            f"объёмный прокси направленного потока с коэффициентом "
+            f"{ratio:.1f} к 1 (крупные бары vs мелкие). Не является "
+            f"реальным торговым потоком."
+        )
     elif ratio >= 1.2:
         text = f"преобладание крупно-объёмного прокси ({ratio:.2f}x). Прокси-оценка, не реальный поток."
     else:
@@ -196,7 +207,7 @@ def calculate_liquidity_grab(df: pd.DataFrame, window: int = 30) -> tuple[int, s
         return 5, "умеренная охота за ликвидностью."
 
     slice_df = df.tail(window).copy()
-    
+
     # 20-bar swing extremes
     sw_high = slice_df["high"].rolling(15, min_periods=1).max().shift(1)
     sw_low = slice_df["low"].rolling(15, min_periods=1).min().shift(1)
@@ -218,7 +229,11 @@ def calculate_liquidity_grab(df: pd.DataFrame, window: int = 30) -> tuple[int, s
     score = int(np.clip(round(sweep_count * 2.0 + wick_atr_ratio * 3.0 + 2), 1, 10))
 
     if score >= 7:
-        text = "активный паттерн прокси-свипа локальных уровней (фитиль за экстремум с возвратом). Паттерн-скор, не подтверждение ликвидности."
+        text = (
+            "активный паттерн прокси-свипа локальных уровней (фитиль за "
+            "экстремум с возвратом). Паттерн-скор, не подтверждение "
+            "ликвидности."
+        )
     elif score >= 4:
         text = "локальные сборы стопов вблизи ключевых экстремумов."
     else:
@@ -242,7 +257,7 @@ def calculate_delta_confidence(df: pd.DataFrame) -> tuple[str, str]:
 
     signed_delta = (pos_in_bar * 2.0 - 1.0).fillna(0.0) * vol
     cum_delta = signed_delta.cumsum()
-    
+
     # Delta slope
     slope = cum_delta.iloc[-1] - cum_delta.iloc[0]
     total_vol = vol.sum() if vol.sum() > 0 else 1.0
@@ -253,7 +268,7 @@ def calculate_delta_confidence(df: pd.DataFrame) -> tuple[str, str]:
     consistency = direction_bars / len(slice_df)
 
     dir_party = "Покупатели" if slope > 0 else "Продавцы"
-    
+
     # N9 (audit 2026-08-10): VERY HIGH must be checked BEFORE HIGH, otherwise the
     # stricter threshold (norm_slope>0.6, consistency>0.75) is nested inside the
     # looser one (norm_slope>0.4, consistency>0.65) and can never be reached.
@@ -282,8 +297,7 @@ def _provenance_keys(name: str, n_bars: int) -> Dict[str, Any]:
     return {
         "source_kind": SOURCE_KIND,
         "lookback": int(meta["lookback"]),
-        "data_status": "sufficient" if n_bars >= int(meta["min_bars"])
-        else "insufficient",
+        "data_status": "sufficient" if n_bars >= int(meta["min_bars"]) else "insufficient",
     }
 
 
@@ -338,8 +352,7 @@ def compute_institutional_metrics(df: pd.DataFrame) -> Dict[str, Any]:
         },
         "source_provenance": {
             "source_kind": SOURCE_KIND,
-            "lookbacks": {name: meta["lookback"]
-                          for name, meta in PARAMETER_META.items()},
+            "lookbacks": {name: meta["lookback"] for name, meta in PARAMETER_META.items()},
             "note": "OHLCV proxy only; NOT real trade flow / L2 / MBO / on-chain",
         },
     }
@@ -359,5 +372,7 @@ def format_institutional_metrics_report(metrics: Dict[str, Any]) -> str:
         f"**SMF Ratio: {m['smf_ratio']['display']}** — {m['smf_ratio']['text']}\n\n"
         f"**Liquidity Grab: {m['liquidity_grab']['display']}** — {m['liquidity_grab']['text']}\n\n"
         f"**Delta Confidence: {m['delta_confidence']['display']}** — {m['delta_confidence']['text']}\n\n"
-        "_Источник: OHLCV-прокси (не реальный торговый поток / L2 / MBO / on-chain). Прокси-паттерн, не подтверждение институционального участия._"
+        "_Источник: OHLCV-прокси (не реальный торговый поток / L2 / MBO / "
+        "on-chain). Прокси-паттерн, не подтверждение институционального "
+        "участия._"
     )

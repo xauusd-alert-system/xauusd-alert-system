@@ -2,15 +2,16 @@
 Unit tests for logs/journal.py and logs/reporter.py.
 Run with: pytest logs/tests/test_journal.py -v
 """
+
 import os
 import sys
+
 import pytest
-import tempfile
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from logs.journal import SignalJournal
-from logs.reporter import generate_summary, format_summary_message
+from logs.reporter import format_summary_message, generate_summary
 
 SAMPLE_SIGNAL = {
     "bias": "long",

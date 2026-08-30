@@ -9,12 +9,17 @@ venv/
 
 # Environment secrets
 .env
+.env.*
+*.key
+*.pem
 
 # Generated logs and results
 logs/*.csv
 logs/*.json
 logs/*.log
 logs/backtest_archive/
+# Research run artifacts (adaptive barrier comparison etc.)
+results/
 # Live position entry-context journal for the Telegram status commands
 # (already covered by logs/*.json; listed explicitly as it contains trade context)
 logs/live_positions.json
@@ -38,11 +43,19 @@ $null
 # One-off local scripts
 diag.py
 
+# TZ 7.3 / P2-29: generated backtest artifacts stay out of git
+artifacts/
+!artifacts/.gitkeep
+pytest_mt5_out.txt
+
 # PDF exports of the codebase
 compact_project_code.pdf
 
 # Version stub files (e.g. "2.4.0" dropped by some package managers)
 [0-9]*.*
+# ...but versioned DB migration modules (data/migrations/001_initial.py etc.)
+# are real source files, not stubs.
+!data/migrations/*.py
 
 # One-off local migration/patch script
 fix_ingestion.py
@@ -92,3 +105,19 @@ data/challenge_trades.csv
 *.db
 data/usstocks_export/
 data/book_bars/
+backups/
+# TZ 6.5: database backups stay local
+
+# TZ 6.6: logs/setup.py is real source code (structured logging setup), not a
+# scratch script — the logs/*.py rule above targets one-off diagnostics only.
+!logs/setup.py
+
+# TZ task 1: coverage artifacts stay out of git
+htmlcov/
+.coverage
+.coverage.*
+coverage.json
+ruff_*.txt
+results_baseline_*.csv
+data/signal_log.db
+data/signal_log.db

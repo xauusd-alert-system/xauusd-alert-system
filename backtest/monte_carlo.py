@@ -3,10 +3,13 @@ Monte Carlo Simulation & Portfolio Stress Testing Engine.
 Computes Value at Risk (VaR), Conditional Value at Risk (CVaR/Expected Shortfall),
 Risk of Ruin, and Drawdown Distributions over thousands of resampled equity paths.
 """
+
 from __future__ import annotations
+
+from typing import Any, Dict, List
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional
 
 
 class MonteCarloSimulator:
@@ -36,7 +39,7 @@ class MonteCarloSimulator:
             return self._empty_result()
 
         rng = np.random.default_rng(self.random_seed)
-        
+
         # Sample with replacement: (n_simulations, horizon_trades)
         sampled_trades = rng.choice(
             self.trade_pnls,
@@ -45,17 +48,19 @@ class MonteCarloSimulator:
         )
 
         # Cumulative PnL paths: shape (n_simulations, horizon_trades + 1)
-        cum_pnl = np.hstack([
-            np.zeros((self.n_simulations, 1)),
-            np.cumsum(sampled_trades, axis=1),
-        ])
+        cum_pnl = np.hstack(
+            [
+                np.zeros((self.n_simulations, 1)),
+                np.cumsum(sampled_trades, axis=1),
+            ]
+        )
         equity_paths = self.initial_balance + cum_pnl
 
         # Calculate drawdowns for each path
         running_max = np.maximum.accumulate(equity_paths, axis=1)
         drawdowns_usd = equity_paths - running_max
         drawdowns_pct = (drawdowns_usd / np.maximum(running_max, 1e-6)) * 100.0
-        
+
         max_drawdowns_pct = np.abs(np.min(drawdowns_pct, axis=1))
         ending_equities = equity_paths[:, -1]
         ending_pnls = ending_equities - self.initial_balance
@@ -63,7 +68,7 @@ class MonteCarloSimulator:
         # Value at Risk (VaR) & CVaR (Expected Shortfall)
         var_95 = float(np.percentile(ending_pnls, 5.0))
         var_99 = float(np.percentile(ending_pnls, 1.0))
-        
+
         # CVaR is mean of losses beyond VaR
         tail_95 = ending_pnls[ending_pnls <= var_95]
         tail_99 = ending_pnls[ending_pnls <= var_99]

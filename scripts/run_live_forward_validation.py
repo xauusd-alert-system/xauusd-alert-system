@@ -4,11 +4,11 @@ This command refuses to expose outcomes before the pre-registered closed-trade
 minimum.  Once the gate is reached it appends ``validation_read`` BEFORE reading
 PnL payloads, permanently recording that the hold-out has been consumed.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import math
 
 import numpy as np
 import pandas as pd
@@ -70,7 +70,8 @@ def main(argv=None):
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--paper-db", default="data/paper_forward.sqlite")
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Explicitly confirm the single irreversible hold-out outcome read.",
     )
     parser.add_argument("--out", default=None)
@@ -89,26 +90,29 @@ def main(argv=None):
         )
     if status["validation_reads"]:
         raise SystemExit(
-            "HOLD-OUT ALREADY READ: validation_read exists for this frozen run; "
-            "refusing a sequential second look."
+            "HOLD-OUT ALREADY READ: validation_read exists for this frozen run; refusing a sequential second look."
         )
     if not args.force:
         raise SystemExit(
-            "HOLD-OUT READY BUT SEALED: re-run with --force to confirm the single "
-            "irreversible outcome read."
+            "HOLD-OUT READY BUT SEALED: re-run with --force to confirm the single irreversible outcome read."
         )
 
     # Burn marker first. A crash after this line still counts as a consumed read.
     marker_created = append_paper_event(
-        args.paper_db, run_id=run_id, event_type="validation_read",
+        args.paper_db,
+        run_id=run_id,
+        event_type="validation_read",
         idempotency_key=f"{run_id}:validation_read:1",
         event_timestamp_utc=int(pd.Timestamp.now(tz="UTC").timestamp()),
         payload={
             "manifest_sha256": manifest["manifest_sha256"],
             "closed_trades_at_read": status["closed_trades"],
             "thresholds": {
-                "min_trades": minimum, "profit_factor": 1.30,
-                "cost_x1_5_pf": 1.20, "t_block": 1.50, "dsr_neff": 0.80,
+                "min_trades": minimum,
+                "profit_factor": 1.30,
+                "cost_x1_5_pf": 1.20,
+                "t_block": 1.50,
+                "dsr_neff": 0.80,
             },
         },
     )
@@ -118,13 +122,15 @@ def main(argv=None):
         raise SystemExit("HOLD-OUT ALREADY READ: concurrent validation marker exists.")
     closed = read_paper_events(args.paper_db, run_id, event_type="close")
     trial = trial_from_closed_events(closed)
-    trial.update({
-        "run_id": run_id,
-        "asset_key": manifest["asset_key"],
-        "variant": manifest["variant"],
-        "manifest_sha256": manifest["manifest_sha256"],
-        "model_sha256": manifest["model_sha256"],
-    })
+    trial.update(
+        {
+            "run_id": run_id,
+            "asset_key": manifest["asset_key"],
+            "variant": manifest["variant"],
+            "manifest_sha256": manifest["manifest_sha256"],
+            "model_sha256": manifest["model_sha256"],
+        }
+    )
     checks = check_thresholds(trial, minimum)
     result = {"trial": trial, "checks": checks}
 

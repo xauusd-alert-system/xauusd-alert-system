@@ -17,6 +17,7 @@ Usage
 Also importable for Telegram admin bot:
     from scripts.process_manager import kill_trader, restart_trader, get_status
 """
+
 import argparse
 import logging
 import os
@@ -36,18 +37,14 @@ DASHBOARD_PATTERNS = ["uvicorn realtime.app"]
 # ---------------------------------------------------------------------------
 # Python interpreter detection
 # ---------------------------------------------------------------------------
-_VENV_PYTHON = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "venv", "Scripts", "python.exe")
-)
+_VENV_PYTHON = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "venv", "Scripts", "python.exe"))
 _SYSTEM_PYTHON = sys.executable  # the interpreter running this script
 
 
 def _is_venv_python(path: str) -> bool:
     """Return True if *path* resolves to the project venv interpreter."""
     try:
-        return os.path.normcase(os.path.abspath(path)) == os.path.normcase(
-            os.path.abspath(_VENV_PYTHON)
-        )
+        return os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(_VENV_PYTHON))
     except Exception:
         return False
 
@@ -67,11 +64,14 @@ def _discover_processes() -> list[dict]:
     try:
         raw = subprocess.check_output(
             [
-                "powershell", "-Command",
+                "powershell",
+                "-Command",
                 "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" "
                 "| Select-Object ProcessId,CommandLine | Format-List",
             ],
-            text=True, timeout=10, stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+            stderr=subprocess.DEVNULL,
         )
     except Exception:
         return rows
@@ -100,13 +100,15 @@ def _discover_processes() -> list[dict]:
                     if pat.lower() in cmd_lower:
                         role = "dashboard"
                         break
-            rows.append({
-                "pid": pid,
-                "exe": python_path,
-                "python_label": _python_label(python_path),
-                "role": role,
-                "cmdline": cmdline,
-            })
+            rows.append(
+                {
+                    "pid": pid,
+                    "exe": python_path,
+                    "python_label": _python_label(python_path),
+                    "role": role,
+                    "cmdline": cmdline,
+                }
+            )
             pid = None
             cmdline = ""
     return rows
@@ -162,7 +164,9 @@ def kill_trader() -> bool:
     for p in procs:
         logger.info(
             "Killing TRADER PID=%d  interpreter=%s  cmd=%s",
-            p["pid"], p["python_label"], p["cmdline"][:60],
+            p["pid"],
+            p["python_label"],
+            p["cmdline"][:60],
         )
         if not _kill_pid(p["pid"], "trader"):
             ok = False
@@ -179,7 +183,9 @@ def kill_dashboard() -> bool:
     for p in procs:
         logger.info(
             "Killing DASHBOARD PID=%d  interpreter=%s  cmd=%s",
-            p["pid"], p["python_label"], p["cmdline"][:60],
+            p["pid"],
+            p["python_label"],
+            p["cmdline"][:60],
         )
         if not _kill_pid(p["pid"], "dashboard"):
             ok = False
@@ -197,7 +203,10 @@ def restart_trader() -> bool:
     logger.info("Starting trader: %s  (logging to %s)", " ".join(cmd), log_path)
     with open(log_path, "a") as log_f:
         proc = subprocess.Popen(
-            cmd, cwd=project_root, stdout=log_f, stderr=subprocess.STDOUT,
+            cmd,
+            cwd=project_root,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
         )
     logger.info("Trader started PID=%d", proc.pid)
     # Save PID for Telegram admin compatibility
@@ -215,12 +224,14 @@ def restart_dashboard() -> bool:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     venv_python = os.path.join(project_root, "venv", "Scripts", "python.exe")
     log_path = os.path.join(project_root, "logs", "dashboard.log")
-    cmd = [venv_python, "-u", "-m", "uvicorn", "realtime.app:app",
-           "--host", "127.0.0.1", "--port", "8000"]
+    cmd = [venv_python, "-u", "-m", "uvicorn", "realtime.app:app", "--host", "127.0.0.1", "--port", "8000"]
     logger.info("Starting dashboard: %s", " ".join(cmd))
     with open(log_path, "a") as log_f:
         proc = subprocess.Popen(
-            cmd, cwd=project_root, stdout=log_f, stderr=subprocess.STDOUT,
+            cmd,
+            cwd=project_root,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
         )
     logger.info("Dashboard started PID=%d", proc.pid)
     return True
@@ -231,10 +242,16 @@ def restart_dashboard() -> bool:
 # ---------------------------------------------------------------------------
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Safe process manager for trader/dashboard.")
-    parser.add_argument("action", choices=[
-        "status", "kill-trader", "kill-dashboard",
-        "restart-trader", "restart-dashboard",
-    ])
+    parser.add_argument(
+        "action",
+        choices=[
+            "status",
+            "kill-trader",
+            "kill-dashboard",
+            "restart-trader",
+            "restart-dashboard",
+        ],
+    )
     args = parser.parse_args(argv)
 
     if args.action == "status":

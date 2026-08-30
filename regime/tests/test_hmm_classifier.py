@@ -1,6 +1,7 @@
 """
 Tests for Unsupervised Regime Classifier (GMM / Latent states).
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -17,13 +18,15 @@ def dummy_ohlcv():
     low = close - np.abs(np.random.randn(n) * 1.5)
     open_p = (high + low) / 2.0
     vol = np.random.randint(50, 1000, size=n).astype(float)
-    return pd.DataFrame({
-        "open": open_p,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": vol,
-    })
+    return pd.DataFrame(
+        {
+            "open": open_p,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": vol,
+        }
+    )
 
 
 def test_unsupervised_regime_fit_predict(dummy_ohlcv):

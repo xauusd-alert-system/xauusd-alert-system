@@ -13,18 +13,19 @@ Computes:
 - Calibration Gate: If ECE > threshold (default 0.05), meta-labeling development
   is gated/blocked and an explicit warning is logged.
 """
+
 from __future__ import annotations
 
 import logging
+from typing import Any, Optional
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("model_calibration")
 
 
-def compute_brier_score(y_true: np.ndarray | list | pd.Series,
-                        y_prob: np.ndarray | list | pd.Series) -> float:
+def compute_brier_score(y_true: np.ndarray | list | pd.Series, y_prob: np.ndarray | list | pd.Series) -> float:
     """Computes the Brier score: MSE of predicted probabilities vs binary outcomes."""
     y_t = np.asarray(y_true, dtype=float)
     y_p = np.asarray(y_prob, dtype=float)
@@ -33,9 +34,9 @@ def compute_brier_score(y_true: np.ndarray | list | pd.Series,
     return float(np.mean((y_p - y_t) ** 2))
 
 
-def compute_ece(y_true: np.ndarray | list | pd.Series,
-                y_prob: np.ndarray | list | pd.Series,
-                n_bins: int = 10) -> tuple[float, list[dict]]:
+def compute_ece(
+    y_true: np.ndarray | list | pd.Series, y_prob: np.ndarray | list | pd.Series, n_bins: int = 10
+) -> tuple[float, list[dict]]:
     """Computes Expected Calibration Error (ECE) and bin-level reliability data.
 
     Parameters
@@ -77,15 +78,17 @@ def compute_ece(y_true: np.ndarray | list | pd.Series,
             actual_rate = 0.0
             abs_diff = 0.0
 
-        bins_data.append({
-            "bin": i,
-            "bin_lower": round(float(low), 3),
-            "bin_upper": round(float(high), 3),
-            "avg_predicted": round(avg_pred, 4),
-            "actual_rate": round(actual_rate, 4),
-            "count": count,
-            "abs_error": round(abs_diff, 4),
-        })
+        bins_data.append(
+            {
+                "bin": i,
+                "bin_lower": round(float(low), 3),
+                "bin_upper": round(float(high), 3),
+                "avg_predicted": round(avg_pred, 4),
+                "actual_rate": round(actual_rate, 4),
+                "count": count,
+                "abs_error": round(abs_diff, 4),
+            }
+        )
 
     return float(ece), bins_data
 
@@ -148,13 +151,11 @@ def evaluate_asset_calibration(
     ece_threshold: float = 0.05,
 ) -> dict[str, Any]:
     """Evaluates probability calibration on purged-OOS predictions for a single asset."""
-    from scripts.deflated_sharpe import _score_fold
     from backtest.walk_forward import generate_windows
+    from scripts.deflated_sharpe import _score_fold
 
     wf_cfg = cfg["backtest"]["walk_forward"]
-    windows = generate_windows(
-        df, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"]
-    )
+    windows = generate_windows(df, wf_cfg["train_window_days"], wf_cfg["test_window_days"], wf_cfg["step_days"])
     if not windows:
         return calibration_report([], [], n_bins=n_bins, ece_threshold=ece_threshold, asset_name=asset_key)
 
@@ -176,6 +177,4 @@ def evaluate_asset_calibration(
             all_y_true.extend(labels.tolist())
             all_y_prob.extend(probs.tolist())
 
-    return calibration_report(
-        all_y_true, all_y_prob, n_bins=n_bins, ece_threshold=ece_threshold, asset_name=asset_key
-    )
+    return calibration_report(all_y_true, all_y_prob, n_bins=n_bins, ece_threshold=ece_threshold, asset_name=asset_key)

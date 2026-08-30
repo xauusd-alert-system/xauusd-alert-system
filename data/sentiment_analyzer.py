@@ -4,9 +4,10 @@ Analyzes economic statements, central bank decisions (Fed/ECB/BOE),
 inflation reports (CPI/PCE), and employment data (NFP) to produce
 causal numeric sentiment scores [-1.0, +1.0] for Gold and FX assets.
 """
+
 from __future__ import annotations
-import re
-from typing import Dict, Any, List
+
+from typing import Any, Dict, List, Optional
 
 
 class MacroNewsSentimentAnalyzer:
@@ -101,10 +102,13 @@ class MacroNewsSentimentAnalyzer:
         scores = [self.analyze_headline(h)["score"] for h in headlines]
         return float(sum(scores) / len(scores))
 
-    def red_zone_event_sentiment(self, current_ts_utc: int = None,
-                                 buffer_before_minutes: int = 30,
-                                 buffer_after_minutes: int = 30,
-                                 assets: tuple = ("USD", "ALL")) -> dict:
+    def red_zone_event_sentiment(
+        self,
+        current_ts_utc: Optional[int] = None,
+        buffer_before_minutes: int = 30,
+        buffer_after_minutes: int = 30,
+        assets: tuple = ("USD", "ALL"),
+    ) -> dict:
         """Score the sentiment of any High-Impact event currently inside the
         news red-zone buffer window (W17: wires this module into the live trading
         path as an optional sentiment veto).
@@ -116,7 +120,6 @@ class MacroNewsSentimentAnalyzer:
         """
         try:
             from data.news_filter import fetch_economic_calendar
-            import time
         except Exception:
             return {"score": 0.0, "bias": "neutral", "title": "", "in_red_zone": False}
         if not current_ts_utc:
@@ -137,8 +140,7 @@ class MacroNewsSentimentAnalyzer:
             if (news_ts - buf_before) <= current_ts_utc <= (news_ts + buf_after):
                 title = event.get("title", "")
                 res = self.analyze_headline(title)
-                return {"score": res["score"], "bias": res["bias"], "title": title,
-                        "in_red_zone": True}
+                return {"score": res["score"], "bias": res["bias"], "title": title, "in_red_zone": True}
         return {"score": 0.0, "bias": "neutral", "title": "", "in_red_zone": False}
 
 

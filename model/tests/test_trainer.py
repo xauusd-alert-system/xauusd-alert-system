@@ -2,8 +2,10 @@
 Unit tests for model/trainer.py and model/predictor.py.
 Run with: pytest model/tests/test_trainer.py -v
 """
+
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,12 +14,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
-from features.indicators import build_all_indicators
 from features.candle_anatomy import candle_anatomy
-from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
+from features.indicators import build_all_indicators
 from labeling.label_generator import generate_labels_from_config
-from model.trainer import build_training_matrix, time_ordered_split, train_model, calibrate_model, save_model, load_model, FEATURE_COLUMNS
 from model.predictor import ModelPredictor
+from model.trainer import (
+    build_training_matrix,
+    calibrate_model,
+    save_model,
+    time_ordered_split,
+    train_model,
+)
+from regime.classifier import RegimeLabel, add_regime_indicators, classify_regime_series
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -25,16 +33,19 @@ SESSIONS = CFG["sessions"]
 
 # Override labeling barriers to match mock data scale (~0.15 pts/candle drift)
 import copy
+
 CFG = copy.deepcopy(CFG)
 CFG["labeling"]["target_pips_x"] = 3.0
 CFG["labeling"]["stop_pips_y"] = 2.0
+
 
 def _full_featured_labeled_df(n=3000, seed=55):
     df = fetch_mock_candles("M15", n_candles=n, sessions_config=SESSIONS, seed=seed)
     df = build_all_indicators(df, CFG)
     df = candle_anatomy(df)
     df = add_regime_indicators(df, CFG)
-    df["mtf_confluence_score"] = 0.0  # placeholder in isolated test - real value comes from mtf_confluence.py in the full pipeline
+    df["mtf_confluence_score"] = 0.0  # placeholder in isolated test - real
+    # value comes from mtf_confluence.py in the full pipeline
     labels = generate_labels_from_config(df, CFG)
     df["label"] = labels
     return df
@@ -75,6 +86,7 @@ def test_build_training_matrix_three_class_keeps_zero_label():
     df.loc[valid_idx, "label"] = pattern[: len(valid_idx)]
 
     import copy
+
     three_cfg = copy.deepcopy(CFG)
     three_cfg["model"] = dict(three_cfg.get("model", {}))
     three_cfg["model"]["include_zero_class"] = True
@@ -360,18 +372,16 @@ def test_predictor_raises_on_nan_input(tmp_path):
 # ---------------------------------------------------------------------------
 
 from model.trainer import (  # noqa: E402
-    normalize_label_space,
     DegenerateLabelSpaceError,
+    normalize_label_space,
 )
 
 THREE_CLASS_CFG = {
-    "model": {"include_zero_class": True, "type": "xgboost",
-              "calibration_method": "sigmoid", "random_seed": 42},
+    "model": {"include_zero_class": True, "type": "xgboost", "calibration_method": "sigmoid", "random_seed": 42},
     "labeling": {"horizon_candles_n": 36},
 }
 BINARY_CFG = {
-    "model": {"include_zero_class": False, "type": "xgboost",
-              "calibration_method": "sigmoid", "random_seed": 42},
+    "model": {"include_zero_class": False, "type": "xgboost", "calibration_method": "sigmoid", "random_seed": 42},
     "labeling": {"horizon_candles_n": 36},
 }
 
@@ -380,8 +390,9 @@ def _directional_xy(n=600, seed=7):
     """Feature 'a' fully determines the direction, so p_long must track it."""
     rng = np.random.default_rng(seed)
     a = rng.normal(size=n)
-    X = pd.DataFrame({"ema_9": a, "rsi": rng.normal(size=n),
-                      "atr": rng.normal(size=n), "macd_line": rng.normal(size=n)})
+    X = pd.DataFrame(
+        {"ema_9": a, "rsi": rng.normal(size=n), "atr": rng.normal(size=n), "macd_line": rng.normal(size=n)}
+    )
     return a, X
 
 
@@ -431,7 +442,7 @@ def test_three_class_window_without_no_trade_trains_and_keeps_direction(tmp_path
     y = pd.Series(np.where(a > 0, 2, 0), index=X.index)  # {0, 2}: no no_trade
     assert sorted(y.unique()) == [0, 2]
 
-    base = train_model(X, y, THREE_CLASS_CFG)          # used to raise ValueError
+    base = train_model(X, y, THREE_CLASS_CFG)  # used to raise ValueError
     assert list(base.classes_) == [0, 1]
     assert base._label_space_no_trade_absent is True
 

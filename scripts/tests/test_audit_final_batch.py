@@ -12,7 +12,6 @@ Tests for the final audit batch:
 """
 
 import json
-import math
 import os
 import sys
 
@@ -22,38 +21,35 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from features.fractional_diff import frac_diff, min_d_adf
-from model.cv import purged_kfold_indices, purge_train_indices, embargo_train_indices
-from model.uniqueness import average_uniqueness_weights, sample_weight_series
 from backtest.portfolio import (
-    daily_r_matrix,
-    strategy_correlation,
-    effective_number_bets,
     cluster_risk_parity_weights,
-    portfolio_curve,
-    portfolio_metrics,
     compare_schemes,
+    daily_r_matrix,
+    effective_number_bets,
     kill_switch_thresholds,
+    portfolio_curve,
+    strategy_correlation,
 )
 from execution.risk_sizer import (
-    trade_risk_pct,
-    lots_for_risk,
     cluster_exposure_ok,
-    same_direction_cluster_penalty,
     drawdown_throttle,
     leverage_multiplier,
+    lots_for_risk,
+    same_direction_cluster_penalty,
+    trade_risk_pct,
     vol_target_scale,
 )
-from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
-    run_analysis,
-)
-from scripts.exit_calibration import calibrate_stop
-from scripts.diag_meta_precheck import run_meta_precheck
-from scripts.diag_event_tail import run_event_tail, _minutes_to_nearest
-from scripts.diag_time_stop import run_time_stop
+from features.fractional_diff import frac_diff, min_d_adf
+from model.cv import embargo_train_indices, purge_train_indices, purged_kfold_indices
 from model.ensemble_backtest import EnsembleBacktester
+from model.uniqueness import average_uniqueness_weights, sample_weight_series
+from scripts.deflated_sharpe import (
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
+)
+from scripts.diag_event_tail import _minutes_to_nearest, run_event_tail
+from scripts.diag_meta_precheck import run_meta_precheck
+from scripts.diag_time_stop import run_time_stop
 
 
 @pytest.fixture(scope="module")
@@ -66,11 +62,13 @@ def synthetic_gbp_df():
 # Regression (post-real-run 2026-08-07, PR #11): the two bugs fixed there
 # ---------------------------------------------------------------------------
 
+
 def test_block_bootstrap_t_fewer_trades_than_block():
     """A fold with fewer trades than the bootstrap block (20) made
     rng.integers(0, n - block) fail with ValueError: high <= 0. The block must
     be shrunk to n - 1; the call must return a float without raising."""
     from backtest.metrics import block_bootstrap_t
+
     t = block_bootstrap_t([1.0, -0.5, 0.2], block=20, n_boot=100)
     assert isinstance(t, float) and np.isfinite(t)
 
@@ -80,8 +78,9 @@ def test_regime_override_applied_with_enum_regimes():
     'RegimeLabel.TREND_UP' while regime_overrides keys are 'trend_up' (.value).
     The engine must normalize via _regime_name() so the override applies:
     stop 5.0xATR vs the base 3.0xATR, and regime_at_entry == 'trend_up'."""
-    from model.tests.test_ensemble_backtest import _fx_v3_early_be_cfg, _df
+    from model.tests.test_ensemble_backtest import _df, _fx_v3_early_be_cfg
     from regime.classifier import RegimeLabel
+
     cfg = _fx_v3_early_be_cfg(1.0)
     cfg["signal_grid"]["regime_overrides"] = {
         "trend_up": {"stop_mult": 5.0, "tp3_mult": 4.0},
@@ -100,6 +99,7 @@ def test_regime_override_applied_with_enum_regimes():
 # ---------------------------------------------------------------------------
 # Fractional differencing
 # ---------------------------------------------------------------------------
+
 
 def test_frac_diff_d1_is_first_difference():
     s = pd.Series(np.cumsum(np.random.default_rng(0).normal(0, 1, 100)))
@@ -133,6 +133,7 @@ def test_min_d_adf_finds_stationary_d():
 # ---------------------------------------------------------------------------
 # Purged CV + uniqueness
 # ---------------------------------------------------------------------------
+
 
 def test_purge_train_indices_drops_overlapping():
     train = np.arange(0, 20)
@@ -187,14 +188,21 @@ def test_sample_weight_series_decay():
 # Trainer: feature_subset + sample_weight
 # ---------------------------------------------------------------------------
 
+
 def test_feature_subset_respected():
     from model.trainer import build_training_matrix
-    df = pd.DataFrame({
-        "close": np.arange(50.0), "high": np.arange(50.0) + 0.1,
-        "low": np.arange(50.0) - 0.1, "atr": np.full(50, 1.0),
-        "rsi": np.full(50, 50.0), "ema_9": np.arange(50.0),
-        "label": [1, -1] * 25,
-    })
+
+    df = pd.DataFrame(
+        {
+            "close": np.arange(50.0),
+            "high": np.arange(50.0) + 0.1,
+            "low": np.arange(50.0) - 0.1,
+            "atr": np.full(50, 1.0),
+            "rsi": np.full(50, 50.0),
+            "ema_9": np.arange(50.0),
+            "label": [1, -1] * 25,
+        }
+    )
     X, y, cols = build_training_matrix(df, cfg={"model": {"feature_subset": ["atr", "rsi"]}})
     assert set(cols) == {"atr", "rsi"}
     assert set(X.columns) == {"atr", "rsi"}
@@ -202,11 +210,17 @@ def test_feature_subset_respected():
 
 def test_feature_subset_unknown_ignored():
     from model.trainer import build_training_matrix
-    df = pd.DataFrame({
-        "close": np.arange(50.0), "high": np.arange(50.0) + 0.1,
-        "low": np.arange(50.0) - 0.1, "atr": np.full(50, 1.0),
-        "rsi": np.full(50, 50.0), "label": [1, -1] * 25,
-    })
+
+    df = pd.DataFrame(
+        {
+            "close": np.arange(50.0),
+            "high": np.arange(50.0) + 0.1,
+            "low": np.arange(50.0) - 0.1,
+            "atr": np.full(50, 1.0),
+            "rsi": np.full(50, 50.0),
+            "label": [1, -1] * 25,
+        }
+    )
     X, y, cols = build_training_matrix(df, cfg={"model": {"feature_subset": ["atr", "no_such"]}})
     assert "no_such" not in cols
     assert "atr" in cols
@@ -214,11 +228,11 @@ def test_feature_subset_unknown_ignored():
 
 def test_train_model_sample_weight():
     from model.trainer import train_model
+
     X = pd.DataFrame({"a": np.arange(60.0), "b": np.arange(60.0) % 3})
     y = pd.Series((np.arange(60) % 2).astype(int))
     m1 = train_model(X, y, cfg={"model": {"type": "xgboost", "random_seed": 42}})
-    m2 = train_model(X, y, cfg={"model": {"type": "xgboost", "random_seed": 42}},
-                     sample_weight=np.ones(60))
+    m2 = train_model(X, y, cfg={"model": {"type": "xgboost", "random_seed": 42}}, sample_weight=np.ones(60))
     assert m1 is not None and m2 is not None
     with pytest.raises(ValueError):
         train_model(X, y, cfg={"model": {"type": "xgboost"}}, sample_weight=np.ones(5))
@@ -228,17 +242,21 @@ def test_train_model_sample_weight():
 # Feature selection (MDA)
 # ---------------------------------------------------------------------------
 
+
 def test_feature_selection_run(synthetic_gbp_df):
     from config.loader import load_config
-    from scripts.feature_selection import run_feature_selection
     from labeling.label_generator import generate_labels_from_config
+    from model.trainer import FEATURE_COLUMNS
+    from scripts.feature_selection import run_feature_selection
+
     cfg = load_config()
     df = synthetic_gbp_df.copy()
     if "label" not in df.columns:
         df["label"] = generate_labels_from_config(df, cfg)
-    d = run_feature_selection(cfg, "GBPUSD", df,
-                              max_features=5, n_splits=3, n_permute=2)
-    assert d["n_features_total"] == 46
+    d = run_feature_selection(cfg, "GBPUSD", df, max_features=5, n_splits=3, n_permute=2)
+    # Track the production feature contract instead of a hardcoded count
+    # (46 pre-bifurcation -> FEATURE_COLUMNS may grow with causal features).
+    assert d["n_features_total"] == len(FEATURE_COLUMNS)
     assert len(d["mda_rank"]) > 0
     assert len(d["suggested_subset"]) <= 5
     assert len(d["clustered"]) > 0
@@ -249,8 +267,10 @@ def test_feature_selection_run(synthetic_gbp_df):
 # Meta pre-check / event tail / time stop
 # ---------------------------------------------------------------------------
 
+
 def test_meta_precheck_structure(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
     d = run_meta_precheck(cfg, "GBPUSD", synthetic_gbp_df, max_folds=4)
     assert d["n_trades"] > 0
@@ -263,9 +283,9 @@ def test_meta_precheck_structure(synthetic_gbp_df):
 
 def test_event_tail_buckets(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
-    events = [{"timestamp_utc": int(1_650_000_000 + i * 86_400), "title": f"e{i}"}
-              for i in range(100)]
+    events = [{"timestamp_utc": int(1_650_000_000 + i * 86_400), "title": f"e{i}"} for i in range(100)]
     d = run_event_tail(cfg, "GBPUSD", synthetic_gbp_df, events, tail_pct=10.0, max_folds=4)
     assert d["n_trades"] > 0
     assert d["n_events"] == 100
@@ -283,6 +303,7 @@ def test_minutes_to_nearest():
 
 def test_time_stop_structure(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
     d = run_time_stop(cfg, "GBPUSD", synthetic_gbp_df, max_folds=4, max_h=20)
     assert d["n_trades"] > 0
@@ -295,9 +316,11 @@ def test_time_stop_structure(synthetic_gbp_df):
 # Pooled comparison
 # ---------------------------------------------------------------------------
 
+
 def test_pooled_comparison_runs(synthetic_gbp_df):
     from config.loader import load_config
     from scripts.backtest_pooled import run_pooled_comparison
+
     cfg = load_config()
     d = run_pooled_comparison(cfg, ["GBPUSD", "EURUSD"], max_folds=2, scale="zscore")
     assert "GBPUSD" in d["assets"] and "EURUSD" in d["assets"]
@@ -310,6 +333,7 @@ def test_pooled_comparison_runs(synthetic_gbp_df):
 # ---------------------------------------------------------------------------
 # Portfolio
 # ---------------------------------------------------------------------------
+
 
 def _trades(asset, days=60, seed=0, r_mean=0.03, r_std=0.4):
     rng = np.random.default_rng(seed)
@@ -379,6 +403,7 @@ def test_portfolio_curve_respects_weights():
 # Risk sizer
 # ---------------------------------------------------------------------------
 
+
 def test_trade_risk_pct_scale():
     r1 = trade_risk_pct(0.10, 0.4, trades_per_day=2, enb=1.0)
     r2 = trade_risk_pct(0.10, 0.4, trades_per_day=2, enb=3.0)
@@ -431,18 +456,29 @@ def test_leverage_and_vol_scale():
 # Engine: limit fill mode
 # ---------------------------------------------------------------------------
 
+
 def _df(n=400, price=1.10):
     idx = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
-    return pd.DataFrame({
-        "timestamp_utc": idx.astype("int64") // 10 ** 9,
-        "open": price, "high": price, "low": price, "close": price,
-        "volume": 100.0, "session": "london", "regime": "trend_up",
-        "atr": 0.0003, "ml_p_long": 0.9, "ml_p_short": 0.1,
-    })
+    return pd.DataFrame(
+        {
+            "timestamp_utc": idx.astype("int64") // 10**9,
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "volume": 100.0,
+            "session": "london",
+            "regime": "trend_up",
+            "atr": 0.0003,
+            "ml_p_long": 0.9,
+            "ml_p_short": 0.1,
+        }
+    )
 
 
 def test_limit_fill_mode_fills_on_touch():
     from model.tests.test_ensemble_backtest import _fx_v3_early_be_cfg
+
     cfg = _fx_v3_early_be_cfg(1.0)
     cfg["backtest"]["fill_mode"] = "limit"
     cfg["backtest"]["limit_frac"] = 0.25
@@ -459,6 +495,7 @@ def test_limit_fill_mode_fills_on_touch():
 
 def test_limit_fill_mode_timeout_cancels():
     from model.tests.test_ensemble_backtest import _fx_v3_early_be_cfg
+
     cfg = _fx_v3_early_be_cfg(1.0)
     cfg["backtest"]["fill_mode"] = "limit"
     cfg["backtest"]["limit_frac"] = 0.25
@@ -472,6 +509,7 @@ def test_limit_fill_mode_timeout_cancels():
 
 def test_limit_fill_mode_fills_later_within_timeout():
     from model.tests.test_ensemble_backtest import _fx_v3_early_be_cfg
+
     cfg = _fx_v3_early_be_cfg(1.0)
     cfg["backtest"]["fill_mode"] = "limit"
     cfg["backtest"]["limit_frac"] = 0.25

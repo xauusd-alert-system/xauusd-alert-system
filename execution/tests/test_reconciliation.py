@@ -1,7 +1,6 @@
 """Unit tests for execution/reconciliation.py (ТЗ §27/§28)."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from execution.reconciliation import (
     classify_broker_close,
@@ -17,23 +16,34 @@ def _spec(side="long") -> TradeGroupSpec:
     else:
         entry, tp1, tp2, tp3, sl = 100.0, 96.0, 92.0, 88.0, 110.0
     return TradeGroupSpec(
-        group_id="TG-REC-1", signal_id="SGL-REC-1", intent_id="INT-REC-1",
-        asset_key="XAUUSD", broker_symbol="GOLD", mode="demo", side=side,
+        group_id="TG-REC-1",
+        signal_id="SGL-REC-1",
+        intent_id="INT-REC-1",
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        mode="demo",
+        side=side,
         entry={"low": 99.0, "high": 101.0, "reference": entry},
-        geometry={"version": "v1", "unit": "price", "step_price": 4.0,
-                  "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl},
-        targets=[{"leg": 1, "price": tp1, "allocation": 1 / 3},
-                 {"leg": 2, "price": tp2, "allocation": 1 / 3},
-                 {"leg": 3, "price": tp3, "allocation": 1 / 3}],
-        break_even={"trigger": "tp1_filled",
-                    "raw_price_policy": "actual_fill",
-                    "protected_price_policy": "actual_fill_plus_cost_buffer",
-                    "apply_to": [2, 3]},
-        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5,
-              "estimated_loss_at_sl": 30.0, "total_volume": 0.03},
-        profile_id="v1", model_version="v3", model_hash="m" * 64,
-        config_hash="c" * 64, strategy_version="s3",
-        expires_at_utc_ms=1_900_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        geometry={"version": "v1", "unit": "price", "step_price": 4.0, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl},
+        targets=[
+            {"leg": 1, "price": tp1, "allocation": 1 / 3},
+            {"leg": 2, "price": tp2, "allocation": 1 / 3},
+            {"leg": 3, "price": tp3, "allocation": 1 / 3},
+        ],
+        break_even={
+            "trigger": "tp1_filled",
+            "raw_price_policy": "actual_fill",
+            "protected_price_policy": "actual_fill_plus_cost_buffer",
+            "apply_to": [2, 3],
+        },
+        risk={"currency": "USD", "max_cash": 50.0, "max_pct": 0.5, "estimated_loss_at_sl": 30.0, "total_volume": 0.03},
+        profile_id="v1",
+        model_version="v3",
+        model_hash="m" * 64,
+        config_hash="c" * 64,
+        strategy_version="s3",
+        expires_at_utc_ms=1_900_000_000_000,
+        created_at_utc_ms=1_700_000_000_000,
     )
 
 
@@ -81,12 +91,9 @@ def test_inspect_group_detects_broker_closed_leg_via_history():
         "state": GroupState.OPENED,
         "submitted": True,
         "legs": [
-            {"leg": 1, "volume": 0.01, "state": "OPEN",
-             "broker": {"position_id": 100001}},
-            {"leg": 2, "volume": 0.01, "state": "OPEN",
-             "broker": {"position_id": 100002}},
-            {"leg": 3, "volume": 0.01, "state": "OPEN",
-             "broker": {"position_id": 100003}},
+            {"leg": 1, "volume": 0.01, "state": "OPEN", "broker": {"position_id": 100001}},
+            {"leg": 2, "volume": 0.01, "state": "OPEN", "broker": {"position_id": 100002}},
+            {"leg": 3, "volume": 0.01, "state": "OPEN", "broker": {"position_id": 100003}},
         ],
     }
     # leg1 position is gone; its OUT deal (broker TP at 104) lives in history
@@ -96,8 +103,7 @@ def test_inspect_group_detects_broker_closed_leg_via_history():
             {"ticket": 100003, "volume": 0.01, "comment": f"TG:{spec.group_id}|L:{spec.group_id}-L3"},
         ],
         deals={
-            100001: [{"ticket": 10, "position": 100001, "entry": 1, "price": 104.0,
-                      "time": 100, "volume": 0.01}],
+            100001: [{"ticket": 10, "position": 100001, "entry": 1, "price": 104.0, "time": 100, "volume": 0.01}],
             100002: [],
             100003: [],
         },
@@ -125,8 +131,7 @@ def test_inspect_group_volume_mismatch_netting():
         ],
     }
     driver = _FakeDriver(
-        positions=[{"ticket": 100001, "volume": 0.04,
-                    "comment": f"TG:{spec.group_id}|L:{spec.group_id}-L1"}],
+        positions=[{"ticket": 100001, "volume": 0.04, "comment": f"TG:{spec.group_id}|L:{spec.group_id}-L1"}],
         deals={100001: []},
     )
     inspection = inspect_group(driver, group)

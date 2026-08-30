@@ -33,6 +33,7 @@ Degeneracy audit (2026-08-27, GBPUSD artifact):
 
 Read-only. Writes logs/model_fingerprint_audit.csv.
 """
+
 import argparse
 import hashlib
 import os
@@ -121,8 +122,9 @@ def _is_degenerate(stats: dict | None, min_std: float) -> tuple[bool, str]:
     return False, ""
 
 
-def verify_file(path: str, probe_X: pd.DataFrame | None = None,
-                min_std: float = 0.01, asset_key: str | None = None) -> dict:
+def verify_file(
+    path: str, probe_X: pd.DataFrame | None = None, min_std: float = 0.01, asset_key: str | None = None
+) -> dict:
     row = {
         "file": path,
         "asset": asset_key or _asset_from_name(path),
@@ -201,8 +203,9 @@ def verify_file(path: str, probe_X: pd.DataFrame | None = None,
     return row
 
 
-def _build_probe_frame(cfg: dict, asset_key: str, timeframe: str,
-                       db_path: str, probe_days: int, probe_bars: int) -> pd.DataFrame | None:
+def _build_probe_frame(
+    cfg: dict, asset_key: str, timeframe: str, db_path: str, probe_days: int, probe_bars: int
+) -> pd.DataFrame | None:
     """Build a real recent-features frame for one asset (cached by caller).
 
     Mirrors scripts/diag_calib_check: cap raw history to recent days, build the
@@ -212,14 +215,14 @@ def _build_probe_frame(cfg: dict, asset_key: str, timeframe: str,
     try:
         from scripts.run_backtest import load_asset_history
         from scripts.train_mt5 import build_full_df
+
         raw = load_asset_history(db_path, timeframe, asset_key)
         if raw is None or len(raw) == 0:
             return None
         if probe_days:
             cutoff = raw["timestamp_utc"].max() - probe_days * 86400.0
             raw = raw[raw["timestamp_utc"] >= cutoff]
-        df = build_full_df(raw, cfg, db_path=db_path, asset_key=asset_key,
-                           timeframe=timeframe)
+        df = build_full_df(raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe)
         if df is None or len(df) == 0:
             return None
         tail = df.tail(probe_bars).copy()
@@ -227,6 +230,7 @@ def _build_probe_frame(cfg: dict, asset_key: str, timeframe: str,
         # do the same so the completeness filter sees training-time columns.
         if "regime" in tail.columns:
             from regime.classifier import regime_onehot_df
+
             onehot = regime_onehot_df(tail)
             for c in onehot.columns:
                 if c not in tail.columns:
@@ -239,29 +243,26 @@ def _build_probe_frame(cfg: dict, asset_key: str, timeframe: str,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--min-std", type=float, default=0.01,
-                        help="std p_long/p_short below this flags DEGENERATE (default 0.01)")
-    parser.add_argument("--probe-days", type=int, default=60,
-                        help="recent raw-history window used to build the probe frame")
-    parser.add_argument("--probe-bars", type=int, default=1500,
-                        help="tail bars of the probe frame scored per model")
-    parser.add_argument("--no-probe", action="store_true",
-                        help="skip the degeneracy probe entirely (fingerprints only)")
+    parser.add_argument(
+        "--min-std", type=float, default=0.01, help="std p_long/p_short below this flags DEGENERATE (default 0.01)"
+    )
+    parser.add_argument(
+        "--probe-days", type=int, default=60, help="recent raw-history window used to build the probe frame"
+    )
+    parser.add_argument("--probe-bars", type=int, default=1500, help="tail bars of the probe frame scored per model")
+    parser.add_argument(
+        "--no-probe", action="store_true", help="skip the degeneracy probe entirely (fingerprints only)"
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config()
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     production_paths = {
-        os.path.normpath(v.get("model_path", ""))
-        for v in cfg.get("assets", {}).values()
-        if v.get("model_path")
+        os.path.normpath(v.get("model_path", "")) for v in cfg.get("assets", {}).values() if v.get("model_path")
     }
 
     files = sorted(
-        os.path.join(root, name)
-        for root, _, names in os.walk(MODEL_DIR)
-        for name in names
-        if name.endswith(".joblib")
+        os.path.join(root, name) for root, _, names in os.walk(MODEL_DIR) for name in names if name.endswith(".joblib")
     )
     if not files:
         print(f"no *.joblib under {MODEL_DIR}")
@@ -274,14 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         asset = _asset_from_name(p)
         probe = None
         if not args.no_probe and asset in cfg.get("assets", {}):
-            tf = (cfg["assets"][asset].get("timeframe")
-                  or cfg.get("market_data", {}).get("timeframe", "M5"))
+            tf = cfg["assets"][asset].get("timeframe") or cfg.get("market_data", {}).get("timeframe", "M5")
             key = (asset, tf)
             if key not in probe_cache:
                 print(f"building probe frame: {asset} {tf} ...", flush=True)
-                probe_cache[key] = _build_probe_frame(
-                    cfg, asset, tf, db_path, args.probe_days, args.probe_bars
-                )
+                probe_cache[key] = _build_probe_frame(cfg, asset, tf, db_path, args.probe_days, args.probe_bars)
             probe = probe_cache[key]
         rows.append(verify_file(p, probe_X=probe, min_std=args.min_std, asset_key=asset))
 
@@ -300,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 130)
 
     from collections import Counter
+
     counts = Counter(r["verdict"] for r in rows)
     print("verdicts:", dict(counts))
 
@@ -310,7 +309,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fail-closed: any broken PRODUCTION model fails the night.
     failed = [
-        r["file"] for r in rows
+        r["file"]
+        for r in rows
         if r["verdict"] in ("DEGENERATE", "NEW-MISMATCH", "UNRECOGNIZED")
         and os.path.normpath(r["file"]) in production_paths
     ]

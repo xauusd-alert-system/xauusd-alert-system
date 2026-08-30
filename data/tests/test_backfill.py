@@ -4,16 +4,23 @@ All HTTP calls are mocked with time.sleep patched out - no real network calls,
 no real waiting.
 Run with: pytest data/tests/test_backfill.py -v
 """
+
 import os
 import sys
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from data.ingestion import backfill_historical, fetch_live_candles, _request_with_backoff, TWELVE_DATA_MAX_OUTPUTSIZE
+from data.ingestion import (
+    TWELVE_DATA_MAX_OUTPUTSIZE,
+    _request_with_backoff,
+    backfill_historical,
+    fetch_live_candles,
+)
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -24,10 +31,16 @@ def _make_values(start_dt: pd.Timestamp, n: int, step_minutes: int = 15):
     values = []
     for i in range(n):
         dt = start_dt - pd.Timedelta(minutes=step_minutes * i)
-        values.append({
-            "datetime": dt.strftime("%Y-%m-%d %H:%M:%S"),
-            "open": "2400.0", "high": "2401.0", "low": "2399.0", "close": "2400.5", "volume": "100.0",
-        })
+        values.append(
+            {
+                "datetime": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": "2400.0",
+                "high": "2401.0",
+                "low": "2399.0",
+                "close": "2400.5",
+                "volume": "100.0",
+            }
+        )
     return values
 
 
@@ -93,7 +106,11 @@ def test_backfill_historical_paginates_across_multiple_calls(mock_get, mock_slee
     """
     end_dt = pd.Timestamp("2026-01-10 00:00:00", tz="UTC")
     page1_values = _make_values(end_dt, 100, step_minutes=15)  # newest first
-    page2_values = _make_values(page1_values and pd.Timestamp(page1_values[-1]["datetime"], tz="UTC") - pd.Timedelta(minutes=15), 50, step_minutes=15)
+    page2_values = _make_values(
+        page1_values and pd.Timestamp(page1_values[-1]["datetime"], tz="UTC") - pd.Timedelta(minutes=15),
+        50,
+        step_minutes=15,
+    )
 
     resp1 = MagicMock(status_code=200)
     resp1.json.return_value = {"values": page1_values}

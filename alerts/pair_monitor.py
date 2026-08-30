@@ -13,6 +13,7 @@ Integration with control_bot.py:
 The send_fn is control_bot._send(chat_id, text) — or any callable that
 posts a Telegram message.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -112,7 +113,7 @@ class PairMonitor:
     def _ensure_imports(self):
         if self._pair_analyzer is not None:
             return
-        from pairs_analysis import PairAnalyzer, SignalEngine, EnsembleEngine
+        from pairs_analysis import EnsembleEngine, PairAnalyzer, SignalEngine
         from pairs_analysis import load_config as load_pairs_config
 
         # Reload pairs_config to get fresh thresholds
@@ -132,8 +133,7 @@ class PairMonitor:
         side_ru = "LONG" if sig.direction == "long" else "SHORT"
         side_emoji = "\U0001f7e2" if sig.direction == "long" else "\U0001f534"
         p1, p2 = m.name.split("/")
-        rec = (f"long {p1} / short {p2}" if sig.direction == "long"
-               else f"short {p1} / long {p2}")
+        rec = f"long {p1} / short {p2}" if sig.direction == "long" else f"short {p1} / long {p2}"
 
         # z-score strength indicator
         z_abs = abs(sig.z)
@@ -149,19 +149,15 @@ class PairMonitor:
         if ensemble is not None:
             ens_summary = ensemble.summary_line()
             ens_conf = ensemble.confidence
-            top = sorted(ensemble.engines, key=lambda e: e.confidence,
-                         reverse=True)[:4]
+            top = sorted(ensemble.engines, key=lambda e: e.confidence, reverse=True)[:4]
             engine_lines = []
             for e in top:
-                dir_label = {"long": "LONG", "short": "SHORT",
-                             "neutral": "NEUTRAL"}.get(e.direction, e.direction.upper())
-                engine_lines.append(
-                    f"  {e.name:<14} {dir_label:>8}  {e.confidence:>4.0f}%")
+                dir_label = {"long": "LONG", "short": "SHORT", "neutral": "NEUTRAL"}.get(
+                    e.direction, e.direction.upper()
+                )
+                engine_lines.append(f"  {e.name:<14} {dir_label:>8}  {e.confidence:>4.0f}%")
             engines_block = "\n".join(engine_lines)
-            ens_section = (
-                f"\n\U0001f9e0 ENSEMBLE\n"
-                f"{ens_summary} ({ens_conf:.0f}% confidence)\n"
-                f"{engines_block}")
+            ens_section = f"\n\U0001f9e0 ENSEMBLE\n{ens_summary} ({ens_conf:.0f}% confidence)\n{engines_block}"
 
         # Period label
         hl_label = f"{m.half_life_days:.1f}d"
@@ -200,7 +196,7 @@ class PairMonitor:
         self._ensure_imports()
 
         pair_sent = _load_json(PAIR_SENT_FILE)
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         alerts = []
 
         for pair in self.pairs_cfg.get("pairs", []):
@@ -238,12 +234,9 @@ class PairMonitor:
                         "hurst": m.hurst,
                         "sigma": m.sigma,
                         "regime": "mean-reverting" if m.hurst < 0.5 else "trending",
-                        "ensemble_direction": (ensemble.direction if ensemble
-                                               else "neutral"),
-                        "ensemble_confidence": (ensemble.confidence if ensemble
-                                                else 0),
-                        "ensemble_line": (ensemble.summary_line() if ensemble
-                                          else ""),
+                        "ensemble_direction": (ensemble.direction if ensemble else "neutral"),
+                        "ensemble_confidence": (ensemble.confidence if ensemble else 0),
+                        "ensemble_line": (ensemble.summary_line() if ensemble else ""),
                     }
                     alerts.append((name, text, metadata))
             except Exception as e:
@@ -255,6 +248,7 @@ class PairMonitor:
         """Check open pair positions for exit_z / stop_z / timeout."""
         try:
             from challenge.manual.pair_outcomes import resolve_pair_outcomes
+
             resolve_pair_outcomes(self.timeframe)
         except Exception as e:
             logger.warning("pair outcome resolve: %s", e)
@@ -267,7 +261,7 @@ class PairMonitor:
         # Check pair signals
         alerts = self._check_signals()
         pair_sent = _load_json(PAIR_SENT_FILE)
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
 
         for pair_name, text, meta in alerts:
             try:
@@ -284,9 +278,12 @@ class PairMonitor:
 
     def _loop(self):
         poll_sec = self.poll_minutes * 60
-        logger.info("Pair monitor started: tf=%s, poll=%dm, pairs=%s",
-                     self.timeframe, self.poll_minutes,
-                     self.pairs_to_watch or "all")
+        logger.info(
+            "Pair monitor started: tf=%s, poll=%dm, pairs=%s",
+            self.timeframe,
+            self.poll_minutes,
+            self.pairs_to_watch or "all",
+        )
         while not self._stop.is_set():
             try:
                 now = time.time()
@@ -305,8 +302,7 @@ class PairMonitor:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(
-            target=self._loop, name="pair-monitor", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="pair-monitor", daemon=True)
         self._thread.start()
 
     def stop(self):
@@ -330,8 +326,7 @@ class PairMonitor:
                 sig = self._signal_engine.current(m)
                 forecast = self._ensemble_engine.forecast(m)
 
-                icon = {"long": "\U0001f7e2 LONG", "short": "\U0001f534 SHORT"}.get(
-                    sig.direction, "\u26aa NO EDGE")
+                icon = {"long": "\U0001f7e2 LONG", "short": "\U0001f534 SHORT"}.get(sig.direction, "\u26aa NO EDGE")
                 adf_icon = "\u2705" if m.adf_p < 0.05 else "\u274c"
                 hurst_icon = "\u2705" if m.hurst < 0.5 else "\u274c"
 
@@ -351,14 +346,16 @@ class PairMonitor:
 
         # Pair stats if available
         try:
-            from challenge.manual.outcomes import read_journal, compute_stats
+            from challenge.manual.outcomes import compute_stats, read_journal
+
             rows = read_journal(PAIR_JOURNAL_CSV)
             stats = compute_stats(rows)
             if stats.get("total", 0) > 0:
                 lines.append(
                     f"\n\U0001f4c8 Pair stats: {stats['total']} trades, "
                     f"WR {stats.get('win_rate', 0):.0f}%, "
-                    f"avgR {stats.get('avg_r', 0):+.2f}")
+                    f"avgR {stats.get('avg_r', 0):+.2f}"
+                )
         except Exception:
             pass
 

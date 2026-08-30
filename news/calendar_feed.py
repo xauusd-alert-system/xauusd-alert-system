@@ -24,10 +24,10 @@ import logging
 import os
 import threading
 import time
-import urllib.request
-import requests
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
+
+import requests
 
 logger = logging.getLogger("news.calendar_feed")
 
@@ -44,10 +44,11 @@ _DISK_CACHE_TTL = 86400  # 24 hours
 @dataclass
 class CalendarEvent:
     """Single economic calendar event."""
+
     title: str
-    currency: str           # e.g. "USD", "EUR", "GBP"
+    currency: str  # e.g. "USD", "EUR", "GBP"
     datetime_utc: dt.datetime
-    impact: str             # "Low" | "Medium" | "High"
+    impact: str  # "Low" | "Medium" | "High"
     forecast: str = ""
     previous: str = ""
 
@@ -60,8 +61,7 @@ class CalendarEvent:
         return self.impact in ("Medium", "High")
 
     def __repr__(self) -> str:
-        return (f"CalendarEvent({self.impact} {self.currency} {self.title} "
-                f"@ {self.datetime_utc:%Y-%m-%d %H:%M})")
+        return f"CalendarEvent({self.impact} {self.currency} {self.title} @ {self.datetime_utc:%Y-%m-%d %H:%M})"
 
 
 def _parse_event(raw: dict) -> Optional[CalendarEvent]:
@@ -81,7 +81,7 @@ def _parse_event(raw: dict) -> Optional[CalendarEvent]:
         # Format: "2026-08-18T08:30:00-04:00"
         dt_obj = dt.datetime.fromisoformat(date_str)
         # Convert to UTC
-        dt_utc = dt_obj.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        dt_utc = dt_obj.astimezone(dt.UTC).replace(tzinfo=None)
 
         return CalendarEvent(
             title=title,
@@ -116,11 +116,15 @@ class CalendarFeed:
         url = _FF_BASE.format(week=week)
         for attempt in range(retries):
             try:
-                resp = requests.get(url, timeout=15, headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; NewsGuard/1.0)",
-                })
+                resp = requests.get(
+                    url,
+                    timeout=15,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; NewsGuard/1.0)",
+                    },
+                )
                 if resp.status_code == 429:
-                    wait = 2 ** attempt * 2  # 2s, 4s, 8s
+                    wait = 2**attempt * 2  # 2s, 4s, 8s
                     logger.warning("Rate limited on %s, waiting %ds", week, wait)
                     time.sleep(wait)
                     continue
@@ -167,10 +171,12 @@ class CalendarFeed:
 
         self._cache = deduped
         self._cache_ts = now
-        logger.info("Calendar feed refreshed: %d events (HIGH: %d, MEDIUM: %d)",
-                     len(deduped),
-                     sum(1 for e in deduped if e.is_high),
-                     sum(1 for e in deduped if e.impact == "Medium"))
+        logger.info(
+            "Calendar feed refreshed: %d events (HIGH: %d, MEDIUM: %d)",
+            len(deduped),
+            sum(1 for e in deduped if e.is_high),
+            sum(1 for e in deduped if e.impact == "Medium"),
+        )
 
     def _load_disk_cache(self) -> None:
         """Load events from disk cache if fresh enough."""
@@ -193,8 +199,7 @@ class CalendarFeed:
                 self._cache = events
                 self._cache_ts = cache_ts
                 if age > _CACHE_TTL:
-                    logger.info("Loaded stale disk cache (%.0fh old, %d events)",
-                                age / 3600, len(events))
+                    logger.info("Loaded stale disk cache (%.0fh old, %d events)", age / 3600, len(events))
         except Exception:
             pass  # corrupt cache, ignore
 
@@ -204,14 +209,16 @@ class CalendarFeed:
             os.makedirs(os.path.dirname(self._disk_cache_path), exist_ok=True)
             events_data = []
             for ev in self._cache:
-                events_data.append({
-                    "title": ev.title,
-                    "country": ev.currency,
-                    "date": ev.datetime_utc.isoformat() + "+00:00",
-                    "impact": ev.impact,
-                    "forecast": ev.forecast,
-                    "previous": ev.previous,
-                })
+                events_data.append(
+                    {
+                        "title": ev.title,
+                        "country": ev.currency,
+                        "date": ev.datetime_utc.isoformat() + "+00:00",
+                        "impact": ev.impact,
+                        "forecast": ev.forecast,
+                        "previous": ev.previous,
+                    }
+                )
             with open(self._disk_cache_path, "w", encoding="utf-8") as f:
                 json.dump({"ts": self._cache_ts, "events": events_data}, f)
         except Exception:
@@ -247,9 +254,9 @@ class CalendarFeed:
         """Get HIGH impact events within next `hours`."""
         return [e for e in self.get_upcoming(hours, reference) if e.is_high]
 
-    def is_red_zone(self, now: Optional[dt.datetime] = None,
-                    buffer_min: int = 30,
-                    currencies: Optional[set[str]] = None) -> bool:
+    def is_red_zone(
+        self, now: Optional[dt.datetime] = None, buffer_min: int = 30, currencies: Optional[set[str]] = None
+    ) -> bool:
         """
         Check if `now` is within ±buffer_min of a HIGH impact event.
 
@@ -280,8 +287,9 @@ class CalendarFeed:
                     return True
         return False
 
-    def next_high_impact(self, reference: Optional[dt.datetime] = None,
-                         currencies: Optional[set[str]] = None) -> Optional[CalendarEvent]:
+    def next_high_impact(
+        self, reference: Optional[dt.datetime] = None, currencies: Optional[set[str]] = None
+    ) -> Optional[CalendarEvent]:
         """Return the next upcoming HIGH impact event, or None."""
         self._ensure_cache()
         now = reference or dt.datetime.utcnow()
@@ -294,8 +302,9 @@ class CalendarFeed:
                 return ev
         return None
 
-    def format_upcoming(self, hours: float = 48.0, max_events: int = 15,
-                         reference: Optional[dt.datetime] = None) -> str:
+    def format_upcoming(
+        self, hours: float = 48.0, max_events: int = 15, reference: Optional[dt.datetime] = None
+    ) -> str:
         """Format upcoming events as a readable string for Telegram."""
         events = self.get_upcoming(hours, reference=reference)
         if not events:

@@ -37,11 +37,12 @@ Run:
     LEDGER_INGEST_TOKEN=... LEDGER_INGEST_SECRET=... \\
     python -m scripts.run_observer_signing_proxy [--port 8787]
 """
+
 from __future__ import annotations
 
 import argparse
-import hmac
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -50,16 +51,23 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from contracts.execution_contracts import event_envelope_from_dict  # noqa: E402
+from contracts.execution_contracts import (  # noqa: E402
+    check_protocol_version,
+    event_envelope_from_dict,
+)
 
 logger = logging.getLogger("observer_signing_proxy")
 
 LOOPBACK_HOST = "127.0.0.1"
 
+
 # Indirection so tests can patch remote delivery without a live network.
 def _requests_post(url, data, headers, timeout=10.0):
     import requests
+
     return requests.post(url, data=data, headers=headers, timeout=timeout)
+
+
 PROXY_PATH = "/v1/observer/ingest"
 MAX_BODY_BYTES = 1_000_000  # 1 MB cap for observer envelopes
 ALLOWED_ACCOUNT_MODES = {"demo", "contest"}
@@ -85,13 +93,9 @@ def load_proxy_config(env=None) -> dict:
     if not ingest_secret:
         missing.append("LEDGER_INGEST_SECRET")
     if missing:
-        raise ProxyConfigError(
-            "observer signing proxy configuration incomplete: " + ", ".join(missing)
-        )
+        raise ProxyConfigError("observer signing proxy configuration incomplete: " + ", ".join(missing))
     if not str(ingest_url).startswith("https://"):
-        raise ProxyConfigError(
-            "LEDGER_INGEST_URL must be https:// (strict signed remote ingress)"
-        )
+        raise ProxyConfigError("LEDGER_INGEST_URL must be https:// (strict signed remote ingress)")
     return {
         "proxy_token": str(proxy_token),
         "ingest_url": str(ingest_url),
@@ -110,6 +114,11 @@ def validate_observer_envelope(raw: dict) -> tuple[bool, str]:
     Returns (ok, error). Raises nothing; a rejected envelope must NOT be
     forwarded or signed.
     """
+    # ТЗ 10.4: protocol version gate — unknown versions are never signed or
+    # forwarded; a missing field counts as v1 (legacy observers).
+    version_ok, version_err, _version = check_protocol_version(raw)
+    if not version_ok:
+        return False, version_err
     try:
         envelope = event_envelope_from_dict(raw)
     except Exception as exc:  # pydantic ValidationError and friends
@@ -118,10 +127,7 @@ def validate_observer_envelope(raw: dict) -> tuple[bool, str]:
         return False, f"producer must be mt5_observer, got {envelope.producer!r}"
     for event in envelope.events:
         if event.account_mode not in ALLOWED_ACCOUNT_MODES:
-            return False, (
-                f"account_mode {event.account_mode!r} not allowed "
-                f"(demo/contest only)"
-            )
+            return False, (f"account_mode {event.account_mode!r} not allowed (demo/contest only)")
     return True, ""
 
 
@@ -165,9 +171,7 @@ class ObserverSigningProxyHandler(BaseHTTPRequestHandler):
 
         # 1. observer proxy bearer (constant-time)
         auth = self.headers.get("Authorization", "")
-        if not auth.startswith("Bearer ") or not constant_time_eq(
-            auth[len("Bearer "):], self.proxy_token
-        ):
+        if not auth.startswith("Bearer ") or not constant_time_eq(auth[len("Bearer ") :], self.proxy_token):
             self._reject(401, "proxy authorization required")
             return
 
@@ -190,7 +194,6 @@ class ObserverSigningProxyHandler(BaseHTTPRequestHandler):
             return
 
         # 4. forward EXACT raw body to remote HTTPS with bearer + HMAC
-        import requests as _requests
 
         headers = {
             "Authorization": f"Bearer {self.ingest_token}",
@@ -198,9 +201,7 @@ class ObserverSigningProxyHandler(BaseHTTPRequestHandler):
             "X-Ledger-Signature": sign_raw_body(raw_body, self.ingest_secret),
         }
         try:
-            response = _requests_post(
-                self.ingest_url, data=raw_body, headers=headers, timeout=10.0
-            )
+            response = _requests_post(self.ingest_url, data=raw_body, headers=headers, timeout=10.0)
         except Exception as exc:
             logger.warning("remote transport failure: %s", exc)
             self._reject(502, "remote ingest unavailable")
@@ -208,10 +209,8 @@ class ObserverSigningProxyHandler(BaseHTTPRequestHandler):
         remote_status = response.status_code
         batch_id = raw.get("batch_id", "?")
         logger.info(
-            "forward producer=mt5_observer account_mode=%s events=%d "
-            "batch=%s remote_status=%d",
-            raw.get("events", [{}])[0].get("account_mode", "?")
-            if raw.get("events") else "?",
+            "forward producer=mt5_observer account_mode=%s events=%d batch=%s remote_status=%d",
+            raw.get("events", [{}])[0].get("account_mode", "?") if raw.get("events") else "?",
             len(raw.get("events", [])),
             batch_id,
             remote_status,
@@ -236,24 +235,18 @@ def build_proxy_server(config: dict) -> HTTPServer:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--host", default=LOOPBACK_HOST,
-                        help="MUST stay 127.0.0.1; any other value is rejected")
+    parser.add_argument("--host", default=LOOPBACK_HOST, help="MUST stay 127.0.0.1; any other value is rejected")
     args = parser.parse_args()
     if args.host != LOOPBACK_HOST:
-        raise ProxyConfigError(
-            f"proxy host must be {LOOPBACK_HOST} (loopback only); got {args.host!r}"
-        )
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s [%(levelname)s] %(message)s")
+        raise ProxyConfigError(f"proxy host must be {LOOPBACK_HOST} (loopback only); got {args.host!r}")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     config = load_proxy_config()
-    server = HTTPServer((LOOPBACK_HOST, args.port),
-                        ObserverSigningProxyHandler)
+    server = HTTPServer((LOOPBACK_HOST, args.port), ObserverSigningProxyHandler)
     ObserverSigningProxyHandler.proxy_token = config["proxy_token"]
     ObserverSigningProxyHandler.ingest_url = config["ingest_url"]
     ObserverSigningProxyHandler.ingest_token = config["ingest_token"]
     ObserverSigningProxyHandler.ingest_secret = config["ingest_secret"]
-    logger.info("observer signing proxy listening on http://%s:%d%s",
-                LOOPBACK_HOST, args.port, PROXY_PATH)
+    logger.info("observer signing proxy listening on http://%s:%d%s", LOOPBACK_HOST, args.port, PROXY_PATH)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

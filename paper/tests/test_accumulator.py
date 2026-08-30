@@ -35,11 +35,15 @@ class FakePipeline:
 def _manifest(tmp_path, min_trades=1):
     cfg = copy.deepcopy(load_config())
     cfg.setdefault("validation", {})["locked_holdout"] = {
-        "enabled": True, "start": "1970-01-01T00:01:40Z", "end": None,
+        "enabled": True,
+        "start": "1970-01-01T00:01:40Z",
+        "end": None,
     }
     model = tmp_path / "frozen.joblib"
     save_model(
-        {"fake": True}, ["rsi"], str(model),
+        {"fake": True},
+        ["rsi"],
+        str(model),
         metadata={
             "bundle_schema_version": 2,
             "asset_key": "XAUUSD",
@@ -50,20 +54,31 @@ def _manifest(tmp_path, min_trades=1):
     )
     path = tmp_path / "manifest.json"
     manifest = create_frozen_manifest(
-        cfg, asset_key="XAUUSD", variant="wide_trend_filtered",
-        model_path=str(model), output_path=str(path),
-        start_timestamp_utc=100, min_closed_trades=min_trades,
+        cfg,
+        asset_key="XAUUSD",
+        variant="wide_trend_filtered",
+        model_path=str(model),
+        output_path=str(path),
+        start_timestamp_utc=100,
+        min_closed_trades=min_trades,
     )
     return manifest, path, model
 
 
 def _signal(ts):
     return {
-        "bias": "long", "confidence": 0.8, "step": 1.0,
-        "timestamp_utc": ts, "regime": "trend_up", "session": "london",
-        "entry_zone": [99.9, 100.1], "invalidation": 96.0,
-        "targets": [101.0, 101.5, 104.0], "reasoning_summary": "frozen test",
-        "features": {}, "generated_at": "2026-08-08T00:00:00+00:00",
+        "bias": "long",
+        "confidence": 0.8,
+        "step": 1.0,
+        "timestamp_utc": ts,
+        "regime": "trend_up",
+        "session": "london",
+        "entry_zone": [99.9, 100.1],
+        "invalidation": 96.0,
+        "targets": [101.0, 101.5, 104.0],
+        "reasoning_summary": "frozen test",
+        "features": {},
+        "generated_at": "2026-08-08T00:00:00+00:00",
     }
 
 
@@ -71,12 +86,18 @@ def test_manifest_is_immutable_and_detects_model_change(tmp_path):
     manifest, path, model = _manifest(tmp_path)
     cfg = copy.deepcopy(load_config())
     cfg.setdefault("validation", {})["locked_holdout"] = {
-        "enabled": True, "start": "1970-01-01T00:01:40Z", "end": None,
+        "enabled": True,
+        "start": "1970-01-01T00:01:40Z",
+        "end": None,
     }
     same = create_frozen_manifest(
-        cfg, asset_key="XAUUSD", variant="wide_trend_filtered",
-        model_path=str(model), output_path=str(path),
-        start_timestamp_utc=100, min_closed_trades=1,
+        cfg,
+        asset_key="XAUUSD",
+        variant="wide_trend_filtered",
+        model_path=str(model),
+        output_path=str(path),
+        start_timestamp_utc=100,
+        min_closed_trades=1,
     )
     assert same["manifest_sha256"] == manifest["manifest_sha256"]
     model.write_bytes(model.read_bytes() + b"changed")
@@ -158,9 +179,7 @@ def test_one_time_validation_burns_before_reporting(tmp_path, capsys):
     assert paper_accumulation_status(db, manifest["run_id"])["validation_reads"] == 0
 
     out = tmp_path / "result.json"
-    validate_main([
-        "--manifest", str(path), "--paper-db", db, "--out", str(out), "--force"
-    ])
+    validate_main(["--manifest", str(path), "--paper-db", db, "--out", str(out), "--force"])
     result = json.loads(out.read_text())
     assert result["trial"]["n_trades"] == 1
     assert paper_accumulation_status(db, manifest["run_id"])["validation_reads"] == 1

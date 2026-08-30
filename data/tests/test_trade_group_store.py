@@ -1,10 +1,8 @@
 """Tests for data/trade_group_store.py — durable TradeGroupSpec persistence."""
+
 from __future__ import annotations
 
-import pytest
-
 from data.trade_group_store import (
-    init_trade_group_store,
     is_submitted,
     list_groups,
     load_group,
@@ -18,23 +16,41 @@ from execution.trade_group import GroupState, TradeGroupSpec
 def _spec(group_id: str = "TG-TEST-1", mode: str = "paper") -> TradeGroupSpec:
     return TradeGroupSpec(
         group_id=group_id,
-        signal_id="SGL-1", intent_id="INT-1",
-        asset_key="XAUUSD", broker_symbol="GOLD", mode=mode, side="long",
+        signal_id="SGL-1",
+        intent_id="INT-1",
+        asset_key="XAUUSD",
+        broker_symbol="GOLD",
+        mode=mode,
+        side="long",
         entry={"low": 4159.10, "high": 4159.50, "reference": 4159.30},
-        geometry={"version": "v1", "unit": "price", "step_price": 4.30,
-                  "tp1": 4163.60, "tp2": 4167.70, "tp3": 4171.20, "sl": 4140.30},
-        targets=[{"leg": 1, "price": 4163.60, "allocation": 0.333333},
-                 {"leg": 2, "price": 4167.70, "allocation": 0.333333},
-                 {"leg": 3, "price": 4171.20, "allocation": 0.333334}],
-        break_even={"trigger": "tp1_filled",
-                    "raw_price_policy": "actual_fill",
-                    "protected_price_policy": "actual_fill_plus_cost_buffer",
-                    "apply_to": [2, 3]},
-        risk={"currency": "USD", "max_cash": 25.0, "max_pct": 0.5,
-              "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
+        geometry={
+            "version": "v1",
+            "unit": "price",
+            "step_price": 4.30,
+            "tp1": 4163.60,
+            "tp2": 4167.70,
+            "tp3": 4171.20,
+            "sl": 4140.30,
+        },
+        targets=[
+            {"leg": 1, "price": 4163.60, "allocation": 0.333333},
+            {"leg": 2, "price": 4167.70, "allocation": 0.333333},
+            {"leg": 3, "price": 4171.20, "allocation": 0.333334},
+        ],
+        break_even={
+            "trigger": "tp1_filled",
+            "raw_price_policy": "actual_fill",
+            "protected_price_policy": "actual_fill_plus_cost_buffer",
+            "apply_to": [2, 3],
+        },
+        risk={"currency": "USD", "max_cash": 25.0, "max_pct": 0.5, "estimated_loss_at_sl": 24.0, "total_volume": 0.03},
         profile_id="xau_m15_intraday_v1",
-        model_version="v3", model_hash="m", config_hash="c", strategy_version="s",
-        expires_at_utc_ms=1_800_000_000_000, created_at_utc_ms=1_700_000_000_000,
+        model_version="v3",
+        model_hash="m",
+        config_hash="c",
+        strategy_version="s",
+        expires_at_utc_ms=1_800_000_000_000,
+        created_at_utc_ms=1_700_000_000_000,
     )
 
 
@@ -54,9 +70,13 @@ def test_update_state_preserves_geometry(tmp_path):
     db = str(tmp_path / "groups2.sqlite")
     spec = _spec()
     save_group(db, spec, state=GroupState.VALIDATED)
-    update_group_state(db, spec.group_id, GroupState.SUBMITTED,
-                       legs=[{"leg": 1, "state": "SUBMITTED"}],
-                       broker_ids={"TG-TEST-1-L1": {"order_id": "O1"}})
+    update_group_state(
+        db,
+        spec.group_id,
+        GroupState.SUBMITTED,
+        legs=[{"leg": 1, "state": "SUBMITTED"}],
+        broker_ids={"TG-TEST-1-L1": {"order_id": "O1"}},
+    )
     loaded = load_group(db, spec.group_id)
     assert loaded["state"] == GroupState.SUBMITTED
     assert loaded["legs"][0]["leg"] == 1

@@ -4,25 +4,21 @@ which the overnight pipeline runs fail-closed so a collapsed model cannot stay
 deployed silently (GBPUSD 0.0002 / XAGUSD 0.475371 constant class).
 """
 
-import os
-import tempfile
-
 import joblib
 import numpy as np
 import pandas as pd
-import pytest
 
 from model.trainer import compute_model_fingerprint
 from scripts.verify_model_fingerprints import (
-    degeneracy_stats,
     _is_degenerate,
+    degeneracy_stats,
     verify_file,
 )
-
 
 # ---------------------------------------------------------------------------
 # Degeneracy helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeBinaryModel:
     """Picklable fake binary classifier: classes_ = [0, 1] (short, long).
@@ -49,20 +45,20 @@ class _FakeBinaryModel:
         # Deterministic repr (no memory address): the content fingerprint uses
         # repr as the non-XGBoost fallback, and it must be stable across a
         # pickle round-trip for the self-hash to verify.
-        return (f"_FakeBinaryModel(variation={self.variation!r}, "
-                f"p_long_mean={float(np.mean(self.p_long))!r}, "
-                f"p_short_mean={float(np.mean(self.p_short))!r})")
+        return (
+            f"_FakeBinaryModel(variation={self.variation!r}, "
+            f"p_long_mean={float(np.mean(self.p_long))!r}, "
+            f"p_short_mean={float(np.mean(self.p_short))!r})"
+        )
 
 
-def _binary_model(p_long: np.ndarray, p_short: np.ndarray,
-                  variation: float = 1e-3):
+def _binary_model(p_long: np.ndarray, p_short: np.ndarray, variation: float = 1e-3):
     """Wrap two probability vectors in a fake fitted binary model."""
     return _FakeBinaryModel(p_long, p_short, variation)
 
 
 def test_degeneracy_stats_spread_model():
-    model = _binary_model(np.linspace(0.4, 0.6, 50), np.linspace(0.6, 0.4, 50),
-                          variation=0.5)
+    model = _binary_model(np.linspace(0.4, 0.6, 50), np.linspace(0.6, 0.4, 50), variation=0.5)
     X = pd.DataFrame({"f": np.zeros(50)})
     stats = degeneracy_stats(model, ["f"], X)
     assert stats["n"] == 50
@@ -73,8 +69,7 @@ def test_degeneracy_stats_spread_model():
 
 
 def test_degeneracy_stats_constant_output():
-    model = _binary_model(np.full(50, 0.475371), np.full(50, 0.524629),
-                          variation=0.0)
+    model = _binary_model(np.full(50, 0.475371), np.full(50, 0.524629), variation=0.0)
     X = pd.DataFrame({"f": np.zeros(50)})
     stats = degeneracy_stats(model, ["f"], X)
     assert stats["nunique_p_long"] == 1
@@ -85,8 +80,7 @@ def test_degeneracy_stats_constant_output():
 
 def test_is_degenerate_narrow_band():
     # Collapsed band: std below the 0.01 floor (the GBPUSD/XAGUSD class).
-    stats = {"n": 100, "std_p_long": 0.0002, "std_p_short": 0.0002,
-             "nunique_p_long": 40, "nunique_p_short": 40}
+    stats = {"n": 100, "std_p_long": 0.0002, "std_p_short": 0.0002, "nunique_p_long": 40, "nunique_p_short": 40}
     degen, why = _is_degenerate(stats, min_std=0.01)
     assert degen
     assert "std_p" in why
@@ -102,9 +96,9 @@ def test_is_degenerate_no_probe_data():
 # verify_file verdicts
 # ---------------------------------------------------------------------------
 
+
 def _make_bundle(model, feature_cols, metadata=None):
-    return {"model": model, "feature_cols": feature_cols,
-            "metadata": metadata or {}}
+    return {"model": model, "feature_cols": feature_cols, "metadata": metadata or {}}
 
 
 def _dump_with_self_hash(tmp_path, name, model, cols, metadata=None):
@@ -122,10 +116,8 @@ def _dump_with_self_hash(tmp_path, name, model, cols, metadata=None):
 
 
 def test_verify_file_degenerate_beats_new_ok(tmp_path):
-    model = _binary_model(np.full(60, 0.475), np.full(60, 0.525),
-                          variation=0.0)
-    path = _dump_with_self_hash(tmp_path, "xagusd_direction_model.joblib",
-                                model, ["f"])
+    model = _binary_model(np.full(60, 0.475), np.full(60, 0.525), variation=0.0)
+    path = _dump_with_self_hash(tmp_path, "xagusd_direction_model.joblib", model, ["f"])
     X = pd.DataFrame({"f": np.zeros(60)})
     row = verify_file(path, probe_X=X, min_std=0.01, asset_key="XAGUSD")
     assert row["verdict"] == "DEGENERATE"
@@ -134,10 +126,8 @@ def test_verify_file_degenerate_beats_new_ok(tmp_path):
 
 
 def test_verify_file_healthy_new_ok(tmp_path):
-    model = _binary_model(np.linspace(0.30, 0.70, 80), np.linspace(0.70, 0.30, 80),
-                          variation=0.5)
-    path = _dump_with_self_hash(tmp_path, "btcusd_direction_model.joblib",
-                                model, ["f"])
+    model = _binary_model(np.linspace(0.30, 0.70, 80), np.linspace(0.70, 0.30, 80), variation=0.5)
+    path = _dump_with_self_hash(tmp_path, "btcusd_direction_model.joblib", model, ["f"])
     X = pd.DataFrame({"f": np.zeros(80)})
     row = verify_file(path, probe_X=X, min_std=0.01, asset_key="BTCUSD")
     assert row["verdict"] == "NEW-OK"
@@ -145,8 +135,7 @@ def test_verify_file_healthy_new_ok(tmp_path):
 
 
 def test_verify_file_mismatch_wins_over_degenerate(tmp_path):
-    model = _binary_model(np.full(60, 0.475), np.full(60, 0.525),
-                          variation=0.0)
+    model = _binary_model(np.full(60, 0.475), np.full(60, 0.525), variation=0.0)
     cols = ["f"]
     bundle = _make_bundle(model, cols, {"model_hash": "0" * 64})  # wrong hash
     path = str(tmp_path / "gbpusd_direction_model.joblib")

@@ -52,10 +52,7 @@ class SimClock:
         """Schedule ``callback(tick)`` to run exactly once at the given tick."""
         tick = int(tick)
         if tick < self.tick:
-            raise ValueError(
-                f"Cannot schedule event at tick {tick} in the past "
-                f"(current tick is {self.tick})."
-            )
+            raise ValueError(f"Cannot schedule event at tick {tick} in the past (current tick is {self.tick}).")
         heapq.heappush(self._heap, _Event(tick, self._seq, priority, callback))
         self._seq += 1
 
@@ -155,9 +152,7 @@ class SimClock:
                     # A single faulty callback must not kill the simulation.
                     import logging
 
-                    logging.getLogger(__name__).exception(
-                        "SimClock event failed at tick %d", event.tick
-                    )
+                    logging.getLogger(__name__).exception("SimClock event failed at tick %d", event.tick)
         return self.tick
 
     def step(self) -> int:
@@ -179,7 +174,4 @@ class SimClock:
         return len(self._heap)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (
-            f"SimClock(tick={self.tick}, "
-            f"pending={len(self._heap)}, next_event={self.next_event_tick})"
-        )
+        return f"SimClock(tick={self.tick}, pending={len(self._heap)}, next_event={self.next_event_tick})"

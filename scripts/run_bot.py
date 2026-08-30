@@ -24,9 +24,11 @@ Telegram commands once running
     /resume      switch back to live
     /closeall    emergency close all positions
 """
-import os
-import sys
+
 import logging
+import os
+import signal
+import sys
 
 # --- sys.path injection (must come first) ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,15 +38,15 @@ _shim_dir = os.path.join(_PROJECT_ROOT, "simulation", "mt5_shim")
 if _shim_dir not in sys.path:
     sys.path.insert(0, _shim_dir)
 
-import threading
 
-from simulation.simulator import MarketSimulator, load_simulation_config, shutdown_mt5_shim
 # NOTE: import the shim under its plain top-level name (see run_simulation.py
 # comment) so _inject() lands on the module object the trader actually uses.
 import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
-from simulation.virtual_state import VirtualState
+
 from alerts.control_bot import TelegramControlBot
-from scripts.run_simulation import SimulationDriver, _bar_timestamp, build_virtual_cfg  # reuse driver
+from scripts.run_simulation import SimulationDriver, build_virtual_cfg  # reuse driver
+from simulation.simulator import MarketSimulator, shutdown_mt5_shim
+from simulation.virtual_state import VirtualState
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +55,58 @@ logging.basicConfig(
 logger = logging.getLogger("run_bot")
 
 
+def _install_shutdown_handlers(executor, logger_):  # pragma: no cover - wiring
+    """ТЗ 6.4 / P2-6: SIGTERM/SIGINT -> executor.shutdown() then exit.
+
+    On Windows signal.SIGTERM support is partial; SIGINT/KeyboardInterrupt
+    covers the common console case. Handlers are installed best-effort:
+    a platform without a given signal is skipped, never fatal.
+    """
+
+    def _handle(signum, frame):
+        logger_.info("Received signal %s — graceful shutdown", signum)
+        try:
+            executor.shutdown()
+        except Exception as exc:
+            logger_.error("executor.shutdown() failed: %s", exc)
+        raise SystemExit(0)
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handle)
+        except (ValueError, OSError) as exc:
+            logger_.warning("could not install %s handler: %s", sig_name, exc)
+
+
+def _resolve_db_path() -> str:
+    """Main SQLite path per project convention (config general.db_path)."""
+    try:
+        from config.loader import load_config
+
+        return str(load_config().get("general", {}).get("db_path", "data/market_data_mt5.sqlite"))
+    except Exception:
+        return "data/market_data_mt5.sqlite"
+
+
+def _apply_db_migrations() -> None:
+    """Run versioned schema migrations on the main DB before trading (ТЗ 9.3).
+
+    Failures are fatal: trading on an unverified/partially migrated schema is
+    unsafe, so the bot refuses to start.
+    """
+    from data.migrate import apply_migrations
+
+    db_path = _resolve_db_path()
+    applied = apply_migrations(db_path)
+    logger.info("DB migrations applied (%d) to %s", len(applied), db_path)
+
+
 def main() -> None:
+    _apply_db_migrations()
+
     cfg = build_virtual_cfg()
 
     # 1. Build & warm up the virtual market.
@@ -71,6 +124,7 @@ def main() -> None:
 
     # 3. Build the real trader.
     from execution.mt5_trader import MultiAssetMT5Trader
+
     trader = MultiAssetMT5Trader()
 
     # 4. Start the Telegram control bot in a daemon thread.
@@ -86,11 +140,22 @@ def main() -> None:
     )
 
     # 5. Run the trading loop in the main thread (blocking).
+    # ТЗ 6.4 / P2-6: SIGTERM/SIGINT -> graceful shutdown of the executor
+    # layer (final poll + state persist). The trader exposes shutdown()
+    # when the trade-group executor layer is active; handlers are installed
+    # best-effort and are a no-op otherwise.
+    if hasattr(trader, "shutdown"):
+        _install_shutdown_handlers(trader, logger)
     try:
         logger.info("Starting MultiAssetMT5Trader.run_loop() ...")
         trader.run_loop()
     except KeyboardInterrupt:
         logger.info("KeyboardInterrupt — shutting down.")
+        if hasattr(trader, "shutdown"):
+            try:
+                trader.shutdown()
+            except Exception as exc:
+                logger.error("trader.shutdown() failed: %s", exc)
     finally:
         control_bot.stop()
         driver.stop()
@@ -101,8 +166,13 @@ def main() -> None:
     if account is not None:
         profit = account.equity - cfg.get("virtual_balance", 10000.0)
         logger.info("=" * 50)
-        logger.info("FINAL: balance=%.2f equity=%.2f profit=%+.2f mid=%.2f",
-                    account.balance, account.equity, profit, sim.current_mid_price)
+        logger.info(
+            "FINAL: balance=%.2f equity=%.2f profit=%+.2f mid=%.2f",
+            account.balance,
+            account.equity,
+            profit,
+            sim.current_mid_price,
+        )
         logger.info("=" * 50)
 
 

@@ -7,8 +7,14 @@ Uses real R-distribution from backtest data + checklist rules:
 - Target +$80
 - Commission-aware sizing
 """
-import json, os, datetime as dt, random, statistics
+
+import datetime as dt
+import json
+import os
+import random
+import statistics
 import sys as _sys
+
 _sys.path.insert(0, r"C:\Users\botbo\Desktop\xauusd-alert-system")
 
 BASE = r"C:\Users\botbo\Desktop\xauusd-alert-system\data\backtest"
@@ -34,7 +40,7 @@ def load_candles(ticker):
 def build_days(candles):
     days = {}
     for c in candles:
-        utc = dt.datetime.fromtimestamp(c["time"], dt.timezone.utc)
+        utc = dt.datetime.fromtimestamp(c["time"], dt.UTC)
         if utc.weekday() >= 5:
             continue
         sec = utc.hour * 3600 + utc.minute * 60 + utc.second
@@ -52,12 +58,14 @@ def _close(pos, price, ts, slip, reason):
     pos["exit_price"] = price * (1 - slip * pos["side"])
     pos["exit_ts"] = ts
     pos["exit_reason"] = reason
-    pos["pnl"] = (pos["exit_price"] - pos["entry"]) * pos["side"] * pos["qty"] \
-                 - fee(pos["entry"], pos["qty"]) - fee(pos["exit_price"], pos["qty"])
+    pos["pnl"] = (
+        (pos["exit_price"] - pos["entry"]) * pos["side"] * pos["qty"]
+        - fee(pos["entry"], pos["qty"])
+        - fee(pos["exit_price"], pos["qty"])
+    )
 
 
-def run_opening_drive_all(candles, drive_bars=3, stop_pct=0.005, tp_ratio=3.5,
-                          risk_per_trade=5.0, min_body_ratio=0.5):
+def run_opening_drive_all(candles, drive_bars=3, stop_pct=0.005, tp_ratio=3.5, risk_per_trade=5.0, min_body_ratio=0.5):
     """Run opening drive on all days, return list of trade results (pnl in $)."""
     days = build_days(candles)
     day_trades = {}
@@ -87,11 +95,17 @@ def run_opening_drive_all(candles, drive_bars=3, stop_pct=0.005, tp_ratio=3.5,
             continue
         tp = entry + bias * risk_dist * tp_ratio
         qty = (risk_per_trade / stop_pct) / entry
-        open_pos = {"side": bias, "entry": entry, "qty": qty,
-                    "stop": stop, "tp": tp, "bar": bars[drive_bars - 1]["time"]}
+        open_pos = {
+            "side": bias,
+            "entry": entry,
+            "qty": qty,
+            "stop": stop,
+            "tp": tp,
+            "bar": bars[drive_bars - 1]["time"],
+        }
         for b in bars[drive_bars:]:
             t = b["time"]
-            utc = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            utc = dt.datetime.fromtimestamp(t, dt.UTC)
             sec = utc.hour * 3600 + utc.minute * 60 + utc.second
             if open_pos is None:
                 break
@@ -101,14 +115,22 @@ def run_opening_drive_all(candles, drive_bars=3, stop_pct=0.005, tp_ratio=3.5,
             s = open_pos
             if s["side"] == 1:
                 if b["low"] * (1 - SLIP) <= s["stop"]:
-                    _close(open_pos, s["stop"], t, SLIP, "stop"); open_pos = None; break
+                    _close(open_pos, s["stop"], t, SLIP, "stop")
+                    open_pos = None
+                    break
                 elif b["high"] * (1 + SLIP) >= s["tp"]:
-                    _close(open_pos, s["tp"], t, SLIP, "target"); open_pos = None; break
+                    _close(open_pos, s["tp"], t, SLIP, "target")
+                    open_pos = None
+                    break
             else:
                 if b["high"] * (1 + SLIP) >= s["stop"]:
-                    _close(open_pos, s["stop"], t, SLIP, "stop"); open_pos = None; break
+                    _close(open_pos, s["stop"], t, SLIP, "stop")
+                    open_pos = None
+                    break
                 elif b["low"] * (1 - SLIP) <= s["tp"]:
-                    _close(open_pos, s["tp"], t, SLIP, "target"); open_pos = None; break
+                    _close(open_pos, s["tp"], t, SLIP, "target")
+                    open_pos = None
+                    break
         if open_pos is not None:
             _close(open_pos, bars[-1]["close"], bars[-1]["time"], SLIP, "eod")
         if open_pos is not None:
@@ -200,13 +222,15 @@ def simulate_challenge(r_values, n_sims=NUM_SIMS):
             # Reset for next day
             day_start = equity
 
-        results.append({
-            "passed": passed,
-            "failed": failed,
-            "equity_end": equity,
-            "days_used": days_used,
-            "trading_days": trading_days,
-        })
+        results.append(
+            {
+                "passed": passed,
+                "failed": failed,
+                "equity_end": equity,
+                "days_used": days_used,
+                "trading_days": trading_days,
+            }
+        )
 
     return results
 
@@ -256,30 +280,30 @@ def main():
     # Days to target (for passed sims)
     if passed:
         days_to_target = [r["days_used"] for r in passed]
-        print(f"\n  Days to target (passed only):")
+        print("\n  Days to target (passed only):")
         print(f"    Median:   {statistics.median(days_to_target):.0f} days")
         print(f"    Mean:     {statistics.mean(days_to_target):.1f} days")
-        print(f"    P25:      {sorted(days_to_target)[len(days_to_target)//4]:.0f} days")
-        print(f"    P75:      {sorted(days_to_target)[3*len(days_to_target)//4]:.0f} days")
+        print(f"    P25:      {sorted(days_to_target)[len(days_to_target) // 4]:.0f} days")
+        print(f"    P75:      {sorted(days_to_target)[3 * len(days_to_target) // 4]:.0f} days")
         print(f"    Min:      {min(days_to_target):.0f} days")
         print(f"    Max:      {max(days_to_target):.0f} days")
 
     # Equity distribution
     all_equity = [r["equity_end"] for r in results]
-    print(f"\n  Final equity distribution:")
+    print("\n  Final equity distribution:")
     print(f"    Median:   ${statistics.median(all_equity):.0f}")
     print(f"    Mean:     ${statistics.mean(all_equity):.0f}")
-    print(f"    P10:      ${sorted(all_equity)[len(all_equity)//10]:.0f}")
-    print(f"    P25:      ${sorted(all_equity)[len(all_equity)//4]:.0f}")
-    print(f"    P75:      ${sorted(all_equity)[3*len(all_equity)//4]:.0f}")
-    print(f"    P90:      ${sorted(all_equity)[9*len(all_equity)//10]:.0f}")
+    print(f"    P10:      ${sorted(all_equity)[len(all_equity) // 10]:.0f}")
+    print(f"    P25:      ${sorted(all_equity)[len(all_equity) // 4]:.0f}")
+    print(f"    P75:      ${sorted(all_equity)[3 * len(all_equity) // 4]:.0f}")
+    print(f"    P90:      ${sorted(all_equity)[9 * len(all_equity) // 10]:.0f}")
 
     # Risk of ruin
     ruin = sum(1 for r in results if r["equity_end"] <= STARTING_EQUITY - TOTAL_STOP)
     print(f"\n  Risk of ruin (equity <= ${STARTING_EQUITY - TOTAL_STOP:.0f}): {100 * ruin / len(results):.1f}%")
 
     # Equity percentile curves
-    print(f"\n  Equity percentiles by day:")
+    print("\n  Equity percentiles by day:")
     max_days = max(r["days_used"] for r in results)
     for day in range(1, min(max_days + 1, 31)):
         day_equities = []
@@ -298,7 +322,8 @@ def main():
     print("SENSITIVITY: required win rate for P(+$80) > 70%")
     print("=" * 70)
     for wr_target in [40, 45, 50, 55, 60]:
-        # Create synthetic R distribution with target win rate
+        # Create synthetic R distribution with target win
+        # rate
         wins = [r for r in r_values if r > 0]
         losses = [r for r in r_values if r <= 0]
         avg_win = statistics.mean(wins) if wins else 0.5
@@ -306,7 +331,9 @@ def main():
         synthetic_r = [avg_win] * int(wr_target * 10) + [avg_loss] * int((100 - wr_target) * 10)
         res = simulate_challenge(synthetic_r, n_sims=5000)
         p = 100 * sum(1 for r in res if r["passed"]) / len(res)
-        med_days = statistics.median([r["days_used"] for r in res if r["passed"]]) if any(r["passed"] for r in res) else "n/a"
+        med_days = (
+            statistics.median([r["days_used"] for r in res if r["passed"]]) if any(r["passed"] for r in res) else "n/a"
+        )
         print(f"  WR={wr_target}%: P(pass)={p:.0f}%  median_days={med_days}")
 
 

@@ -24,7 +24,7 @@ import numpy as np
 from config.loader import load_config, resolve_asset_timeframe
 from model.calibration import compute_ece
 from scripts.train_mt5 import build_full_df, build_training_matrix
-from scripts.verify_model_fingerprints import compute_model_fingerprint, verify_file
+from scripts.verify_model_fingerprints import verify_file
 
 
 def main() -> int:
@@ -89,9 +89,11 @@ def main() -> int:
     cov_055 = float((p_oos >= 0.55).mean() * 100.0)
     cov_060 = float((p_oos >= 0.60).mean() * 100.0)
 
-    print(f"OOS  n={len(p_oos)}  p_mean={p_oos.mean():.4f}  std_p={p_oos.std():.4f}  "
-          f"p5={np.percentile(p_oos, 5):.4f}  p95={np.percentile(p_oos, 95):.4f}  "
-          f"min={p_oos.min():.4f}  max={p_oos.max():.4f}")
+    print(
+        f"OOS  n={len(p_oos)}  p_mean={p_oos.mean():.4f}  std_p={p_oos.std():.4f}  "
+        f"p5={np.percentile(p_oos, 5):.4f}  p95={np.percentile(p_oos, 95):.4f}  "
+        f"min={p_oos.min():.4f}  max={p_oos.max():.4f}"
+    )
     print(f"OOS  ECE={ece_oos:.4f}  (cal-slice ECE={ece_cal:.4f})")
     print(f"OOS  coverage: p>=0.55 {cov_055:.1f}%   p>=0.60 {cov_060:.1f}%")
 

@@ -16,12 +16,13 @@ mutating MT5 function. All MT5 access goes through the lazily-loaded module
 handle `_mt5` so the alert bot stays import-safe on machines without the
 MetaTrader5 package.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger("status_commands")
@@ -54,9 +55,9 @@ def _load_mt5():
     global _mt5, _mt5_import_failed
     if _mt5 is None and not _mt5_import_failed:
         try:
-            import MetaTrader5
+            from mt5_adapter.lazy import get_mt5_module
 
-            _mt5 = MetaTrader5
+            _mt5 = get_mt5_module()
         except Exception:  # ImportError and anything a broken install raises
             _mt5_import_failed = True
             logger.warning("MetaTrader5 package is not importable in this process")
@@ -93,6 +94,7 @@ def ensure_mt5_connection() -> bool:
 # Entry-context journal (logs/live_positions.json)
 # ---------------------------------------------------------------------------
 
+
 def load_position_contexts(path: Optional[str] = None) -> dict:
     """Load the open-position entry contexts keyed by ticket (str).
 
@@ -115,6 +117,7 @@ def load_position_contexts(path: Optional[str] = None) -> dict:
 # Config helpers
 # ---------------------------------------------------------------------------
 
+
 def symbol_to_asset_map(cfg: dict) -> dict:
     """Reverse mapping MT5 symbol -> internal asset key (e.g. GOLD -> XAUUSD)."""
     out = {}
@@ -131,14 +134,17 @@ def point_value_lot_for(cfg: dict, asset_key: Optional[str]) -> float:
     Same resolution order as model/ensemble_backtest.py: per-asset override,
     then the backtest section default, then 100.0 (gold: 1 lot = 100 oz)."""
     asset_cfg = (cfg or {}).get("assets", {}).get(asset_key, {}) if asset_key else {}
-    return float(asset_cfg.get(
-        "point_value_lot",
-        (cfg or {}).get("backtest", {}).get("point_value_lot", 100.0),
-    ))
+    return float(
+        asset_cfg.get(
+            "point_value_lot",
+            (cfg or {}).get("backtest", {}).get("point_value_lot", 100.0),
+        )
+    )
 
 
-def floating_r(profit: float, entry_price: float, initial_stop: Optional[float],
-               volume: float, point_value_lot: float) -> Optional[float]:
+def floating_r(
+    profit: float, entry_price: float, initial_stop: Optional[float], volume: float, point_value_lot: float
+) -> Optional[float]:
     """Floating PnL normalized to initial risk:
         R = profit / (|entry - initial_stop| * volume * point_value_lot)
     — the same formula as backtest/metrics.py::compute_r_metrics.
@@ -154,6 +160,7 @@ def floating_r(profit: float, entry_price: float, initial_stop: Optional[float],
 # ---------------------------------------------------------------------------
 # Small formatting helpers
 # ---------------------------------------------------------------------------
+
 
 def _fmt_money(x: float) -> str:
     return f"{float(x):+,.2f}"
@@ -210,10 +217,10 @@ def _fmt_price_list(values) -> str:
 # /status — open positions with floating PnL in $ and R
 # ---------------------------------------------------------------------------
 
-def format_position_line(pos, contexts: dict, cfg: dict,
-                         now: Optional[datetime] = None) -> str:
+
+def format_position_line(pos, contexts: dict, cfg: dict, now: Optional[datetime] = None) -> str:
     """One open position as a multi-line status block."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     sym2asset = symbol_to_asset_map(cfg)
     symbol = getattr(pos, "symbol", "?")
     asset_key = sym2asset.get(symbol)
@@ -251,10 +258,9 @@ def format_position_line(pos, contexts: dict, cfg: dict,
     return "\n".join(lines)
 
 
-def format_positions_report(positions, contexts: dict, cfg: dict,
-                            now: Optional[datetime] = None) -> str:
+def format_positions_report(positions, contexts: dict, cfg: dict, now: Optional[datetime] = None) -> str:
     """The positions section shared by /status."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if not positions:
         return "📭 Открытых позиций нет."
     lines = [f"📂 Открытые позиции ({len(positions)}):"]
@@ -263,12 +269,12 @@ def format_positions_report(positions, contexts: dict, cfg: dict,
     return "\n".join(lines)
 
 
-def format_status_report(info, positions, contexts: dict, cfg: dict,
-                         dry_run: bool = False, n_assets: int = 0,
-                         now: Optional[datetime] = None) -> str:
+def format_status_report(
+    info, positions, contexts: dict, cfg: dict, dry_run: bool = False, n_assets: int = 0, now: Optional[datetime] = None
+) -> str:
     """Full /status: trader mode + account header (the pre-existing summary)
     followed by the per-position detail with floating PnL in $ and R."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     mode = "⏸ DRY-RUN (на паузе)" if dry_run else "▶️ LIVE"
     lines = [f"📊 Статус трейдера — {mode} (UTC {now:%Y-%m-%d %H:%M})"]
     if info is not None:
@@ -304,8 +310,7 @@ CONTEXT_HELP = (
 )
 
 
-def format_why_report(asset_key: str, mt5_symbol: str, position,
-                      context: Optional[dict]) -> str:
+def format_why_report(asset_key: str, mt5_symbol: str, position, context: Optional[dict]) -> str:
     """Answer "why are we in this trade" verbatim from the recorded entry
     context. Never fabricates a reason: missing context -> explicit notice."""
     if position is None:
@@ -328,7 +333,9 @@ def format_why_report(asset_key: str, mt5_symbol: str, position,
 
     # --- Readable entry-parameter breakdown (owner request 2026-08-11) ---
     bias = context.get("bias", "n/a")
-    bias_word = {"long": "КУПЛЯ (покупка, ставка на рост)", "short": "ПРОДАЖА (ставка на снижение)"}.get(str(bias).lower(), str(bias))
+    bias_word = {"long": "КУПЛЯ (покупка, ставка на рост)", "short": "ПРОДАЖА (ставка на снижение)"}.get(
+        str(bias).lower(), str(bias)
+    )
     entry_zone = context.get("entry_zone")
     invalidation = context.get("invalidation")
     targets = context.get("targets") or []
@@ -342,9 +349,7 @@ def format_why_report(asset_key: str, mt5_symbol: str, position,
         try:
             risk = abs(float(entry_ref) - float(invalidation))
             if risk > 0:
-                rr_lines.append(
-                    f"• Риск (до стопа): ≈{_fmt_price(risk)} пунктов"
-                )
+                rr_lines.append(f"• Риск (до стопа): ≈{_fmt_price(risk)} пунктов")
                 for i, t in enumerate(targets[:3], start=1):
                     reward = abs(float(t) - float(entry_ref))
                     rr_lines.append(
@@ -375,7 +380,9 @@ def format_why_report(asset_key: str, mt5_symbol: str, position,
         try:
             c = float(conf)
             pct = c * 100.0 if -1.0 <= c <= 1.0 else c
-            conf_hint = " (сигнал достаточно уверенный)" if pct >= 60 else " (уверенность средняя — торгуйте осторожнее)"
+            conf_hint = (
+                " (сигнал достаточно уверенный)" if pct >= 60 else " (уверенность средняя — торгуйте осторожнее)"
+            )
         except (TypeError, ValueError):
             pass
 
@@ -403,7 +410,11 @@ def format_why_report(asset_key: str, mt5_symbol: str, position,
     lines.append("• Шаг сетки (ATR-шаг): " + _fmt_price(context.get("step")) if context.get("step") is not None else "")
     lines.append(f"• Открыта (UTC): {context.get('opened_at_utc', 'n/a')}")
     lines.append("")
-    lines.append("Простыми словами: модель оценила, что движение в сторону входа вероятнее, чем обратное; стоп защищает от убытка, а цели фиксируют прибыль по мере движения цены.")
+    lines.append(
+        "Простыми словами: модель оценила, что движение в сторону входа "
+        "вероятнее, чем обратное; стоп защищает от убытка, а цели фиксируют "
+        "прибыль по мере движения цены."
+    )
     # Drop any empty trailing lines gracefully
     return "\n".join([l for l in lines if l])
 
@@ -411,6 +422,7 @@ def format_why_report(asset_key: str, mt5_symbol: str, position,
 # ---------------------------------------------------------------------------
 # Deals fetching (works against the real terminal AND the bundled shim)
 # ---------------------------------------------------------------------------
+
 
 def fetch_deals_between(dt_from: datetime, dt_to: datetime) -> list:
     """history_deals_get for a UTC datetime window, filtered client-side.
@@ -440,7 +452,7 @@ def fetch_deals_between(dt_from: datetime, dt_to: datetime) -> list:
             deals = None
 
     out = []
-    for d in (deals or []):
+    for d in deals or []:
         try:
             t = int(getattr(d, "time", 0) or 0)
         except (TypeError, ValueError):
@@ -453,15 +465,17 @@ def fetch_deals_between(dt_from: datetime, dt_to: datetime) -> list:
 def realized_pnl_today(now: Optional[datetime] = None) -> float:
     """Sum of profit+swap+commission over all of today's (UTC) deals — every
     cash movement booked today, matching how mt5_trader totals closed PnL."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     deals = fetch_deals_between(day_start, now)
-    return float(sum(
-        float(getattr(d, "profit", 0.0) or 0.0)
-        + float(getattr(d, "swap", 0.0) or 0.0)
-        + float(getattr(d, "commission", 0.0) or 0.0)
-        for d in deals
-    ))
+    return float(
+        sum(
+            float(getattr(d, "profit", 0.0) or 0.0)
+            + float(getattr(d, "swap", 0.0) or 0.0)
+            + float(getattr(d, "commission", 0.0) or 0.0)
+            for d in deals
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +496,7 @@ PERIOD_KEYS = ["today", "week", "2week", "month", "3month", "all"]
 
 def period_range(kind: str, now: Optional[datetime] = None):
     """(dt_from, dt_to, human_label) for a /metrics period key."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     days = {
         "week": 7,
         "2week": 14,
@@ -496,8 +510,7 @@ def period_range(kind: str, now: Optional[datetime] = None):
     return now.replace(hour=0, minute=0, second=0, microsecond=0), now, PERIODS["today"]
 
 
-def compute_deal_metrics(deals, contexts: Optional[dict] = None,
-                         cfg: Optional[dict] = None) -> dict:
+def compute_deal_metrics(deals, contexts: Optional[dict] = None, cfg: Optional[dict] = None) -> dict:
     """Closed-trade statistics over exit deals (any non-IN deal realizes PnL,
     so partial TP closes count as separate realizations — documented behaviour).
 
@@ -540,9 +553,9 @@ def compute_deal_metrics(deals, contexts: Optional[dict] = None,
             invalidation = ctx.get("invalidation")
             entry_price = in_price_by_pos.get(getattr(d, "position_id", None))
             asset_key = ctx.get("asset_key") or sym2asset.get(getattr(d, "symbol", ""))
-            r = floating_r(pnl, entry_price, invalidation,
-                           getattr(d, "volume", 0.0),
-                           point_value_lot_for(cfg, asset_key))
+            r = floating_r(
+                pnl, entry_price, invalidation, getattr(d, "volume", 0.0), point_value_lot_for(cfg, asset_key)
+            )
             if r is not None:
                 r_values.append(r)
 
@@ -610,15 +623,17 @@ def _fmt_metrics_detail(m: dict) -> str:
     pf = m["profit_factor"]
     pf_txt = "∞" if pf == float("inf") else (f"{pf:.2f}" if pf is not None else "—")
     r_txt = f"{m['mean_r']:+.2f} R (n={m['n_r']})" if m.get("mean_r") is not None else "n/a"
-    return "\n".join([
-        f"  Сделок: {m['n']} | Побед: {m['wins']} | Поражений: {m['losses']}",
-        f"  Win rate: {m['win_rate_pct']:.1f}% | Profit factor: {pf_txt}",
-        f"  Средний выигрыш: ${_fmt_money(m['avg_win'])} | Средний убыток: ${_fmt_money(m['avg_loss'])}",
-        f"  Expectancy: ${_fmt_money(m['expectancy'])} | Средний R: {r_txt}",
-        f"  Лучшая сделка: ${_fmt_money(m['best_trade'])} | Худшая: ${_fmt_money(m['worst_trade'])}",
-        f"  Макс. подряд убытков: {m['max_consec_losses']} | Макс. просадка: ${_fmt_money(m['max_drawdown'])}",
-        f"  Итоговый P&L: ${_fmt_money(m['total_pnl'])}",
-    ])
+    return "\n".join(
+        [
+            f"  Сделок: {m['n']} | Побед: {m['wins']} | Поражений: {m['losses']}",
+            f"  Win rate: {m['win_rate_pct']:.1f}% | Profit factor: {pf_txt}",
+            f"  Средний выигрыш: ${_fmt_money(m['avg_win'])} | Средний убыток: ${_fmt_money(m['avg_loss'])}",
+            f"  Expectancy: ${_fmt_money(m['expectancy'])} | Средний R: {r_txt}",
+            f"  Лучшая сделка: ${_fmt_money(m['best_trade'])} | Худшая: ${_fmt_money(m['worst_trade'])}",
+            f"  Макс. подряд убытков: {m['max_consec_losses']} | Макс. просадка: ${_fmt_money(m['max_drawdown'])}",
+            f"  Итоговый P&L: ${_fmt_money(m['total_pnl'])}",
+        ]
+    )
 
 
 def format_metrics_report(deals, contexts: dict, cfg: dict, period_label: str) -> str:
@@ -652,10 +667,10 @@ def format_metrics_report(deals, contexts: dict, cfg: dict, period_label: str) -
 # /account — account state
 # ---------------------------------------------------------------------------
 
-def format_account_report(info, realized_today: float,
-                          now: Optional[datetime] = None) -> str:
+
+def format_account_report(info, realized_today: float, now: Optional[datetime] = None) -> str:
     """Balance/equity/margin snapshot + realized PnL for today (UTC)."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if info is None:
         return "❌ Данные счёта недоступны (account_info вернул None — терминал не подключён?)."
     balance = float(getattr(info, "balance", 0.0))
@@ -665,12 +680,14 @@ def format_account_report(info, realized_today: float,
     margin_level = float(getattr(info, "margin_level", 0.0) or 0.0)
     floating = equity - balance
     ml_txt = f"{margin_level:,.1f}%" if margin > 1e-12 else "— (нет открытой маржи)"
-    return "\n".join([
-        f"💼 Счёт (UTC {now:%Y-%m-%d %H:%M})",
-        f"Баланс: ${balance:,.2f}",
-        f"Equity: ${equity:,.2f}",
-        f"Плавающий P&L: ${_fmt_money(floating)}",
-        f"Реализованный P&L за сегодня: ${_fmt_money(realized_today)}",
-        f"Маржа: ${margin:,.2f} | Свободная маржа: ${margin_free:,.2f}",
-        f"Уровень маржи: {ml_txt}",
-    ])
+    return "\n".join(
+        [
+            f"💼 Счёт (UTC {now:%Y-%m-%d %H:%M})",
+            f"Баланс: ${balance:,.2f}",
+            f"Equity: ${equity:,.2f}",
+            f"Плавающий P&L: ${_fmt_money(floating)}",
+            f"Реализованный P&L за сегодня: ${_fmt_money(realized_today)}",
+            f"Маржа: ${margin:,.2f} | Свободная маржа: ${margin_free:,.2f}",
+            f"Уровень маржи: {ml_txt}",
+        ]
+    )

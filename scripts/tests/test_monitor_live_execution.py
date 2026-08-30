@@ -4,6 +4,7 @@ Tests for scripts/monitor_live_execution.py.
 Uses a temporary SQLite database populated through data.trade_logger so the
 test exercises the same schema and read path as production, without MT5.
 """
+
 import glob
 import os
 import sys
@@ -13,23 +14,25 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from data.trade_logger import init_trade_log_schema, log_trade_entry, log_trade_close
+from data.trade_logger import init_trade_log_schema, log_trade_close, log_trade_entry
 from scripts.monitor_live_execution import compute_live_metrics
 
 
 def test_compute_live_metrics_basic():
-    df = pd.DataFrame({
-        "ticket": [1, 2, 3, 4, 5],
-        "symbol": ["BTCUSD"] * 5,
-        "bias": ["long", "short", "long", "short", "long"],
-        "entry_time": [1000, 2000, 3000, 4000, 5000],
-        "entry_price": [50000.0] * 5,
-        "close_time": [1100, 2100, 3100, 4100, 5100],
-        "close_price": [50100.0, 49900.0, 50070.0, 49950.0, 50040.0],
-        "pnl": [10.0, -5.0, 7.0, -3.0, 4.0],
-        "outcome": [1, 0, 1, 0, 1],
-        "features": ["{}"] * 5,
-    })
+    df = pd.DataFrame(
+        {
+            "ticket": [1, 2, 3, 4, 5],
+            "symbol": ["BTCUSD"] * 5,
+            "bias": ["long", "short", "long", "short", "long"],
+            "entry_time": [1000, 2000, 3000, 4000, 5000],
+            "entry_price": [50000.0] * 5,
+            "close_time": [1100, 2100, 3100, 4100, 5100],
+            "close_price": [50100.0, 49900.0, 50070.0, 49950.0, 50040.0],
+            "pnl": [10.0, -5.0, 7.0, -3.0, 4.0],
+            "outcome": [1, 0, 1, 0, 1],
+            "features": ["{}"] * 5,
+        }
+    )
     m = compute_live_metrics(df)
     assert m["n_trades"] == 5
     assert m["total_pnl"] == 13.0
@@ -52,8 +55,7 @@ def test_monitor_cli_writes_csv(tmp_path, monkeypatch):
     db = tmp_path / "test_exec.sqlite"
     init_trade_log_schema(str(db))
 
-    log_trade_entry(str(db), 100, "BTCUSD", "long", 1_700_000_000, 50000.0,
-                    {"p_long": 0.8, "p_short": 0.2})
+    log_trade_entry(str(db), 100, "BTCUSD", "long", 1_700_000_000, 50000.0, {"p_long": 0.8, "p_short": 0.2})
     log_trade_close(str(db), 100, 1_700_000_100, 50100.0, 25.0)
 
     monkeypatch.chdir(tmp_path)

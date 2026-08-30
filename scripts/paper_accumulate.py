@@ -1,4 +1,5 @@
 """Create and run a frozen, append-only live-forward paper accumulator."""
+
 from __future__ import annotations
 
 import argparse
@@ -51,15 +52,31 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
     if args.command == "create-manifest":
         manifest = create_frozen_manifest(
-            load_config(), asset_key=args.asset, variant=args.variant,
-            model_path=args.model_path, output_path=args.manifest,
+            load_config(),
+            asset_key=args.asset,
+            variant=args.variant,
+            model_path=args.model_path,
+            output_path=args.manifest,
             start_timestamp_utc=_timestamp(args.start),
             min_closed_trades=args.min_trades,
         )
-        print(json.dumps({k: manifest[k] for k in (
-            "run_id", "asset_key", "variant", "model_sha256", "manifest_sha256",
-            "start_timestamp_utc", "min_closed_trades",
-        )}, indent=2))
+        print(
+            json.dumps(
+                {
+                    k: manifest[k]
+                    for k in (
+                        "run_id",
+                        "asset_key",
+                        "variant",
+                        "model_sha256",
+                        "manifest_sha256",
+                        "start_timestamp_utc",
+                        "min_closed_trades",
+                    )
+                },
+                indent=2,
+            )
+        )
         return
 
     manifest = load_frozen_manifest(args.manifest, verify_model=args.command == "run")
@@ -70,17 +87,17 @@ def main(argv=None) -> None:
 
     accumulator = FrozenPaperAccumulator(manifest, args.db_path)
     pipeline = RealtimePipeline(
-        cfg=manifest["config_snapshot"], model_path=manifest["model_path"],
-        asset_key=manifest["asset_key"], data_mode="live",
+        cfg=manifest["config_snapshot"],
+        model_path=manifest["model_path"],
+        asset_key=manifest["asset_key"],
+        data_mode="live",
     )
     while True:
         result = accumulator.process_once(pipeline, n_candles=args.n_candles)
         print(format_accumulation_status(result), flush=True)
         if args.once:
             return
-        timeframe = manifest["config_snapshot"]["assets"][manifest["asset_key"]].get(
-            "timeframe", "M15"
-        )
+        timeframe = manifest["config_snapshot"]["assets"][manifest["asset_key"]].get("timeframe", "M15")
         time.sleep(seconds_until_next_candle_close(timeframe))
 
 

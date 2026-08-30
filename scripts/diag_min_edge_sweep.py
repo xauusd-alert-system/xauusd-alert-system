@@ -29,25 +29,28 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.walk_forward import generate_windows, run_walk_forward  # noqa: E402
 from config.loader import load_config  # noqa: E402
 from data.provenance import provenance_gate  # noqa: E402
-from backtest.walk_forward import run_walk_forward, generate_windows  # noqa: E402
 from scripts.run_backtest import (  # noqa: E402
+    build_full_df,
+    load_asset_history,
     strategy_fn_factory,
     truncate_before,
-    load_asset_history,
-    build_full_df,
 )
 from scripts.trial_journal import enforce_locked_holdout  # noqa: E402
 
 END_DATE = "2026-08-08"  # locked hold-out start: research never burns it
 
 
-def run_asset_sweep(asset: str, edges: list[float],
-                     min_prob: float | None = None,
-                     min_conf: float | None = None,
-                     relax_sessions: bool = False,
-                     relax_regimes: bool = False) -> pd.DataFrame:
+def run_asset_sweep(
+    asset: str,
+    edges: list[float],
+    min_prob: float | None = None,
+    min_conf: float | None = None,
+    relax_sessions: bool = False,
+    relax_regimes: bool = False,
+) -> pd.DataFrame:
     cfg = load_config()
     asset_cfg = cfg["assets"][asset]
     db = cfg["general"]["db_path"]
@@ -61,9 +64,7 @@ def run_asset_sweep(asset: str, edges: list[float],
     print(f"[{asset}] loaded {len(df)} rows (tf={timeframe}), lock {END_DATE}", flush=True)
 
     wf = cfg["backtest"]["walk_forward"]
-    windows = generate_windows(
-        df, wf["train_window_days"], wf["test_window_days"], wf["step_days"]
-    )
+    windows = generate_windows(df, wf["train_window_days"], wf["test_window_days"], wf["step_days"])
     enforce_locked_holdout(cfg, windows, "min_edge_sweep", allow=False)
 
     rows = []
@@ -72,6 +73,7 @@ def run_asset_sweep(asset: str, edges: list[float],
         # models are identical across thresholds (min_edge only gates the
         # TEST-phase signal), so differences are purely the gate.
         import copy
+
         cfg_e = copy.deepcopy(cfg)
         cfg_e.setdefault("ensemble", {})["min_edge"] = edge
         if min_prob is not None:
@@ -82,30 +84,41 @@ def run_asset_sweep(asset: str, edges: list[float],
             cfg_e["ensemble"]["suppress_sessions"] = []
         if relax_regimes:
             cfg_e["ensemble"]["suppress_regimes"] = []
-        results = run_walk_forward(
-            df, cfg_e, strategy_fn_factory(cfg_e, model_path, asset_key=asset)
-        )
+        results = run_walk_forward(df, cfg_e, strategy_fn_factory(cfg_e, model_path, asset_key=asset))
         agg = _aggregate(results)
         agg["asset"] = asset
         agg["min_edge"] = edge
         rows.append(agg)
-        print(f"[{asset}] min_edge={edge}: {agg['n_trades']} trades, "
-              f"total_pnl={agg['total_pnl']:+.2f}, pnl/trade={agg['pnl_per_trade']:+.4f}, "
-              f"medianPF={agg['median_pf']:.3f}, pos_folds={agg['pos_folds']}/{agg['valid_folds']}",
-              flush=True)
+        print(
+            f"[{asset}] min_edge={edge}: {agg['n_trades']} trades, "
+            f"total_pnl={agg['total_pnl']:+.2f}, pnl/trade={agg['pnl_per_trade']:+.4f}, "
+            f"medianPF={agg['median_pf']:.3f}, pos_folds={agg['pos_folds']}/{agg['valid_folds']}",
+            flush=True,
+        )
     return pd.DataFrame(rows)
 
 
 def _aggregate(results: list[dict]) -> dict:
     valid = [r for r in results if r.get("n_trades", 0) > 0]
     if not valid:
-        return {"n_trades": 0, "total_pnl": 0.0, "pnl_per_trade": 0.0,
-                "median_pf": 0.0, "win_rate": 0.0, "pos_folds": 0, "valid_folds": 0}
+        return {
+            "n_trades": 0,
+            "total_pnl": 0.0,
+            "pnl_per_trade": 0.0,
+            "median_pf": 0.0,
+            "win_rate": 0.0,
+            "pos_folds": 0,
+            "valid_folds": 0,
+        }
     n = int(sum(r["n_trades"] for r in valid))
     pnl = float(sum(r.get("total_pnl", 0.0) for r in valid))
-    pfs = [r["profit_factor"] for r in valid if r.get("profit_factor", 0) is not None
-           and r["profit_factor"] == r["profit_factor"]]
+    pfs = [
+        r["profit_factor"]
+        for r in valid
+        if r.get("profit_factor", 0) is not None and r["profit_factor"] == r["profit_factor"]
+    ]
     import numpy as np
+
     return {
         "n_trades": n,
         "total_pnl": round(pnl, 2),
@@ -121,14 +134,21 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--assets", default="XAUUSD,EURUSD")
     ap.add_argument("--edges", default="0.15,0.10,0.08")
-    ap.add_argument("--min-prob", type=float, default=None,
-                    help="Override ensemble.min_ml_probability (probe the binding gate)")
-    ap.add_argument("--min-conf", type=float, default=None,
-                    help="Override ensemble.min_confidence_to_alert (probe the binding gate)")
-    ap.add_argument("--relax-sessions", action="store_true",
-                    help="Disable session suppression (probe the binding filter)")
-    ap.add_argument("--relax-regimes", action="store_true",
-                    help="Disable regime suppression (probe the binding filter)")
+    ap.add_argument(
+        "--min-prob", type=float, default=None, help="Override ensemble.min_ml_probability (probe the binding gate)"
+    )
+    ap.add_argument(
+        "--min-conf",
+        type=float,
+        default=None,
+        help="Override ensemble.min_confidence_to_alert (probe the binding gate)",
+    )
+    ap.add_argument(
+        "--relax-sessions", action="store_true", help="Disable session suppression (probe the binding filter)"
+    )
+    ap.add_argument(
+        "--relax-regimes", action="store_true", help="Disable regime suppression (probe the binding filter)"
+    )
     ap.add_argument("--out", default="logs/min_edge_sweep.csv")
     args = ap.parse_args(argv)
 
@@ -136,17 +156,32 @@ def main(argv: list[str] | None = None) -> None:
     edges = [float(e) for e in args.edges.split(",") if e.strip()]
     frames = []
     for asset in assets:
-        frames.append(run_asset_sweep(asset, edges, min_prob=args.min_prob,
-                                      min_conf=args.min_conf,
-                                      relax_sessions=args.relax_sessions,
-                                      relax_regimes=args.relax_regimes))
+        frames.append(
+            run_asset_sweep(
+                asset,
+                edges,
+                min_prob=args.min_prob,
+                min_conf=args.min_conf,
+                relax_sessions=args.relax_sessions,
+                relax_regimes=args.relax_regimes,
+            )
+        )
 
     out = pd.concat(frames, ignore_index=True)
     os.makedirs("logs", exist_ok=True)
     out.to_csv(args.out, index=False)
     print("\n========== MIN-EDGE SWEEP SUMMARY ==========")
-    cols = ["asset", "min_edge", "n_trades", "total_pnl", "pnl_per_trade",
-            "win_rate", "median_pf", "pos_folds", "valid_folds"]
+    cols = [
+        "asset",
+        "min_edge",
+        "n_trades",
+        "total_pnl",
+        "pnl_per_trade",
+        "win_rate",
+        "median_pf",
+        "pos_folds",
+        "valid_folds",
+    ]
     print(out[cols].to_string(index=False))
     print(f"\nCSV -> {args.out}")
 

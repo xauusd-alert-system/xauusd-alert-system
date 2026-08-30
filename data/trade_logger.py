@@ -2,9 +2,12 @@
 SQLite persistence for executed real-world trades, including features at signal time
 and actual trade outcome (pnl, close_price, outcome label) for weekly ML retraining.
 """
+
+import json
 import os
 import sqlite3
-import json
+from typing import Optional
+
 import pandas as pd
 
 TABLE_NAME = "executed_trades"
@@ -20,9 +23,19 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 # TradeGroupSpec v1 columns (ТЗ §27 data/trade_logger.py): nullable, added
 # in-place so legacy executed_trades rows migrate non-destructively.
 GROUP_COLUMNS = [
-    "group_id", "intent_id", "leg_id", "profile_id", "schema_version",
-    "requested_entry", "actual_fill", "tp1", "tp2", "tp3", "sl",
-    "be_requested", "be_confirmed",
+    "group_id",
+    "intent_id",
+    "leg_id",
+    "profile_id",
+    "schema_version",
+    "requested_entry",
+    "actual_fill",
+    "tp1",
+    "tp2",
+    "tp3",
+    "sl",
+    "be_requested",
+    "be_confirmed",
 ]
 
 
@@ -53,15 +66,29 @@ def init_trade_log_schema(db_path: str):
         conn.close()
 
 
-def log_trade_entry(db_path: str, ticket: int, symbol: str, bias: str, entry_time: int,
-                    entry_price: float, features: dict, *,
-                    group_id: str | None = None, intent_id: str | None = None,
-                    leg_id: str | None = None, profile_id: str | None = None,
-                    schema_version: str | None = None, requested_entry: float | None = None,
-                    actual_fill: float | None = None, tp1: float | None = None,
-                    tp2: float | None = None, tp3: float | None = None,
-                    sl: float | None = None, be_requested: float | None = None,
-                    be_confirmed: float | None = None):
+def log_trade_entry(
+    db_path: str,
+    ticket: int,
+    symbol: str,
+    bias: str,
+    entry_time: int,
+    entry_price: float,
+    features: dict,
+    *,
+    group_id: str | None = None,
+    intent_id: str | None = None,
+    leg_id: str | None = None,
+    profile_id: str | None = None,
+    schema_version: str | None = None,
+    requested_entry: float | None = None,
+    actual_fill: float | None = None,
+    tp1: float | None = None,
+    tp2: float | None = None,
+    tp3: float | None = None,
+    sl: float | None = None,
+    be_requested: float | None = None,
+    be_confirmed: float | None = None,
+):
     """
     Logs trade entry with feature values serialized to JSON.
 
@@ -81,12 +108,29 @@ def log_trade_entry(db_path: str, ticket: int, symbol: str, bias: str, entry_tim
                 ({columns})
                 VALUES ({placeholders})""",
             (
-                ticket, symbol, bias, entry_time, entry_price,
-                None, None, None, None,
+                ticket,
+                symbol,
+                bias,
+                entry_time,
+                entry_price,
+                None,
+                None,
+                None,
+                None,
                 json.dumps(features or {}),
-                group_id, intent_id, leg_id, profile_id, schema_version,
-                requested_entry, actual_fill, tp1, tp2, tp3, sl,
-                be_requested, be_confirmed,
+                group_id,
+                intent_id,
+                leg_id,
+                profile_id,
+                schema_version,
+                requested_entry,
+                actual_fill,
+                tp1,
+                tp2,
+                tp3,
+                sl,
+                be_requested,
+                be_confirmed,
             ),
         )
         conn.commit()
@@ -113,7 +157,7 @@ def log_trade_close(db_path: str, ticket: int, close_time: int, close_price: flo
         conn.close()
 
 
-def read_executed_trades(db_path: str, symbol: str = None) -> pd.DataFrame:
+def read_executed_trades(db_path: str, symbol: Optional[str] = None) -> pd.DataFrame:
     """
     Reads executed trades dataframe for ML retraining.
     """

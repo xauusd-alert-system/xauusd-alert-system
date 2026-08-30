@@ -4,8 +4,10 @@ Validates label correctness on constructed synthetic price paths where the
 correct outcome is known exactly, plus statistical sanity checks on distribution.
 Run with: pytest labeling/tests/test_labels.py -v
 """
+
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -13,7 +15,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
-from labeling.label_generator import generate_labels, generate_labels_from_config, label_distribution_summary
+from labeling.label_generator import (
+    generate_labels,
+    generate_labels_from_config,
+    label_distribution_summary,
+)
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -23,20 +29,24 @@ SESSIONS = CFG["sessions"]
 # These unit tests exercise the FIXED-barrier path: mock candles carry no "atr"
 # column, and build_all_indicators() is out of scope here (covered in test_trainer).
 import copy
+
 CFG = copy.deepcopy(CFG)
 CFG["labeling"]["method"] = "fixed"
 CFG["labeling"]["target_pips_x"] = 3.0
 CFG["labeling"]["stop_pips_y"] = 2.0
 
+
 def _flat_df(n, price=2000.0):
-    return pd.DataFrame({
-        "timestamp_utc": np.arange(n) * 900,
-        "open": np.full(n, price),
-        "high": np.full(n, price),
-        "low": np.full(n, price),
-        "close": np.full(n, price),
-        "volume": np.full(n, 100.0),
-    })
+    return pd.DataFrame(
+        {
+            "timestamp_utc": np.arange(n) * 900,
+            "open": np.full(n, price),
+            "high": np.full(n, price),
+            "low": np.full(n, price),
+            "close": np.full(n, price),
+            "volume": np.full(n, 100.0),
+        }
+    )
 
 
 def test_upper_barrier_hit_produces_label_1():
@@ -75,7 +85,7 @@ def test_insufficient_future_data_produces_nan():
     # Last `horizon` rows must all be NaN since we cannot look beyond the dataset
     assert labels.iloc[-horizon:].isna().all()
     # Rows before that with enough future data must NOT be NaN
-    assert not labels.iloc[:n - horizon].isna().any()
+    assert not labels.iloc[: n - horizon].isna().any()
 
 
 def test_double_touch_same_candle_is_excluded_not_short():
@@ -104,9 +114,10 @@ def test_double_touch_atr_scaled_is_excluded_too():
     df.loc[4, "high"] = 2000.0 + 200.0
     df.loc[4, "low"] = 2000.0 - 200.0
     from labeling.label_generator import generate_labels_atr_scaled
+
     labels = generate_labels_atr_scaled(
-        df, target_atr_multiplier=1.5, stop_atr_multiplier=1.0,
-        horizon_n=10, atr_col="atr")
+        df, target_atr_multiplier=1.5, stop_atr_multiplier=1.0, horizon_n=10, atr_col="atr"
+    )
     assert np.isnan(labels.iloc[0])
 
 
@@ -114,6 +125,7 @@ def test_ambiguous_bar_excluded_from_training_matrix():
     """build_training_matrix drops NaN labels, so excluded observations never
     reach the model (both in binary and 3-class mode)."""
     from model.trainer import build_training_matrix
+
     n = 20
     df = _flat_df(n)
     df.loc[4, "high"] = 2000.0 + 200.0

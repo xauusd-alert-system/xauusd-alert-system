@@ -25,11 +25,50 @@
 | **Multi-Broker Execution Layer** (`execution/broker_adapter.py`) | MT5 + virtual adapters; FIX/cTrader поверхности являются mock/prototype | `test_broker_adapter` | `IMPLEMENTED; MT5 only operational path` |
 | **Portfolio & Risk Allocation** (`execution/portfolio_allocator.py`) | Kelly/inverse-vol/HRP utilities | `test_portfolio_allocator` | `OPT-IN/RESEARCH; HRP не приоритет без active multi-asset portfolio` |
 | **Execution & Risk Management** (`execution/`) | MT5 авто-трейдер, трехуровневый TP (50%/30%/20%), Breakeven, trailing stop, dynamic correlation filter, daily loss circuit breaker | `test_engine`, `test_virtual_mt5_shim` | `ГОТОВО [x]` |
+| **Unified Risk Engine** (`risk/`) | ТЗ 8.5: единая точка `RiskEngine.can_open()`; `limits.py` (дневные лимиты + circuit breaker P0-5), `sizing.py` (P1-4 обязательные капы), `throttle.py` (только rate-based, P2-10), `state.py` (персистентность + HWM P1-7), `legacy_throttle.py` (deprecated). Старые `execution/risk_manager.py`, `risk_sizer.py`, `trade_throttle.py` — shims до Фазы 7 | `risk/tests/` | `IMPLEMENTED [x]` |
 | **Monte Carlo Stress Testing** (`backtest/monte_carlo.py`) | Стресс-тестирование, VaR 95%/99%, CVaR (Expected Shortfall), Risk of Ruin, симуляция 1000 эквити-кривых | `test_monte_carlo` | `ГОТОВО [x]` |
 | **Alerts & Visual Charts** (`alerts/`) | Telegram рассылка, интерактивный бот (`/start`, `/status`, `/metrics`, `/pause`, `/resume`, `/closeall`), SVG/ASCII визуализатор уровней | `test_formatter`, `test_chart_renderer` | `ГОТОВО [x]` |
 | **Interactive Web Dashboard & API** (`realtime/app.py`, `dashboard.py`) | API/UI с обязательными source/mode/as-of disclosures; отсутствие live data не подменяется demo-числами | `test_app` | `IMPLEMENTED; deployment not asserted` |
 | **LOB Simulation & MT5 Shim** (`simulation/`) | Synthetic matching/shim test environment, не источник подтверждённого alpha | `test_virtual_mt5_shim` | `IMPLEMENTED FOR TESTING` |
 | **Deploy Guard & Overnight Pipeline** (`scripts/`) | Backup/retrain/OOS guard/rollback orchestration | `test_deploy_guard`, `test_retrain_real_trades`, `test_scheduler` | `IMPLEMENTED; live verification environment-dependent` |
+
+### 1.1. Статусы неиспользуемых модулей (TZ Часть 7 п.7.1; P2-48 / P2-36 / P2-11 — аудит 2026-08-27)
+
+| Модуль | Статус | Решение и grep-доказательства |
+|---|---|---|
+| `data/sentiment_analyzer.py` (P2-48) | `ACTIVE-OPT-IN` | **Оставлен.** Не удалять: `model/ensemble.py:318` — динамический импорт `from data.sentiment_analyzer import MacroNewsSentimentAnalyzer` внутри ветки `use_sentiment_guard` (config.yaml:68 `use_sentiment_guard: false` — OPT-IN); `realtime/app.py:46,692` — прямой импорт для scoring новостей дашборда; `model/tests/test_ensemble.py:197`, `data/tests/test_sentiment_analyzer.py` — тесты. Удаляемый по ТЗ кандидат оказался живым через динамический импорт — принцип №6 (не удалять работающее). |
+| `model/neural_trainer.py` (P2-36) | `EXPERIMENTAL` | **Пометен @experimental, НЕ удалять.** grep `neural_trainer`: единственные совпадения — сам модуль и его тест `model/tests/test_neural_trainer.py`. В `train_all_assets` / `run_backtest` вызовов нет. Docstring обновлён со статусом. Удаление/интеграция — отдельное решение с экономическим A/B. |
+| `execution/portfolio_allocator.py` (P2-11) | `ACTIVE (validation)` | **Оставлен в `execution/`, НЕ переносить в backtest/.** grep: `execution/mt5_trader.py:215` — live-трейдер вызывает `validate_scaleout_tranches`; `model/ensemble_backtest.py:79` — бэктест-валидация scaleout; тесты `test_portfolio_allocator`, `test_scaleout_lot_validation`. Так как live-вызов существует, критерий ТЗ «переместить только если не вызывается» не выполнен — перенос сломал бы live-валидацию объёмов. Kelly/HRP-часть — OPT-IN. |
+| `data/news_calendar_cache.json` | `RUNTIME-CACHE (git-tracked seed)` | **Оставлен в git.** Это дисковый кэш `news/calendar_feed.py:111` и health-check-артефакт `services/news_feed/service.py:37` (формат `{"ts": ..., "events": [...]}`). Код восстанавливает кэш сам, но tracked-файл служит seed-ом для offline-стартов и частью health check (файл должен существовать). Перезаписывается рантаймом — изменения в `git status` игнорируются при деплое; полная untrack-политика отложена до ТЗ 6.5 retention. |
+| `features/order_flow.py` | Вне скоупа шага 14 | Уже покрыт статусом в матрице выше (`ГОТОВО [x]`); тиковые данные — отдельная задача P2-37. |
+| `execution/fx_execution_probe.py` | Вне скоупа шага 14 | P2-13 (расписание проб) — отдельная задача, не часть 7.1-кандидатов текущего шага. |
+
+### 1.2. План удаления легаси-пути `alerts/formatter.py` (P2-21 / TZ Часть 7 п.7.2 — 2026-08-27)
+
+**Статус: DEPRECATED (не удалён).**
+
+Grep-доказательство того, что легаси-путь живой: `alerts/telegram_bot.py:96`
+вызывает `format_signal_message` для каждого сигнала; при отсутствии
+`group_spec` / `schema_version == trade-group.v1` сигнал попадает в ветку
+рекомпьютации уровней (`compute_levels`) в `format_clean_signal_message`.
+Слепое удаление сломало бы отправку старых сигналов, созданных до пайплайна
+trade-group (принцип №6).
+
+**Сделано в рамках P2-21:**
+- Ветка trade-group.v1 подтверждена тестом `test_formatter_uses_geometry_payload`
+  как ЕДИНСТВЕННЫЙ авторитетный путь (уровни из `spec.as_geometry_payload()`).
+- Легаси-ветка помечена `DeprecationWarning` (`_warn_legacy_formatting`);
+  тест `test_legacy_path_warns` фиксирует предупреждение и обратную совместимость.
+
+**План удаления:**
+1. Убедиться, что все продюсеры сигналов (realtime пайплайн, paper driver,
+   mt5_trade_group) отправляют только `trade-group.v1`.
+2. Добавить метрику/лог `formatter_error` для сигналов без group_spec
+   (ТЗ 7.2 п.3) и проконтролировать отсутствие легаси-сигналов в проде
+   в течение ≥ 2 недель.
+3. Удалить ветку легаси-форматирования (`compute_levels`, `resolve_step`,
+   `entry_price` — после проверки их потребителей) и снять
+   `test_legacy_path_warns` вместе с легаси-тестами `test_formatter.py`.
 
 ---
 
@@ -193,3 +232,18 @@ GOLD | ЗОЛОТО | XAUUSD
 - [x] **API эндпоинты:** `/health`, `/signal`, `/api/matrix`, `/api/correlation`, `/api/paper-status`, `/api/status`, `/api/sentiment`, `/api/monte-carlo`, `/api/chart/XAUUSD` — **Все работают**.
 - [x] **Симуляция LOB:** `python -m scripts.run_simulation` — **Проверено**.
 - [x] **Ночной таймер:** `deploy/overnight/overnight.timer` — **Сконфигурирован**.
+
+## 5. Deferred (ТЗ 9.x — schema versioning, оценка Фазы 7, 2026-08-27)
+
+Сделано (см. docs/MIGRATIONS.md):
+
+- [x] **9.1–9.3** — schema registry (`execution/schema_registry.py`) + БД-миграции (`data/migrate.py`, 001–003) + `scripts/migrate_all.py`.
+- [x] **9.4/9.5 (config_hash)** — `TradeGroupSpec.config_hash` уже существует и хранится в `trade_groups`/`provenance_records`; отдельная миграция не требуется, задокументировано.
+- [x] **9.8 (feature versioning)** — `FEATURES_SCHEMA_VERSION` + `feature_set_version` в снапшотах Feature Store (миграция 002).
+- [x] **P2-41 (labeling schema version)** — `labeling/label_generator.py::LABELING_SCHEMA_VERSION = "labels.v1"` (константа + контракт записи в метадата обучения).
+
+Deferred (не тривиальны, не блокируют эксплуатацию):
+
+- [ ] **9.6–9.7 (intent version chain expansion)** — расширение цепочки версий ExecutionIntent на будущие несовместимые изменения контракта; сейчас v1 = current, chain содержит identity-миграцию. Сделать при первом фактическом изменении контракта.
+- [ ] **9.9–9.10 (per-table schema_version колонки)** — добавление колонки `schema_version` в отдельные legacy-таблицы требует ALTER + миграции данных; отложено до следующего изменения схем этих таблиц (миг. 004+).
+- [ ] **9.12–9.15 (cross-DB transactional migrations, rollback tooling)** — инженерная инфраструктура отката миграций; SQLite-раннер сейчас forward-only по дизайну (идемпотентность + backup_db --restore как средство отката). Пересмотреть при появлении много-схемных изменений.

@@ -1,17 +1,21 @@
 """
 Tests for Visual Chart Renderer.
 """
+
 import pandas as pd
+
 from alerts.chart_renderer import ChartRenderer
 
 
 def test_svg_chart_generation():
-    df = pd.DataFrame({
-        "open": [2000.0, 2005.0, 2003.0, 2008.0],
-        "high": [2006.0, 2009.0, 2007.0, 2012.0],
-        "low": [1998.0, 2002.0, 2001.0, 2006.0],
-        "close": [2004.0, 2003.0, 2007.0, 2011.0],
-    })
+    df = pd.DataFrame(
+        {
+            "open": [2000.0, 2005.0, 2003.0, 2008.0],
+            "high": [2006.0, 2009.0, 2007.0, 2012.0],
+            "low": [1998.0, 2002.0, 2001.0, 2006.0],
+            "close": [2004.0, 2003.0, 2007.0, 2011.0],
+        }
+    )
     svg = ChartRenderer.render_svg_candlestick(
         df,
         symbol="XAUUSD",

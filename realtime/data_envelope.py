@@ -19,6 +19,7 @@ the producer itself failed.
 Rule enforced by tests: an unavailable source must never become a numeric
 fallback (no $100,000, no neutral 0.50, no random chart).
 """
+
 from __future__ import annotations
 
 import time
@@ -26,8 +27,8 @@ from typing import Any, Literal
 
 FreshnessStatus = Literal["fresh", "stale", "offline", "waiting", "error"]
 
-FRESH_AFTER_MS = 5_000      # spec: < 5s -> green "fresh"
-STALE_AFTER_MS = 60_000     # spec: 5-60s -> amber "stale"; > 60s -> "offline"
+FRESH_AFTER_MS = 5_000  # spec: < 5s -> green "fresh"
+STALE_AFTER_MS = 60_000  # spec: 5-60s -> amber "stale"; > 60s -> "offline"
 
 VALID_STATUSES = frozenset(FreshnessStatus.__args__)  # type: ignore[attr-defined]
 
@@ -78,9 +79,15 @@ def freshness_fields(
     though no observation timestamp exists yet.
     """
     now_value = int(now_ms() if now is None else now)
-    status = freshness if freshness is not None else freshness_status(
-        last_activity_ms, now_value,
-        fresh_after_ms=fresh_after_ms, stale_after_ms=stale_after_ms,
+    status = (
+        freshness
+        if freshness is not None
+        else freshness_status(
+            last_activity_ms,
+            now_value,
+            fresh_after_ms=fresh_after_ms,
+            stale_after_ms=stale_after_ms,
+        )
     )
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid freshness status {status!r}")
@@ -89,11 +96,9 @@ def freshness_fields(
         "mode": mode,
         "as_of_utc_ms": None if last_activity_ms is None else int(last_activity_ms),
         "freshness_status": status,
-        "ingest_lag_ms": None if last_activity_ms is None
-        else max(0, now_value - int(last_activity_ms)),
+        "ingest_lag_ms": None if last_activity_ms is None else max(0, now_value - int(last_activity_ms)),
         "coverage": coverage,
-        "last_successful_at_utc_ms": None if last_activity_ms is None
-        else int(last_activity_ms),
+        "last_successful_at_utc_ms": None if last_activity_ms is None else int(last_activity_ms),
     }
 
 
@@ -111,11 +116,18 @@ def stamp(
 ) -> dict[str, Any]:
     """Merge freshness keys into a payload without dropping existing fields."""
     merged = dict(payload)
-    merged.update(freshness_fields(
-        last_activity_ms, source=source, mode=mode, coverage=coverage, now=now,
-        fresh_after_ms=fresh_after_ms, stale_after_ms=stale_after_ms,
-        freshness=freshness,
-    ))
+    merged.update(
+        freshness_fields(
+            last_activity_ms,
+            source=source,
+            mode=mode,
+            coverage=coverage,
+            now=now,
+            fresh_after_ms=fresh_after_ms,
+            stale_after_ms=stale_after_ms,
+            freshness=freshness,
+        )
+    )
     return merged
 
 

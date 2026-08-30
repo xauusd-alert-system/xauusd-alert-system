@@ -6,6 +6,7 @@ tick). When active they submit a random-size market order in a random
 direction, based on a lognormal order-size distribution clamped to
 [noise_min_size, noise_max_size].
 """
+
 from __future__ import annotations
 
 import math
@@ -28,19 +29,13 @@ class NoiseTrader(BaseAgent):
         # Directional "tide": the BUY probability oscillates as a sine wave in
         # time (default sweep 0.45..0.55) so local buy/sell pressure arrives in
         # waves instead of a perfectly symmetric 50/50 flip that pins the price.
-        self.buy_prob_amplitude: float = float(
-            cfg.get("noise_imbalance_amplitude", 0.05)
-        )
-        self.buy_prob_period: float = float(
-            cfg.get("noise_imbalance_period_ticks", 480.0)
-        )
+        self.buy_prob_amplitude: float = float(cfg.get("noise_imbalance_amplitude", 0.05))
+        self.buy_prob_period: float = float(cfg.get("noise_imbalance_period_ticks", 480.0))
         self._phase: float = self.rng.uniform(0.0, 2.0 * math.pi)
 
     def _buy_probability(self, tick: int) -> float:
         """Time-varying BUY probability: 0.5 +/- sine wave (default 45%..55%)."""
-        wave = self.buy_prob_amplitude * math.sin(
-            2.0 * math.pi * tick / self.buy_prob_period + self._phase
-        )
+        wave = self.buy_prob_amplitude * math.sin(2.0 * math.pi * tick / self.buy_prob_period + self._phase)
         return 0.5 + wave
 
     def _draw_size(self) -> float:

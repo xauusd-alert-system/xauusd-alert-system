@@ -6,6 +6,7 @@ All estimators are POINT-IN-TIME: the spread at bar t uses β_t estimated
 from data up to t (Kalman filter state), and rolling windows use only past
 bars — no look-ahead (ТЗ §7.2).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -13,10 +14,10 @@ import pandas as pd
 from scipy import stats
 from statsmodels.tsa.stattools import adfuller
 
-
 # ---------------------------------------------------------------------------
 # Hedge ratio β
 # ---------------------------------------------------------------------------
+
 
 def ols_beta(x: pd.Series, y: pd.Series, window: int = 90) -> pd.Series:
     """Rolling OLS slope of y on x (fallback method, ТЗ §4.1)."""
@@ -28,8 +29,7 @@ def ols_beta(x: pd.Series, y: pd.Series, window: int = 90) -> pd.Series:
     return out.replace([np.inf, -np.inf], np.nan)
 
 
-def kalman_beta(x: pd.Series, y: pd.Series, q: float = 1e-4,
-                r: float = 1e-2, init_window: int = 10) -> np.ndarray:
+def kalman_beta(x: pd.Series, y: pd.Series, q: float = 1e-4, r: float = 1e-2, init_window: int = 10) -> np.ndarray:
     """Dynamic β_t from a 1-D state-space Kalman filter (ТЗ §4.1):
 
         β_t      = β_{t-1} + η_t,   η ~ N(0, q)      (random-walk state)
@@ -53,10 +53,10 @@ def kalman_beta(x: pd.Series, y: pd.Series, q: float = 1e-4,
         b = 0.0
     for t in range(n):
         xt = xv[t]
-        P = P + q                                  # predict
+        P = P + q  # predict
         if np.isfinite(yv[t]) and np.isfinite(xt):
-            k = P * xt / (P * xt * xt + r)         # Kalman gain
-            b = b + k * (yv[t] - xt * b)           # update
+            k = P * xt / (P * xt * xt + r)  # Kalman gain
+            b = b + k * (yv[t] - xt * b)  # update
             P = (1.0 - k * xt) * P
         beta[t] = b
     return beta
@@ -65,6 +65,7 @@ def kalman_beta(x: pd.Series, y: pd.Series, q: float = 1e-4,
 # ---------------------------------------------------------------------------
 # Spread / z-score
 # ---------------------------------------------------------------------------
+
 
 def spread(y: pd.Series, x: pd.Series, beta) -> pd.Series:
     """Log-spread e_t = ln(P1_t) − β_t·ln(P2_t). `beta` may be a scalar or a
@@ -128,6 +129,7 @@ def annualized_sigma(e: pd.Series, bars_per_year: float, window: int = 90) -> fl
 # Math Board stats (ТЗ §4.2) — stage-1 core subset
 # ---------------------------------------------------------------------------
 
+
 def hurst_rs(x: pd.Series, max_lag: int = 100) -> float:
     """Hurst exponent by the R/S method: E[R(n)/S(n)] = C·n^H.
 
@@ -170,8 +172,7 @@ def hurst_rs(x: pd.Series, max_lag: int = 100) -> float:
             lag_list.append(int(lag))
     if len(lag_list) < 4:
         return float("nan")
-    slope, *_ = np.polyfit(np.log(np.array(lag_list, dtype=float)),
-                           np.log(np.array(rs_vals, dtype=float)), 1)
+    slope, *_ = np.polyfit(np.log(np.array(lag_list, dtype=float)), np.log(np.array(rs_vals, dtype=float)), 1)
     return float(slope)
 
 
@@ -186,7 +187,7 @@ def excess_kurtosis(x: pd.Series) -> float:
     s = x.dropna().to_numpy(dtype=float)
     if len(s) < 8:
         return float("nan")
-    return float(stats.kurtosis(s))          # scipy default = excess kurtosis
+    return float(stats.kurtosis(s))  # scipy default = excess kurtosis
 
 
 def acf1(x: pd.Series) -> float:
@@ -205,5 +206,5 @@ def realized_vol_pct(x: pd.Series, window: int = 90) -> float:
     s = x.dropna().to_numpy(dtype=float)
     if len(s) < window + 2:
         return float("nan")
-    r = np.diff(s[-(window + 1):])
+    r = np.diff(s[-(window + 1) :])
     return float(r.std(ddof=1) * 100.0)

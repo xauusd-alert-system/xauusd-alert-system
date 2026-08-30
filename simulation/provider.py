@@ -44,9 +44,7 @@ class SimulationProvider:
         seed: Optional[int] = None,
         warm_up_ticks: int = 5000,
     ) -> None:
-        self.cfg: dict = (
-            cfg if cfg is not None else load_simulation_config()
-        )
+        self.cfg: dict = cfg if cfg is not None else load_simulation_config()
         self.simulator = MarketSimulator(cfg=self.cfg, seed=seed)
         self.state = VirtualState(self.cfg)
         self.warm_up_ticks: int = int(warm_up_ticks)
@@ -99,13 +97,9 @@ class SimulationProvider:
             df = self.simulator.aggregator.get_bars_by_interval(interval, n=n)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("get_candles failed for TF=%s: %s", timeframe, exc)
-            return pd.DataFrame(
-                columns=["timestamp", "open", "high", "low", "close", "volume"]
-            )
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
         if df is None:
-            return pd.DataFrame(
-                columns=["timestamp", "open", "high", "low", "close", "volume"]
-            )
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
         return df
 
     # ------------------------------------------------------------------
@@ -140,7 +134,4 @@ class SimulationProvider:
         }
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (
-            f"SimulationProvider(tick={self.simulator.tick}, "
-            f"equity={self.equity():.2f})"
-        )
+        return f"SimulationProvider(tick={self.simulator.tick}, equity={self.equity():.2f})"

@@ -11,20 +11,21 @@ Stores open signals in pair_alerts_sent.json (extended with entry_z, direction,
 half_life_days, signal_bar_index). Resolves by re-analyzing the pair and checking
 current z against entry conditions.
 """
+
 from __future__ import annotations
 
 import datetime as dt
 import json
 import os
 import sys
-import time
 
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from pairs_analysis import load_config as load_pairs_config, PairAnalyzer, SignalEngine
+from pairs_analysis import PairAnalyzer
+from pairs_analysis import load_config as load_pairs_config
 
 PAIR_SENT_FILE = os.path.join(ROOT, "data", "manual", "pair_alerts_sent.json")
 PAIR_RESOLVED_FILE = os.path.join(ROOT, "data", "manual", "pair_outcomes_resolved.json")
@@ -90,7 +91,7 @@ def resolve_pair_outcomes(tf: str = "D1") -> int:
     Returns the number of newly resolved outcomes."""
     sent = load_pair_sent()
     resolved = load_pair_resolved()
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     changed = 0
 
     for key, rec in sorted(sent.items()):
@@ -171,6 +172,7 @@ def resolve_pair_outcomes(tf: str = "D1") -> int:
         # Log to journal
         try:
             from pairs_analysis.integrations import log_pair_trade
+
             log_pair_trade(
                 PAIR_JOURNAL_CSV,
                 date=sig_dt.strftime("%Y-%m-%d"),
@@ -201,14 +203,16 @@ def resolve_pair_outcomes(tf: str = "D1") -> int:
         except Exception as e:
             print(f"pair_outcome: journal log error: {e}", file=sys.stderr)
 
-        print(f"{now:%H:%M:%S} UTC: pair outcome {pair_name}: {outcome} R{r:+.2f} "
-              f"(z {entry_z:+.2f} -> {z_cur:+.2f}, {held_days:.1f}d)", file=sys.stderr)
+        print(
+            f"{now:%H:%M:%S} UTC: pair outcome {pair_name}: {outcome} R{r:+.2f} "
+            f"(z {entry_z:+.2f} -> {z_cur:+.2f}, {held_days:.1f}d)",
+            file=sys.stderr,
+        )
 
     return changed
 
 
-def format_pair_resolution(pair_name: str, rec: dict, outcome: dict,
-                           ensemble_line: str = "") -> str:
+def format_pair_resolution(pair_name: str, rec: dict, outcome: dict, ensemble_line: str = "") -> str:
     """Format a Telegram message for a resolved pair trade."""
     direction = rec.get("direction", "")
     entry_z = float(rec.get("entry_z", 0))

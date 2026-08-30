@@ -9,11 +9,13 @@ market dynamics shift slightly (immediate neighbors are negative).
 neighbors (+/-1 step along each grid dimension) are positive, finds the widest
 connected plateau, and returns its central/median configuration.
 """
+
 from __future__ import annotations
+
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional, Tuple
 
 
 def _build_coord_map(param_grid: Dict[str, List[Any]]) -> Tuple[List[str], Dict[Tuple, int], List[Dict[str, Any]]]:
@@ -21,7 +23,7 @@ def _build_coord_map(param_grid: Dict[str, List[Any]]) -> Tuple[List[str], Dict[
     dims = list(param_grid.keys())
     sorted_values = {k: list(v) for k, v in param_grid.items()}
     val_to_idx = {k: {val: idx for idx, val in enumerate(vals)} for k, vals in sorted_values.items()}
-    
+
     return dims, val_to_idx, sorted_values
 
 
@@ -103,6 +105,7 @@ def select_plateau_config(
 
         # Generate neighbor offsets in [-1, 0, 1]^d excluding (0, ..., 0)
         from itertools import product
+
         for offset in product([-1, 0, 1], repeat=d_dim):
             if all(o == 0 for o in offset):
                 continue

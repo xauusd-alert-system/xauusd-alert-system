@@ -10,6 +10,7 @@ For each asset:
 
 Output: logs/regime_comparison_*.csv + console summary.
 """
+
 import argparse
 import os
 import sys
@@ -20,10 +21,9 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
-from scripts.run_backtest import load_asset_history, build_full_df, merge_asset_cfg
-from regime.classifier import classify_regime_series, RegimeLabel
+from regime.classifier import classify_regime_series
 from regime.hmm_classifier import UnsupervisedRegimeClassifier
-
+from scripts.run_backtest import build_full_df, load_asset_history, merge_asset_cfg
 
 ASSETS = ["XAUUSD", "BTCUSD", "EURUSD", "GBPUSD", "XAGUSD"]
 FWD_HORIZONS_M15 = {"1h": 4, "4h": 16, "1d": 64}  # bars on M15
@@ -63,14 +63,16 @@ def _per_regime_stats(df: pd.DataFrame, regime_col: str, ret_cols: list[str]) ->
     return pd.DataFrame(rows)
 
 
-def _information_coefficient(df: pd.DataFrame, regime_col: str, ret_col: str,
-                              ordinal_map: dict | None = None) -> float:
+def _information_coefficient(df: pd.DataFrame, regime_col: str, ret_col: str, ordinal_map: dict | None = None) -> float:
     """Spearman rank correlation between ordinal regime and forward returns."""
     if ordinal_map is None:
         ordinal_map = {
-            "trend_up": 2, "trend_down": -2,
-            "range": 0, "compression": 0.5,
-            "reversal_watch": -0.5, "no_trade": 0,
+            "trend_up": 2,
+            "trend_down": -2,
+            "range": 0,
+            "compression": 0.5,
+            "reversal_watch": -0.5,
+            "no_trade": 0,
         }
     valid = df[[regime_col, ret_col]].dropna()
     if len(valid) < 30:
@@ -81,15 +83,19 @@ def _information_coefficient(df: pd.DataFrame, regime_col: str, ret_col: str,
     return float(ordinal.corr(valid[ret_col], method="spearman"))
 
 
-def _hit_rate(df: pd.DataFrame, regime_col: str, ret_col: str,
-              bullish_regimes: set | None = None, bearish_regimes: set | None = None) -> dict:
+def _hit_rate(
+    df: pd.DataFrame,
+    regime_col: str,
+    ret_col: str,
+    bullish_regimes: set | None = None,
+    bearish_regimes: set | None = None,
+) -> dict:
     """Directional hit rate: does the regime 'agree' with the sign of the return?"""
     if bullish_regimes is None:
         bullish_regimes = {"trend_up", "high_vol_trending"}
     if bearish_regimes is None:
         bearish_regimes = {"trend_down", "high_vol_shock"}
-    neutral_regimes = {"range", "compression", "reversal_watch", "no_trade",
-                       "standard_range", "low_vol_compression"}
+    neutral_regimes = {"range", "compression", "reversal_watch", "no_trade", "standard_range", "low_vol_compression"}
     valid = df[[regime_col, ret_col]].dropna()
     hits = 0
     total = 0
@@ -97,13 +103,14 @@ def _hit_rate(df: pd.DataFrame, regime_col: str, ret_col: str,
         reg = r[regime_col]
         ret = r[ret_col]
         if reg in bullish_regimes and ret > 0:
-            hits += 1; total += 1
+            hits += 1
+            total += 1
         elif reg in bearish_regimes and ret < 0:
-            hits += 1; total += 1
+            hits += 1
+            total += 1
         elif reg in neutral_regimes:
             total += 1
-    return {"hits": hits, "total directional": total,
-            "hit_rate": round(100 * hits / total, 1) if total > 0 else None}
+    return {"hits": hits, "total directional": total, "hit_rate": round(100 * hits / total, 1) if total > 0 else None}
 
 
 def run_asset(asset_key: str, cfg: dict, max_bars: int | None = None) -> dict:
@@ -157,8 +164,10 @@ def run_asset(asset_key: str, cfg: dict, max_bars: int | None = None) -> dict:
     gmm_stats = _per_regime_stats(gmm_df, "regime_gmm", ret_cols)
     # Map GMM labels to ordinal: high_vol_trending > standard_range > low_vol_compression > high_vol_shock
     gmm_ordinal = {
-        "high_vol_trending": 2, "standard_range": 0.5,
-        "low_vol_compression": -0.5, "high_vol_shock": -2,
+        "high_vol_trending": 2,
+        "standard_range": 0.5,
+        "low_vol_compression": -0.5,
+        "high_vol_shock": -2,
     }
     gmm_ic = {rc: _information_coefficient(gmm_df, "regime_gmm", rc, gmm_ordinal) for rc in ret_cols}
     gmm_hit = {rc: _hit_rate(gmm_df, "regime_gmm", rc) for rc in ret_cols}
@@ -196,7 +205,7 @@ def main():
 
     results = []
     for asset in assets:
-        print(f"\n{'='*60}\n  {asset}\n{'='*60}")
+        print(f"\n{'=' * 60}\n  {asset}\n{'=' * 60}")
         r = run_asset(asset, cfg, max_bars=args.max_bars)
         results.append(r)
 
@@ -211,7 +220,7 @@ def main():
         print(f"  Distribution (GMM):  {r['gmm']['distribution']}")
 
         print(f"\n  {'Regime':<18} {'N%':>5}  {'Mean 4h (bps)':>13}  {'Sharpe':>8}  |  {'IC':>6}")
-        print(f"  {'-'*62}")
+        print(f"  {'-' * 62}")
 
         # Rule-based
         print("  [Rule-based ADX/DI]")
@@ -220,9 +229,11 @@ def main():
             sharpe = row.get(f"{rc}_sharpe", "—")
             print(f"  {row['regime']:<18} {row['n_pct']:>4.1f}%  {str(mean):>13}  {str(sharpe):>8}")
         ic_val = r["rule"]["ic"].get(rc, float("nan"))
-        print(f"  {'IC('+rc+')':<18} {'':>5}  {'':>13}  {'':>8}  |  {ic_val:>+.4f}")
+        print(f"  {'IC(' + rc + ')':<18} {'':>5}  {'':>13}  {'':>8}  |  {ic_val:>+.4f}")
         hr = r["rule"]["hit"].get(rc, {})
-        print(f"  {'Hit rate':<18} {'':>5}  hits={hr.get('hits','?')}/{hr.get('total directional','?')}  {hr.get('hit_rate','—')}%")
+        print(
+            f"  {'Hit rate':<18} {'':>5}  hits={hr.get('hits', '?')}/{hr.get('total directional', '?')}  {hr.get('hit_rate', '—')}%"
+        )
 
         # GMM
         print("\n  [Unsupervised GMM]")
@@ -231,9 +242,11 @@ def main():
             sharpe = row.get(f"{rc}_sharpe", "—")
             print(f"  {row['regime']:<18} {row['n_pct']:>4.1f}%  {str(mean):>13}  {str(sharpe):>8}")
         ic_val = r["gmm"]["ic"].get(rc, float("nan"))
-        print(f"  {'IC('+rc+')':<18} {'':>5}  {'':>13}  {'':>8}  |  {ic_val:>+.4f}")
+        print(f"  {'IC(' + rc + ')':<18} {'':>5}  {'':>13}  {'':>8}  |  {ic_val:>+.4f}")
         hr = r["gmm"]["hit"].get(rc, {})
-        print(f"  {'Hit rate':<18} {'':>5}  hits={hr.get('hits','?')}/{hr.get('total directional','?')}  {hr.get('hit_rate','—')}%")
+        print(
+            f"  {'Hit rate':<18} {'':>5}  hits={hr.get('hits', '?')}/{hr.get('total directional', '?')}  {hr.get('hit_rate', '—')}%"
+        )
 
     # Save CSV
     os.makedirs(args.out_dir, exist_ok=True)
@@ -247,8 +260,11 @@ def main():
             hit = r[classifier]["hit"]
             for _, row in stats.iterrows():
                 rec = {
-                    "asset": r["asset"], "classifier": classifier,
-                    "regime": row["regime"], "n": row["n"], "n_pct": row["n_pct"],
+                    "asset": r["asset"],
+                    "classifier": classifier,
+                    "regime": row["regime"],
+                    "n": row["n"],
+                    "n_pct": row["n_pct"],
                 }
                 for col in stats.columns:
                     if col not in ("regime", "n", "n_pct"):

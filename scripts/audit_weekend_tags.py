@@ -11,6 +11,7 @@ Saturday–Sunday 21:00 UTC). BTCUSD is 24/7 and is excluded.
 Reads trade_quality CSVs produced by diag_trade_quality.py / walk-forward.
 Read-only. Exit 1 on any violation (fail-closed for overnight pipeline).
 """
+
 import argparse
 import datetime
 import glob
@@ -56,19 +57,21 @@ def audit_weekend_tags(log_dir: str = "logs") -> list[dict]:
                     if row.get("session") != "weekend":
                         continue
                     ts = int(row["entry_ts"])
-                    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+                    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
                     # Sunday 21:00-24:00 UTC = the invalid window
                     if dt.weekday() == 6 and dt.hour >= 21:
-                        violations.append({
-                            "asset": asset_key,
-                            "csv": basename,
-                            "entry_ts": ts,
-                            "entry_utc": dt.strftime("%Y-%m-%d %H:%M UTC"),
-                            "day": dt.strftime("%A"),
-                            "direction": row.get("direction", "?"),
-                            "R": row.get("R", "?"),
-                            "exit_reason": row.get("exit_reason", "?"),
-                        })
+                        violations.append(
+                            {
+                                "asset": asset_key,
+                                "csv": basename,
+                                "entry_ts": ts,
+                                "entry_utc": dt.strftime("%Y-%m-%d %H:%M UTC"),
+                                "day": dt.strftime("%A"),
+                                "direction": row.get("direction", "?"),
+                                "R": row.get("R", "?"),
+                                "exit_reason": row.get("exit_reason", "?"),
+                            }
+                        )
         except Exception as exc:
             print(f"  WARNING: could not read {csv_path}: {exc}")
 

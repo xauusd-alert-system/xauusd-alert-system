@@ -63,6 +63,7 @@ def shutdown_mt5_shim() -> None:
     """Release the injected MT5 shim (called by run_simulation on exit)."""
     try:
         from simulation.mt5_shim import MetaTrader5 as _mt5  # type: ignore
+
         _mt5.shutdown()
         logger.info("MT5 shim shut down.")
     except Exception:
@@ -147,14 +148,26 @@ class MarketSimulator:
         """Plant thin resting limit orders around `mid` to guarantee a spread."""
         for level in range(1, 6):
             spread = level * max(self.spread_ask_offset, 0.05)
-            self.book.add_limit_order(Order(
-                agent_id="seed", side="BUY", order_type="LIMIT",
-                price=round(mid - spread, 6), volume=1.0, tick=self.tick,
-            ))
-            self.book.add_limit_order(Order(
-                agent_id="seed", side="SELL", order_type="LIMIT",
-                price=round(mid + spread, 6), volume=1.0, tick=self.tick,
-            ))
+            self.book.add_limit_order(
+                Order(
+                    agent_id="seed",
+                    side="BUY",
+                    order_type="LIMIT",
+                    price=round(mid - spread, 6),
+                    volume=1.0,
+                    tick=self.tick,
+                )
+            )
+            self.book.add_limit_order(
+                Order(
+                    agent_id="seed",
+                    side="SELL",
+                    order_type="LIMIT",
+                    price=round(mid + spread, 6),
+                    volume=1.0,
+                    tick=self.tick,
+                )
+            )
 
     @property
     def current_mid_price(self) -> float:
@@ -218,9 +231,7 @@ class MarketSimulator:
         mid = self.current_mid_price
         closes: list[float] = []
         try:
-            df = self.aggregator.get_bars_by_interval(
-                int(self.cfg.get("bar_interval_ticks", 12)), n=30
-            )
+            df = self.aggregator.get_bars_by_interval(int(self.cfg.get("bar_interval_ticks", 12)), n=30)
             closes = [float(x) for x in df["close"].tolist()]
         except Exception:
             logger.debug("aggregator bars unavailable", exc_info=True)
@@ -268,7 +279,9 @@ class MarketSimulator:
         if deviation >= self.circuit_breaker_pct:
             logger.warning(
                 "Circuit breaker tripped: mid=%.2f anchor=%.2f dev=%.3f",
-                mid, self._cb_anchor, deviation,
+                mid,
+                self._cb_anchor,
+                deviation,
             )
             self.paused = True
 
@@ -294,7 +307,9 @@ class MarketSimulator:
         current_mid = self.current_mid_price
         logger.info(
             "Warm-up complete: tick=%d mid=%.2f m5_bar_tick=%d",
-            self.tick, current_mid, self.last_m5_bar_tick,
+            self.tick,
+            current_mid,
+            self.last_m5_bar_tick,
         )
 
         # 1. Re-anchor CB to post-warmup price.
@@ -346,14 +361,16 @@ class MarketSimulator:
         rows: list[Bar] = []
         if df is not None and len(df) > 0:
             for _, r in df.iterrows():
-                rows.append({
-                    "time": int(r["timestamp"]),
-                    "open": float(r["open"]),
-                    "high": float(r["high"]),
-                    "low": float(r["low"]),
-                    "close": float(r["close"]),
-                    "volume": float(r["volume"]),
-                })
+                rows.append(
+                    {
+                        "time": int(r["timestamp"]),
+                        "open": float(r["open"]),
+                        "high": float(r["high"]),
+                        "low": float(r["low"]),
+                        "close": float(r["close"]),
+                        "volume": float(r["volume"]),
+                    }
+                )
         return rows
 
     def __repr__(self) -> str:

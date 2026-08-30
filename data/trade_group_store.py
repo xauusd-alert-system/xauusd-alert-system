@@ -10,6 +10,7 @@ transition a group from not-submitted to submitted (an UPDATE with
 ``WHERE submitted=0`` that affects 0 rows returns False), so recovery after a
 restart can never submit a duplicate order for an already-submitted group.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ import time
 from typing import Any
 
 from data.storage import get_connection
+from execution.schema_registry import deserialize_spec
 from execution.trade_group import GroupState, TradeGroupSpec
 
 TABLE = "trade_groups"
@@ -111,13 +113,21 @@ def save_group(
                  intent_json, account_mode, volume_json, comp_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                spec.group_id, spec.schema_version,
-                spec.model_dump_json(), spec.geometry_hash(),
-                state.value, json.dumps(legs or []),
-                json.dumps(be_state or {}), json.dumps(broker_ids or {}),
-                1 if submitted else 0, now, now,
-                intent_json, account_mode,
-                json.dumps(volume or {}), json.dumps(comp_state or {}),
+                spec.group_id,
+                spec.schema_version,
+                spec.model_dump_json(),
+                spec.geometry_hash(),
+                state.value,
+                json.dumps(legs or []),
+                json.dumps(be_state or {}),
+                json.dumps(broker_ids or {}),
+                1 if submitted else 0,
+                now,
+                now,
+                intent_json,
+                account_mode,
+                json.dumps(volume or {}),
+                json.dumps(comp_state or {}),
             ),
         )
         conn.commit()
@@ -130,16 +140,18 @@ def load_group(db_path: str, group_id: str) -> dict[str, Any] | None:
     init_trade_group_store(db_path)
     conn = get_connection(db_path)
     try:
-        row = conn.execute(
-            f"SELECT * FROM {TABLE} WHERE group_id = ?", (group_id,)
-        ).fetchone()
+        row = conn.execute(f"SELECT * FROM {TABLE} WHERE group_id = ?", (group_id,)).fetchone()
         if row is None:
             return None
         columns = [c[1] for c in conn.execute(f"PRAGMA table_info({TABLE})").fetchall()]
         data = dict(zip(columns, row))
     finally:
         conn.close()
-    data["spec"] = TradeGroupSpec.model_validate_json(data.pop("spec_json"))
+    # ТЗ 9.1–9.2: deserialize through the versioned schema registry, which
+    # defaults untagged (legacy) rows to trade-group.v1 and rejects unknown
+    # versions instead of silently guessing.
+    spec_payload = json.loads(data.pop("spec_json"))
+    data["spec"] = deserialize_spec(spec_payload)
     data["state"] = GroupState(data["state"])
     data["legs"] = json.loads(data.pop("legs_json") or "[]")
     data["be_state"] = json.loads(data.pop("be_json") or "{}")
@@ -156,8 +168,8 @@ def load_group(db_path: str, group_id: str) -> dict[str, Any] | None:
 # Idempotent execution actions (ТЗ P1.5 §30)
 # --------------------------------------------------------------------------
 
-def mark_action(db_path: str, group_id: str, action_id: str,
-                payload: dict[str, Any] | None = None) -> bool:
+
+def mark_action(db_path: str, group_id: str, action_id: str, payload: dict[str, Any] | None = None) -> bool:
     """Atomically record one actionId; returns True ONLY for the first caller.
 
     Repeating the same ``actionId`` (restart, retry, duplicate event) never
@@ -170,8 +182,7 @@ def mark_action(db_path: str, group_id: str, action_id: str,
             f"""INSERT OR IGNORE INTO {ACTIONS_TABLE}
                 (group_id, action_id, payload_json, created_at_ms)
                 VALUES (?, ?, ?, ?)""",
-            (group_id, action_id, json.dumps(payload or {}, sort_keys=True, default=str),
-             _now_ms()),
+            (group_id, action_id, json.dumps(payload or {}, sort_keys=True, default=str), _now_ms()),
         )
         conn.commit()
         return cursor.rowcount == 1
@@ -201,8 +212,7 @@ def list_actions(db_path: str, group_id: str) -> list[dict[str, Any]]:
             f"WHERE group_id=? ORDER BY created_at_ms, action_id",
             (group_id,),
         ).fetchall()
-        return [{"action_id": r[0], "payload": json.loads(r[1] or "{}"),
-                 "created_at_ms": r[2]} for r in rows]
+        return [{"action_id": r[0], "payload": json.loads(r[1] or "{}"), "created_at_ms": r[2]} for r in rows]
     finally:
         conn.close()
 
@@ -257,9 +267,7 @@ def update_group_state(
             sets.append("comp_json = ?")
             params.append(json.dumps(comp_state))
         params.append(group_id)
-        conn.execute(
-            f"UPDATE {TABLE} SET {', '.join(sets)} WHERE group_id = ?", params
-        )
+        conn.execute(f"UPDATE {TABLE} SET {', '.join(sets)} WHERE group_id = ?", params)
         conn.commit()
     finally:
         conn.close()
@@ -289,9 +297,7 @@ def is_submitted(db_path: str, group_id: str) -> bool:
     init_trade_group_store(db_path)
     conn = get_connection(db_path)
     try:
-        row = conn.execute(
-            f"SELECT submitted FROM {TABLE} WHERE group_id = ?", (group_id,)
-        ).fetchone()
+        row = conn.execute(f"SELECT submitted FROM {TABLE} WHERE group_id = ?", (group_id,)).fetchone()
         return bool(row and row[0])
     finally:
         conn.close()

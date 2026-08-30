@@ -28,6 +28,7 @@ never merged, so when the fix was reverted the whole suite stayed green and the
 next walk-forward run silently reproduced the buggy +8915 PnL. A fix without its
 guard is a fix with a countdown on it.
 """
+
 import pytest
 
 from model.ensemble_backtest import EnsembleBacktester
@@ -132,8 +133,8 @@ def test_breakeven_trigger_distance_is_side_symmetric():
         bt = EnsembleBacktester(_zero_cost_cfg(breakeven_trigger_atr=0.5), asset_key="TEST")
         if side == 1:
             df = _df(n=10, price=PRICE)
-            df.loc[2, "high"] = PRICE + 0.6 * ATR   # 0.6 ATR in favour
-            df.loc[3, "low"] = PRICE - 2.1 * ATR    # then through the stop
+            df.loc[2, "high"] = PRICE + 0.6 * ATR  # 0.6 ATR in favour
+            df.loc[3, "low"] = PRICE - 2.1 * ATR  # then through the stop
         else:
             df = _short_df()
             df.loc[2, "low"] = PRICE - 0.6 * ATR

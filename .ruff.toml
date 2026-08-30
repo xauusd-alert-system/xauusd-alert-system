@@ -1,0 +1,67 @@
+# Ruff configuration (TZ tasks 2/6).
+#
+# Baseline policy: the repo carries a large pre-refactor legacy surface, so a
+# handful of style rules that fire en masse on legacy code are ignored for now
+# (see docs/RUFF_POLICY.md for the rationale table). Everything else in the
+# selected rule families must pass — CI gates on `ruff check .`.
+line-length = 120
+target-version = "py312"
+src = ["."]
+
+[lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+
+ignore = [
+    # --- TZ mandate: line length is handled by review, not lint ---
+    "E501",
+    # --- Legacy style debt (mass offenders; do NOT grow in new code) ---
+    "E402",  # 66x: module-level imports after sys.path manipulation in scripts
+    "E702",  # 68x: semicolon-joined statements in legacy scripts
+    "E701",  # 11x: one-line statements in legacy scripts
+    "E731",  # 2x: lambda assignment
+    "E741",  # 15x: ambiguous single-letter names (l/I/O) in legacy math code
+    "N803",  # 31x: non-lowercase argument names (legacy XAU/USD math)
+    "N806",  # 149x: non-lowercase variables in functions (legacy math)
+    "N813", "N814", "N815", "N817", "N818",  # camelCase import/exception naming debt
+    "UP006", # 74x: typing.List/Dict annotations (py3.8-style) — gradual migration
+    "UP009", # 31x: utf-8 coding declarations in legacy files
+    "UP015", # 33x: redundant open() mode strings
+    "UP031", # 5x: printf-style formatting
+    "UP035", # 45x: deprecated typing imports — gradual migration
+    "UP037", # 31x: quoted annotations
+    "UP045", # 168x: Optional[X] annotations — gradual migration
+    "F841",  # 45x: unused locals in legacy scripts (may indicate intent; cleanup separately)
+    "B007",  # 28x: unused loop control variables in legacy code
+    "B904",  # 7x: raise-without-from in legacy error paths
+    "B905",  # 29x: zip() without strict= (pre-3.10 habit)
+    "B017",  # 4x: pytest.raises(Exception) in legacy tests
+    "B011",  # 1x: assert False in legacy code
+    # --- Targeted legacy exceptions (see docs/RUFF_POLICY.md) ---
+    "UP042", # 6x: str,Enum mixins predate enum.StrEnum; migration is a behavior-
+             # touching refactor (serialization relies on str subclassing) — deferred
+    "B023",  # 2x: regime/classifier.py loop-variable closure — verified safe (lambda
+             # is invoked within the same iteration by pandas .map)
+]
+
+[lint.per-file-ignores]
+# Unit-test naming: helper factories use CamelCase by convention there.
+"tests/**" = ["N802"]
+"**/tests/**" = ["N802"]
+# MT5 shim must keep the exact module name of the real package it shadows.
+"simulation/mt5_shim/MetaTrader5/__init__.py" = ["N999"]
+# LightGBM import inside try/except documents optional availability; ruff's
+# find_spec suggestion would change runtime semantics of the estimator pool.
+"model/trainer.py" = ["F401"]
+# Useless expression is intentional: asserts AttributeError on missing constant.
+"mt5_adapter/tests/test_client.py" = ["B018"]
+# Legacy diagnostic HTML embedded as Python string — trailing spaces inside
+# the template block are cosmetic only.
+"realtime/dashboard.py" = ["W293"]
+# Legacy naming for a domain-specific bootstrap statistic.
+"realtime/prepost_metrics.py" = ["N802"]
+# String forward-reference before the local import inside the factory body.
+"tests/builder.py" = ["F821"]
+# OWNER WORK-IN-PROGRESS files (not yet committed): legacy import layout and
+# unused imports there belong to the owner's pending diff — do not gate CI.
+"execution/mt5_trader.py" = ["I001", "W292"]
+"execution/tests/test_trade_throttle.py" = ["F401"]

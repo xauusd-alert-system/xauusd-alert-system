@@ -3,6 +3,7 @@
 Reads logs/backtest_<asset>.csv and prints, for each asset, the row for the
 benchmarks.md Phase-0 baseline tables: avg value per metric plus min..max range.
 """
+
 from __future__ import annotations
 
 import os

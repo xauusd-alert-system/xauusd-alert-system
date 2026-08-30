@@ -5,6 +5,7 @@ Each timeframe has its own table. Within each table, candles are uniquely
 identified by (symbol, timestamp_utc), allowing multiple assets to share an
 M15 table safely.
 """
+
 import os
 import sqlite3
 
@@ -61,10 +62,7 @@ def _create_table(conn: sqlite3.Connection, table: str) -> None:
     for column in OPTIONAL_MARKET_COLUMNS:
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} REAL")
-    conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_{table}_symbol_ts "
-        f"ON {table}(symbol, timestamp_utc);"
-    )
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_symbol_ts ON {table}(symbol, timestamp_utc);")
 
 
 def _has_legacy_schema(conn: sqlite3.Connection, table: str) -> bool:
@@ -73,11 +71,7 @@ def _has_legacy_schema(conn: sqlite3.Connection, table: str) -> bool:
         return False
 
     names = {column[1] for column in columns}
-    primary_key_columns = [
-        column[1]
-        for column in sorted(columns, key=lambda column: column[5])
-        if column[5] > 0
-    ]
+    primary_key_columns = [column[1] for column in sorted(columns, key=lambda column: column[5]) if column[5] > 0]
     return "symbol" not in names or primary_key_columns != ["symbol", "timestamp_utc"]
 
 

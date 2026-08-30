@@ -5,12 +5,12 @@ Must run on mock data (no real SQLite required).
 
 import os
 import sys
-import tempfile
+
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config, get_signal_grid
+from config.loader import get_signal_grid, load_config
 from data.ingestion import to_epoch_seconds
 
 
@@ -31,28 +31,29 @@ def test_get_signal_grid_trailing_default_is_none():
 
 def test_diag_gbp_smoke_runs_without_db(monkeypatch):
     """diag_gbp_profile should not crash on synthetic data."""
-    from scripts.diag_gbp_profile import main as diag_main
     # We can't easily monkey the whole main without side effects; instead import and call core logic lightly.
     # For smoke we just ensure the module imports and a minimal backtester run works.
     from model.ensemble_backtest import EnsembleBacktester
+
     cfg = load_config()
     # tiny synthetic
-    import numpy as np
     n = 80
     idx = pd.date_range("2024-01-01", periods=n, freq="1h", tz="UTC")
-    df = pd.DataFrame({
-        "timestamp_utc": to_epoch_seconds(idx),
-        "open": 1.30,
-        "high": 1.3005,
-        "low": 1.2995,
-        "close": 1.30,
-        "volume": 1000.0,
-        "session": "london",
-        "regime": "trend_up",
-        "atr": 0.0015,
-        "ml_p_long": 0.7,
-        "ml_p_short": 0.3,
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": to_epoch_seconds(idx),
+            "open": 1.30,
+            "high": 1.3005,
+            "low": 1.2995,
+            "close": 1.30,
+            "volume": 1000.0,
+            "session": "london",
+            "regime": "trend_up",
+            "atr": 0.0015,
+            "ml_p_long": 0.7,
+            "ml_p_short": 0.3,
+        }
+    )
     bt = EnsembleBacktester(cfg, asset_key="GBPUSD")
     trades = bt.run(df)
     assert isinstance(trades, list)
@@ -64,6 +65,7 @@ def test_grid_search_gbp_smoke_runs(monkeypatch):
     leaky future-injection helper must be GONE (honesty regression)."""
     # We avoid full long run; just import and instantiate a tiny helper
     from scripts.grid_search_gbp import _make_synthetic_gbp_wf_df
+
     df = _make_synthetic_gbp_wf_df(n=300)
     assert len(df) == 300
     # The builder now carries the columns the honest per-fold strategy needs
@@ -72,17 +74,17 @@ def test_grid_search_gbp_smoke_runs(monkeypatch):
     assert "regime" in df.columns
     assert "ml_p_long" not in df.columns
     assert "ml_p_short" not in df.columns
-    assert not hasattr(__import__("scripts.grid_search_gbp", fromlist=["x"]),
-                       "_inject_ml_probs"), "leaky _inject_ml_probs must stay deleted"
+    assert not hasattr(__import__("scripts.grid_search_gbp", fromlist=["x"]), "_inject_ml_probs"), (
+        "leaky _inject_ml_probs must stay deleted"
+    )
 
 
 def test_per_asset_model_merge_in_run_backtest():
     from scripts.run_backtest import merge_asset_cfg
+
     cfg = load_config()
     # simulate adding per-asset model
-    cfg["assets"]["TESTGBP"] = {
-        "model": {"use_regime_feature": True, "include_zero_class": True}
-    }
+    cfg["assets"]["TESTGBP"] = {"model": {"use_regime_feature": True, "include_zero_class": True}}
     merged = merge_asset_cfg(cfg, "TESTGBP", "model")
     assert merged["model"]["use_regime_feature"] is True
     assert merged["model"]["include_zero_class"] is True
@@ -93,6 +95,7 @@ def test_per_asset_model_merge_in_run_backtest():
 
 def test_per_asset_model_in_realtime_pipeline_effective_cfg():
     from realtime.pipeline import RealtimePipeline
+
     cfg = load_config()
     # minimal patch for test
     cfg = dict(cfg)  # shallow ok for test
@@ -119,6 +122,7 @@ def test_get_signal_grid_regime_overrides():
     """Per-regime exit policy: signal_grid.regime_overrides.<regime> layers on
     top of the effective grid; absent regime keeps the base grid untouched."""
     from config.loader import get_signal_grid
+
     cfg = load_config()
     asset = cfg["assets"]["GBPUSD"]
 
@@ -131,10 +135,13 @@ def test_get_signal_grid_regime_overrides():
     cfg["assets"]["GBPUSD"] = dict(asset)
     cfg["assets"]["GBPUSD"]["signal_grid"] = dict(asset["signal_grid"])
     cfg["assets"]["GBPUSD"]["signal_grid"]["regime_overrides"] = {
-        "trend_up": {"stop_mult": 4.0, "breakeven_trigger_atr": 1.0,
-                     "tp3_mult": 4.0, "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3}},
-        "range": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5,
-                  "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4}},
+        "trend_up": {
+            "stop_mult": 4.0,
+            "breakeven_trigger_atr": 1.0,
+            "tp3_mult": 4.0,
+            "scaleout": {"tp1_ratio": 0.3, "tp2_ratio": 0.3},
+        },
+        "range": {"stop_mult": 2.0, "breakeven_trigger_atr": 0.5, "scaleout": {"tp1_ratio": 0.6, "tp2_ratio": 0.4}},
     }
     trend = get_signal_grid(cfg, cfg["assets"]["GBPUSD"], regime="trend_up")
     assert trend["stop_mult"] == 4.0
@@ -164,32 +171,36 @@ def test_get_signal_grid_regime_overrides():
 # WHOLE run (every remaining fold and asset was lost).
 # ---------------------------------------------------------------------------
 
+
 def _gbp_like_fold_df(n, labels, seed=5):
     """Minimal GBP-shaped frame carrying what strategy_fn needs: a few model
     features, the raw `regime` column (GBP sets use_regime_feature=true), the
     OHLCV/session columns EnsembleBacktester consumes, and a chosen label cycle."""
     import numpy as np
+
     rng = np.random.default_rng(seed)
     idx = pd.date_range("2022-01-01", periods=n, freq="1h", tz="UTC")
     drift = rng.normal(scale=0.0006, size=n).cumsum()
     close = 1.28 + drift
-    df = pd.DataFrame({
-        "timestamp_utc": to_epoch_seconds(idx),
-        "open": close + rng.normal(scale=0.0002, size=n),
-        "high": close + np.abs(rng.normal(scale=0.0007, size=n)),
-        "low": close - np.abs(rng.normal(scale=0.0007, size=n)),
-        "close": close,
-        "volume": 2000.0,
-        "session": "london",
-        "regime": rng.choice(["trend_up", "trend_down", "range"], n),
-        "atr": 0.0014,
-        # a handful of real FEATURE_COLUMNS names so build_training_matrix has
-        # something to train on
-        "ema_9": close,
-        "rsi": rng.uniform(20, 80, n),
-        "macd_line": rng.normal(scale=0.0003, size=n),
-        "adx": rng.uniform(10, 40, n),
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": to_epoch_seconds(idx),
+            "open": close + rng.normal(scale=0.0002, size=n),
+            "high": close + np.abs(rng.normal(scale=0.0007, size=n)),
+            "low": close - np.abs(rng.normal(scale=0.0007, size=n)),
+            "close": close,
+            "volume": 2000.0,
+            "session": "london",
+            "regime": rng.choice(["trend_up", "trend_down", "range"], n),
+            "atr": 0.0014,
+            # a handful of real FEATURE_COLUMNS names so build_training_matrix has
+            # something to train on
+            "ema_9": close,
+            "rsi": rng.uniform(20, 80, n),
+            "macd_line": rng.normal(scale=0.0003, size=n),
+            "adx": rng.uniform(10, 40, n),
+        }
+    )
     df["timestamp"] = idx
     df["label"] = [labels[i % len(labels)] for i in range(n)]
     return df
@@ -198,6 +209,7 @@ def _gbp_like_fold_df(n, labels, seed=5):
 def _gbp_three_class_cfg():
     cfg = load_config()
     import copy as _copy
+
     cfg = _copy.deepcopy(cfg)
     # GBPUSD already ships model.include_zero_class=true; assert it so this test
     # keeps guarding the real configuration rather than a local invention.
@@ -208,6 +220,7 @@ def _gbp_three_class_cfg():
 def test_absent_no_trade_downgrades_only_the_effective_fold_config():
     """The policy remains three-class in cfg; only a sparse fold becomes binary."""
     import copy
+
     from scripts.run_backtest import _maybe_downgrade_three_class, merge_asset_cfg
 
     cfg = _gbp_three_class_cfg()
@@ -229,9 +242,8 @@ def test_walk_forward_fold_without_no_trade_class_does_not_crash(capsys):
     """Fold labels are only +1/-1 -> three-class y is {0: short, 2: long} with no
     no_trade row. This used to abort the whole GBP backtest; it must now train and
     return metrics for the fold."""
-    from scripts.run_backtest import strategy_fn_factory
     from model.trainer import build_training_matrix
-    from scripts.run_backtest import merge_asset_cfg
+    from scripts.run_backtest import merge_asset_cfg, strategy_fn_factory
 
     cfg = _gbp_three_class_cfg()
     train_df = _gbp_like_fold_df(400, labels=[1, -1], seed=5)

@@ -2,9 +2,8 @@
 partial-hit flags) is persisted and restored across a process restart, so a
 restart keeps managing still-open positions instead of dropping them to the
 broker TP/SL."""
-import json
 
-import pytest
+import json
 
 from execution.mt5_trader import MultiAssetMT5Trader
 
@@ -21,9 +20,15 @@ def test_save_and_restore_management_state(tmp_path):
     t = _trader(state)
     t.active_trades = {
         1001: {
-            "symbol": "GOLD", "type": "long", "entry_price": 2000.0,
-            "original_volume": 0.10, "tp1": 2005.0, "tp2": 2010.0, "tp3": 2015.0,
-            "tp1_hit": True, "tp2_hit": False,
+            "symbol": "GOLD",
+            "type": "long",
+            "entry_price": 2000.0,
+            "original_volume": 0.10,
+            "tp1": 2005.0,
+            "tp2": 2010.0,
+            "tp3": 2015.0,
+            "tp1_hit": True,
+            "tp2_hit": False,
         }
     }
     t._save_management_state()
@@ -43,8 +48,7 @@ def test_load_ignores_entries_without_tp_targets(tmp_path):
     """Entries with tp1=None (e.g. never recorded) are not restored, because the
     manager cannot act on them."""
     state = str(tmp_path / "mgmt.json")
-    json.dump({"9999": {"symbol": "GOLD", "tp1": None, "tp1_hit": False}},
-              open(state, "w"))
+    json.dump({"9999": {"symbol": "GOLD", "tp1": None, "tp1_hit": False}}, open(state, "w"))
     t = _trader(state)
     assert 9999 not in t.active_trades
 

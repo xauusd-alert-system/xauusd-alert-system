@@ -13,8 +13,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from scripts.exit_profile import classify_path, build_exit_profile, _aggregate
-from scripts.deflated_sharpe import _make_synthetic_wf_df, _inject_biased_probs
+from scripts.deflated_sharpe import _inject_biased_probs, _make_synthetic_wf_df
+from scripts.exit_profile import _aggregate, build_exit_profile, classify_path
 
 
 def test_classify_path_buckets():
@@ -32,12 +32,14 @@ def test_classify_path_buckets():
 
 
 def test_aggregate_payoff_geometry():
-    tdf = pd.DataFrame({
-        "path": ["TP3", "TP3", "SL_pre_TP1"],
-        "net_r": [1.7, 1.7, -3.0],
-        "pnl": [1.7, 1.7, -3.0],
-        "regime": ["trend_up"] * 3,
-    })
+    tdf = pd.DataFrame(
+        {
+            "path": ["TP3", "TP3", "SL_pre_TP1"],
+            "net_r": [1.7, 1.7, -3.0],
+            "pnl": [1.7, 1.7, -3.0],
+            "regime": ["trend_up"] * 3,
+        }
+    )
     agg = _aggregate(tdf)
     assert agg["n"] == 3
     assert agg["payoff"]["avg_win_R"] == pytest.approx(1.7)
@@ -55,6 +57,7 @@ def synthetic_gbp_df():
 
 def test_build_exit_profile_structure(synthetic_gbp_df):
     from config.loader import load_config
+
     cfg = load_config()
     prof = build_exit_profile(cfg, "GBPUSD", synthetic_gbp_df, max_folds=4)
     assert prof["n_folds"] == 4
@@ -67,6 +70,7 @@ def test_build_exit_profile_structure(synthetic_gbp_df):
 
 def test_build_exit_profile_no_folds_raises():
     from config.loader import load_config
+
     cfg = load_config()
     df = _make_synthetic_wf_df(500, price=1.28, atr=0.0014, freq="1h")
     with pytest.raises(ValueError, match="No walk-forward folds"):
@@ -76,6 +80,7 @@ def test_build_exit_profile_no_folds_raises():
 def test_main_writes_csv_and_json(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from scripts.exit_profile import main
+
     out = str(tmp_path / "ep.csv")
     main(["--asset", "GBPUSD", "--max-folds", "2", "--out", out])
     assert os.path.exists(out)

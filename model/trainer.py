@@ -40,15 +40,18 @@ Now supports multiple model backends:
 - lightgbm (optional, if installed)
 - ensemble (soft voting of available models)
 """
-import os
+
 import logging
+import os
+from typing import Optional
+
+import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-import joblib
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("model_trainer")
@@ -67,25 +70,61 @@ def _warn_once(prefix: str, message: str, *args) -> None:
 
 
 FEATURE_COLUMNS = [
-    "ema_9", "ema_21", "ema_50", "ema_200", "rsi", "macd_line", "macd_signal", "macd_hist",
-    "atr", "bb_width", "body_ratio", "upper_wick_ratio", "lower_wick_ratio", "candle_direction",
-    "adx", "plus_di", "minus_di", "atr_ratio", "mtf_confluence_score",
-    "return_1", "return_4", "volume_ratio", "atr_pct",
-    "dist_asia_high_atr", "dist_asia_low_atr",
-    "garman_klass_vol", "dist_ema50_atr", "dist_ema200_atr", "macd_accel",
-    "sin_hour", "cos_hour", "dist_pdh_atr", "dist_pdl_atr",
-    "obv", "mfi", "rsi_slope", "volume_zscore",
-    "dist_donchian_high_atr", "dist_donchian_low_atr",
-    "bb_width_percentile", "atr_percentile",
+    "ema_9",
+    "ema_21",
+    "ema_50",
+    "ema_200",
+    "rsi",
+    "macd_line",
+    "macd_signal",
+    "macd_hist",
+    "atr",
+    "bb_width",
+    "body_ratio",
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "candle_direction",
+    "adx",
+    "plus_di",
+    "minus_di",
+    "atr_ratio",
+    "mtf_confluence_score",
+    "return_1",
+    "return_4",
+    "volume_ratio",
+    "atr_pct",
+    "dist_asia_high_atr",
+    "dist_asia_low_atr",
+    "garman_klass_vol",
+    "dist_ema50_atr",
+    "dist_ema200_atr",
+    "macd_accel",
+    "sin_hour",
+    "cos_hour",
+    "dist_pdh_atr",
+    "dist_pdl_atr",
+    "obv",
+    "mfi",
+    "rsi_slope",
+    "volume_zscore",
+    "dist_donchian_high_atr",
+    "dist_donchian_low_atr",
+    "bb_width_percentile",
+    "atr_percentile",
     # Order-flow / microstructure (features/order_flow.py, causal, per-row)
-    "cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50",
+    "cvd",
+    "cvd_slope_10",
+    "order_flow_imbalance_14",
+    "order_flow_imbalance_50",
     "dist_vwap_atr",
     # Agent-based bifurcation (features/bifurcation.py, causal entropy)
-    "break_score", "break_intensity", "agent_long_ratio",
+    "break_score",
+    "break_intensity",
+    "agent_long_ratio",
 ]
 
 
-def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict = None) -> tuple:
+def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: Optional[dict] = None) -> tuple:
     """
     Extracts (X, y) from a fully-featured, labeled DataFrame.
     Drops rows with NaN in required feature columns or NaN label (label is NaN
@@ -117,13 +156,36 @@ def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict 
     # into the model bundle via available_cols, and ModelPredictor selects
     # exactly its saved feature_cols at inference, so all consumers work
     # unchanged. Unknown names in the subset are ignored with a warning.
+    #
+    # Задача 3.3 (2026-08-29): the subset may ALSO name config-gated research
+    # features that exist on the frame but are not in the static
+    # FEATURE_COLUMNS whitelist (e.g. `close_fd` from features.fractional_diff
+    # or the four `cusum_*` columns from features.cusum, both added by
+    # build_full_df when their feature flags are enabled). Such entries are
+    # admitted when present in df.columns. This lets a research run pass the
+    # FULL whitelist + the new features as an explicit list without touching
+    # FEATURE_COLUMNS. No prod config sets feature_subset, so prod behaviour
+    # is unchanged.
     subset = model_cfg.get("feature_subset")
     if subset:
-        unknown = [f for f in subset if f not in available_cols]
+        known = set(available_cols) | set(df.columns)
+        unknown = [f for f in subset if f not in known]
         if unknown:
-            print(f"[trainer] WARNING: feature_subset entries not available, "
-                  f"ignored: {unknown}")
-        available_cols = [f for f in subset if f in available_cols] or available_cols
+            print(f"[trainer] WARNING: feature_subset entries not available, ignored: {unknown}")
+        resolved = [f for f in subset if f in known]
+        # Preserve subset order but keep the NaN-drop semantics: a subset that
+        # names zero resolvable columns falls back to the whitelist-derived set.
+        available_cols = resolved or available_cols
+    # Задача 3.3: EXTENSION list — appends config-gated research features
+    # (present on the frame, not in FEATURE_COLUMNS) WITHOUT having to spell
+    # out the full whitelist in YAML. No prod config sets it.
+    subset_ext = model_cfg.get("feature_subset_ext")
+    if subset_ext:
+        extra = [f for f in subset_ext if f in df.columns and f not in available_cols]
+        missing = [f for f in subset_ext if f not in df.columns]
+        if missing:
+            print(f"[trainer] WARNING: feature_subset_ext entries not on the frame, skipped: {missing}")
+        available_cols = available_cols + extra
     if use_regime:
         # Phase 3: expand the causal `regime` column (already computed by
         # classify_regime_series upstream) into one-hot columns and append them to
@@ -136,6 +198,7 @@ def build_training_matrix(df: pd.DataFrame, label_col: str = "label", cfg: dict 
                 "DataFrame (compute it with classify_regime_series first)"
             )
         from regime.classifier import regime_onehot_df
+
         onehot = regime_onehot_df(df)
         new_regime_cols = [c for c in onehot.columns if c not in available_cols]
         available_cols = available_cols + new_regime_cols
@@ -183,7 +246,7 @@ _CLS_NO_TRADE = 1
 _CLS_LONG = 2
 
 
-def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
+def _normalize_label_space(y: pd.Series, cfg: Optional[dict] = None) -> tuple:
     """
     Map the semantic label space onto a CONTIGUOUS, decodable one.
 
@@ -237,8 +300,7 @@ def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
 
     if len(observed) < 2:
         raise DegenerateLabelSpaceError(
-            f"training labels contain a single class {sorted(observed)}; a "
-            "directional model needs at least two classes"
+            f"training labels contain a single class {sorted(observed)}; a directional model needs at least two classes"
         )
 
     if not include_zero:
@@ -246,10 +308,7 @@ def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
         # not no_trade, so the three-class constants deliberately are not reused.
         if observed <= {0, 1}:
             return y.astype(int), info
-        raise DegenerateLabelSpaceError(
-            f"binary training labels must be a subset of {{0, 1}}, got "
-            f"{sorted(observed)}"
-        )
+        raise DegenerateLabelSpaceError(f"binary training labels must be a subset of {{0, 1}}, got {sorted(observed)}")
 
     if observed == {_CLS_SHORT, _CLS_NO_TRADE, _CLS_LONG}:
         return y.astype(int), info
@@ -280,12 +339,11 @@ def _normalize_label_space(y: pd.Series, cfg: dict = None) -> tuple:
         )
 
     raise DegenerateLabelSpaceError(
-        f"three-class training labels must be a subset of {{0, 1, 2}}, got "
-        f"{sorted(observed)}"
+        f"three-class training labels must be a subset of {{0, 1, 2}}, got {sorted(observed)}"
     )
 
 
-def normalize_label_space(y: pd.Series, cfg: dict = None) -> pd.Series:
+def normalize_label_space(y: pd.Series, cfg: Optional[dict] = None) -> pd.Series:
     """
     Public wrapper around _normalize_label_space returning only the labels.
     See _normalize_label_space for the full rationale and mapping table.
@@ -345,12 +403,73 @@ def purged_time_ordered_split(
             "purged_time_ordered_split: purge gap (%d rows) is not smaller than "
             "the training slice (%d rows), so NO training data survives. Reduce "
             "backtest.walk_forward.embargo_candles or supply more history.",
-            gap, split_idx,
+            gap,
+            split_idx,
         )
 
     X_train, X_test = X.iloc[:train_end], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:train_end], y.iloc[split_idx:]
     return X_train, X_test, y_train, y_test
+
+
+class LogitMarginEstimator(BaseEstimator, ClassifierMixin):
+    """Expose a binary classifier's log-odds margin as ``decision_function``.
+
+    Canonical Platt scaling fits the sigmoid ``1/(1+exp(a*x+b))`` on the
+    log-odds margin ``logit(p) = ln(p/(1-p))``. XGBoost exposes no
+    ``decision_function``, so sklearn's ``_SigmoidCalibration`` was historically
+    fed raw probabilities (already squashed near 0.5), which collapsed the
+    calibrated spread and killed the minority direction (audit 2026-08-25).
+    Wrapping the base classifier with this estimator restores the canonical
+    input space.
+
+    IMPORTANT (artifact compatibility): production joblib bundles pickle this
+    class by reference (module path ``model.trainer.LogitMarginEstimator``);
+    removing or renaming it breaks unpickling of every previously saved model.
+    """
+
+    def __init__(self, estimator=None, base_estimator=None):
+        # ``estimator`` follows the sklearn convention CalibratedClassifierCV
+        # relies on when cloning (production pickles store the base classifier
+        # under this attribute). ``base_estimator`` kept as an alias.
+        self.estimator = base_estimator if base_estimator is not None else estimator
+
+    @property
+    def base_estimator(self):
+        return self.estimator_
+
+    def fit(self, X, y, **kwargs):
+        self.estimator.fit(X, y, **kwargs)
+        self.estimator_ = self.estimator  # convention: trailing _ = fitted
+        return self
+
+    @property
+    def classes_(self):
+        if hasattr(self, "classes_ref") and self.classes_ref is not None:
+            return self.classes_ref
+        est = getattr(self, "estimator_", None) or self.estimator
+        return est.classes_
+
+    def _margin(self, proba):
+        # proba column for the positive class; guard against 0/1 saturation.
+        p = np.clip(np.asarray(proba, dtype=float), 1e-6, 1 - 1e-6)
+        return np.log(p / (1 - p))
+
+    def decision_function(self, X):
+        """Return the raw log-odds margin of the positive class."""
+        proba = self._inner().predict_proba(X)
+        # Binary case: sklearn expects a 1-D margin; take the positive class.
+        return self._margin(proba[:, 1])
+
+    def predict_proba(self, X):
+        return self._inner().predict_proba(X)
+
+    def predict(self, X):
+        return self._inner().predict(X)
+
+    def _inner(self):
+        """Fitted estimator if present, otherwise the unfitted template."""
+        return getattr(self, "estimator_", None) or self.estimator
 
 
 def _get_xgb_classifier(model_cfg: dict, random_state: int):
@@ -386,6 +505,7 @@ def _get_lightgbm_classifier(model_cfg: dict, random_state: int):
     """Create LightGBM classifier (if installed)."""
     try:
         import lightgbm as lgb
+
         return lgb.LGBMClassifier(
             n_estimators=model_cfg.get("n_estimators_lgb", 200),
             max_depth=model_cfg.get("max_depth_lgb", 4),
@@ -412,6 +532,7 @@ def _create_ensemble_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict)
     # LightGBM if available
     try:
         import lightgbm as lgb
+
         estimators.append(("lgb", _get_lightgbm_classifier(model_cfg, random_state)))
     except ImportError:
         pass
@@ -423,13 +544,16 @@ def _create_ensemble_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict)
 
     voting = VotingClassifier(
         estimators=estimators,
-        voting=model_cfg.get("ensemble_method", "soft_voting") if model_cfg.get("ensemble_method") in ("hard", "soft") else "soft",
+        voting=(
+            model_cfg.get("ensemble_method", "soft_voting")
+            if model_cfg.get("ensemble_method") in ("hard", "soft")
+            else "soft"
+        ),
     )
     return voting
 
 
-def _fit_classifier(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
-                    sample_weight: np.ndarray | None = None):
+def _fit_classifier(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict, sample_weight: np.ndarray | None = None):
     """
     Build and fit the configured classifier on an ALREADY label-normalized y.
 
@@ -457,8 +581,7 @@ def _fit_classifier(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
     if sample_weight is not None:
         sw = np.asarray(sample_weight, dtype=float)
         if len(sw) != len(y_train):
-            raise ValueError(
-                f"sample_weight length {len(sw)} != y_train length {len(y_train)}")
+            raise ValueError(f"sample_weight length {len(sw)} != y_train length {len(y_train)}")
         # XGBoost (and RF/LGBM) accept sample_weight in fit.
         model.fit(X_train, y_train, sample_weight=sw)
     else:
@@ -466,8 +589,7 @@ def _fit_classifier(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
     return model
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
-                sample_weight: np.ndarray | None = None):
+def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict, sample_weight: np.ndarray | None = None):
     """
     Train a model according to config 'model.type'.
 
@@ -485,8 +607,9 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
     return model
 
 
-def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict,
-                    sample_weight: np.ndarray | None = None):
+def calibrate_model(
+    base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: dict, sample_weight: np.ndarray | None = None
+):
     """
     Wrap the trained model with HONEST probability calibration using a purged,
     time-ordered split -- no shuffled K-fold, no temporal overlap (Phase 0+1).
@@ -522,9 +645,7 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     if sample_weight is not None:
         sw = np.asarray(sample_weight, dtype=float)
         if len(sw) != len(y_train):
-            raise ValueError(
-                f"sample_weight length {len(sw)} != y_train length {len(y_train)}"
-            )
+            raise ValueError(f"sample_weight length {len(sw)} != y_train length {len(y_train)}")
         if not np.isfinite(sw).all() or (sw < 0).any() or not (sw > 0).any():
             raise ValueError("sample_weight must be finite, non-negative and not all zero")
     # Normalize ONCE here (never again downstream): CalibratedClassifierCV refits
@@ -557,20 +678,23 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
             "calibrate_model:insufficient_purged_data",
             "calibrate_model: insufficient data for a purged calibration split "
             "(n=%d < fit=%d + purge=%d + calib=%d); applying identity calibration.",
-            n, min_fit, horizon, min_calib,
+            n,
+            min_fit,
+            horizon,
+            min_calib,
         )
         base = _fit_classifier(X_train, y_train, cfg, sample_weight=sw)  # deterministic refit, same seed
         _attach_noop_calibration(base, method_invalid=True)
         return base
 
     # Strictly time-ordered split: EARLIER slice fits the model, LATER slice fits the calibrator.
-    fit_end = n - horizon - min_calib                # last row index usable for the model fit
+    fit_end = n - horizon - min_calib  # last row index usable for the model fit
     if fit_end < min_fit:
         fit_end = min_fit
     X_fit = X_train.iloc[:fit_end]
     y_fit = y_train.iloc[:fit_end]
-    X_calib = X_train.iloc[fit_end + horizon:]       # purge gap of `horizon` rows in between
-    y_calib = y_train.iloc[fit_end + horizon:]
+    X_calib = X_train.iloc[fit_end + horizon :]  # purge gap of `horizon` rows in between
+    y_calib = y_train.iloc[fit_end + horizon :]
 
     # Both slices must carry the FULL class set, not merely "2+ classes". A slice
     # that drops one class of a three-class window would (a) hand XGBoost the same
@@ -582,9 +706,9 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     if len(X_fit) < 2 or set(y_fit.unique()) != full_classes:
         _warn_once(
             "calibrate_model:degenerate_fit_slice",
-            "calibrate_model: calibration-fit slice is degenerate "
-            "(classes %s vs full %s); identity calibration.",
-            sorted(set(y_fit.unique())), sorted(full_classes),
+            "calibrate_model: calibration-fit slice is degenerate (classes %s vs full %s); identity calibration.",
+            sorted(set(y_fit.unique())),
+            sorted(full_classes),
         )
         base = _fit_classifier(X_train, y_train, cfg, sample_weight=sw)  # refit on full set (deterministic seed)
         _attach_noop_calibration(base, method_invalid=True)
@@ -594,7 +718,8 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
             "calibrate_model:heldout_slice_lacks_diversity",
             "calibrate_model: calibration held-out slice lacks class diversity "
             "(classes %s vs full %s); identity calibration.",
-            sorted(set(y_calib.unique())), sorted(full_classes),
+            sorted(set(y_calib.unique())),
+            sorted(full_classes),
         )
         base = _fit_classifier(X_train, y_train, cfg, sample_weight=sw)
         _attach_noop_calibration(base, method_invalid=True)
@@ -602,7 +727,9 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
 
     logger.info(
         "calibrate_model: purged split fit_rows=%d calib_rows=%d purge_gap=%d",
-        len(X_fit), len(X_calib), horizon,
+        len(X_fit),
+        len(X_calib),
+        horizon,
     )
 
     # Fit the base model on the earlier slice, then calibrate on the strictly LATER
@@ -612,15 +739,11 @@ def calibrate_model(base_model, X_train: pd.DataFrame, y_train: pd.Series, cfg: 
     # base_model acts as the hyper-parameter template; sklearn clones + refits it on
     # exactly the EARLIER fit indices and fits the calibrator on exactly the LATER,
     # purged test indices (positions in X_train).
-    split_indices = [
-        (np.arange(fit_end), np.arange(fit_end + horizon, n))
-    ]
+    split_indices = [(np.arange(fit_end), np.arange(fit_end + horizon, n))]
     calibrated = CalibratedClassifierCV(base_model, method=method, cv=split_indices)
     fit_kwargs = {"sample_weight": sw} if sw is not None else {}
     calibrated.fit(X_train, y_train, **fit_kwargs)
-    calibrated._calibration_weight_mode = (
-        "sample_weight" if sw is not None else "unweighted"
-    )
+    calibrated._calibration_weight_mode = "sample_weight" if sw is not None else "unweighted"
     return calibrated
 
 
@@ -700,7 +823,7 @@ def compute_model_fingerprint(model, feature_cols: list) -> str:
                 for key in ("a_", "b_"):
                     val = getattr(cal, key, None)
                     if val is not None:
-                        parts.append(f"{key}={val!r}".encode("utf-8"))
+                        parts.append(f"{key}={val!r}".encode())
 
     return hashlib.sha256(b"\x00".join(parts)).hexdigest()
 

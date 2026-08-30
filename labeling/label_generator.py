@@ -26,15 +26,57 @@ a config refactor can do by accident.
 CRITICAL NO-LOOK-AHEAD WARNING:
 This module is intentionally forward-looking for OFFLINE labeling only.
 """
+
 import numpy as np
 import pandas as pd
 
 # Values accepted by labeling.event (see generate_labels_from_config).
 LABEL_EVENTS = ("barrier", "traded")
 
+
+def adaptive_holding_period(
+    atr: float,
+    price: float,
+    base_period: int,
+    high_vol_pct: float,
+    mid_vol_pct: float,
+) -> int:
+    """Adaptive holding horizon from per-bar volatility.
+
+    ``vol_pct = atr / price`` classifies the bar's volatility regime:
+
+    * ``vol_pct > high_vol_pct``  -> ``base_period // 4`` (turbulent: the
+      barrier geometry resolves fast, a long window only adds label noise);
+    * ``vol_pct > mid_vol_pct``   -> ``base_period // 2``;
+    * otherwise                   -> ``base_period``.
+
+    Invalid inputs (NaN/nonpositive ATR, ``price <= 0``) fall back to
+    ``base_period`` — a missing ATR must degrade to the legacy horizon, not
+    crash or silently zero-out the window. The returned horizon is always
+    ``>= 1`` so a label window exists for every scannable bar.
+    """
+    if price <= 0 or atr != atr or atr <= 0:  # NaN/invalid -> base
+        return base_period
+    vol_pct = atr / price
+    if vol_pct > high_vol_pct:
+        return max(1, base_period // 4)
+    if vol_pct > mid_vol_pct:
+        return max(1, base_period // 2)
+    return base_period
+
 # Label spaces the traded direction label can be emitted in. See
 # generate_labels_traded_direction for why both exist.
 TRADED_ENCODINGS = ("binary01", "pm1")
+
+# P2-41 / TZ 9.x: version of the labeling OUTPUT format produced by this
+# module. Any change to the label semantics (barrier rules, traded-event
+# resolution, encoding mapping, same-candle ambiguity policy) MUST bump this
+# constant and be recorded in docs/MIGRATIONS.md — labels trained against one
+# version must never be mixed silently with another. The label Series carries
+# no per-row version column (labels are offline artifacts keyed by bar
+# timestamp + asset), so callers who persist labeled datasets should store
+# this value alongside them (e.g. in the training metadata bundle).
+LABELING_SCHEMA_VERSION = "labels.v1"
 
 
 def resolve_label_event(cfg: dict) -> str:
@@ -47,14 +89,13 @@ def resolve_label_event(cfg: dict) -> str:
     lab_cfg = (cfg or {}).get("labeling", {}) or {}
     event = str(lab_cfg.get("event", "barrier")).strip().lower()
     if event not in LABEL_EVENTS:
-        raise ValueError(
-            f"Unknown labeling.event: {event!r}; expected one of {LABEL_EVENTS}"
-        )
+        raise ValueError(f"Unknown labeling.event: {event!r}; expected one of {LABEL_EVENTS}")
     return event
 
 
-def generate_labels(df: pd.DataFrame, target_x: float, stop_y: float, horizon_n: int,
-                     price_col: str = "close") -> pd.Series:
+def generate_labels(
+    df: pd.DataFrame, target_x: float, stop_y: float, horizon_n: int, price_col: str = "close"
+) -> pd.Series:
     n = len(df)
     highs = df["high"].values
     lows = df["low"].values
@@ -153,8 +194,148 @@ def generate_labels_atr_scaled(
 
 
 # ---------------------------------------------------------------------------
+# Adaptive holding period: per-bar horizon variants of the barrier labellers.
+#
+# The legacy functions above scan a FIXED horizon for every bar. When
+# ``labeling.adaptive_holding`` is enabled (config.yaml, default false), each
+# bar gets its own horizon from adaptive_holding_period() — shorter windows in
+# turbulent bars, the legacy horizon otherwise. These variants exist so the
+# legacy functions stay byte-for-byte untouched: when adaptive_holding=false
+# the code path below is never taken.
+# ---------------------------------------------------------------------------
+
+
+def _adaptive_horizons(
+    df: pd.DataFrame,
+    lab_cfg: dict,
+    base_period: int,
+) -> np.ndarray:
+    """Per-bar holding horizons from the bar's ATR/price volatility ratio.
+
+    Reads ``adaptive_high_vol_pct`` / ``adaptive_mid_vol_pct`` (and the
+    ``atr_column`` / ``price_column`` names) from ``lab_cfg``. Requires the
+    ATR column to exist — the adaptive switch cannot work without volatility.
+    """
+    atr_col = lab_cfg.get("atr_column", "atr")
+    price_col = lab_cfg.get("price_column", "close")
+    if atr_col not in df.columns:
+        raise ValueError(f"adaptive_holding=true requires ATR column {atr_col!r} in the frame")
+    if price_col not in df.columns:
+        raise ValueError(f"adaptive_holding=true requires price column {price_col!r} in the frame")
+    high_vol_pct = float(lab_cfg.get("adaptive_high_vol_pct", 0.02))
+    mid_vol_pct = float(lab_cfg.get("adaptive_mid_vol_pct", 0.01))
+    prices = df[price_col].values
+    atrs = df[atr_col].values
+    return np.asarray(
+        [
+            adaptive_holding_period(atrs[i], prices[i], base_period, high_vol_pct, mid_vol_pct)
+            for i in range(len(df))
+        ],
+        dtype=int,
+    )
+
+
+def generate_labels_with_horizons(
+    df: pd.DataFrame,
+    target_x: float,
+    stop_y: float,
+    horizons: np.ndarray,
+    price_col: str = "close",
+) -> pd.Series:
+    """Fixed-barrier triple barrier with a PER-BAR horizon.
+
+    Same rules as :func:`generate_labels` (including the NaN double-touch
+    policy), except bar ``i`` is scanned ``horizons[i]`` bars forward. Bars
+    whose window does not fit in the frame stay NaN.
+    """
+    highs = df["high"].values
+    lows = df["low"].values
+    entry_prices = df[price_col].values
+    n = len(df)
+    labels = np.full(n, np.nan)
+
+    for i in range(n):
+        h = int(horizons[i])
+        if i + h >= n:
+            continue
+        entry = entry_prices[i]
+        upper_barrier = entry + target_x
+        lower_barrier = entry - stop_y
+
+        outcome = 0
+        for j in range(i + 1, i + h + 1):
+            hit_upper = highs[j] >= upper_barrier
+            hit_lower = lows[j] <= lower_barrier
+            if hit_upper and hit_lower:
+                # Same-candle double touch: intrabar order unknowable -> NaN
+                # (the same systematic-bias exclusion as the fixed horizon).
+                outcome = np.nan
+                break
+            elif hit_upper:
+                outcome = 1
+                break
+            elif hit_lower:
+                outcome = -1
+                break
+        labels[i] = outcome
+
+    return pd.Series(labels, index=df.index, name="label")
+
+
+def generate_labels_atr_scaled_with_horizons(
+    df: pd.DataFrame,
+    target_atr_multiplier: float,
+    stop_atr_multiplier: float,
+    horizons: np.ndarray,
+    price_col: str = "close",
+    atr_col: str = "atr",
+) -> pd.Series:
+    """ATR-scaled triple barrier with a PER-BAR horizon.
+
+    Same rules as :func:`generate_labels_atr_scaled` (barrier widths scaled by
+    the row's ATR, NaN double-touch exclusion), except bar ``i`` is scanned
+    ``horizons[i]`` bars forward. Rows with missing/nonpositive ATR stay NaN.
+    """
+    highs = df["high"].values
+    lows = df["low"].values
+    entry_prices = df[price_col].values
+    atr_values = df[atr_col].values
+    n = len(df)
+    labels = np.full(n, np.nan)
+
+    for i in range(n):
+        h = int(horizons[i])
+        if i + h >= n:
+            continue
+        atr_i = atr_values[i]
+        if pd.isna(atr_i) or atr_i <= 0:
+            continue
+        entry = entry_prices[i]
+        upper_barrier = entry + atr_i * target_atr_multiplier
+        lower_barrier = entry - atr_i * stop_atr_multiplier
+
+        outcome = 0
+        for j in range(i + 1, i + h + 1):
+            hit_upper = highs[j] >= upper_barrier
+            hit_lower = lows[j] <= lower_barrier
+            if hit_upper and hit_lower:
+                outcome = np.nan
+                break
+            elif hit_upper:
+                outcome = 1
+                break
+            elif hit_lower:
+                outcome = -1
+                break
+        labels[i] = outcome
+
+    return pd.Series(labels, index=df.index, name="label")
+
+
+# ---------------------------------------------------------------------------
 # A10: labels for the event the execution engine actually resolves.
 # ---------------------------------------------------------------------------
+
 
 def _execution_costs(cfg: dict, asset_key: str) -> tuple:
     """(spread, slippage) in absolute price units, resolved exactly like
@@ -176,6 +357,7 @@ def generate_labels_traded_event(
     include_costs: bool = True,
     require_net_positive: bool = True,
     use_regime_overrides: bool = True,
+    horizons: np.ndarray = None,
 ) -> pd.Series:
     """Binary label for the event EnsembleBacktester actually resolves.
 
@@ -249,6 +431,10 @@ def generate_labels_traded_event(
     if atr_col not in df.columns:
         raise ValueError(f"ATR column {atr_col!r} missing from frame")
     horizon = int(horizon_n if horizon_n is not None else lab_cfg.get("horizon_candles_n", 36))
+    if horizons is not None and len(horizons) != len(df):
+        raise ValueError(
+            f"horizons length {len(horizons)} does not match frame length {len(df)}"
+        )
     spread, slippage = _execution_costs(cfg, asset_key)
     round_trip = spread + 2.0 * slippage
 
@@ -305,7 +491,8 @@ def generate_labels_traded_event(
         protect_level = entry + dir_ * be_trigger * tp1_distance
         stop_level = entry - dir_ * step * stop_mult
 
-        last_bar = min(n - 1, entry_bar + horizon)
+        bar_horizon = horizon if horizons is None else int(horizons[s])
+        last_bar = min(n - 1, entry_bar + bar_horizon)
         outcome = np.nan
         for j in range(entry_bar + 1, last_bar + 1):
             if dir_ == 1:
@@ -375,9 +562,7 @@ def generate_labels_traded_direction(
     Emitted with name "label" in both encodings.
     """
     if encoding not in TRADED_ENCODINGS:
-        raise ValueError(
-            f"encoding must be one of {TRADED_ENCODINGS}, got {encoding!r}"
-        )
+        raise ValueError(f"encoding must be one of {TRADED_ENCODINGS}, got {encoding!r}")
 
     long_lab = generate_labels_traded_event(df, cfg, asset_key, direction=1, **kwargs).values
     short_lab = generate_labels_traded_event(df, cfg, asset_key, direction=-1, **kwargs).values
@@ -447,8 +632,7 @@ def traded_event_summary(
     }
 
 
-def generate_labels_from_config(df: pd.DataFrame, cfg: dict,
-                                asset_key: str = None) -> pd.Series:
+def generate_labels_from_config(df: pd.DataFrame, cfg: dict, asset_key: str = None) -> pd.Series:
     """The single entry point every training path uses to build `label`.
 
     Dispatches on labeling.event (see module docstring and resolve_label_event).
@@ -458,6 +642,13 @@ def generate_labels_from_config(df: pd.DataFrame, cfg: dict,
     """
     lab_cfg = cfg["labeling"]
     event = resolve_label_event(cfg)
+
+    adaptive = bool(lab_cfg.get("adaptive_holding", False))
+    horizons = (
+        _adaptive_horizons(df, lab_cfg, int(lab_cfg.get("horizon_candles_n", 36)))
+        if adaptive
+        else None
+    )
 
     if event == "traded":
         if asset_key is None:
@@ -480,26 +671,41 @@ def generate_labels_from_config(df: pd.DataFrame, cfg: dict,
             )
         # "pm1" is mandatory here: build_training_matrix filters on
         # isin([1, -1]), so the {0, 1} space would lose every short row.
-        return generate_labels_traded_direction(
-            df, cfg, asset_key, encoding="pm1"
-        )
+        return generate_labels_traded_direction(df, cfg, asset_key, encoding="pm1", horizons=horizons)
 
     method = lab_cfg.get("method", "fixed")
 
     if method == "fixed":
-        return generate_labels(
+        if not adaptive:
+            # Legacy code path — behaviour is bit-for-bit unchanged.
+            return generate_labels(
+                df,
+                target_x=lab_cfg["target_pips_x"],
+                stop_y=lab_cfg["stop_pips_y"],
+                horizon_n=lab_cfg["horizon_candles_n"],
+            )
+        return generate_labels_with_horizons(
             df,
             target_x=lab_cfg["target_pips_x"],
             stop_y=lab_cfg["stop_pips_y"],
-            horizon_n=lab_cfg["horizon_candles_n"],
+            horizons=horizons,
         )
 
     if method == "atr_scaled":
-        return generate_labels_atr_scaled(
+        if not adaptive:
+            # Legacy code path — behaviour is bit-for-bit unchanged.
+            return generate_labels_atr_scaled(
+                df,
+                target_atr_multiplier=lab_cfg["target_atr_multiplier"],
+                stop_atr_multiplier=lab_cfg["stop_atr_multiplier"],
+                horizon_n=lab_cfg["horizon_candles_n"],
+                atr_col=lab_cfg.get("atr_column", "atr"),
+            )
+        return generate_labels_atr_scaled_with_horizons(
             df,
             target_atr_multiplier=lab_cfg["target_atr_multiplier"],
             stop_atr_multiplier=lab_cfg["stop_atr_multiplier"],
-            horizon_n=lab_cfg["horizon_candles_n"],
+            horizons=horizons,
             atr_col=lab_cfg.get("atr_column", "atr"),
         )
 

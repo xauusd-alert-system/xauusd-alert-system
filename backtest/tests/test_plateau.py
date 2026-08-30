@@ -1,6 +1,5 @@
-import numpy as np
 import pandas as pd
-import pytest
+
 from backtest.plateau import select_plateau_config
 
 
@@ -32,11 +31,13 @@ def test_task5_select_plateau_config_prefers_plateau_over_sharp_peak():
             else:
                 metric = -10.0  # background is negative
 
-            rows.append({
-                "stop_mult": s,
-                "tp_mult": t,
-                "oos_metric": metric,
-            })
+            rows.append(
+                {
+                    "stop_mult": s,
+                    "tp_mult": t,
+                    "oos_metric": metric,
+                }
+            )
 
     results_df = pd.DataFrame(rows)
 

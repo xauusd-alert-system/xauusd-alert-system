@@ -10,25 +10,24 @@ Usage:
 
 Requires env var: TWELVEDATA_API_KEY
 """
+
+import argparse
 import os
 import sys
-import argparse
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
 from data.ingestion import backfill_historical
 from data.storage import init_schema, upsert_candles
-from data.session_tagger import tag_dataframe
 
 
 def main():
     parser = argparse.ArgumentParser(description="Seed historical OHLCV data into SQLite.")
     parser.add_argument("--days", type=int, default=90, help="How many days back to seed (default: 90)")
     parser.add_argument("--timeframe", type=str, default=None, help="Single timeframe to seed (default: all)")
-    parser.add_argument("--symbol", type=str, default="XAUUSD",
-                        help="Asset key from config (default: XAUUSD)")
+    parser.add_argument("--symbol", type=str, default="XAUUSD", help="Asset key from config (default: XAUUSD)")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -50,7 +49,7 @@ def main():
 
     init_schema(db_path, timeframes)
 
-    end_date = datetime.now(timezone.utc)
+    end_date = datetime.now(UTC)
     start_date = end_date - timedelta(days=args.days)
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
@@ -83,5 +82,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

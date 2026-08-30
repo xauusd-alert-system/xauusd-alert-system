@@ -10,11 +10,11 @@ RESEARCH 2026-08-22 (us_stocks audit §5.2):
 Input: 1-minute candles for the current trading day + N prior days.
 Output: list of S/R zones with strength classification.
 """
+
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass
 
 # Session boundaries (UTC) — NYSE 13:30-19:55
 SESSION_START_SEC = 13 * 3600 + 30 * 60
@@ -27,12 +27,14 @@ PREMARKET_END_SEC = 13 * 3600 + 30 * 60
 @dataclass
 class SRZone:
     """A support or resistance zone."""
-    price: float            # center of zone
-    zone_type: str          # prev_high | prev_low | prev_close | premarket_high | premarket_low | swing_high | swing_low
-    direction: str          # resistance | support
-    strength: int           # number of touches (1 = single level, 2+ = cluster)
-    confidence: float       # 0-1, based on touches + recency
-    source_date: str = ""   # which day this came from
+
+    price: float  # center of zone
+    zone_type: str  # prev_high | prev_low | prev_close |
+    #                        premarket_high | premarket_low | swing_high | swing_low
+    direction: str  # resistance | support
+    strength: int  # number of touches (1 = single level, 2+ = cluster)
+    confidence: float  # 0-1, based on touches + recency
+    source_date: str = ""  # which day this came from
 
     def distance_from(self, price: float) -> float:
         return abs(self.price - price)
@@ -40,33 +42,41 @@ class SRZone:
 
 def _utc_sec(ts: int) -> int:
     """Extract seconds-since-midnight UTC from a timestamp."""
-    utc = dt.datetime.fromtimestamp(ts, dt.timezone.utc)
+    utc = dt.datetime.fromtimestamp(ts, dt.UTC)
     return utc.hour * 3600 + utc.minute * 60 + utc.second
 
 
 def _utc_date(ts: int) -> dt.date:
-    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).date()
+    return dt.datetime.fromtimestamp(ts, dt.UTC).date()
 
 
 def _session_bars(candles, date: dt.date) -> list:
     """Extract 1-min bars within the NYSE session for a given date."""
-    return [c for c in candles
-            if _utc_date(c["time"]) == date
-            and SESSION_START_SEC <= _utc_sec(c["time"]) <= SESSION_END_SEC]
+    return [
+        c
+        for c in candles
+        if _utc_date(c["time"]) == date and SESSION_START_SEC <= _utc_sec(c["time"]) <= SESSION_END_SEC
+    ]
 
 
 def _premarket_bars(candles, date: dt.date) -> list:
     """Extract 1-min bars within premarket (09:00-13:30 UTC) for a given date."""
-    return [c for c in candles
-            if _utc_date(c["time"]) == date
-            and PREMARKET_START_SEC <= _utc_sec(c["time"]) <= PREMARKET_END_SEC]
+    return [
+        c
+        for c in candles
+        if _utc_date(c["time"]) == date and PREMARKET_START_SEC <= _utc_sec(c["time"]) <= PREMARKET_END_SEC
+    ]
 
 
 def _prior_day_data(candles: list, current_date: dt.date, lookback_days: int = 5) -> list[dt.date]:
     """Return list of trading dates before current_date, up to lookback_days."""
-    all_dates = sorted(set(_utc_date(c["time"]) for c in candles
-                           if _utc_date(c["time"]) < current_date
-                           and _utc_date(c["time"]).weekday() < 5))
+    all_dates = sorted(
+        set(
+            _utc_date(c["time"])
+            for c in candles
+            if _utc_date(c["time"]) < current_date and _utc_date(c["time"]).weekday() < 5
+        )
+    )
     return all_dates[-lookback_days:]
 
 
@@ -118,8 +128,9 @@ def _cluster_zones(levels: list[tuple[float, str, str]], tolerance_pct: float = 
     return zones
 
 
-def _cluster_zones_with_direction(levels: list[tuple[float, str, str, str]],
-                                 tolerance_pct: float = 0.002) -> list[SRZone]:
+def _cluster_zones_with_direction(
+    levels: list[tuple[float, str, str, str]], tolerance_pct: float = 0.002
+) -> list[SRZone]:
     """Cluster with pre-assigned directions.
     levels: (price, zone_type, source_date, direction)"""
     if not levels:
@@ -160,9 +171,14 @@ def _make_zone(cluster: list[tuple[float, str, str]]) -> SRZone:
     else:
         direction = "resistance" if any("high" in s for s in sources) else "support"
     source_date = sources[0] if sources else ""
-    return SRZone(price=round(avg_price, 4), zone_type=f"cluster_{direction}",
-                  direction=direction, strength=touches,
-                  confidence=round(confidence, 2), source_date=source_date)
+    return SRZone(
+        price=round(avg_price, 4),
+        zone_type=f"cluster_{direction}",
+        direction=direction,
+        strength=touches,
+        confidence=round(confidence, 2),
+        source_date=source_date,
+    )
 
 
 def _make_zone_with_direction(cluster: list[tuple[float, str, str, str]]) -> SRZone:
@@ -174,13 +190,17 @@ def _make_zone_with_direction(cluster: list[tuple[float, str, str, str]]) -> SRZ
     confidence = min(1.0, 0.3 + 0.2 * (touches - 1))
     direction = max(set(directions), key=directions.count)
     source_date = cluster[0][2]
-    return SRZone(price=round(avg_price, 4), zone_type=f"cluster_{direction}",
-                  direction=direction, strength=touches,
-                  confidence=round(confidence, 2), source_date=source_date)
+    return SRZone(
+        price=round(avg_price, 4),
+        zone_type=f"cluster_{direction}",
+        direction=direction,
+        strength=touches,
+        confidence=round(confidence, 2),
+        source_date=source_date,
+    )
 
 
-def detect_sr_zones(candles: list, current_date: dt.date,
-                    lookback_days: int = 5) -> list[SRZone]:
+def detect_sr_zones(candles: list, current_date: dt.date, lookback_days: int = 5) -> list[SRZone]:
     """Detect S/R zones from candle data.
 
     Sources (per us_stocks audit §5.2):
@@ -205,8 +225,16 @@ def detect_sr_zones(candles: list, current_date: dt.date,
 
         zones.append(SRZone(pd_high, "prev_high", "resistance", 1, 0.5, pd_date))
         zones.append(SRZone(pd_low, "prev_low", "support", 1, 0.5, pd_date))
-        zones.append(SRZone(pd_close, "prev_close", "resistance" if pd_close > (pd_high + pd_low) / 2 else "support",
-                            1, 0.4, pd_date))
+        zones.append(
+            SRZone(
+                pd_close,
+                "prev_close",
+                "resistance" if pd_close > (pd_high + pd_low) / 2 else "support",
+                1,
+                0.4,
+                pd_date,
+            )
+        )
 
     # --- 2. Premarket levels for today ---
     pm_bars = _premarket_bars(candles, current_date)
@@ -220,10 +248,13 @@ def detect_sr_zones(candles: list, current_date: dt.date,
 
     # --- 3. Multi-touch swing points from recent sessions ---
     # Use 5-min bars from the last N days for swing detection
-    recent_candles = [c for c in candles
-                      if _utc_date(c["time"]) >= (current_date - dt.timedelta(days=lookback_days + 2))
-                      and _utc_date(c["time"]) < current_date
-                      and SESSION_START_SEC <= _utc_sec(c["time"]) <= SESSION_END_SEC]
+    recent_candles = [
+        c
+        for c in candles
+        if _utc_date(c["time"]) >= (current_date - dt.timedelta(days=lookback_days + 2))
+        and _utc_date(c["time"]) < current_date
+        and SESSION_START_SEC <= _utc_sec(c["time"]) <= SESSION_END_SEC
+    ]
 
     # Resample to 5-min for swing detection
     bars5 = _resample_5min(recent_candles)
@@ -253,8 +284,14 @@ def _resample_5min(candles: list) -> list:
     cur = None
     for c in sorted(candles, key=lambda x: x["time"]):
         if cur is None:
-            cur = {"open": c["open"], "high": c["high"], "low": c["low"],
-                   "close": c["close"], "time": c["time"], "volume": c.get("volume", 0)}
+            cur = {
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "time": c["time"],
+                "volume": c.get("volume", 0),
+            }
         elif c["time"] < cur["time"] + 300:
             cur["high"] = max(cur["high"], c["high"])
             cur["low"] = min(cur["low"], c["low"])
@@ -262,16 +299,28 @@ def _resample_5min(candles: list) -> list:
             cur["volume"] += c.get("volume", 0)
         else:
             out.append(cur)
-            cur = {"open": c["open"], "high": c["high"], "low": c["low"],
-                   "close": c["close"], "time": c["time"], "volume": c.get("volume", 0)}
+            cur = {
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "time": c["time"],
+                "volume": c.get("volume", 0),
+            }
     if cur:
         out.append(cur)
     return out
 
 
-def check_proximity(entry: float, stop: float, target: float, bias: str,
-                    zones: list[SRZone], buffer_usd: float = 2.0,
-                    buffer_pct: float = 0.0) -> tuple[bool, str]:
+def check_proximity(
+    entry: float,
+    stop: float,
+    target: float,
+    bias: str,
+    zones: list[SRZone],
+    buffer_usd: float = 2.0,
+    buffer_pct: float = 0.0,
+) -> tuple[bool, str]:
     """Check if entry/stop/target are too close to S/R zones.
 
     Per us_stocks audit §5.2:
@@ -302,9 +351,13 @@ def check_proximity(entry: float, stop: float, target: float, bias: str,
         # --- Entry proximity check ---
         if dist < buffer_usd:
             if bias == "long" and zone.direction == "resistance":
-                return False, f"entry ${entry:.2f} too close to resistance ${zone.price:.2f} (${dist:.2f} < ${buffer_usd})"
+                return False, (
+                    f"entry ${entry:.2f} too close to resistance ${zone.price:.2f} (${dist:.2f} < ${buffer_usd})"
+                )
             if bias == "short" and zone.direction == "support":
-                return False, f"entry ${entry:.2f} too close to support ${zone.price:.2f} (${dist:.2f} < ${buffer_usd})"
+                return False, (
+                    f"entry ${entry:.2f} too close to support ${zone.price:.2f} (${dist:.2f} < ${buffer_usd})"
+                )
 
         # --- Stop placement check ---
         stop_dist = abs(stop - entry)
@@ -338,7 +391,9 @@ def format_zones(zones: list[SRZone]) -> str:
     lines = []
     for z in sorted(zones, key=lambda z: z.price):
         icon = "R" if z.direction == "resistance" else "S"
-        lines.append(f"  [{icon}] ${z.price:.2f}  {z.direction:10s}  "
-                     f"touches={z.strength}  conf={z.confidence:.0%}  "
-                     f"src={z.zone_type}")
+        lines.append(
+            f"  [{icon}] ${z.price:.2f}  {z.direction:10s}  "
+            f"touches={z.strength}  conf={z.confidence:.0%}  "
+            f"src={z.zone_type}"
+        )
     return "\n".join(lines)

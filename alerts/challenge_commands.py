@@ -15,6 +15,7 @@ Commands added here:
   /scan       — разовый live-скан watchlist (сетапы A/B)
   /alert      — статус алертера (что отправлено сегодня)
 """
+
 import datetime as dt
 import json
 import os
@@ -32,9 +33,11 @@ def _import_manual():
     """Lazy import of the challenge package. Returns (module, err)."""
     try:
         import sys
+
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
-        from challenge.manual import risk, journal  # noqa: F401
+        from challenge.manual import journal, risk  # noqa: F401
+
         return (risk, journal), None
     except Exception as exc:
         return None, str(exc)
@@ -62,7 +65,7 @@ def cmd_day(send, chat_id, args=()):
     lines = [
         f"День {s.stage}-й (профиль {s.profile}), дата {s.date}",
         f"Equity {s.current_equity:.2f} | старт дня {s.day_start_equity:.2f}",
-        f"PnL дня {s.daily_pnl():+.2f}$ ({100*s.daily_pnl()/s.day_start_equity:+.2f}%)",
+        f"PnL дня {s.daily_pnl():+.2f}$ ({100 * s.daily_pnl() / s.day_start_equity:+.2f}%)",
         f"Сделок {s.trades_today}/{s.effective_max_trades} | убытков {s.losses_today}",
         f"Риск/сделку {s.effective_risk_usd:.2f}$ | только A-сетапы: {'да' if s.effective_only_a else 'нет'}",
         f"Статус: {s.status} — {s.status_reason}",
@@ -102,8 +105,7 @@ def cmd_journal(send, chat_id, args=()):
         )
     for d in journal.daily_summary(JOURNAL_FILE):
         lines.append(
-            f"{d['date']}: {d['trades']} сделок, PnL {d['pnl_usd']:+.2f}$, "
-            f"WR {d['win_rate_pct']}%, avg R {d['avg_r']}"
+            f"{d['date']}: {d['trades']} сделок, PnL {d['pnl_usd']:+.2f}$, WR {d['win_rate_pct']}%, avg R {d['avg_r']}"
         )
     send(chat_id, "\n".join(lines), parse_mode="Markdown")
 
@@ -112,6 +114,7 @@ def cmd_scan(send, chat_id, args=()):
     """/scan — разовый live-скан watchlist через UTEX API (ТЗ §4)."""
     try:
         import sys
+
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
         from challenge.manual import alerter
@@ -142,12 +145,14 @@ def cmd_stats(send, chat_id, args=()):
         if stats:
             try:
                 from challenge.manual import outcomes as outcomes_mod
+
                 send(chat_id, outcomes_mod.format_stats_summary(stats))
             except Exception as exc:
                 send(chat_id, f"❌ Stats unavailable: {exc}")
             return
     try:
         import sys
+
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
         from challenge.manual import outcomes as outcomes_mod
@@ -164,12 +169,18 @@ def cmd_stats(send, chat_id, args=()):
 
 
 def cmd_pairs(send, chat_id, args=()):
-    "/pairs [TF] — z-scores и сигналы по всем парам (D1 по умолчанию)."""
+    "/pairs [TF] — z-scores и сигналы по всем парам (D1 по умолчанию)."
     try:
         import sys
+
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
-        from pairs_analysis import load_config, PairAnalyzer, SignalEngine, EnsembleEngine
+        from pairs_analysis import (
+            EnsembleEngine,
+            PairAnalyzer,
+            SignalEngine,
+            load_config,
+        )
     except Exception as exc:
         send(chat_id, f"❌ Pairs module unavailable: {exc}")
         return
@@ -209,8 +220,7 @@ def cmd_pairs(send, chat_id, args=()):
             if sig.valid:
                 lines.append(f"    {sig.reason}")
             lines.append(
-                f"  Ensemble: {ens_arrow.get(ens.direction, '?')} {ens.direction.upper()} "
-                f"CONF {ens.confidence:.0f}%"
+                f"  Ensemble: {ens_arrow.get(ens.direction, '?')} {ens.direction.upper()} CONF {ens.confidence:.0f}%"
             )
             lines.append("")
         except Exception as exc:
@@ -218,6 +228,7 @@ def cmd_pairs(send, chat_id, args=()):
     # Cumulative pair stats
     try:
         from pairs_analysis.integrations import pair_cumulative_stats
+
         stats = pair_cumulative_stats()
         if stats["total_trades"] > 0:
             lines.append(
@@ -232,7 +243,7 @@ def cmd_pairs(send, chat_id, args=()):
 
 def cmd_alert(send, chat_id, args=()):
     """/alert — статус алертера и отправленные сегодня сетапы."""
-    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    today = dt.datetime.now(dt.UTC).date().isoformat()
     lines = []
     if os.path.exists(SENT_FILE):
         try:
@@ -249,13 +260,16 @@ def cmd_alert(send, chat_id, args=()):
         lines.append("Файл алертов не найден — алертер, вероятно, не запущен.")
     try:
         import sys
+
         if ROOT not in sys.path:
             sys.path.insert(0, ROOT)
         from challenge.manual import risk as risk_mod
+
         sm = risk_mod.DailyStateMachine()
         s = sm.state
-        lines.append(f"День: {s.trades_today}/{s.effective_max_trades} сделок, "
-                     f"PnL {s.daily_pnl():+.2f}$, статус {s.status}")
+        lines.append(
+            f"День: {s.trades_today}/{s.effective_max_trades} сделок, PnL {s.daily_pnl():+.2f}$, статус {s.status}"
+        )
     except Exception as exc:
         lines.append(f"Состояние дня недоступно: {exc}")
     send(chat_id, "\n".join(lines))

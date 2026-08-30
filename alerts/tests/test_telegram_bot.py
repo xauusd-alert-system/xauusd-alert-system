@@ -1,7 +1,6 @@
 """Tests for the audit W11 fix in alerts/telegram_bot.py: the bot token must be
 redacted from logged exception messages (requests exceptions embed the request
 URL, which contains the token, and logging it would leak control of the bot)."""
-import pytest
 
 from alerts.telegram_bot import TelegramAlertBot
 

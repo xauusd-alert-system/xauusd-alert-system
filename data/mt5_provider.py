@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Final
 
-import MetaTrader5 as mt5
 import pandas as pd
+
+from mt5_adapter.lazy import get_mt5_module
+
+# ТЗ 8.6: the raw module handle is resolved through the adapter (no direct
+# `import MetaTrader5` here). Module-level attribute access in tests
+# (monkeypatch.setattr(mt5_provider.mt5, ...)) keeps working.
+mt5 = get_mt5_module()
 
 
 _TIMEFRAMES: Final[dict[str, int]] = {
@@ -39,16 +45,13 @@ def validate_symbol(symbol: str) -> None:
     info = mt5.symbol_info(symbol)
     if info is None:
         raise MT5ProviderError(
-            f"MT5 symbol {symbol!r} was not found. "
-            "Check the exact name in the FxPro MT5 Symbols window."
+            f"MT5 symbol {symbol!r} was not found. Check the exact name in the FxPro MT5 Symbols window."
         )
 
     if not mt5.symbol_select(symbol, True):
         code, message = mt5.last_error()
-        raise MT5ProviderError(
-            f"Could not enable MT5 symbol {symbol!r} in Market Watch: "
-            f"{code} {message}"
-        )
+        raise MT5ProviderError(f"Could not enable MT5 symbol {symbol!r} in Market Watch: {code} {message}")
+
 
 def _normalize_rates(rates, server_offset_hours: float = 0.0) -> pd.DataFrame:
     if rates is None or len(rates) == 0:
@@ -83,10 +86,7 @@ def _normalize_rates(rates, server_offset_hours: float = 0.0) -> pd.DataFrame:
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
     df = (
-        df.dropna(subset=required)
-        .drop_duplicates(subset=["timestamp"])
-        .sort_values("timestamp")
-        .reset_index(drop=True)
+        df.dropna(subset=required).drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
     )
 
     if df.empty:
@@ -144,8 +144,8 @@ def fetch_candles_range(
 
     validate_symbol(symbol)
 
-    start_utc = start_utc.astimezone(timezone.utc)
-    end_utc = end_utc.astimezone(timezone.utc)
+    start_utc = start_utc.astimezone(UTC)
+    end_utc = end_utc.astimezone(UTC)
 
     # N10: MT5's copy_rates_range interprets the datetimes as SERVER time, so the
     # requested UTC bounds must be shifted by the server offset to select the same
@@ -168,8 +168,13 @@ def fetch_candles_range(
 
     now_utc = pd.Timestamp.now(tz="UTC")
     tf_minutes = {
-        "M1": 1, "M5": 5, "M15": 15, "M30": 30,
-        "H1": 60, "H4": 240, "D1": 1440,
+        "M1": 1,
+        "M5": 5,
+        "M15": 15,
+        "M30": 30,
+        "H1": 60,
+        "H4": 240,
+        "D1": 1440,
     }[timeframe]
 
     current_bar_open = now_utc.floor(f"{tf_minutes}min")

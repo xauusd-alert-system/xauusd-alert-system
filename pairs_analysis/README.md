@@ -26,12 +26,23 @@ mean-reversion / no-edge (этап 2). ТЗ: `pairs-trading-module.md`.
 ```python
 from pairs_analysis import load_config, PairAnalyzer
 
-cfg = load_config()                      # config/pairs_config.yaml
+cfg = load_config()  # config/pairs_config.yaml
 for pair in cfg["pairs"]:
-    m = PairAnalyzer(pair, cfg["analysis"]).analyze()   # D1 по умолчанию
+    m = PairAnalyzer(pair, cfg["analysis"]).analyze()  # D1 по умолчанию
     s = m.summary()
-    print(s["name"], "β=", s["beta"], "ADF p=", s["adf_p"],
-          "HL дн=", s["half_life_days"], "z=", s["z"], "Hurst=", s["hurst"])
+    print(
+        s["name"],
+        "β=",
+        s["beta"],
+        "ADF p=",
+        s["adf_p"],
+        "HL дн=",
+        s["half_life_days"],
+        "z=",
+        s["z"],
+        "Hurst=",
+        s["hurst"],
+    )
 ```
 
 CLI-проверка всех пар:

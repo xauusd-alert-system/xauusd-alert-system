@@ -5,11 +5,24 @@ Provides institutional risk allocation and position sizing models:
 - Inverse Volatility weighting
 - Hierarchical Risk Parity (HRP) allocation
 - Lot size calculation with pip / point value scaling
+
+Status: ACTIVE but backtest/execution-validation only (P2-11, TZ Часть 7 п.7.1).
+NOT in the live decision path: `mt5_trade_group.py` never imports this module.
+Real call sites:
+- execution/mt5_trader.py::validate_scaleout_tranches (volume validation)
+- model/ensemble_backtest.py (strict_scaleout_validation)
+- execution/tests/test_portfolio_allocator.py,
+  execution/tests/test_scaleout_lot_validation.py
+Kept in execution/ because the live trader calls it for scaleout validation;
+full Kelly/HRP allocation remains OPT-IN (docs/TODO.md).
 """
+
 from __future__ import annotations
+
+from typing import Dict
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional
 
 
 def calculate_fractional_kelly(
@@ -132,12 +145,12 @@ def validate_scaleout_tranches(
     for idx, t in enumerate(tranches):
         if t < min_lot - 1e-9:
             valid = False
-            err_msg = f"Tranche {idx+1} volume {t:.4f} < min_lot {min_lot:.2f}"
+            err_msg = f"Tranche {idx + 1} volume {t:.4f} < min_lot {min_lot:.2f}"
             break
         rem = t % lot_step
         if not (abs(rem) < 1e-6 or abs(rem - lot_step) < 1e-6):
             valid = False
-            err_msg = f"Tranche {idx+1} volume {t:.4f} is not a multiple of lot_step {lot_step:.2f}"
+            err_msg = f"Tranche {idx + 1} volume {t:.4f} is not a multiple of lot_step {lot_step:.2f}"
             break
 
     if not valid and raise_on_invalid:

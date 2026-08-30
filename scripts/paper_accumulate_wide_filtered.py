@@ -14,19 +14,16 @@ Metrics stay hidden until the pre-registered threshold is reached.
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
-
-import pandas as pd
+from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config
-from scripts.run_backtest import load_asset_history, build_full_df
-from scripts.deflated_sharpe import _apply_variant
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
 from alerts.telegram_bot import TelegramAlertBot
-
+from config.loader import load_config
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
+from scripts.deflated_sharpe import _apply_variant
+from scripts.run_backtest import build_full_df, load_asset_history
 
 LIVE_START_UTC = "2026-08-08"
 PAPER_DB_PATH = os.getenv("PAPER_TRADES_DB_PATH", "data/paper_trades.sqlite")
@@ -131,15 +128,16 @@ def main() -> None:
         print(f"Frozen model not found: {FROZEN_MODEL_PATH}")
         print("Copy the current production model first:")
         print("  New-Item -ItemType Directory -Force output/models/frozen")
-        print("  Copy-Item output/models/xauusd_direction_model.joblib "
-              "output/models/frozen/xauusd_paper_20260815.joblib")
+        print(
+            "  Copy-Item output/models/xauusd_direction_model.joblib output/models/frozen/xauusd_paper_20260815.joblib"
+        )
         return
 
     print("Loading market data...")
     raw = load_asset_history(db_path, timeframe, asset_key)
     full_df = build_full_df(cfg, raw, db_path=db_path, asset_key=asset_key)
 
-    live_start_ts = int(datetime.fromisoformat(LIVE_START_UTC).replace(tzinfo=timezone.utc).timestamp())
+    live_start_ts = int(datetime.fromisoformat(LIVE_START_UTC).replace(tzinfo=UTC).timestamp())
     live_df = full_df[full_df["timestamp_utc"] >= live_start_ts].copy()
 
     if len(live_df) == 0:

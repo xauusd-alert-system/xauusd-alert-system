@@ -2,8 +2,10 @@
 Unit tests for regime/classifier.py.
 Run with: pytest regime/tests/test_classifier.py -v
 """
+
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -12,8 +14,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
 from features.indicators import build_all_indicators
-from regime.classifier import add_regime_indicators, classify_regime_series, classify_regime_row, regime_onehot_df, RegimeLabel
-from regime.ml_interface import RuleBasedRegimeClassifier, MLRegimeClassifierStub
+from regime.classifier import (
+    RegimeLabel,
+    add_regime_indicators,
+    classify_regime_series,
+    regime_onehot_df,
+)
+from regime.ml_interface import MLRegimeClassifierStub, RuleBasedRegimeClassifier
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -47,15 +54,17 @@ def test_synthetic_strong_uptrend_classified_as_trend_up():
     rng = np.random.default_rng(42)
     noise = rng.normal(0, 1.5, n)
     close = 2000 + np.arange(n) * 3.0 + noise
-    df = pd.DataFrame({
-        "timestamp_utc": ts,
-        "open": close - 0.5,
-        "high": close + np.abs(rng.normal(1.0, 0.3, n)),
-        "low":  close - np.abs(rng.normal(1.0, 0.3, n)),
-        "close": close,
-        "volume": np.full(n, 100.0),
-        "session": ["london"] * n,
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": ts,
+            "open": close - 0.5,
+            "high": close + np.abs(rng.normal(1.0, 0.3, n)),
+            "low": close - np.abs(rng.normal(1.0, 0.3, n)),
+            "close": close,
+            "volume": np.full(n, 100.0),
+            "session": ["london"] * n,
+        }
+    )
     df = build_all_indicators(df, CFG)
     df = add_regime_indicators(df, CFG)
     labels = classify_regime_series(df, CFG)
@@ -70,15 +79,17 @@ def test_no_trade_on_flat_zero_volatility_series():
     n = 250
     ts = np.arange(n) * 900
     flat_price = np.full(n, 2000.0)
-    df = pd.DataFrame({
-        "timestamp_utc": ts,
-        "open": flat_price,
-        "high": flat_price,
-        "low": flat_price,
-        "close": flat_price,
-        "volume": np.full(n, 100.0),
-        "session": ["asia"] * n,
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": ts,
+            "open": flat_price,
+            "high": flat_price,
+            "low": flat_price,
+            "close": flat_price,
+            "volume": np.full(n, 100.0),
+            "session": ["asia"] * n,
+        }
+    )
     df = build_all_indicators(df, CFG)
     df = add_regime_indicators(df, CFG)
     labels = classify_regime_series(df, CFG)
@@ -144,4 +155,3 @@ def test_ml_stub_raises_not_implemented():
         assert False, "Expected NotImplementedError"
     except NotImplementedError:
         pass
-

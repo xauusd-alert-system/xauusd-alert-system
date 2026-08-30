@@ -31,19 +31,19 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.loader import load_config
+from model.ensemble_backtest import EnsembleBacktester
 from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
-    _build_fold_frames,
     _SYNTH_DEFAULTS,
+    _build_fold_frames,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
 )
 from scripts.run_backtest import merge_asset_cfg
-from model.ensemble_backtest import EnsembleBacktester
 
 
-def run_time_stop(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                  max_folds: int | None = None,
-                  max_h: int | None = None) -> dict:
+def run_time_stop(
+    cfg: dict, asset_key: str, df_full: pd.DataFrame, max_folds: int | None = None, max_h: int | None = None
+) -> dict:
     windows, frames = _build_fold_frames(df_full, cfg, asset_key, max_folds)
     if not windows:
         raise ValueError(f"No walk-forward folds produced for {asset_key}.")
@@ -52,8 +52,7 @@ def run_time_stop(cfg: dict, asset_key: str, df_full: pd.DataFrame,
     bt_cfg = cfg.get("backtest", {})
     volume = float(bt_cfg.get("volume", 0.01))
     point_value_lot = float(asset_cfg.get("point_value_lot", bt_cfg.get("point_value_lot", 100.0)))
-    horizon = int(merge_asset_cfg(cfg, asset_key, "labeling")["labeling"].get(
-        "horizon_candles_n", 36))
+    horizon = int(merge_asset_cfg(cfg, asset_key, "labeling")["labeling"].get("horizon_candles_n", 36))
     max_h = max_h or horizon
 
     rows = []
@@ -64,18 +63,17 @@ def run_time_stop(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         fdf_run = fdf.reset_index(drop=True)
         ts = fdf_run["timestamp_utc"].to_numpy(dtype=np.int64)
         for t in engine.run(fdf_run):
-            risk = abs(t.entry_price - t.initial_stop_price) * t.volume * point_value_lot \
-                if t.initial_stop_price else 0.0
+            risk = (
+                abs(t.entry_price - t.initial_stop_price) * t.volume * point_value_lot if t.initial_stop_price else 0.0
+            )
             net_r = float(t.pnl / risk) if risk > 1e-12 else float("nan")
             i0 = int(np.where(ts == t.entry_ts)[0][0]) if np.any(ts == t.entry_ts) else -1
             i1 = int(np.where(ts == t.exit_ts)[0][0]) if np.any(ts == t.exit_ts) else -1
-            held = (i1 - i0) if (i0 >= 0 and i1 >= 0) else int(
-                (t.exit_ts - t.entry_ts) / max(86400, 1))
+            held = (i1 - i0) if (i0 >= 0 and i1 >= 0) else int((t.exit_ts - t.entry_ts) / max(86400, 1))
             rows.append({"held": held, "net_r": net_r, "exit_reason": t.exit_reason})
 
     if len(rows) < 10:
-        return {"asset": asset_key, "n_trades": len(rows), "verdict": "insufficient trades",
-                "curve": []}
+        return {"asset": asset_key, "n_trades": len(rows), "verdict": "insufficient trades", "curve": []}
 
     rdf = pd.DataFrame(rows)
     curve = []
@@ -88,16 +86,19 @@ def run_time_stop(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         boot = np.empty(500)
         for b in range(500):
             boot[b] = rng.choice(r, size=len(r), replace=True).mean()
-        curve.append({
-            "h_bars": int(h),
-            "n_still_open": int(len(sub)),
-            "survival_pct": round(100.0 * len(sub) / len(rdf), 1),
-            "e_net_r_given_held_ge_h": round(float(r.mean()), 4),
-            "ci95_lo": round(float(np.percentile(boot, 2.5)), 4),
-            "ci95_hi": round(float(np.percentile(boot, 97.5)), 4),
-            "e_net_r_tp1_not_reached": round(float(r[sub["exit_reason"] == "timeout"].mean()), 4)
-            if (sub["exit_reason"] == "timeout").any() else None,
-        })
+        curve.append(
+            {
+                "h_bars": int(h),
+                "n_still_open": int(len(sub)),
+                "survival_pct": round(100.0 * len(sub) / len(rdf), 1),
+                "e_net_r_given_held_ge_h": round(float(r.mean()), 4),
+                "ci95_lo": round(float(np.percentile(boot, 2.5)), 4),
+                "ci95_hi": round(float(np.percentile(boot, 97.5)), 4),
+                "e_net_r_tp1_not_reached": round(float(r[sub["exit_reason"] == "timeout"].mean()), 4)
+                if (sub["exit_reason"] == "timeout").any()
+                else None,
+            }
+        )
 
     # first h where the point estimate of conditional expectancy <= 0
     time_stop = None
@@ -105,10 +106,19 @@ def run_time_stop(cfg: dict, asset_key: str, df_full: pd.DataFrame,
         if c["e_net_r_given_held_ge_h"] <= 0.0:
             time_stop = c["h_bars"]
             break
-    verdict = (f"time-stop at ~{time_stop} bars" if time_stop
-               else "no h with negative conditional expectancy; time-stop unlikely to help")
-    return {"asset": asset_key, "n_trades": len(rows), "horizon": horizon,
-            "time_stop_h": time_stop, "verdict": verdict, "curve": curve}
+    verdict = (
+        f"time-stop at ~{time_stop} bars"
+        if time_stop
+        else "no h with negative conditional expectancy; time-stop unlikely to help"
+    )
+    return {
+        "asset": asset_key,
+        "n_trades": len(rows),
+        "horizon": horizon,
+        "time_stop_h": time_stop,
+        "verdict": verdict,
+        "curve": curve,
+    }
 
 
 def print_report(d: dict) -> None:
@@ -116,9 +126,11 @@ def print_report(d: dict) -> None:
     print(f"Trades: {d['n_trades']} | horizon: {d['horizon']}")
     print("E[net R | held >= h] (survival % | point estimate | 95% CI):")
     for c in d["curve"][:: max(1, len(d["curve"]) // 12)]:
-        print(f"  h={c['h_bars']:>3}  surv={c['survival_pct']:>5.1f}%  "
-              f"E[R]={c['e_net_r_given_held_ge_h']:+.3f}  "
-              f"CI=[{c['ci95_lo']:+.3f}, {c['ci95_hi']:+.3f}]")
+        print(
+            f"  h={c['h_bars']:>3}  surv={c['survival_pct']:>5.1f}%  "
+            f"E[R]={c['e_net_r_given_held_ge_h']:+.3f}  "
+            f"CI=[{c['ci95_lo']:+.3f}, {c['ci95_hi']:+.3f}]"
+        )
     print(f"Verdict: {d['verdict']}")
 
 
@@ -141,14 +153,17 @@ def main(argv: list[str] | None = None) -> None:
 
     synthetic = False
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[timestop] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[timestop] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[timestop] WARNING: cannot load real data ({exc.__class__.__name__}); "
+            "SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)

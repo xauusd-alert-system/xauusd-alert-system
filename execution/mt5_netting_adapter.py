@@ -15,6 +15,7 @@ adapter never presents the group as three independent MT5 positions.
 BE is a SINGLE SL modification on the aggregate position — two sequential
 opposite SL modifies for virtual legs are forbidden (ТЗ §19).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -49,8 +50,7 @@ class MT5NettingDriver:
             open_volume = float(spec.risk.total_volume)
             snapshot = self.ctx.symbol_snapshot(spec.broker_symbol)
             price = snapshot["ask"] if spec.side == "long" else snapshot["bid"]
-            order_type = self.mt5.ORDER_TYPE_BUY if spec.side == "long" \
-                else self.mt5.ORDER_TYPE_SELL
+            order_type = self.mt5.ORDER_TYPE_BUY if spec.side == "long" else self.mt5.ORDER_TYPE_SELL
             request = {
                 "action": self.mt5.TRADE_ACTION_DEAL,
                 "symbol": spec.broker_symbol,
@@ -63,26 +63,30 @@ class MT5NettingDriver:
                 "type_time": self.mt5.ORDER_TIME_GTC,
                 "type_filling": self.mt5.ORDER_FILLING_IOC,
                 "sl": float(spec.geometry.sl),
-                "tp": float(spec.geometry.tp3),   # final target on the aggregate
+                "tp": float(spec.geometry.tp3),  # final target on the aggregate
             }
             result = self.mt5.order_send(request)
             retcode = int(getattr(result, "retcode", -1) or -1)
             done = getattr(self.mt5, "TRADE_RETCODE_DONE", 10009)
             if retcode != done:
                 return {
-                    "status": "rejected", "retcode": retcode,
+                    "status": "rejected",
+                    "retcode": retcode,
                     "comment": str(getattr(result, "comment", "") or ""),
                     "order_id": getattr(result, "order", None),
-                    "requested_volume": open_volume, "filled_volume": 0.0,
+                    "requested_volume": open_volume,
+                    "filled_volume": 0.0,
                     "fill_price": None,
                 }
             position = self._resolve_aggregate(spec)
             if position is None:
                 return {
-                    "status": "rejected", "retcode": retcode,
+                    "status": "rejected",
+                    "retcode": retcode,
                     "comment": "order accepted but position could not be resolved",
                     "order_id": getattr(result, "order", None),
-                    "requested_volume": open_volume, "filled_volume": 0.0,
+                    "requested_volume": open_volume,
+                    "filled_volume": 0.0,
                     "fill_price": None,
                 }
             ticket = int(position["ticket"])
@@ -92,14 +96,15 @@ class MT5NettingDriver:
             filled = float(getattr(result, "volume", 0.0) or 0.0) or float(position["volume"])
             status = "filled" if filled >= open_volume - 1e-9 else "partially_filled"
             return {
-                "status": status, "retcode": retcode,
+                "status": status,
+                "retcode": retcode,
                 "comment": str(getattr(result, "comment", "") or ""),
                 "order_id": int(getattr(result, "order", 0) or 0) or None,
                 "deal_id": int(getattr(result, "deal", 0) or 0) or None,
                 "position_id": ticket,
-                "requested_volume": open_volume, "filled_volume": float(filled),
-                "fill_price": float(getattr(result, "price", 0.0) or 0.0)
-                or float(position["price_open"]),
+                "requested_volume": open_volume,
+                "filled_volume": float(filled),
+                "fill_price": float(getattr(result, "price", 0.0) or 0.0) or float(position["price_open"]),
                 "virtual": False,
             }
         # virtual legs 2/3: no broker order, share the aggregate position
@@ -109,16 +114,20 @@ class MT5NettingDriver:
             ticket = int(position["ticket"]) if position else 0
         if not ticket:
             return {
-                "status": "rejected", "retcode": -1,
+                "status": "rejected",
+                "retcode": -1,
                 "comment": "aggregate position missing for virtual leg",
-                "requested_volume": float(volume), "filled_volume": 0.0,
+                "requested_volume": float(volume),
+                "filled_volume": 0.0,
             }
         self._ref_map[new_leg_id(spec.group_id, leg)] = ticket
         return {
-            "status": "virtual", "retcode": 0,
+            "status": "virtual",
+            "retcode": 0,
             "comment": "virtual leg (netting)",
             "position_id": ticket,
-            "requested_volume": float(volume), "filled_volume": 0.0,
+            "requested_volume": float(volume),
+            "filled_volume": 0.0,
             "fill_price": None,
             "virtual": True,
         }
@@ -156,10 +165,8 @@ class MT5NettingDriver:
         ticket = self._resolve_ticket(reference)
         position = self._position(ticket)
         if position is None:
-            return {"status": "rejected", "retcode": -1,
-                    "comment": f"aggregate position {ticket} not found"}
-        close_type = self.mt5.ORDER_TYPE_SELL if position["type"] == 0 \
-            else self.mt5.ORDER_TYPE_BUY
+            return {"status": "rejected", "retcode": -1, "comment": f"aggregate position {ticket} not found"}
+        close_type = self.mt5.ORDER_TYPE_SELL if position["type"] == 0 else self.mt5.ORDER_TYPE_BUY
         snapshot = self.ctx.symbol_snapshot(position["symbol"])
         price = snapshot["bid"] if position["type"] == 0 else snapshot["ask"]
         group_id = self.ctx.parse_comment(position["comment"]) or f"TG:{position['ticket']}"
@@ -181,11 +188,15 @@ class MT5NettingDriver:
         retcode = int(getattr(result, "retcode", -1) or -1)
         done = getattr(self.mt5, "TRADE_RETCODE_DONE", 10009)
         if retcode != done:
-            return {"status": "rejected", "retcode": retcode,
-                    "comment": str(getattr(result, "comment", "") or ""),
-                    "order_id": getattr(result, "order", None)}
+            return {
+                "status": "rejected",
+                "retcode": retcode,
+                "comment": str(getattr(result, "comment", "") or ""),
+                "order_id": getattr(result, "order", None),
+            }
         return {
-            "status": "filled", "retcode": retcode,
+            "status": "filled",
+            "retcode": retcode,
             "comment": str(getattr(result, "comment", "") or ""),
             "order_id": int(getattr(result, "order", 0) or 0) or None,
             "deal_id": int(getattr(result, "deal", 0) or 0) or None,

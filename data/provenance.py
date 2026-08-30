@@ -14,12 +14,13 @@ candle source to a fingerprint of its content:
 and fails closed on any mismatch, so mixing brokers, truncated exports or
 incomplete history stops the run instead of silently changing results.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -28,7 +29,11 @@ from data.session_tagger import tag_session
 from data.storage import read_candles
 
 TIMEFRAME_INTERVAL_SECONDS = {
-    "M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400,
+    "M1": 60,
+    "M5": 300,
+    "M15": 900,
+    "H1": 3600,
+    "H4": 14400,
 }
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -46,13 +51,18 @@ def _aligned_bars(start_ts: int, end_ts: int, interval: int) -> pd.DatetimeIndex
     first = (start_ts // interval + (1 if start_ts % interval else 0)) * interval
     if first > end_ts:
         return pd.DatetimeIndex([])
-    return pd.date_range(start=pd.Timestamp(first, unit="s", tz="UTC"),
-                         end=pd.Timestamp(end_ts, unit="s", tz="UTC"),
-                         freq=f"{interval}s", tz="UTC")
+    return pd.date_range(
+        start=pd.Timestamp(first, unit="s", tz="UTC"),
+        end=pd.Timestamp(end_ts, unit="s", tz="UTC"),
+        freq=f"{interval}s",
+        tz="UTC",
+    )
 
 
 def _expected_bars_per_year(
-    start_ts: int, end_ts: int, interval: int,
+    start_ts: int,
+    end_ts: int,
+    interval: int,
 ) -> dict[int, int]:
     """Expected aligned bars per UTC year, counting Mon-Fri only (weekend
     trading depends on the broker and is audited separately as weekend gaps)."""
@@ -87,9 +97,16 @@ def gap_audit(
     sessions_config = sessions_config or {}
     interval = _interval_seconds(timeframe)
     if df.empty:
-        return {"present_bars": 0, "missing_bars": 0, "weekend_gaps": 0,
-                "coverage": None, "gaps": [], "gap_count": 0,
-                "per_year": {}, "per_session": {}}
+        return {
+            "present_bars": 0,
+            "missing_bars": 0,
+            "weekend_gaps": 0,
+            "coverage": None,
+            "gaps": [],
+            "gap_count": 0,
+            "per_year": {},
+            "per_session": {},
+        }
     ts = pd.to_datetime(df["timestamp_utc"], unit="s", utc=True).sort_values()
     start_ts = int(ts.iloc[0].timestamp())
     end_ts = int(ts.iloc[-1].timestamp())
@@ -190,21 +207,23 @@ def _close_gap_run(
         for raw in (scan_start, scan_end, start, end):
             if pd.Timestamp(raw, unit="s", tz="UTC").weekday() >= 5:
                 spans_weekend = True
-    gaps.append({
-        "start_ts_utc": start,
-        "end_ts_utc": end,
-        "missing_bars": len(run),
-        "duration_minutes": int((end - start + interval) / 60),
-        "spans_weekend": bool(spans_weekend),
-    })
+    gaps.append(
+        {
+            "start_ts_utc": start,
+            "end_ts_utc": end,
+            "missing_bars": len(run),
+            "duration_minutes": int((end - start + interval) / 60),
+            "spans_weekend": bool(spans_weekend),
+        }
+    )
 
 
 def compute_data_hash(df: pd.DataFrame) -> str:
     """sha256 over the canonical sorted export rows (content fingerprint)."""
     ordered = df.sort_values("timestamp_utc")
     payload = ordered.to_csv(
-        index=False, columns=["timestamp_utc", "open", "high", "low", "close",
-                              "volume", "spread", "real_volume"],
+        index=False,
+        columns=["timestamp_utc", "open", "high", "low", "close", "volume", "spread", "real_volume"],
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -252,7 +271,7 @@ def build_provenance_manifest(
         "timeframe": timeframe.upper(),
         "interval_seconds": _interval_seconds(timeframe),
         "source_window_utc": {"start_ts": start_ts, "end_ts": end_ts},
-        "export_time_utc": datetime.now(timezone.utc).isoformat(),
+        "export_time_utc": datetime.now(UTC).isoformat(),
         "db_file_sha256": file_sha256(db_path),
         "candle_count": int(len(df)),
         "gap_audit": gap_audit(df, timeframe, sessions_config),
@@ -272,9 +291,7 @@ def write_provenance_manifest(path: str, manifest: dict[str, Any]) -> str:
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as handle:
             if handle.read() != payload:
-                raise RuntimeError(
-                    f"provenance manifest already exists with different content: {path}"
-                )
+                raise RuntimeError(f"provenance manifest already exists with different content: {path}")
         return manifest["manifest_hash"]
     directory = os.path.dirname(path)
     if directory:
@@ -311,13 +328,11 @@ def verify_provenance_manifest(
     loaded = load_provenance_manifest(manifest) if isinstance(manifest, str) else manifest
     if loaded.get("asset_key") != asset_key:
         raise RuntimeError(
-            f"provenance manifest asset_key={loaded.get('asset_key')!r} "
-            f"does not match requested {asset_key!r}"
+            f"provenance manifest asset_key={loaded.get('asset_key')!r} does not match requested {asset_key!r}"
         )
     if (loaded.get("timeframe") or "").upper() != timeframe.upper():
         raise RuntimeError(
-            f"provenance manifest timeframe={loaded.get('timeframe')!r} "
-            f"does not match requested {timeframe!r}"
+            f"provenance manifest timeframe={loaded.get('timeframe')!r} does not match requested {timeframe!r}"
         )
     df = read_candles(db_path, timeframe, asset_key)
     if df.empty:
@@ -330,8 +345,9 @@ def verify_provenance_manifest(
             f"Source data changed after the manifest was frozen."
         )
     window = loaded.get("source_window_utc") or {}
-    if window.get("start_ts") != int(df["timestamp_utc"].min()) or \
-            window.get("end_ts") != int(df["timestamp_utc"].max()):
+    if window.get("start_ts") != int(df["timestamp_utc"].min()) or window.get("end_ts") != int(
+        df["timestamp_utc"].max()
+    ):
         raise RuntimeError(
             f"provenance source window mismatch for {asset_key} {timeframe}: "
             f"manifest {window} != data [{int(df['timestamp_utc'].min())}, "
@@ -342,8 +358,7 @@ def verify_provenance_manifest(
             f"provenance candle_count mismatch for {asset_key} {timeframe}: "
             f"manifest {loaded.get('candle_count')} != data {len(df)}"
         )
-    return {"verified": True, "asset_key": asset_key, "timeframe": timeframe,
-            "data_hash": recomputed_hash}
+    return {"verified": True, "asset_key": asset_key, "timeframe": timeframe, "data_hash": recomputed_hash}
 
 
 def provenance_gate(

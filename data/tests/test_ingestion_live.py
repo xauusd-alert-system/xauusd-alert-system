@@ -3,17 +3,18 @@ Tests for data/ingestion.py::fetch_live_candles - HTTP calls are fully mocked,
 no real network requests are made. Validates response parsing, error handling,
 and the unified fetch_candles() dispatcher.
 """
+
 import os
 import sys
-import time
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from data.ingestion import fetch_live_candles, fetch_candles
+from data.ingestion import fetch_candles, fetch_live_candles
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -25,10 +26,16 @@ def _mock_twelvedata_payload(n=5):
     for i in range(n):
         ts = base_ts + i * 900
         dt = pd.Timestamp(ts, unit="s", tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
-        values.append({
-            "datetime": dt, "open": "2400.5", "high": "2402.0",
-            "low": "2399.0", "close": "2401.0", "volume": "150.0",
-        })
+        values.append(
+            {
+                "datetime": dt,
+                "open": "2400.5",
+                "high": "2402.0",
+                "low": "2399.0",
+                "close": "2401.0",
+                "volume": "150.0",
+            }
+        )
     return {"values": values}
 
 

@@ -17,6 +17,7 @@ Usage in tests
 
 Or via pytest fixtures (conftest.py wraps these).
 """
+
 from __future__ import annotations
 
 import os
@@ -127,6 +128,7 @@ def build_pipeline(
 ) -> "RealtimePipeline":
     """Build a RealtimePipeline with test-safe defaults."""
     from realtime.pipeline import RealtimePipeline
+
     if cfg is None:
         cfg = build_cfg()
     if model_path is None:
@@ -159,8 +161,7 @@ def build_signal(
         "context_timeframes": ["M15", "H1"],
         "expires_at_utc": 9999999999,
         "target_legs": [{"price": tp, "close_ratio": 1 / 3, "label": "TP1"}],
-        "confirmation_predicates": ["candle_closed", "regime_allowed",
-                                     "session_allowed", "ensemble_gate_passed"],
+        "confirmation_predicates": ["candle_closed", "regime_allowed", "session_allowed", "ensemble_gate_passed"],
         "confirmed_by": "systematic:ensemble" if bias != "no_trade" else None,
         "confirmation_time_utc": 9999999999 if bias != "no_trade" else None,
         "bias": bias,
@@ -243,8 +244,10 @@ def build_risk_object(
 
     Used by challenge runner tests that need risk.position_size(price, equity).
     """
+
     class _Risk:
         pass
+
     r = _Risk()
     r.max_open_positions = max_open_positions
     r.daily_loss_stop = daily_loss_stop
@@ -253,6 +256,7 @@ def build_risk_object(
 
     def _position_size(self, price, equity):
         return self.position_size_value
+
     r.position_size = _position_size.__get__(r, type(r))
     return r
 
@@ -274,11 +278,15 @@ class StubPredictor:
 
     def predict_proba(self, X):
         import pandas as pd
+
         n = len(X)
-        return pd.DataFrame({
-            "p_long": [self._p_long] * n,
-            "p_short": [1 - self._p_long] * n,
-        }, index=getattr(X, 'index', None))
+        return pd.DataFrame(
+            {
+                "p_long": [self._p_long] * n,
+                "p_short": [1 - self._p_long] * n,
+            },
+            index=getattr(X, "index", None),
+        )
 
 
 class StubMT5:
@@ -295,6 +303,7 @@ class StubMT5:
             profit = 0.0
             login = 99999
             server = "test"
+
         return _Info()
 
     def positions_get(self):

@@ -4,14 +4,15 @@ Compares the current duplicated-base reference [M15,H1] with [H1,H4].  It
 refuses to cross the configured locked hold-out and writes explicit source/mode/
 as-of metadata. Nothing is deployed.
 """
+
 from __future__ import annotations
 
 import argparse
 import copy
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -37,16 +38,12 @@ def main(argv=None) -> None:
     lock = cfg.get("validation", {}).get("locked_holdout", {})
     lock_start = lock.get("start") if lock.get("enabled") else None
     if lock_start and pd.Timestamp(args.end_date, tz="UTC") > pd.Timestamp(lock_start, tz="UTC"):
-        raise SystemExit(
-            f"end-date {args.end_date} crosses locked hold-out start {lock_start}; refusing"
-        )
+        raise SystemExit(f"end-date {args.end_date} crosses locked hold-out start {lock_start}; refusing")
     asset_cfg = cfg.get("assets", {}).get(args.asset)
     if not asset_cfg:
         raise SystemExit(f"unknown asset {args.asset}")
     timeframe = asset_cfg.get("timeframe", "M15")
-    raw = truncate_before(
-        load_asset_history(args.db_path, timeframe, args.asset), args.end_date, args.asset
-    )
+    raw = truncate_before(load_asset_history(args.db_path, timeframe, args.asset), args.end_date, args.asset)
 
     candidates = {
         "current_M15_H1": ["M15", "H1"],
@@ -58,8 +55,13 @@ def main(argv=None) -> None:
         cfg_i.setdefault("features", {})["mtf_reference_timeframes"] = refs
         featured = build_full_df(cfg_i, raw, args.db_path, args.asset)
         analysis = run_analysis(
-            cfg_i, args.asset, featured, variants={"current": {}},
-            historical_trials=737, max_folds=args.max_folds, cost_stress=True,
+            cfg_i,
+            args.asset,
+            featured,
+            variants={"current": {}},
+            historical_trials=737,
+            max_folds=args.max_folds,
+            cost_stress=True,
         )
         results[name] = {
             "references": refs,
@@ -74,7 +76,7 @@ def main(argv=None) -> None:
         "locked_holdout_read": False,
         "source": "copied_real_sqlite_prelock",
         "mode": "research_only_not_deployed",
-        "as_of_utc": datetime.now(timezone.utc).isoformat(),
+        "as_of_utc": datetime.now(UTC).isoformat(),
         "results": results,
     }
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)

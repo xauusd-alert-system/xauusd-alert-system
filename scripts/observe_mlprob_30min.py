@@ -20,7 +20,7 @@ import csv
 import json
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BASE = "http://127.0.0.1:8000"
@@ -28,12 +28,11 @@ LOG = Path("logs/trader_real.log")
 CSV = Path("logs/mlprob_observe.csv")
 
 ERROR_TOKENS = ("ERROR", "CRITICAL", "Traceback", "Exception", " FAILED")
-CYCLE_TOKENS = ("New bar detected", "Analyzing newly closed candle",
-                "no trade", "Waiting for new bar", "BE CHECK")
+CYCLE_TOKENS = ("New bar detected", "Analyzing newly closed candle", "no trade", "Waiting for new bar", "BE CHECK")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+    return datetime.now(UTC).strftime("%H:%M:%S")
 
 
 def fetch_mlprob(asset: str = "XAUUSD") -> dict:
@@ -93,8 +92,7 @@ def main() -> int:
         cycles_seen += n_cyc
         if n_err:
             errors_seen.extend(lines)
-        row = {"ts_utc": ts, **m, "new_log_lines": len(lines), "new_errors": n_err,
-               "new_cycle_markers": n_cyc}
+        row = {"ts_utc": ts, **m, "new_log_lines": len(lines), "new_errors": n_err, "new_cycle_markers": n_cyc}
         samples.append(row)
         with open(CSV, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(row))
@@ -108,10 +106,12 @@ def main() -> int:
             except Exception:
                 age = None
             bar_age = f" bar_age~{age}s" if age is not None else ""
-        print(f"[{ts}Z] bars={row.get('n_bars')} last_ts={bar_ts}{bar_age} "
-              f"p_long={row.get('last_p_long')} regime={row.get('last_regime')} "
-              f"avail={row.get('available')} log+={len(lines)} err+={n_err} cyc+={n_cyc}",
-              flush=True)
+        print(
+            f"[{ts}Z] bars={row.get('n_bars')} last_ts={bar_ts}{bar_age} "
+            f"p_long={row.get('last_p_long')} regime={row.get('last_regime')} "
+            f"avail={row.get('available')} log+={len(lines)} err+={n_err} cyc+={n_cyc}",
+            flush=True,
+        )
         time.sleep(args.interval)
 
     print("\n=== 30-min summary ===")

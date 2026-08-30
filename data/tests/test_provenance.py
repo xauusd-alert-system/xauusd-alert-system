@@ -1,7 +1,6 @@
 """Tests for data/provenance.py (immutable raw-data provenance manifest)."""
-from __future__ import annotations
 
-import json
+from __future__ import annotations
 
 import pandas as pd
 import pytest
@@ -16,8 +15,7 @@ from data.provenance import (
 )
 from data.storage import init_schema, upsert_candles
 
-SESSIONS = {"asia": {"start": 0, "end": 8}, "london": {"start": 8, "end": 13},
-            "newyork": {"start": 13, "end": 22}}
+SESSIONS = {"asia": {"start": 0, "end": 8}, "london": {"start": 8, "end": 13}, "newyork": {"start": 13, "end": 22}}
 
 
 def _frame(start_ts: int, interval: int, n: int, *, drop: set[int] | None = None) -> pd.DataFrame:
@@ -27,11 +25,19 @@ def _frame(start_ts: int, interval: int, n: int, *, drop: set[int] | None = None
         ts = start_ts + i * interval
         if ts in drop:
             continue
-        rows.append({
-            "timestamp_utc": ts, "open": 1.0, "high": 1.1, "low": 0.9,
-            "close": 1.05, "volume": 100.0, "session": "london",
-            "spread": 25.0, "real_volume": 90.0,
-        })
+        rows.append(
+            {
+                "timestamp_utc": ts,
+                "open": 1.0,
+                "high": 1.1,
+                "low": 0.9,
+                "close": 1.05,
+                "volume": 100.0,
+                "session": "london",
+                "spread": 25.0,
+                "real_volume": 90.0,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -51,8 +57,13 @@ def test_build_manifest_content(db):
     df = _frame(_monday_0900(), 900, 100)
     upsert_candles(db, "M15", "XAUUSD", df)
     manifest = build_provenance_manifest(
-        db, "M15", "XAUUSD", broker="FxPro", broker_symbol="GOLD",
-        terminal_build="4680", sessions_config=SESSIONS,
+        db,
+        "M15",
+        "XAUUSD",
+        broker="FxPro",
+        broker_symbol="GOLD",
+        terminal_build="4680",
+        sessions_config=SESSIONS,
     )
     assert manifest["asset_key"] == "XAUUSD"
     assert manifest["broker_symbol"] == "GOLD"
@@ -69,8 +80,7 @@ def test_build_manifest_content(db):
 def test_write_is_atomic_and_immutable(db, tmp_path):
     df = _frame(_monday_0900(), 900, 50)
     upsert_candles(db, "M15", "XAUUSD", df)
-    manifest = build_provenance_manifest(db, "M15", "XAUUSD", broker="B",
-                                         sessions_config=SESSIONS)
+    manifest = build_provenance_manifest(db, "M15", "XAUUSD", broker="B", sessions_config=SESSIONS)
     path = str(tmp_path / "manifest.json")
     write_provenance_manifest(path, manifest)
     write_provenance_manifest(path, manifest)  # identical rewrite is fine
@@ -83,8 +93,7 @@ def test_write_is_atomic_and_immutable(db, tmp_path):
 def test_verify_detects_data_change(db, tmp_path):
     df = _frame(_monday_0900(), 900, 60)
     upsert_candles(db, "M15", "XAUUSD", df)
-    manifest = build_provenance_manifest(db, "M15", "XAUUSD", broker="B",
-                                         sessions_config=SESSIONS)
+    manifest = build_provenance_manifest(db, "M15", "XAUUSD", broker="B", sessions_config=SESSIONS)
     path = str(tmp_path / "manifest.json")
     write_provenance_manifest(path, manifest)
 
@@ -138,16 +147,15 @@ def test_provenance_gate_config_driven(db, tmp_path):
     write_provenance_manifest(path, manifest)
 
     # not required -> no-op
-    assert provenance_gate({}, db, "M15", "XAUUSD") == {
-        "verified": False, "required": False, "reason": "not required"}
+    assert provenance_gate({}, db, "M15", "XAUUSD") == {"verified": False, "required": False, "reason": "not required"}
 
-    cfg = {"validation": {"require_provenance_manifest": True,
-                          "provenance_manifest_path": path}}
+    cfg = {"validation": {"require_provenance_manifest": True, "provenance_manifest_path": path}}
     result = provenance_gate(cfg, db, "M15", "XAUUSD")
     assert result["verified"] is True and result["required"] is True
 
     # required but missing -> fail closed
-    cfg_missing = {"validation": {"require_provenance_manifest": True,
-                                  "provenance_manifest_path": str(tmp_path / "nope.json")}}
+    cfg_missing = {
+        "validation": {"require_provenance_manifest": True, "provenance_manifest_path": str(tmp_path / "nope.json")}
+    }
     with pytest.raises(RuntimeError, match="not found"):
         provenance_gate(cfg_missing, db, "M15", "XAUUSD")

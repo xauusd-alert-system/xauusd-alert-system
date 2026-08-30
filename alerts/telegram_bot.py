@@ -2,14 +2,16 @@
 Telegram bot integration - sends alerts for signals AND trade execution/close updates.
 CRITICAL: bot token is read exclusively from environment variable TELEGRAM_BOT_TOKEN.
 """
-import time
+
 import logging
-import requests
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from typing import Optional
 
-from config.loader import get_env
+import requests
+
 from alerts.formatter import format_signal_message
+from config.loader import get_env
 
 logger = logging.getLogger("telegram_bot")
 
@@ -19,7 +21,7 @@ class TelegramAlertBot:
         self.cfg = cfg
         self.bot_token = bot_token or get_env("TELEGRAM_BOT_TOKEN", required=False)
         self.chat_id = chat_id or get_env("TELEGRAM_CHAT_ID", required=False)
-        
+
         if self.bot_token:
             self.base_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         else:
@@ -27,7 +29,7 @@ class TelegramAlertBot:
 
         self._last_alert_ts: Optional[float] = None
         self._alerts_sent_today = 0
-        self._current_day = datetime.now(timezone.utc).date()
+        self._current_day = datetime.now(UTC).date()
 
     def _redact(self, text: str) -> str:
         """Strip the bot token from a log/exception message.
@@ -48,11 +50,7 @@ class TelegramAlertBot:
             return False
 
         try:
-            response = requests.post(
-                self.base_url,
-                data={"chat_id": self.chat_id, "text": text},
-                timeout=10
-            )
+            response = requests.post(self.base_url, data={"chat_id": self.chat_id, "text": text}, timeout=10)
             response.raise_for_status()
             return True
         except Exception as e:
@@ -60,7 +58,7 @@ class TelegramAlertBot:
             return False
 
     def _reset_daily_counter_if_needed(self):
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         if today != self._current_day:
             self._current_day = today
             self._alerts_sent_today = 0
@@ -99,11 +97,8 @@ class TelegramAlertBot:
             published = int(time.time())
             signal["published_at_utc"] = published
             created = signal.get("timestamp_utc")
-            signal["publish_latency_seconds"] = (
-                max(0, published - int(created)) if created is not None else None
-            )
+            signal["publish_latency_seconds"] = max(0, published - int(created)) if created is not None else None
             self._last_alert_ts = time.time()
             self._alerts_sent_today += 1
             return True
         return False
-            

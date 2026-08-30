@@ -3,9 +3,6 @@ Bonferroni/DSR multiple-testing correction used by diag scripts so edge
 hunting is not done by hand (which invites noise mining).
 """
 
-import os
-import tempfile
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,14 +10,14 @@ import pytest
 from scripts.subset_scan import (
     SubsetScanner,
     _bonferroni,
-    _t_to_p_two_sided,
     _compute_subset_metrics,
+    _t_to_p_two_sided,
 )
-
 
 # ---------------------------------------------------------------------------
 # Statistical primitives
 # ---------------------------------------------------------------------------
+
 
 def test_bonferroni_basic():
     assert _bonferroni([0.01, 0.02, 0.03]) == [0.03, 0.06, 0.09]
@@ -43,6 +40,7 @@ def test_t_to_p_two_sided_symmetry():
 # ---------------------------------------------------------------------------
 # Metrics + verdicts
 # ---------------------------------------------------------------------------
+
 
 def test_compute_metrics_all_positive_is_sig():
     r = np.full(60, 1.1)
@@ -77,15 +75,18 @@ def test_compute_metrics_empty():
 # Scanner end-to-end
 # ---------------------------------------------------------------------------
 
+
 def _make_trades(n=200, seed=7):
     rng = np.random.default_rng(seed)
-    df = pd.DataFrame({
-        "regime": rng.choice(["trend_up", "trend_down", "range"], n),
-        "direction": rng.choice([1, -1], n),
-        "session": rng.choice(["london", "newyork", "asia"], n),
-        "exit_reason": rng.choice(["tp", "stop", "be"], n),
-        "R": rng.normal(0.0, 1.0, n),
-    })
+    df = pd.DataFrame(
+        {
+            "regime": rng.choice(["trend_up", "trend_down", "range"], n),
+            "direction": rng.choice([1, -1], n),
+            "session": rng.choice(["london", "newyork", "asia"], n),
+            "exit_reason": rng.choice(["tp", "stop", "be"], n),
+            "R": rng.normal(0.0, 1.0, n),
+        }
+    )
     # Inject a strong real signal into one subset: newyork short tp trades.
     mask = (df["session"] == "newyork") & (df["direction"] == -1) & (df["exit_reason"] == "tp")
     df.loc[mask, "R"] = rng.normal(1.5, 0.4, int(mask.sum()))
@@ -120,10 +121,12 @@ def test_scan_marks_robust_losers_sig_neg():
 
 def test_scan_noise_stays_non_sig():
     rng = np.random.default_rng(42)
-    df = pd.DataFrame({
-        "bucket": rng.choice(["a", "b", "c"], 300),
-        "R": rng.normal(0.0, 1.0, 300),
-    })
+    df = pd.DataFrame(
+        {
+            "bucket": rng.choice(["a", "b", "c"], 300),
+            "R": rng.normal(0.0, 1.0, 300),
+        }
+    )
     scanner = SubsetScanner(df, r_col="R", min_trades=5)
     scanner.add_groupby("bucket")
     results = scanner.scan()
@@ -142,8 +145,20 @@ def test_scan_always_includes_all_baseline():
 def test_to_dict_shape():
     m = _compute_subset_metrics(np.full(20, 0.5), "x", min_trades=5)
     d = m.to_dict()
-    for k in ("subset", "n", "mean_R", "sum_R", "WR%", "PF", "t_block",
-              "sharpe_est", "p_raw", "p_bonf", "DSR", "verdict"):
+    for k in (
+        "subset",
+        "n",
+        "mean_R",
+        "sum_R",
+        "WR%",
+        "PF",
+        "t_block",
+        "sharpe_est",
+        "p_raw",
+        "p_bonf",
+        "DSR",
+        "verdict",
+    ):
         assert k in d
 
 
@@ -151,19 +166,28 @@ def test_to_dict_shape():
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def test_cli_smoke(tmp_path):
     from scripts.subset_scan import main
+
     df = _make_trades(120)
     csv = tmp_path / "trades.csv"
     out = tmp_path / "scan.csv"
     df.to_csv(csv, index=False)
-    main([
-        "--csv", str(csv),
-        "--r-col", "R",
-        "--groupby", "session",
-        "--groupby", "direction",
-        "--out", str(out),
-    ])
+    main(
+        [
+            "--csv",
+            str(csv),
+            "--r-col",
+            "R",
+            "--groupby",
+            "session",
+            "--groupby",
+            "direction",
+            "--out",
+            str(out),
+        ]
+    )
     assert out.exists()
     out_df = pd.read_csv(out)
     assert "verdict" in out_df.columns

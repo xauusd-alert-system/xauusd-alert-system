@@ -1,4 +1,25 @@
-﻿deployment:
+# ТЗ 8.6: MT5 adapter layer. All direct MetaTrader5 usage must live inside the
+# mt5_adapter/ package (guard test: mt5_adapter/tests/test_no_direct_mt5_calls.py).
+mt5_adapter:
+  rate_limit:
+    # Max MetaTrader5 calls per second (token-bucket, burst = value).
+    # null / 0 = disabled (default: existing behaviour is unchanged).
+    # The MT5_RATE_LIMIT_MAX_CPS env var overrides this value (0 = disabled).
+    max_calls_per_second: null
+  cache:
+    # TTL for symbol_info / symbol_info_tick cached reads (milliseconds).
+    ttl_ms: 500
+
+# ТЗ 10.1: API security. require_auth=false keeps current single-operator
+# loopback deployments working (loopback-only guard is the network control);
+# production deployments MUST set require_auth: true (or API_REQUIRE_AUTH=1)
+# together with API_AUTH_TOKEN. Fail-closed: with require_auth=true and no
+# token the API refuses to start.
+security:
+  api:
+    require_auth: false
+
+deployment:
   # Formal safety state; DRY_RUN is no longer the deployment authority.
   # TRIAL-48H (2026-08-18): temporarily switched research -> demo_systematic;
   # auto-revert by `python -m scripts.trial_window watch` after 48h.
@@ -97,6 +118,12 @@ ensemble:
   # divergence - the rule side may carry it (requires min_ml_probability upstream).
   # Default false keeps the Phase-0+1 soft-collapse behaviour.
   hard_divergence_veto: false
+  # P2-47 / TZ 5.3: HARD REJECT on absolute model confidence. When the best
+  # directional probability max(p_long, p_short) is below this floor, the
+  # ensemble returns no_trade with reason ALL_MODELS_LOW_CONFIDENCE instead of
+  # averaging a weak signal. null disables the gate entirely (default keeps the
+  # exact Phase-0+1 signal-path behaviour).
+  reject_threshold: null
 
 
 market_data:
@@ -114,6 +141,23 @@ market_data:
 
 general:
   db_path: data/market_data_mt5.sqlite
+
+
+# ТЗ 8.7: provenance-модуль. TTL снапшотов (P2-51) и аудиторский
+# ProvenanceStore (P2-3). Всё опционально и выключено по умолчанию:
+# включение НЕ меняет существующую семантику provenance (P1.6) —
+# store лишь параллельно каталогизирует записи для аудита.
+provenance:
+  # Максимальный возраст снапшота (ms) для verify_record().age_ok.
+  # Когда null — TTL-проверка не настроена и age_ok всегда True.
+  max_snapshot_age_ms: null
+  store:
+    # Аудиторский каталог provenance-записей (fail-open; executor
+    # никогда не падает из-за недоступности store).
+    enabled: false
+    # null -> general.db_path (candles DB). Задайте отдельный путь,
+    # чтобы каталогизировать provenance в отдельный SQLite-файл.
+    db_path: null
 
 
 assets:
@@ -437,6 +481,41 @@ features:
     std_dev: 2.0
   structure_lookback: 20
   mtf_reference_timeframes: ["M15", "H1"]
+  # Задача 3.1: fractional differentiation (FFd, Lopez de Prado ch.5) of the
+  # close price. Default OFF -> build_full_df adds nothing (byte-identical
+  # baseline). When enabled, a `close_fd` column is appended right after
+  # build_all_indicators; admission to the MODEL happens via
+  # model.feature_subset in research runs (Задача 3.3) — FEATURE_COLUMNS is
+  # NOT touched. d/thres are preregistered by the owner (2026-08-29); do not
+  # tune them against backtest outcomes.
+  fractional_diff:
+    enabled: false
+    d: 0.4
+    thres: 1.0e-5
+    price_columns: [close]
+  # Задача 3.2: two-sided CUSUM change-point features on log returns.
+  # P2 regime/abstention feature — NOT direction alpha (see
+  # features/cusum.py and docs/MQL5_OBSERVER_PLAN.md). Default OFF ->
+  # build_full_df adds nothing (byte-identical baseline). The h/k pair
+  # below is PREREGISTERED (owner, 2026-08-29) per the MQL5-plan rule:
+  # fix h/k + false-alarm budget before any OOS look; recalibration is a
+  # separate registered study, never tuned against backtest outcomes.
+  cusum:
+    enabled: false
+    roll_sigma_window: 96   # M15 = 24h
+    threshold_sigma: 3.0
+    drift_sigma: 0.5
+  # ТЗ 8.3: Feature Store — SQLite catalog of computed feature snapshots
+  # (features/feature_store.py). Default OFF: no snapshots are written and the
+  # pipeline behaviour is identical to the pre-store baseline. When enabled,
+  # each directional signal bar's feature dict is persisted with a
+  # deterministic snapshot_id (sha256 of symbol|tf|bar_ts|version|features
+  # hash); the id is published as `feature_snapshot_id` in the signal payload
+  # and flows into execution provenance via trade_geometry when present.
+  # db_path defaults to general.db_path (candles DB) when unset.
+  store:
+    enabled: false
+    db_path: null
 
 
 regime:
@@ -495,6 +574,16 @@ labeling:
   tp1_atr_multiplier: 1.0
   tp2_atr_multiplier: 1.8
   tp3_atr_multiplier: 2.8
+  # Adaptive holding period (Task 9): per-bar horizon from the bar's
+  # volatility ratio vol_pct = atr / price. vol_pct > adaptive_high_vol_pct
+  # -> horizon // 4; > adaptive_mid_vol_pct -> horizon // 2; else the full
+  # horizon. Default FALSE: prod behaviour is unchanged; flipping it on is an
+  # explicit per-asset (assets.<KEY>.labeling) or global decision and changes
+  # the label space (bump contract_version / re-train before trusting it).
+  adaptive_holding: false
+  adaptive_high_vol_pct: 0.02
+  adaptive_mid_vol_pct: 0.01
+  price_column: close
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +674,11 @@ backtest:
 # TradeThrottle: daily trade limit + loss-streak cooldown + risk step-down.
 # Blocks new trades when limits are hit and reduces position size after losses.
 risk_throttle:
+  # TEMPORARY STUB (2026-08-28, owner request — demo testing): disables ALL
+  # loss-based gates (cooldown, hard stop, daily loss limit, risk step-down).
+  # The daily trade-count cap (max_trades_per_day) still applies.
+  # Remove `stub: true` to re-enable real loss protection.
+  stub: true
   # CALIBRATION 2026-08-23 (all-time deal history): the counter increments per
   # closed LEG (on_trade_closed fires per leg). 16 traded days: mean 27.8
   # legs/day, median 14, p90=71; the 58-122 spike days ran on the 4x TRIAL
@@ -664,6 +758,18 @@ deploy_guard:
 #   slot, so 6 slots = only 2 assets and high-confidence signals on the 3rd asset were
 #   suppressed by "Max concurrent positions limit reached (6/6)").
 execution:
+  # P0-1: per-timeframe signal TTL (ms). A signal without an explicit
+  # expires_at expires after this many milliseconds from creation. The value
+  # is keyed by the asset's trading timeframe (assets.<key>.timeframe or
+  # market_data.timeframe). Timeframes not listed fall back to
+  # execution.signal_ttl_ms.default (7200000 = 2h; the legacy hardcoded 24h
+  # default let stale M1 signals trade half a day later).
+  signal_ttl_ms:
+    default: 7200000      # 2 hours
+    M1: 1800000           # 30 minutes
+    M5: 7200000           # 2 hours
+    M15: 21600000         # 6 hours
+    H1: 86400000          # 24 hours
   # SAFETY FREEZE (2026-08-16): the causal signal-bar grid contract invalidates
   # every admission gate measured with entry-bar ATR, including BTCUSD. Empty is
   # an explicit deny-all list (mt5_trader distinguishes it from a missing key).
@@ -728,7 +834,10 @@ execution:
   # hard-coded 0.01 that made the 50/30/20 scale-out unimplementable. When unset
   # it falls back to backtest.volume (default 0.10, which yields fillable
   # tranches 0.05 / 0.03 / 0.02).
-  volume: 1
+  # OWNER REQUEST 2026-08-28: 0.03 for the $500 demo account (3 x 0.01 legs,
+  # each with its own TP1/TP2/TP3; scale-out partial closes are skipped below
+  # the 0.01 broker min lot ΓÇö remainder stays on broker TP/SL).
+  volume: 0.03
   signal_ranking_metric: confidence   # confidence | ev | probability
 
 
@@ -758,6 +867,11 @@ risk:
     - [-0.06, 0.50]
     - [-0.08, 0.0]
   min_lot: 1
+  # P0-5: the daily-loss circuit breaker measures TRADING loss. Swaps and
+  # other carry adjustments that MT5 settles into `balance` overnight are
+  # excluded so a -$50 swap cannot trip a $150 daily-loss limit by itself.
+  circuit_breaker:
+    exclude_swaps: true
 
 
 # ===== LOCKED HOLD-OUT (quant audit 2026-08-07, Claude plan) =====
@@ -783,6 +897,42 @@ validation:
   #   python -m scripts.build_provenance_manifest --asset XAUUSD --timeframe M15 \
   #       --broker <BROKER> --broker-symbol GOLD --out config/provenance/xauusd_m15.json
   require_provenance_manifest: false
+
+
+# ===== ROLLING HOLD-OUT (Rolling Holdout policy, Step 2, 2026-08-30) =====
+# When the nightly retrain is frozen on data up to validation.locked_holdout.start
+# (see scripts/overnight.py post-fix), the production model silently ages on
+# the live-forward accumulation. Shifting the lock must be a CONSCIOUS,
+# PREREGISTERED, JOURNALLED act - not a silent edit.
+#
+# These are the preregistered policy constants. The gate logic in
+# scripts/holdout_roll.py reads them from here; there are NO bare magic numbers
+# in the gate code. Cadence/step/tolerance are fixed up front (no fitting to
+# outcomes) and only changed by an explicit, reviewed config edit.
+holdout_roll:
+  # The lock start this policy was bootstrapped from. The CI guard
+  # (scripts/check_holdout_roll.py) treats this as the acceptable config value
+  # when the journal is empty, so an out-of-band reset to the original lock is
+  # not flagged as drift.
+  baseline_start: "2026-08-08"
+
+  # How often a lock shift MAY be proposed (days). Preregistered: ~monthly.
+  cadence_days: 30
+  # How far the lock advances each shift (days). Preregistered: +14d, leaving a
+  # 14-day overlap so each new candidate is still validated partly on already
+  # released data before the next shift.
+  step_days: 14
+
+  # Gate comparison against the incumbent (current production model), via
+  # deploy_guard.is_improvement. Same metric contract as deploy_guard.
+  primary_metric: expectancy
+  fallback_metrics: [sharpe_ratio, win_rate, total_pnl]
+  # Allowed degradation of the candidate vs the incumbent on the released slice.
+  # 0.0 = the candidate must be at least as good (strictly conservative).
+  tolerance: 0.0
+  # Minimum OOS trades on the released slice for the comparison to be trusted.
+  # A candidate (or incumbent) with fewer trades NEVER drives a lock shift.
+  released_min_trades: 20
   provenance_manifest_path: null
 
 # ===== TRADE PROFILES (TradeGroupSpec v1, ТЗ §8/§9) =====
@@ -937,3 +1087,67 @@ challenge:
   browser:
     headless: false
     profile_dir: data/challenge_browser_profile
+
+# Phase 3, Step 10 (TZ 8.1/8.2/8.8): standalone service processes with shared
+# health endpoints (services/ package). Entry points: python -m services.<name>.
+services:
+  ledger_bridge:
+    health_port: 8791
+    # P2-19: outbox delivery watermark must move within this budget while
+    # pending events exist, otherwise /health reports degraded.
+    watermark_max_age_min: 30
+  telegram_bot:
+    health_port: 8792
+  news_feed:
+    health_port: 8793
+    # Calendar disk cache (data/news_calendar_cache.json) must be younger
+    # than this, otherwise /health reports degraded.
+    max_cache_age_hours: 6
+    refresh_interval_seconds: 900
+
+# Phase 4, Step 12 (TZ 6.1/6.2): monitoring. Everything here is OFF by
+# default — enabling must not change trading behaviour, only observability.
+monitoring:
+  metrics:
+    # JSONL history sink (logs/metrics.jsonl); METRICS_JSONL_PATH env overrides.
+    jsonl_path: logs/metrics.jsonl
+  alerts:
+    # TZ 6.2: alert manager with rules + cooldowns. Disabled by default:
+    # wiring is added to run_bot only when this is true.
+    enabled: false
+    telegram: true            # deliver via alerts/telegram_bot.py
+    feed_stale_after_s: 30    # FEED_STALE: last tick older than N seconds
+    disk_min_free_mb: 500     # DISK_LOW: free space below threshold (P2-31)
+    mt5_disconnect_threshold: 5  # MT5_DISCONNECT: symbol_info_tick None N times
+  backup:
+    # TZ 6.5: SQLite backup retention (scripts/backup_db.py). Backups live in
+    # backups/ (git-ignored); keep = number of most recent *.bak files kept.
+    dir: backups
+    keep: 7
+  drift:
+    # P2-40 / TZ 5.3: PSI feature-drift monitoring in the overnight pipeline
+    # (stage drift_check). Disabled by default: enabling adds an observability
+    # stage AFTER retrain that compares the train feature matrix against fresh
+    # live features. train_csv/live_csv point at two csv/parquet matrices with
+    # the same feature columns (see scripts/monitor_feature_drift.py --help
+    # for the standalone CLI).
+    enabled: false
+    train_csv: null
+    live_csv: null
+    drifted_psi_threshold: 0.2
+  calibration:
+    # P2-46 / TZ 5.3: calibration monitoring in the overnight pipeline
+    # (stage calibration_check). Disabled by default. Computes Brier score +
+    # ECE on a jsonl/csv of model predictions vs binary outcomes (columns
+    # pred,outcome; see scripts/monitor_calibration.py --help for the
+    # standalone CLI). ECE above ece_threshold (default 0.1) -> WARNING in the
+    # overnight log.
+    enabled: false
+    input_path: null
+    ece_threshold: 0.1
+  logging:
+    # TZ 6.6 / P2-33: structured logging. format: text (default, unchanged
+    # behaviour) | json. RotatingFileHandler limits below.
+    format: text
+    max_bytes: 10485760   # 10 MB
+    backup_count: 5

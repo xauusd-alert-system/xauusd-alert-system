@@ -4,10 +4,10 @@ Unlike ``executed_trades`` (one mutable row per completed trade), this table kee
 EVERY order attempt: fills, partial fills and rejections.  Requested/fill prices
 and timestamps make spread/slippage/latency distributions reproducible per asset.
 """
+
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from typing import Any
 
@@ -57,8 +57,7 @@ def init_execution_ledger(db_path: str) -> None:
             if column not in existing:
                 conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN {column} TEXT")
         conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_asset_time "
-            f"ON {TABLE_NAME}(asset_key, requested_at_ms);"
+            f"CREATE INDEX IF NOT EXISTS idx_{TABLE_NAME}_asset_time ON {TABLE_NAME}(asset_key, requested_at_ms);"
         )
         conn.commit()
     finally:
@@ -124,10 +123,24 @@ def log_execution_attempt(
                 intent_id, precision, metadata_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                asset_key, broker_symbol, action, normalized_side, requested,
-                completed, max(0, completed - requested), requested_price,
-                filled_price, slippage, volume_requested, volume_filled, status,
-                retcode, rejection_reason, order_ticket, position_ticket, intent_id,
+                asset_key,
+                broker_symbol,
+                action,
+                normalized_side,
+                requested,
+                completed,
+                max(0, completed - requested),
+                requested_price,
+                filled_price,
+                slippage,
+                volume_requested,
+                volume_filled,
+                status,
+                retcode,
+                rejection_reason,
+                order_ticket,
+                position_ticket,
+                intent_id,
                 precision,
                 json.dumps(metadata or {}, sort_keys=True, default=str),
             ),
@@ -160,18 +173,17 @@ def broker_spread_report(db_path: str, timeframe: str, asset_key: str) -> dict:
     real_volume = pd.to_numeric(candles.get("real_volume"), errors="coerce").dropna()
     if spread.empty:
         return {
-            "asset_key": asset_key, "timeframe": timeframe,
-            "observations": 0, "unit": "broker_points",
+            "asset_key": asset_key,
+            "timeframe": timeframe,
+            "observations": 0,
+            "unit": "broker_points",
         }
     return {
         "asset_key": asset_key,
         "timeframe": timeframe,
         "observations": int(len(spread)),
         "unit": "broker_points",
-        "spread": {
-            f"p{int(q * 100):02d}": float(spread.quantile(q))
-            for q in (0.5, 0.9, 0.95, 0.99)
-        },
+        "spread": {f"p{int(q * 100):02d}": float(spread.quantile(q)) for q in (0.5, 0.9, 0.95, 0.99)},
         "real_volume_observations": int(len(real_volume)),
     }
 

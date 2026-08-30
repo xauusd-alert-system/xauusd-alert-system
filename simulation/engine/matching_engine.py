@@ -4,10 +4,11 @@ Matching engine for the virtual limit order book.
 Processes incoming market and limit orders against the resting book and
 emits Trade objects for each match, applying price-time priority.
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
 from typing import Callable
+from uuid import uuid4
 
 from simulation.engine.order import Order, Trade
 from simulation.engine.order_book import OrderBook
@@ -100,8 +101,7 @@ class MatchingEngine:
     # ------------------------------------------------------------------
     # Trade recording
     # ------------------------------------------------------------------
-    def _make_trade(self, incoming: Order, resting: Order, price: float,
-                    volume: float) -> Trade:
+    def _make_trade(self, incoming: Order, resting: Order, price: float, volume: float) -> Trade:
         if incoming.is_buy:
             buy_order_id, sell_order_id = incoming.order_id, resting.order_id
         else:

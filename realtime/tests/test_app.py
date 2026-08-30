@@ -1,8 +1,9 @@
 """
 Tests for FastAPI Realtime Application, Dashboard API, Charts, Sentiment, and Monte Carlo.
 """
-from fastapi.testclient import TestClient
+
 import pytest
+from fastapi.testclient import TestClient
 
 from realtime.app import app
 
@@ -92,18 +93,29 @@ def test_api_sentiment_endpoint_does_not_publish_sample_headlines(client, monkey
 
 def test_api_sentiment_computes_aggregate_from_real_feed(client, monkeypatch):
     events = [
-        {"title": "Fed Rate Cut Expectations Rise", "country": "USD",
-         "timestamp_utc": 1_800_000_000, "datetime_str": "2027-01-01 12:00 UTC"},
-        {"title": "Strong Jobs Report Beats", "country": "USD",
-         "timestamp_utc": 1_800_008_640, "datetime_str": "2027-01-02 12:00 UTC"},
-        {"title": "Geopolitical Tensions Escalate", "country": "USD",
-         "timestamp_utc": 1_800_017_280, "datetime_str": "2027-01-03 12:00 UTC"},
+        {
+            "title": "Fed Rate Cut Expectations Rise",
+            "country": "USD",
+            "timestamp_utc": 1_800_000_000,
+            "datetime_str": "2027-01-01 12:00 UTC",
+        },
+        {
+            "title": "Strong Jobs Report Beats",
+            "country": "USD",
+            "timestamp_utc": 1_800_008_640,
+            "datetime_str": "2027-01-02 12:00 UTC",
+        },
+        {
+            "title": "Geopolitical Tensions Escalate",
+            "country": "USD",
+            "timestamp_utc": 1_800_017_280,
+            "datetime_str": "2027-01-03 12:00 UTC",
+        },
     ]
     monkeypatch.setattr("data.news_filter.fetch_economic_calendar", lambda: events)
     monkeypatch.setattr(
         "data.news_filter.news_feed_status",
-        lambda: {"available": True, "last_success_age_seconds": 120,
-                 "error": None, "event_count": 3},
+        lambda: {"available": True, "last_success_age_seconds": 120, "error": None, "event_count": 3},
     )
     payload = client.get("/api/sentiment").json()
     assert payload["available"] is True
@@ -122,8 +134,7 @@ def test_api_sentiment_available_empty_calendar_is_not_a_fallback(client, monkey
     monkeypatch.setattr("data.news_filter.fetch_economic_calendar", lambda: [])
     monkeypatch.setattr(
         "data.news_filter.news_feed_status",
-        lambda: {"available": True, "last_success_age_seconds": 60,
-                 "error": None, "event_count": 0},
+        lambda: {"available": True, "last_success_age_seconds": 60, "error": None, "event_count": 0},
     )
     payload = client.get("/api/sentiment").json()
     assert payload["available"] is True
@@ -145,9 +156,15 @@ def test_api_monte_carlo_uses_primary_event_ledger(client, monkeypatch, tmp_path
     db = str(tmp_path / "trades.sqlite")
     for ticket, pnl in ((1, 10.0), (2, -4.0)):
         append_trading_event(
-            db, event_type="position_closed", signal_id=f"s{ticket}", asset_key="XAUUSD",
-            strategy_version="v3", config_hash="cfg", actor="broker_history",
-            position_ticket=ticket, payload={"realized_pnl": pnl},
+            db,
+            event_type="position_closed",
+            signal_id=f"s{ticket}",
+            asset_key="XAUUSD",
+            strategy_version="v3",
+            config_hash="cfg",
+            actor="broker_history",
+            position_ticket=ticket,
+            payload={"realized_pnl": pnl},
         )
     monkeypatch.setenv("TRADE_LOG_DB_PATH", db)
     payload = client.get("/api/monte-carlo").json()

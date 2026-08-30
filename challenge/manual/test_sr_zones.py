@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 """Tests for S/R zone detection and proximity filter."""
+
 import datetime as dt
 import os
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from challenge.manual.sr_zones import (
-    detect_sr_zones, check_proximity, format_zones,
-    SRZone, _resample_5min, _swing_points, _cluster_zones,
+    SRZone,
+    _cluster_zones,
+    check_proximity,
+    detect_sr_zones,
+    format_zones,
 )
 
 
@@ -19,18 +22,16 @@ def _bar(ts, o, h, l, c, v=1000):
 
 
 def _ts(y, m, d, h, mi=0):
-    return int(dt.datetime(y, m, d, h, mi, tzinfo=dt.timezone.utc).timestamp())
+    return int(dt.datetime(y, m, d, h, mi, tzinfo=dt.UTC).timestamp())
 
 
 class TestSRZoneDetection(unittest.TestCase):
     def test_prev_day_levels(self):
         """Previous day high/low/close should create zones."""
         # Day 1 (prior): session 13:30-19:55 UTC
-        day1 = [_bar(_ts(2026, 8, 19, 13, 30), 100, 105, 99, 103),
-                _bar(_ts(2026, 8, 19, 19, 55), 103, 104, 102, 102)]
+        day1 = [_bar(_ts(2026, 8, 19, 13, 30), 100, 105, 99, 103), _bar(_ts(2026, 8, 19, 19, 55), 103, 104, 102, 102)]
         # Day 2 (current): some bars to detect zones from
-        day2 = [_bar(_ts(2026, 8, 20, 9, 0), 102, 103, 101, 102),
-                _bar(_ts(2026, 8, 20, 13, 30), 102, 104, 101, 103)]
+        day2 = [_bar(_ts(2026, 8, 20, 9, 0), 102, 103, 101, 102), _bar(_ts(2026, 8, 20, 13, 30), 102, 104, 101, 103)]
         candles = day1 + day2
         zones = detect_sr_zones(candles, dt.date(2026, 8, 20))
         self.assertGreater(len(zones), 0)
@@ -41,9 +42,11 @@ class TestSRZoneDetection(unittest.TestCase):
 
     def test_premarket_levels(self):
         """Today's premarket high/low should create zones."""
-        pm = [_bar(_ts(2026, 8, 20, 9, 0), 100, 102, 99, 101),
-              _bar(_ts(2026, 8, 20, 10, 0), 101, 104, 100, 103),
-              _bar(_ts(2026, 8, 20, 12, 0), 103, 103, 101, 101)]
+        pm = [
+            _bar(_ts(2026, 8, 20, 9, 0), 100, 102, 99, 101),
+            _bar(_ts(2026, 8, 20, 10, 0), 101, 104, 100, 103),
+            _bar(_ts(2026, 8, 20, 12, 0), 103, 103, 101, 101),
+        ]
         session = [_bar(_ts(2026, 8, 20, 14, 0), 101, 102, 100, 101)]
         candles = pm + session
         zones = detect_sr_zones(candles, dt.date(2026, 8, 20))
@@ -95,8 +98,7 @@ class TestProximityFilter(unittest.TestCase):
 
     def test_multiple_zones(self):
         """Multiple zones: should fail on the closest problematic one."""
-        zones = [SRZone(102.0, "prev_high", "resistance", 1, 0.5),
-                 SRZone(95.0, "prev_low", "support", 1, 0.5)]
+        zones = [SRZone(102.0, "prev_high", "resistance", 1, 0.5), SRZone(95.0, "prev_low", "support", 1, 0.5)]
         # Entry at 101.5 — within 2 of resistance at 102
         ok, _ = check_proximity(101.5, 100.0, 105.0, "long", zones, buffer_usd=2.0)
         self.assertFalse(ok)
@@ -105,8 +107,7 @@ class TestProximityFilter(unittest.TestCase):
 class TestClustering(unittest.TestCase):
     def test_nearby_levels_cluster(self):
         """Two levels within tolerance should merge."""
-        levels = [(100.0, "prev_high", "2026-08-19"),
-                  (100.15, "premarket_high", "2026-08-20")]
+        levels = [(100.0, "prev_high", "2026-08-19"), (100.15, "premarket_high", "2026-08-20")]
         zones = _cluster_zones(levels, tolerance_pct=0.002)
         self.assertEqual(len(zones), 1)
         self.assertAlmostEqual(zones[0].price, 100.075, places=2)
@@ -114,8 +115,7 @@ class TestClustering(unittest.TestCase):
 
     def test_far_levels_dont_cluster(self):
         """Two levels beyond tolerance should stay separate."""
-        levels = [(100.0, "prev_high", "2026-08-19"),
-                  (103.0, "prev_high", "2026-08-18")]
+        levels = [(100.0, "prev_high", "2026-08-19"), (103.0, "prev_high", "2026-08-18")]
         zones = _cluster_zones(levels, tolerance_pct=0.002)
         self.assertEqual(len(zones), 2)
 
@@ -125,8 +125,7 @@ class TestFormatZones(unittest.TestCase):
         self.assertEqual(format_zones([]), "  (no zones detected)")
 
     def test_with_zones(self):
-        zones = [SRZone(105.0, "prev_high", "resistance", 1, 0.5),
-                 SRZone(95.0, "prev_low", "support", 2, 0.7)]
+        zones = [SRZone(105.0, "prev_high", "resistance", 1, 0.5), SRZone(95.0, "prev_low", "support", 2, 0.7)]
         text = format_zones(zones)
         self.assertIn("105.00", text)
         self.assertIn("95.00", text)

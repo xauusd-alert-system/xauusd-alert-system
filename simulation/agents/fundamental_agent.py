@@ -9,6 +9,7 @@ moves instead of perpetual mean-reversion.
 News shocks SHIFT the anchor permanently, producing lasting directional
 pressure rather than a one-tick blip.
 """
+
 from __future__ import annotations
 
 from typing import Optional

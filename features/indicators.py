@@ -1,6 +1,7 @@
 """
 Technical indicators + Advanced Microstructure & Price Action features.
 """
+
 import numpy as np
 import pandas as pd
 
@@ -127,7 +128,7 @@ def build_all_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     # 3. Институциональные фичи (как раньше)
     log_hl = np.log(out["high"] / out["low"])
     log_co = np.log(out["close"] / out["open"])
-    out["garman_klass_vol"] = np.sqrt(0.5 * (log_hl ** 2) - (2 * np.log(2) - 1) * (log_co ** 2)).fillna(0.0)
+    out["garman_klass_vol"] = np.sqrt(0.5 * (log_hl**2) - (2 * np.log(2) - 1) * (log_co**2)).fillna(0.0)
 
     out["dist_ema50_atr"] = ((out["close"] - out["ema_50"]) / atr_safe).fillna(0.0)
     out["dist_ema200_atr"] = ((out["close"] - out["ema_200"]) / atr_safe).fillna(0.0)
@@ -212,7 +213,9 @@ def build_all_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     # and this rename alone forces no retrain.
     bb_width_min = out["bb_width"].rolling(100).min()
     bb_width_max = out["bb_width"].rolling(100).max()
-    out["bb_width_minmax_100"] = ((out["bb_width"] - bb_width_min) / (bb_width_max - bb_width_min)).fillna(0.0).clip(0, 1)
+    out["bb_width_minmax_100"] = (
+        ((out["bb_width"] - bb_width_min) / (bb_width_max - bb_width_min)).fillna(0.0).clip(0, 1)
+    )
 
     atr_min = atr_safe.rolling(100).min()
     atr_max = atr_safe.rolling(100).max()

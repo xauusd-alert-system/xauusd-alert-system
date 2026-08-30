@@ -12,6 +12,7 @@ raises ``ExecutionIntentMismatch`` on any drift. The intent carries everything t
 broker request builder needs: entry reference, the immutable TP ladder, SL, total
 volume, per-leg volumes, risk envelope, profile id and TTL.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -54,9 +55,7 @@ class ExecutionIntent(BaseModel):
 
     @classmethod
     def from_spec(cls, spec: TradeGroupSpec, intent_id: str | None = None) -> "ExecutionIntent":
-        volumes = [
-            round(spec.risk.total_volume * t.allocation, 8) for t in spec.targets
-        ]
+        volumes = [round(spec.risk.total_volume * t.allocation, 8) for t in spec.targets]
         prov = spec.provenance or {}
         return cls(
             intent_id=intent_id or spec.intent_id,
@@ -106,6 +105,4 @@ class ExecutionIntent(BaseModel):
         if not self.cost_snapshot_id:
             missing.append("cost_snapshot_id")
         if missing:
-            raise ExecutionIntentMismatch(
-                f"intent {self.intent_id} missing provenance for submission: {missing}"
-            )
+            raise ExecutionIntentMismatch(f"intent {self.intent_id} missing provenance for submission: {missing}")

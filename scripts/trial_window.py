@@ -26,6 +26,7 @@ Usage:
   python -m scripts.trial_window report         # generate report now
   python -m scripts.trial_window revert         # restore config now (manual)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,9 +36,8 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import pandas as pd
 import yaml
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -53,8 +53,10 @@ REPORT_DIR = os.path.join(ROOT, "docs")
 # (source line, target line) — applied to the live config at `start`.
 TRIAL_EDITS = [
     ("  mode: research", "  mode: demo_systematic"),
-    ("  mode: research  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic",
-     "  mode: demo_systematic  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic"),
+    (
+        "  mode: research  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic",
+        "  mode: demo_systematic  # simulation | research | paper | human_confirmed | demo_systematic | live_systematic",
+    ),
     ("  max_open_positions_per_asset: 1", "  max_open_positions_per_asset: 2"),
     ("  max_concurrent_positions_global: 3", "  max_concurrent_positions_global: 6"),
     ("  max_daily_trades_per_asset: 10", "  max_daily_trades_per_asset: 20"),
@@ -65,8 +67,12 @@ TRIAL_EDITS = [
     ("  total_open_risk_cap: 0.0075", "  total_open_risk_cap: 0.03"),
 ]
 
-XAGUSD_EDIT = ("XAGUSD:\n    # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).",
-               "XAGUSD:\n    # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).\n    # TRIAL-48H (2026-08-18): temporarily re-enabled.")
+XAGUSD_EDIT = (
+    "XAGUSD:\n    # Quant audit 2026-08-07: XAGUSD moved to SHADOW (enabled: false).",
+    "XAGUSD:\n    # Quant audit 2026-08-07: XAGUSD moved to SHADOW "
+    "(enabled: false).\n    # TRIAL-48H (2026-08-18): temporarily "
+    "re-enabled.",
+)
 
 ASSETS_EDIT = ("  enabled_assets: []", "  enabled_assets: [BTCUSD, XAUUSD, XAGUSD, EURUSD, GBPUSD]")
 
@@ -74,12 +80,12 @@ ASSETS_EDIT = ("  enabled_assets: []", "  enabled_assets: [BTCUSD, XAUUSD, XAGUS
 def _log(line: str) -> None:
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now(timezone.utc).isoformat()} {line}\n")
+        f.write(f"{datetime.now(UTC).isoformat()} {line}\n")
     print(line)
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _read_text(path: str) -> str:
@@ -102,9 +108,9 @@ def _apply_single(text: str, src: str, dst: str) -> tuple[str, str]:
 
 
 def _trial_values_present(cfg: dict) -> bool:
-    exec_cfg = (cfg.get("execution") or {})
-    risk = (cfg.get("risk") or {})
-    alerts = (cfg.get("alerts") or {})
+    exec_cfg = cfg.get("execution") or {}
+    risk = cfg.get("risk") or {}
+    alerts = cfg.get("alerts") or {}
     checks = [
         (cfg.get("deployment") or {}).get("mode") == "demo_systematic",
         exec_cfg.get("enabled_assets") == ["BTCUSD", "XAUUSD", "XAGUSD", "EURUSD", "GBPUSD"],
@@ -136,8 +142,7 @@ def apply_trial_config() -> list[str]:
     if (cfg.get("assets") or {}).get("XAGUSD", {}).get("enabled") is not True:
         text, status = _apply_single(text, XAGUSD_EDIT[0], XAGUSD_EDIT[1])
         if status == "applied":
-            text = text.replace(XAGUSD_EDIT[0] + "\n    enabled: false",
-                                XAGUSD_EDIT[1] + "\n    enabled: true", 1)
+            text = text.replace(XAGUSD_EDIT[0] + "\n    enabled: false", XAGUSD_EDIT[1] + "\n    enabled: true", 1)
         statuses.append(f"XAGUSD.enabled            -> {status}")
     yaml.safe_load(text)  # must parse, else abort
     _write_text(CONFIG_PATH, text)
@@ -146,7 +151,7 @@ def apply_trial_config() -> list[str]:
 
 def snapshot_config() -> str:
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     snap = os.path.join(BACKUP_DIR, f"config.yaml.pre_trial_48h_{ts}.yaml")
     shutil.copy2(CONFIG_PATH, snap)
     return snap
@@ -170,6 +175,7 @@ def stop_trader() -> list[str]:
     stopped = []
     try:
         import psutil  # type: ignore
+
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 cmd = " ".join(proc.info.get("cmdline") or [])
@@ -197,7 +203,9 @@ def stop_trader() -> list[str]:
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command", script],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         return [line.strip() for line in (out.stdout or "").splitlines() if line.strip()]
     except Exception as exc:
@@ -206,10 +214,12 @@ def stop_trader() -> list[str]:
 
 
 def db_paths() -> tuple[str, str]:
-    from config.loader import load_config, get_env
+    from config.loader import get_env, load_config
+
     cfg = load_config()
-    trade_db = str(get_env("TRADE_LOG_DB_PATH",
-                           default=cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")))
+    trade_db = str(
+        get_env("TRADE_LOG_DB_PATH", default=cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite"))
+    )
     signal_db = str(get_env("SIGNAL_LOG_DB_PATH", default="data/signal_log.db"))
     return trade_db, signal_db
 
@@ -218,16 +228,16 @@ def _fmt_ts(ts) -> str:
     if ts is None:
         return "—"
     try:
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(int(ts), tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     except Exception:
         return str(ts)
 
 
 def generate_report(state: dict) -> str:
-    from data.trading_event_ledger import read_trading_events, verify_event_chain
-    from data.trade_logger import read_executed_trades
     from data.execution_ledger import read_execution_ledger
     from data.signal_log import read_signal_history
+    from data.trade_logger import read_executed_trades
+    from data.trading_event_ledger import read_trading_events, verify_event_chain
 
     trade_db, signal_db = db_paths()
     started_at = state.get("started_at_utc", _now_utc())
@@ -237,11 +247,11 @@ def generate_report(state: dict) -> str:
 
     lines: list[str] = []
     w = lines.append
-    w(f"# TRIAL WINDOW REPORT — 48h full-power demo run (XAUUSD Alert System)")
+    w("# TRIAL WINDOW REPORT — 48h full-power demo run (XAUUSD Alert System)")
     w("")
     w(f"- **Окно:** {started_at} → {ends_at} UTC")
     w(f"- **Длительность:** {state.get('hours', 48)} ч")
-    w(f"- **Счёт:** FxPro-MT5 Demo (MT5_SERVER из .env)")
+    w("- **Счёт:** FxPro-MT5 Demo (MT5_SERVER из .env)")
     w(f"- **Snapshot config:** `{state.get('snapshot')}`")
     w(f"- **Trade DB:** `{trade_db}`")
     w(f"- **Signal DB:** `{signal_db}`")
@@ -282,9 +292,11 @@ def generate_report(state: dict) -> str:
     w("")
     try:
         events = read_trading_events(trade_db)
-        in_window = events[
-            (events["event_timestamp_utc"] >= start_ts) & (events["event_timestamp_utc"] <= end_ts)
-        ] if len(events) else events
+        in_window = (
+            events[(events["event_timestamp_utc"] >= start_ts) & (events["event_timestamp_utc"] <= end_ts)]
+            if len(events)
+            else events
+        )
         if len(in_window) == 0:
             w("Событий за окно нет.")
         else:
@@ -303,8 +315,10 @@ def generate_report(state: dict) -> str:
                 for _, row in closed.iterrows():
                     payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
                     pnl = payload.get("realized_pnl")
-                    w(f"| {_fmt_ts(row['event_timestamp_utc'])} | {row['asset_key']} | "
-                      f"{row['position_ticket']} | {row['signal_id']} | {pnl} | {row['reason'] or ''} |")
+                    w(
+                        f"| {_fmt_ts(row['event_timestamp_utc'])} | {row['asset_key']} | "
+                        f"{row['position_ticket']} | {row['signal_id']} | {pnl} | {row['reason'] or ''} |"
+                    )
     except Exception as exc:
         w(f"Ошибка чтения леджера: {exc}")
 
@@ -321,9 +335,12 @@ def generate_report(state: dict) -> str:
             w("| Ticket | Символ | Направление | Вход (UTC) | Выход (UTC) | Вход | Выход | PnL | Исход |")
             w("|---|---|---|---|---|---|---|---|---|")
             for _, t in trades.iterrows():
-                w(f"| {t['ticket']} | {t['symbol']} | {t['bias']} | {_fmt_ts(t['entry_time'])} | "
-                  f"{_fmt_ts(t.get('close_time'))} | {t['entry_price']} | {t.get('close_price') or '—'} | "
-                  f"{t.get('pnl') or '—'} | {'WIN' if t.get('outcome') == 1 else 'LOSS' if t.get('outcome') == 0 else 'OPEN'} |")
+                w(
+                    f"| {t['ticket']} | {t['symbol']} | {t['bias']} | {_fmt_ts(t['entry_time'])} | "
+                    f"{_fmt_ts(t.get('close_time'))} | {t['entry_price']} | {t.get('close_price') or '—'} | "
+                    f"{t.get('pnl') or '—'} | "
+                    f"{'WIN' if t.get('outcome') == 1 else 'LOSS' if t.get('outcome') == 0 else 'OPEN'} |"
+                )
             w("")
             stats = trades[trades["pnl"].notna()]
             wins = stats[stats["pnl"] >= 0]
@@ -333,12 +350,19 @@ def generate_report(state: dict) -> str:
             gross_loss = float(losses["pnl"].sum()) if len(losses) else 0.0
             w("### 4.1 Итоговая статистика")
             w("")
-            w(f"- Всего сделок: **{len(trades)}** (закрыто: {len(stats)}, открыто на конец окна: {len(trades) - len(stats)})")
+            w(
+                f"- Всего сделок: **{len(trades)}** (закрыто: {len(stats)}, "
+                f"открыто на конец окна: {len(trades) - len(stats)})"
+            )
             w(f"- Win rate: **{(100 * len(wins) / len(stats)):.1f}%**" if len(stats) else "- Win rate: —")
             w(f"- Общий PnL: **${total_pnl:+.2f}**")
             w(f"- Средний выигрыш: ${(gross_win / len(wins)):+.2f}" if len(wins) else "- Средний выигрыш: —")
             w(f"- Средний проигрыш: ${(gross_loss / len(losses)):+.2f}" if len(losses) else "- Средний проигрыш: —")
-            w(f"- Profit factor: **{(gross_win / abs(gross_loss)):.2f}**" if gross_loss else "- Profit factor: ∞ (нет убытков)")
+            w(
+                f"- Profit factor: **{(gross_win / abs(gross_loss)):.2f}**"
+                if gross_loss
+                else "- Profit factor: ∞ (нет убытков)"
+            )
             w("")
             w("### 4.2 По активам")
             w("")
@@ -395,6 +419,7 @@ def generate_report(state: dict) -> str:
     w("")
     try:
         from data.signal_log import init_schema as init_signal_schema
+
         init_signal_schema(signal_db)
         sig = read_signal_history(signal_db, start_ts=start_ts, end_ts=end_ts)
         if len(sig) == 0:
@@ -403,9 +428,13 @@ def generate_report(state: dict) -> str:
             w(f"- Всего сигналов: {len(sig)}")
             for symbol, grp in sig.groupby("symbol"):
                 conf = grp["confidence"].dropna()
-                w(f"- **{symbol}**: {len(grp)} сигналов · bias: "
-                  f"{grp['bias'].value_counts().to_dict()} · avg conf: "
-                  f"{float(conf.mean()):.3f}" if len(conf) else f"- **{symbol}**: {len(grp)} сигналов")
+                w(
+                    f"- **{symbol}**: {len(grp)} сигналов · bias: "
+                    f"{grp['bias'].value_counts().to_dict()} · avg conf: "
+                    f"{float(conf.mean()):.3f}"
+                    if len(conf)
+                    else f"- **{symbol}**: {len(grp)} сигналов"
+                )
     except Exception as exc:
         w(f"Ошибка чтения signal_log: {exc}")
 
@@ -421,11 +450,14 @@ def generate_report(state: dict) -> str:
             w("Открытых позиций на конец окна нет.")
         else:
             for _, t in open_pos.iterrows():
-                w(f"- Ticket {t['ticket']} · {t['symbol']} · {t['bias']} · вход {_fmt_ts(t['entry_time'])} @ {t['entry_price']}")
+                w(
+                    f"- Ticket {t['ticket']} · {t['symbol']} · {t['bias']} · "
+                    f"вход {_fmt_ts(t['entry_time'])} @ {t['entry_price']}"
+                )
     except Exception as exc:
         w(f"Ошибка: {exc}")
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     report_path = os.path.join(REPORT_DIR, f"TRIAL_WINDOW_REPORT_{ts}.md")
     _write_text(report_path, "\n".join(lines) + "\n")
     _log(f"Report written: {report_path}")
@@ -436,17 +468,21 @@ def cmd_start(args) -> int:
     if load_state() and not args.force:
         print("Trial window already active. Use --force to re-start.")
         return 1
-    existing = sorted(
-        os.path.join(BACKUP_DIR, name)
-        for name in os.listdir(BACKUP_DIR)
-        if name.startswith("config.yaml.pre_trial_48h_") and name.endswith(".yaml")
-    ) if os.path.isdir(BACKUP_DIR) else []
+    existing = (
+        sorted(
+            os.path.join(BACKUP_DIR, name)
+            for name in os.listdir(BACKUP_DIR)
+            if name.startswith("config.yaml.pre_trial_48h_") and name.endswith(".yaml")
+        )
+        if os.path.isdir(BACKUP_DIR)
+        else []
+    )
     snap = existing[0] if existing else snapshot_config()
     statuses = apply_trial_config()
     _log("Trial config applied:")
     for s in statuses:
         _log(f"  {s}")
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     ends = started + timedelta(hours=args.hours)
     state = {
         "snapshot": snap,
@@ -473,7 +509,7 @@ def cmd_watch(args) -> int:
     _log(f"Watcher started; ends_at={state['ends_at_utc']}")
     while True:
         _write_text(HEARTBEAT_PATH, f"alive {_now_utc()} ends_at={state['ends_at_utc']}\n")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         end = datetime.fromisoformat(state["ends_at_utc"])
         if now >= end:
             _log("Window ended; finalizing (stop trader -> report -> revert config)")

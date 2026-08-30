@@ -6,6 +6,7 @@ process-local TTL cache that serves dashboard polling without re-computing
 serially. Tests monkeypatch pipelines per-test, so the cache must be off
 for the whole test session.
 """
+
 import pytest
 
 import realtime.app as app_mod

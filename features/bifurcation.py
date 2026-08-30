@@ -21,13 +21,14 @@ Usage:
     from features.bifurcation import add_bifurcation_features
     df = add_bifurcation_features(df)  # adds break_score, break_intensity, agent_long_ratio
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-
 # --- helpers (causal) -------------------------------------------------------
+
 
 def _ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
@@ -45,6 +46,7 @@ def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 # --- per-agent vote matrices (vectorized, causal) ---------------------------
 
+
 def _trend_votes(df: pd.DataFrame, n_agents: int = 24) -> np.ndarray:
     """Trend agents: stricter — higher ADX, steeper slope, price must be clearly
     beyond EMA. Fewer, more selective votes -> entropy more meaningful."""
@@ -58,13 +60,17 @@ def _trend_votes(df: pd.DataFrame, n_agents: int = 24) -> np.ndarray:
     votes = np.zeros((len(df), n_agents), dtype=np.int8)
     rng = np.random.default_rng(42)
     for k in range(n_agents):
-        adx_thr = 24 + rng.uniform(-3, 4)       # was 18±6 -> now 24±4, much stricter
-        slope_eps = rng.uniform(0.12, 0.28)     # was 0.0-0.15 -> now 0.12-0.28
+        adx_thr = 24 + rng.uniform(-3, 4)  # was 18±6 -> now 24±4, much stricter
+        slope_eps = rng.uniform(0.12, 0.28)  # was 0.0-0.15 -> now 0.12-0.28
         # price must be beyond EMA by 0.15*ATR to count
         atr = df["atr"] if "atr" in df.columns else pd.Series(1.0, index=df.index)
         dist = (close - ema_fast).abs() / atr.replace(0, np.nan)
-        long_cond = (slope_fast > slope_eps) & (slope_slow > 0.08) & (adx > adx_thr) & (close > ema_fast) & (dist > 0.15)
-        short_cond = (slope_fast < -slope_eps) & (slope_slow < -0.08) & (adx > adx_thr) & (close < ema_fast) & (dist > 0.15)
+        long_cond = (
+            (slope_fast > slope_eps) & (slope_slow > 0.08) & (adx > adx_thr) & (close > ema_fast) & (dist > 0.15)
+        )
+        short_cond = (
+            (slope_fast < -slope_eps) & (slope_slow < -0.08) & (adx > adx_thr) & (close < ema_fast) & (dist > 0.15)
+        )
         v = np.zeros(len(df), dtype=np.int8)
         v[long_cond.values] = 1
         v[short_cond.values] = -1
@@ -83,8 +89,8 @@ def _countertrend_votes(df: pd.DataFrame, n_agents: int = 24) -> np.ndarray:
     votes = np.zeros((len(df), n_agents), dtype=np.int8)
     rng = np.random.default_rng(123)
     for k in range(n_agents):
-        rsi_lo = 22 + rng.uniform(-3, 3)   # was 28±5 -> now 22±3, deeper oversold
-        rsi_hi = 78 + rng.uniform(-3, 3)   # was 72±5 -> now 78±3, deeper overbought
+        rsi_lo = 22 + rng.uniform(-3, 3)  # was 28±5 -> now 22±3, deeper oversold
+        rsi_hi = 78 + rng.uniform(-3, 3)  # was 72±5 -> now 78±3, deeper overbought
         # must be within 0.3 ATR of Donchian extreme to count
         atr = df["atr"] if "atr" in df.columns else pd.Series(1.0, index=df.index)
         dist_atr_hi = (don_hi - close) / atr.replace(0, np.nan)
@@ -125,10 +131,9 @@ def _entropy_from_votes(votes: np.ndarray) -> np.ndarray:
     return ent
 
 
-def add_bifurcation_features(df: pd.DataFrame,
-                             n_trend: int = 32,
-                             n_counter: int = 32,
-                             n_noise: int = 16) -> pd.DataFrame:
+def add_bifurcation_features(
+    df: pd.DataFrame, n_trend: int = 32, n_counter: int = 32, n_noise: int = 16
+) -> pd.DataFrame:
     """Attach agent-based bifurcation columns (causal).
 
     Added columns:
@@ -151,8 +156,18 @@ def add_bifurcation_features(df: pd.DataFrame,
     long_cnt = np.sum(all_votes == 1, axis=1).astype(float)
     short_cnt = np.sum(all_votes == -1, axis=1).astype(float)
     total_dir = long_cnt + short_cnt
-    out["agent_long_ratio"] = np.divide(long_cnt, total_dir, out=np.full_like(long_cnt, 0.5, dtype=float), where=total_dir>0)
-    out["agent_short_ratio"] = np.divide(short_cnt, total_dir, out=np.full_like(short_cnt, 0.5, dtype=float), where=total_dir>0)
+    out["agent_long_ratio"] = np.divide(
+        long_cnt,
+        total_dir,
+        out=np.full_like(long_cnt, 0.5, dtype=float),
+        where=total_dir > 0,
+    )
+    out["agent_short_ratio"] = np.divide(
+        short_cnt,
+        total_dir,
+        out=np.full_like(short_cnt, 0.5, dtype=float),
+        where=total_dir > 0,
+    )
 
     # intensity amplifier: order-flow divergence + BB squeeze
     cvd_slope = out["cvd_slope_10"].abs() if "cvd_slope_10" in out.columns else pd.Series(0.0, index=out.index)
@@ -163,13 +178,17 @@ def add_bifurcation_features(df: pd.DataFrame,
         squeeze = 1.0 - out["bb_width_minmax_100"].fillna(0.5)
     else:
         squeeze = pd.Series(0.0, index=out.index)
-    out["break_intensity"] = (out["break_score"] * (1.0 + cvd_slope.fillna(0.0).clip(0, 3) * 0.3 + squeeze.fillna(0.0) * 0.4)).clip(0, 1.5)
+    out["break_intensity"] = (
+        out["break_score"] * (1.0 + cvd_slope.fillna(0.0).clip(0, 3) * 0.3 + squeeze.fillna(0.0) * 0.4)
+    ).clip(0, 1.5)
 
     # --- correction-after-break flag (literal per transcript):
     # 1) squeeze: bb_width_percentile < 20 within last 10 bars
     # 2) breakout: close beyond Donchian 20 with volume spike
     # 3) pullback 38-61% of the breakout impulse within 20 bars
-    bb_squeeze = (out["bb_width_percentile"] < 20) if "bb_width_percentile" in out.columns else pd.Series(False, index=out.index)
+    bb_squeeze = (
+        (out["bb_width_percentile"] < 20) if "bb_width_percentile" in out.columns else pd.Series(False, index=out.index)
+    )
     vol_ratio = out["volume_ratio"] if "volume_ratio" in out.columns else pd.Series(1.0, index=out.index)
     don_hi = out["donchian_high_20"] if "donchian_high_20" in out.columns else out["high"].rolling(20).max()
     don_lo = out["donchian_low_20"] if "donchian_low_20" in out.columns else out["low"].rolling(20).min()

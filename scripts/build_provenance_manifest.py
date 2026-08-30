@@ -15,6 +15,7 @@ After the manifest exists, set in config.yaml:
 so ``train_mt5`` / ``run_backtest`` verify the frozen content fingerprint
 before every run and stop on any mismatch.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,8 +38,12 @@ def main() -> None:
     parser.add_argument("--company-hash", default=None, help="sha256 of terminal company string")
     parser.add_argument("--terminal-build", default=None)
     parser.add_argument("--terminal-path-hash", default=None)
-    parser.add_argument("--server-offset-hours", type=float, default=None,
-                        help="Broker server timezone offset vs UTC (config market_data.server_time_offset_hours)")
+    parser.add_argument(
+        "--server-offset-hours",
+        type=float,
+        default=None,
+        help="Broker server timezone offset vs UTC (config market_data.server_time_offset_hours)",
+    )
     parser.add_argument("--out", required=True, help="Output manifest path (json)")
     args = parser.parse_args()
 
@@ -46,9 +51,11 @@ def main() -> None:
     offset = args.server_offset_hours
     if offset is None:
         offset = float((cfg.get("market_data", {}) or {}).get("server_time_offset_hours", 0.0))
-    sessions = (cfg.get("sessions", {}) or {})
+    sessions = cfg.get("sessions", {}) or {}
     manifest = build_provenance_manifest(
-        args.db_path, args.timeframe, args.asset,
+        args.db_path,
+        args.timeframe,
+        args.asset,
         broker=args.broker,
         broker_symbol=args.broker_symbol,
         terminal_company_hash=args.company_hash,
@@ -57,21 +64,26 @@ def main() -> None:
         server_time_offset_hours=offset,
         sessions_config=sessions,
         extra={
-            "command": "python -m scripts.build_provenance_manifest "
-                       + " ".join(sys.argv[1:]),
+            "command": "python -m scripts.build_provenance_manifest " + " ".join(sys.argv[1:]),
             "broker_symbol_input": args.broker_symbol,
         },
     )
     write_provenance_manifest(args.out, manifest)
-    print(json.dumps({
-        "manifest_path": args.out,
-        "asset_key": args.asset,
-        "timeframe": args.timeframe,
-        "candle_count": manifest["candle_count"],
-        "data_hash": manifest["data_hash"],
-        "manifest_hash": manifest["manifest_hash"],
-        "gap_audit": manifest["gap_audit"],
-    }, indent=2, default=str))
+    print(
+        json.dumps(
+            {
+                "manifest_path": args.out,
+                "asset_key": args.asset,
+                "timeframe": args.timeframe,
+                "candle_count": manifest["candle_count"],
+                "data_hash": manifest["data_hash"],
+                "manifest_hash": manifest["manifest_hash"],
+                "gap_audit": manifest["gap_audit"],
+            },
+            indent=2,
+            default=str,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -2,15 +2,16 @@
 Tests for order flow and microstructure features.
 Verifies no-lookahead invariants and metric properties.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from features.order_flow import (
+    add_order_flow_features,
     cumulative_volume_delta,
     order_flow_imbalance,
     volume_weighted_average_price,
-    add_order_flow_features,
 )
 
 
@@ -25,14 +26,16 @@ def sample_ohlcv():
     volume = np.random.randint(10, 500, size=n).astype(float)
     ts = np.arange(1000, 1000 + n * 300, 300)
 
-    return pd.DataFrame({
-        "timestamp_utc": ts,
-        "open": open_p,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    })
+    return pd.DataFrame(
+        {
+            "timestamp_utc": ts,
+            "open": open_p,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+    )
 
 
 def test_cvd_causality(sample_ohlcv):
@@ -43,7 +46,7 @@ def test_cvd_causality(sample_ohlcv):
     # A truncated frame that still contains >= 100 bars before i must produce the
     # SAME cvd at index i as the full frame (the old window-start cumsum did not).
     i = 150
-    trunc_cvd = cumulative_volume_delta(sample_ohlcv.iloc[:i + 1], window=100)
+    trunc_cvd = cumulative_volume_delta(sample_ohlcv.iloc[: i + 1], window=100)
     assert np.isclose(full_cvd.iloc[i], trunc_cvd.iloc[i], rtol=1e-9)
 
 
@@ -57,14 +60,16 @@ def test_cvd_level_is_invariant_to_frame_length_beyond_window(sample_ohlcv):
     np.random.seed(1)
     n = 400
     close = 100.0 + np.cumsum(np.random.randn(n) * 0.5)
-    big = pd.DataFrame({
-        "timestamp_utc": np.arange(1000, 1000 + n * 300, 300),
-        "open": close,
-        "high": close + 0.3,
-        "low": close - 0.3,
-        "close": close,
-        "volume": np.random.randint(10, 500, size=n).astype(float),
-    })
+    big = pd.DataFrame(
+        {
+            "timestamp_utc": np.arange(1000, 1000 + n * 300, 300),
+            "open": close,
+            "high": close + 0.3,
+            "low": close - 0.3,
+            "close": close,
+            "volume": np.random.randint(10, 500, size=n).astype(float),
+        }
+    )
     base = big.iloc[150:]
     extended = big.iloc[50:]
     # Target original bar 290: base index 140 (>=100 past 150), extended index
@@ -82,7 +87,7 @@ def test_order_flow_imbalance_bounds(sample_ohlcv):
     assert ((imbalance >= -1.0) & (imbalance <= 1.0)).all()
     # Causality test
     i = 80
-    trunc_imb = order_flow_imbalance(sample_ohlcv.iloc[:i + 1], period=14)
+    trunc_imb = order_flow_imbalance(sample_ohlcv.iloc[: i + 1], period=14)
     assert np.isclose(imbalance.iloc[i], trunc_imb.iloc[i], rtol=1e-6)
 
 
@@ -91,7 +96,7 @@ def test_vwap_causality(sample_ohlcv):
     assert (upper >= vwap).all()
     assert (lower <= vwap).all()
     i = 120
-    t_vwap, t_upper, t_lower = volume_weighted_average_price(sample_ohlcv.iloc[:i + 1], period=50)
+    t_vwap, t_upper, t_lower = volume_weighted_average_price(sample_ohlcv.iloc[: i + 1], period=50)
     assert np.isclose(vwap.iloc[i], t_vwap.iloc[i], rtol=1e-6)
     assert np.isclose(upper.iloc[i], t_upper.iloc[i], rtol=1e-6)
 

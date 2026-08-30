@@ -9,6 +9,7 @@ Exit code 0 = verified; 1 = violations found. Never fabricates missing lineage:
 a group without provenance is reported as ``provenance_status=legacy_unavailable``
 (§38) instead of being retrofitted.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,16 +29,21 @@ def verify_group_provenance(group: dict) -> list[str]:
 
     # 1. provenance presence — legacy records are explicit, never fabricated
     if not prov:
-        violations.append(
-            "provenance_status=legacy_unavailable (no lineage recorded; "
-            "NOT retrofitted)"
-        )
+        violations.append("provenance_status=legacy_unavailable (no lineage recorded; NOT retrofitted)")
         return violations
 
     # 2. critical ids resolve
-    required = ("market_snapshot_id", "feature_snapshot_id", "model_inference_id",
-                "model_hash", "profile_id", "broker_snapshot_id", "cost_snapshot_id",
-                "geometry_hash", "provenance_hash")
+    required = (
+        "market_snapshot_id",
+        "feature_snapshot_id",
+        "model_inference_id",
+        "model_hash",
+        "profile_id",
+        "broker_snapshot_id",
+        "cost_snapshot_id",
+        "geometry_hash",
+        "provenance_hash",
+    )
     for key in required:
         if not prov.get(key):
             violations.append(f"missing provenance.{key}")
@@ -58,9 +64,7 @@ def verify_group_provenance(group: dict) -> list[str]:
     source = prov.get("source")
     if mode == "paper":
         if source not in (None, "simulator", "derived", "config", "model_artifact"):
-            violations.append(
-                f"paper group labeled source={source!r}; expected simulator"
-            )
+            violations.append(f"paper group labeled source={source!r}; expected simulator")
     elif mode == "demo":
         if source == "simulator" or source == "fake_mt5":
             violations.append(f"demo group labeled source={source!r}; expected mt5")

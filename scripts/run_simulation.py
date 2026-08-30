@@ -36,19 +36,20 @@ if _shim_dir not in sys.path:
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
+
+# NOTE: must import the shim under its plain top-level name so it is the SAME
+# module object that `import MetaTrader5 as mt5` in execution/data resolves to
+# (a dotted `from simulation.mt5_shim import MetaTrader5` creates a second
+# module object and _inject() would be invisible to the protected modules).
+import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
 
 from simulation.simulator import (
     MarketSimulator,
     load_simulation_config,
     shutdown_mt5_shim,
 )
-# NOTE: must import the shim under its plain top-level name so it is the SAME
-# module object that `import MetaTrader5 as mt5` in execution/data resolves to
-# (a dotted `from simulation.mt5_shim import MetaTrader5` creates a second
-# module object and _inject() would be invisible to the protected modules).
-import MetaTrader5 as mt5  # noqa: E402  (resolves to the shim via sys.path)
 from simulation.virtual_state import VirtualState
 
 
@@ -77,6 +78,7 @@ def build_virtual_cfg() -> dict:
             overrides[mt5_sym] = copy.deepcopy(overrides.get(asset_key, {}))
     cfg["symbol_overrides"] = overrides
     return cfg
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,9 +134,7 @@ class SimulationDriver:
         )
         while not self._stop_event.is_set():
             try:
-                bar = self.simulator.advance_to_next_m5_bar(
-                    max_ticks=self.max_ticks_per_bar
-                )
+                bar = self.simulator.advance_to_next_m5_bar(max_ticks=self.max_ticks_per_bar)
             except Exception as e:  # pragma: no cover - defensive
                 logger.error("Simulation driver step failed: %s", e)
                 bar = None
@@ -155,9 +155,7 @@ class SimulationDriver:
 def _bar_timestamp(bar: dict) -> str:
     """Format a bar's Unix-second ``time`` field as a readable UTC string."""
     try:
-        return datetime.fromtimestamp(bar["time"], tz=timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        return datetime.fromtimestamp(bar["time"], tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:  # pragma: no cover - defensive
         return str(bar.get("time"))
 

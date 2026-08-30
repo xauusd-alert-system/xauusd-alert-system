@@ -10,28 +10,31 @@ Gives full control over PC/Laptop from your Smartphone:
 - View safe config (/config)
 - View open positions (/positions)
 """
+
+import logging
 import os
+import subprocess
 import sys
 import time
-import subprocess
-import logging
 from datetime import datetime
+
 import MetaTrader5 as mt5
 import telegram
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_env
-from execution.mt5_trader import positions_get_by_magic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
-    MessageHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
+
+from config.loader import get_env, load_config
+from execution.mt5_trader import positions_get_by_magic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("telegram_remote")
@@ -208,10 +211,12 @@ def get_main_keyboard():
 def get_back_keyboard():
     keyboard = get_main_keyboard()
     rows = [list(row) for row in keyboard.inline_keyboard]
-    rows.append([
-        InlineKeyboardButton("⬅️ Назад", callback_data="back"),
-        InlineKeyboardButton("🏠 Главное меню", callback_data="home"),
-    ])
+    rows.append(
+        [
+            InlineKeyboardButton("⬅️ Назад", callback_data="back"),
+            InlineKeyboardButton("🏠 Главное меню", callback_data="home"),
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 
@@ -278,7 +283,9 @@ def _run_safe_command(argv: list[str]) -> str:
         text=True,
         timeout=300,
     )
-    return (result.stdout or result.stderr or "✅ Команда выполнена без вывода.").strip() or "✅ Команда выполнена без вывода."
+    return (
+        result.stdout or result.stderr or "✅ Команда выполнена без вывода."
+    ).strip() or "✅ Команда выполнена без вывода."
 
 
 async def cmd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -287,12 +294,16 @@ async def cmd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     command = " ".join(context.args)
     if not command:
-        await update.message.reply_text("⚠️ Укажите команду. Пример: `/cmd python -m scripts.summary_report`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "⚠️ Укажите команду. Пример: `/cmd python -m scripts.summary_report`", parse_mode="Markdown"
+        )
         return
 
     if not is_allowed_command(command):
         log_action(update.effective_user.id, "cmd_denied", command)
-        await update.message.reply_text("⛔ Команда не входит в список разрешённых.\nДоступны: summary_report, run_backtest, train_all_assets, retrain_models, execution.mt5_trader, базовые команды (dir, echo).")
+        await update.message.reply_text(
+            "⛔ Команда не входит в список разрешённых.\nДоступны: summary_report, run_backtest, train_all_assets, retrain_models, execution.mt5_trader, базовые команды (dir, echo)."
+        )
         return
 
     await update.message.reply_text(f"⏳ Выполняю: `{command}`...", parse_mode="Markdown")
@@ -310,7 +321,6 @@ async def cmd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"```\n{output}\n```", parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
-
 
 
 async def read_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -393,7 +403,11 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_path = os.path.join(root, file_name)
             break
     if target_path is None:
-        target_path = os.path.join(BASE_DIR, "scripts", file_name) if file_name.endswith(".py") else os.path.join(BASE_DIR, "config", file_name)
+        target_path = (
+            os.path.join(BASE_DIR, "scripts", file_name)
+            if file_name.endswith(".py")
+            else os.path.join(BASE_DIR, "config", file_name)
+        )
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     if not is_safe_path(target_path):
@@ -460,7 +474,9 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE, use_q
     if not os.path.exists(log_path):
         text = "❌ Лог-файл `logs/trader.log` не найден."
         if use_query and update.callback_query:
-            await safe_edit_message_text(update.callback_query, text, parse_mode="Markdown", reply_markup=get_back_keyboard())
+            await safe_edit_message_text(
+                update.callback_query, text, parse_mode="Markdown", reply_markup=get_back_keyboard()
+            )
         else:
             await update.message.reply_text(text, parse_mode="Markdown")
         return
@@ -473,13 +489,17 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE, use_q
             content = content[-MAX_OUTPUT_LENGTH:]
         text = f"```\n{content}\n```"
         if use_query and update.callback_query:
-            await safe_edit_message_text(update.callback_query, text, parse_mode="Markdown", reply_markup=get_back_keyboard())
+            await safe_edit_message_text(
+                update.callback_query, text, parse_mode="Markdown", reply_markup=get_back_keyboard()
+            )
         else:
             await update.message.reply_text(text, parse_mode="Markdown")
     except Exception as e:
         error_text = f"❌ Ошибка чтения лога: {e}"
         if use_query and update.callback_query:
-            await safe_edit_message_text(update.callback_query, error_text, parse_mode="Markdown", reply_markup=get_back_keyboard())
+            await safe_edit_message_text(
+                update.callback_query, error_text, parse_mode="Markdown", reply_markup=get_back_keyboard()
+            )
         else:
             await update.message.reply_text(error_text, parse_mode="Markdown")
 
@@ -496,13 +516,17 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE, use
             if a.get("enabled"):
                 msg += f"• `{key}` → {a.get('mt5_symbol', '?')} | {a.get('display_name', '?')}\n"
         if use_query and update.callback_query:
-            await safe_edit_message_text(update.callback_query, msg, parse_mode="Markdown", reply_markup=get_back_keyboard())
+            await safe_edit_message_text(
+                update.callback_query, msg, parse_mode="Markdown", reply_markup=get_back_keyboard()
+            )
         else:
             await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         error_text = f"❌ Ошибка загрузки конфига: {e}"
         if use_query and update.callback_query:
-            await safe_edit_message_text(update.callback_query, error_text, parse_mode="Markdown", reply_markup=get_back_keyboard())
+            await safe_edit_message_text(
+                update.callback_query, error_text, parse_mode="Markdown", reply_markup=get_back_keyboard()
+            )
         else:
             await update.message.reply_text(error_text, parse_mode="Markdown")
 
@@ -547,7 +571,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         TRADER_PROCESS = subprocess.Popen([sys.executable, "-m", "execution.mt5_trader"])
         save_pid(TRADER_PROCESS.pid)
-        await safe_edit_message_text(query, f"🚀 Робот запущен (PID: {TRADER_PROCESS.pid})", reply_markup=get_main_keyboard())
+        await safe_edit_message_text(
+            query, f"🚀 Робот запущен (PID: {TRADER_PROCESS.pid})", reply_markup=get_main_keyboard()
+        )
 
     elif action == "stop_trader":
         status, pid = get_robot_status()
@@ -581,7 +607,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
         TRADER_PROCESS = subprocess.Popen([sys.executable, "-m", "execution.mt5_trader"])
         save_pid(TRADER_PROCESS.pid)
-        await safe_edit_message_text(query, f"🔄 Робот перезапущен (PID: {TRADER_PROCESS.pid})", reply_markup=get_main_keyboard())
+        await safe_edit_message_text(
+            query, f"🔄 Робот перезапущен (PID: {TRADER_PROCESS.pid})", reply_markup=get_main_keyboard()
+        )
 
     elif action == "status_mt5":
         if not mt5.initialize():
@@ -609,12 +637,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=True,
                 encoding="utf-8",
                 env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-                timeout=120
+                timeout=120,
             )
             output = cmd_res.stdout or cmd_res.stderr or "✅ Отчёт сформирован."
             if len(output) > MAX_OUTPUT_LENGTH:
                 output = output[-MAX_OUTPUT_LENGTH:]
-            await safe_edit_message_text(query, f"<pre>{output}</pre>", parse_mode="HTML", reply_markup=get_back_keyboard())
+            await safe_edit_message_text(
+                query, f"<pre>{output}</pre>", parse_mode="HTML", reply_markup=get_back_keyboard()
+            )
         except Exception as e:
             await safe_edit_message_text(query, f"❌ Ошибка формирования отчёта: {e}", reply_markup=get_back_keyboard())
 
@@ -629,12 +659,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subprocess.Popen([sys.executable, "-m", "scripts.train_all_assets"])
 
     elif action == "cmd_retrain":
-        await query.edit_message_text("⏳ Запускаю переобучение моделей (с обновлением данных)...", reply_markup=get_main_keyboard())
+        await query.edit_message_text(
+            "⏳ Запускаю переобучение моделей (с обновлением данных)...", reply_markup=get_main_keyboard()
+        )
         subprocess.Popen([sys.executable, "-m", "scripts.retrain_models"])
 
     elif action == "cmd_backtest_all":
         await query.edit_message_text("⏳ Запускаю бэктесты...", reply_markup=get_main_keyboard())
-        subprocess.Popen(["powershell", "-Command", "foreach ($a in @('XAUUSD','XAGUSD','BTCUSD','EURUSD','GBPUSD')) { python -m scripts.run_backtest --asset $a --timeframe M5 }"])
+        subprocess.Popen(
+            [
+                "powershell",
+                "-Command",
+                "foreach ($a in @('XAUUSD','XAGUSD','BTCUSD','EURUSD','GBPUSD')) { python -m scripts.run_backtest --asset $a --timeframe M5 }",
+            ]
+        )
 
     elif action == "cmd_ls":
         files = os.listdir(".")

@@ -35,15 +35,15 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config
+from config.loader import effective_asset_config, load_config
+from model.cv import purged_kfold_indices
+from model.trainer import FEATURE_COLUMNS, build_training_matrix, train_model
 from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
     _SYNTH_DEFAULTS,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
 )
 from scripts.run_backtest import merge_asset_cfg
-from model.cv import purged_kfold_indices
-from model.trainer import build_training_matrix, train_model, FEATURE_COLUMNS
 
 
 def _oof_accuracy(model, X_test: pd.DataFrame, y_test: pd.Series) -> float:
@@ -51,9 +51,14 @@ def _oof_accuracy(model, X_test: pd.DataFrame, y_test: pd.Series) -> float:
     return float(np.mean(preds == y_test.to_numpy()))
 
 
-def mda_feature_importance(df: pd.DataFrame, cfg: dict, asset_key: str = "XAUUSD",
-                           n_splits: int = 4, n_permute: int = 10,
-                           random_seed: int = 42) -> pd.DataFrame:
+def mda_feature_importance(
+    df: pd.DataFrame,
+    cfg: dict,
+    asset_key: str = "XAUUSD",
+    n_splits: int = 4,
+    n_permute: int = 10,
+    random_seed: int = 42,
+) -> pd.DataFrame:
     """Mean-decrease-accuracy importance on purged K-fold.
 
     Returns a DataFrame indexed by feature with columns: mda (mean drop in
@@ -63,8 +68,7 @@ def mda_feature_importance(df: pd.DataFrame, cfg: dict, asset_key: str = "XAUUSD
     X, y, cols = build_training_matrix(df, cfg={"model": model_cfg})
     if len(y) < 40:
         raise ValueError(f"Too few labeled rows for feature selection ({len(y)}).")
-    horizon = int(merge_asset_cfg(cfg, asset_key, "labeling")["labeling"].get(
-        "horizon_candles_n", 36))
+    horizon = int(merge_asset_cfg(cfg, asset_key, "labeling")["labeling"].get("horizon_candles_n", 36))
     folds = purged_kfold_indices(len(df), n_splits=n_splits, horizon=horizon, embargo=0)
     # map row positions of the labeled matrix back to df positions: build_training
     # matrix drops NaN rows, so align by index values.
@@ -100,8 +104,7 @@ def mda_feature_importance(df: pd.DataFrame, cfg: dict, asset_key: str = "XAUUSD
     return pd.DataFrame(rows).sort_values("mda", ascending=False).reset_index(drop=True)
 
 
-def cluster_correlated_features(df: pd.DataFrame, mda_df: pd.DataFrame,
-                                threshold: float = 0.90) -> pd.DataFrame:
+def cluster_correlated_features(df: pd.DataFrame, mda_df: pd.DataFrame, threshold: float = 0.90) -> pd.DataFrame:
     """Greedy clustering by |Pearson rho| >= threshold; each cluster keeps the
     member with the highest MDA. Returns the reduced set (one per cluster)."""
     feats = mda_df["feature"].tolist()
@@ -112,9 +115,9 @@ def cluster_correlated_features(df: pd.DataFrame, mda_df: pd.DataFrame,
     for f in feats:  # already sorted by MDA descending
         if f in used:
             continue
-        cluster = [f] + [g for g in feats
-                         if g not in used and g != f
-                         and np.isfinite(corr.loc[f, g]) and corr.loc[f, g] >= threshold]
+        cluster = [f] + [
+            g for g in feats if g not in used and g != f and np.isfinite(corr.loc[f, g]) and corr.loc[f, g] >= threshold
+        ]
         picked.append(f)
         used.update(cluster)
     return mda_df[mda_df["feature"].isin(picked)].reset_index(drop=True)
@@ -125,17 +128,23 @@ def suggest_subset(mda_df: pd.DataFrame, max_features: int = 15) -> list[str]:
     return mda_df["feature"].head(max_features).tolist()
 
 
-def run_feature_selection(cfg: dict, asset_key: str, df_full: pd.DataFrame,
-                          max_features: int = 15, corr_threshold: float = 0.90,
-                          n_splits: int = 4, n_permute: int = 10) -> dict:
+def run_feature_selection(
+    cfg: dict,
+    asset_key: str,
+    df_full: pd.DataFrame,
+    max_features: int = 15,
+    corr_threshold: float = 0.90,
+    n_splits: int = 4,
+    n_permute: int = 10,
+) -> dict:
     """Full pipeline: MDA ranks + clustered reduction + top-K subset."""
-    mda_df = mda_feature_importance(df_full, cfg, asset_key=asset_key,
-                                   n_splits=n_splits, n_permute=n_permute)
+    mda_df = mda_feature_importance(df_full, cfg, asset_key=asset_key, n_splits=n_splits, n_permute=n_permute)
     # The MDA set may include regime_* one-hots that live only inside the
     # training matrix; materialize them on the working frame for clustering.
     df_work = df_full
     if "regime" in df_full.columns:
         from regime.classifier import regime_onehot_df
+
         oh = regime_onehot_df(df_full)
         new_cols = [c for c in oh.columns if c not in df_work.columns]
         if new_cols:
@@ -184,14 +193,17 @@ def main(argv: list[str] | None = None) -> None:
 
     synthetic = False
     try:
-        from scripts.run_backtest import load_asset_history, build_full_df
+        from scripts.run_backtest import build_full_df, load_asset_history
+
         raw = load_asset_history(db_path, timeframe, args.asset)
         df = build_full_df(cfg, raw, db_path=db_path, asset_key=args.asset)
         print(f"[featsel] Real data: {len(df)} {timeframe} rows from {db_path}")
     except Exception as exc:
         synthetic = True
-        print(f"[featsel] WARNING: cannot load real data ({exc.__class__.__name__}); "
-              "SYNTHETIC demo — results are NOT real.")
+        print(
+            f"[featsel] WARNING: cannot load real data ({exc.__class__.__name__}); "
+            "SYNTHETIC demo — results are NOT real."
+        )
         spec = _SYNTH_DEFAULTS.get(args.asset, dict(price=1.28, atr=0.0014, freq="1h"))
         freq = spec["freq"]
         bars_per_day = {"5min": 288, "15min": 96, "1h": 24, "4h": 6}.get(freq, 24)
@@ -199,14 +211,19 @@ def main(argv: list[str] | None = None) -> None:
         df = _make_synthetic_wf_df(n, spec["price"], spec["atr"], freq)
         df = _inject_biased_probs(df)
         from labeling.label_generator import generate_labels_from_config
-        cfg_asset = effective_asset_config(cfg, args.asset)
-        df["label"] = generate_labels_from_config(
-            df, cfg_asset, asset_key=args.asset
-        )
 
-    d = run_feature_selection(cfg, args.asset, df, max_features=args.max_features,
-                              corr_threshold=args.corr_threshold,
-                              n_splits=args.n_splits, n_permute=5)
+        cfg_asset = effective_asset_config(cfg, args.asset)
+        df["label"] = generate_labels_from_config(df, cfg_asset, asset_key=args.asset)
+
+    d = run_feature_selection(
+        cfg,
+        args.asset,
+        df,
+        max_features=args.max_features,
+        corr_threshold=args.corr_threshold,
+        n_splits=args.n_splits,
+        n_permute=5,
+    )
     d["synthetic"] = synthetic
     print_report(d)
 

@@ -40,6 +40,7 @@ Decision rule (conservative - never overwrite a good model without evidence):
 
 All knobs live in `config/config.yaml` under `deploy_guard:`.
 """
+
 import argparse
 import copy
 import logging
@@ -53,22 +54,33 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from backtest.metrics import compute_metrics, trades_to_dataframe
+from backtest.walk_forward import generate_windows
 from config.loader import load_config
 from data.storage import read_candles
-from scripts.train_mt5 import build_full_df
-from backtest.metrics import trades_to_dataframe, compute_metrics
-from backtest.walk_forward import generate_windows
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
+from model.registry import ModelRegistry, file_sha256
 from model.trainer import (
     build_training_matrix,
-    train_model,
     calibrate_model,
     save_model,
+    train_model,
 )
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
+from scripts.train_mt5 import build_full_df, locked_holdout_end_date, truncate_raw_before
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("deploy_guard")
+
+
+class RegistryPreflightError(RuntimeError):
+    """Raised when the deploy candidate is unregistered or hash-corrupted
+    (Model Registry pre-flight, ТЗ 8.4). Blocking the deploy is the point."""
+
+    def __init__(self, reason: str, registry_id: str | None = None):
+        super().__init__(reason)
+        self.registry_id = registry_id
+
 
 # Minimum out-of-sample trades required before a side's primary metric is
 # trusted (configurable via deploy_guard.min_trades).
@@ -145,26 +157,23 @@ def is_improvement(
         d_val = _num((deployed or {}).get("total_pnl"))
         c_val = _num((candidate or {}).get("total_pnl"))
 
-    cand_trades = int(((candidate or {}).get("n_trades") or 0))
-    dep_trades = int(((deployed or {}).get("n_trades") or 0))
+    cand_trades = int((candidate or {}).get("n_trades") or 0)
+    dep_trades = int((deployed or {}).get("n_trades") or 0)
     thin_cand = cand_trades is not None and cand_trades < min_trades
     thin_dep = dep_trades is not None and dep_trades < min_trades
 
     # 2. Never replace a proven model with one that has too little OOS evidence.
     if thin_cand and not thin_dep:
-        return _out(False, metric, d_val, c_val,
-                    "candidate_too_little_evidence", tolerance, min_trades)
+        return _out(False, metric, d_val, c_val, "candidate_too_little_evidence", tolerance, min_trades)
     # 3. A candidate with real evidence may replace a model with no evidence.
     if not thin_cand and thin_dep:
-        return _out(True, metric, d_val, c_val,
-                    "candidate_has_evidence_incumbent_thin", tolerance, min_trades)
+        return _out(True, metric, d_val, c_val, "candidate_has_evidence_incumbent_thin", tolerance, min_trades)
 
     # 4. Both sides adequate (or both thin): compare with tolerance.
     if c_val is not None and d_val is not None and c_val >= d_val - tolerance:
         reason = "within_tolerance" if c_val < d_val else "ok"
         return _out(True, metric, d_val, c_val, reason, tolerance, min_trades)
-    return _out(False, metric, d_val, c_val,
-                "regressed_beyond_tolerance", tolerance, min_trades)
+    return _out(False, metric, d_val, c_val, "regressed_beyond_tolerance", tolerance, min_trades)
 
 
 def aggregate_fold_metrics(fold_metrics: list) -> dict:
@@ -175,11 +184,18 @@ def aggregate_fold_metrics(fold_metrics: list) -> dict:
     A side with zero folds yields all-metric None + n_trades=0.
     """
     if not fold_metrics:
-        return {"n_folds": 0, "n_trades": 0, "expectancy": None, "win_rate": None,
-                "profit_factor": None, "sharpe_ratio": None, "sortino_ratio": None,
-                "total_pnl": None, "max_drawdown": None}
-    out = {"n_folds": len(fold_metrics),
-           "n_trades": int(sum(int(m.get("n_trades", 0) or 0) for m in fold_metrics))}
+        return {
+            "n_folds": 0,
+            "n_trades": 0,
+            "expectancy": None,
+            "win_rate": None,
+            "profit_factor": None,
+            "sharpe_ratio": None,
+            "sortino_ratio": None,
+            "total_pnl": None,
+            "max_drawdown": None,
+        }
+    out = {"n_folds": len(fold_metrics), "n_trades": int(sum(int(m.get("n_trades", 0) or 0) for m in fold_metrics))}
     for k in ("expectancy", "win_rate", "profit_factor", "sharpe_ratio", "sortino_ratio"):
         vals = [v for v in (_num(m.get(k)) for m in fold_metrics) if v is not None]
         out[k] = float(np.mean(vals)) if vals else None
@@ -325,8 +341,7 @@ def _slice(df: pd.DataFrame, start_ts: int, end_ts: int) -> pd.DataFrame:
     return df[(df["timestamp_utc"] >= start_ts) & (df["timestamp_utc"] < end_ts)]
 
 
-def evaluate_incumbent(cfg: dict, asset_key: str, deployed_path: str, df: pd.DataFrame,
-                       windows: list) -> dict:
+def evaluate_incumbent(cfg: dict, asset_key: str, deployed_path: str, df: pd.DataFrame, windows: list) -> dict:
     """Static incumbent model scored on every OOS window (never retrained)."""
     if not os.path.exists(deployed_path):
         return None
@@ -369,21 +384,35 @@ def decide_from_evaluations(
     if not windows_valid:
         # Cannot validate honestly. Conservative: never overwrite a good model
         # on no evidence; deploy a first model when there is nothing to protect.
-        return {"deploy": not has_incumbent, "metric": None,
-                "deployed_value": None, "candidate_value": None,
-                "reason": "no_valid_windows", "tolerance": float(dg.get("tolerance", 0.0)),
-                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
+        return {
+            "deploy": not has_incumbent,
+            "metric": None,
+            "deployed_value": None,
+            "candidate_value": None,
+            "reason": "no_valid_windows",
+            "tolerance": float(dg.get("tolerance", 0.0)),
+            "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+        }
     if not has_incumbent or deployed_metrics is None:
-        return {"deploy": True, "metric": None,
-                "deployed_value": None, "candidate_value": None,
-                "reason": "no_deployed_model", "tolerance": float(dg.get("tolerance", 0.0)),
-                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
+        return {
+            "deploy": True,
+            "metric": None,
+            "deployed_value": None,
+            "candidate_value": None,
+            "reason": "no_deployed_model",
+            "tolerance": float(dg.get("tolerance", 0.0)),
+            "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+        }
     if candidate_metrics is None:
-        return {"deploy": False, "metric": None,
-                "deployed_value": None, "candidate_value": None,
-                "reason": "candidate_evaluation_failed",
-                "tolerance": float(dg.get("tolerance", 0.0)),
-                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
+        return {
+            "deploy": False,
+            "metric": None,
+            "deployed_value": None,
+            "candidate_value": None,
+            "reason": "candidate_evaluation_failed",
+            "tolerance": float(dg.get("tolerance", 0.0)),
+            "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+        }
     return is_improvement(
         deployed_metrics,
         candidate_metrics,
@@ -411,34 +440,111 @@ def guard_asset(cfg: dict, asset_key: str, deployed_path: str) -> dict:
 
     raw = read_candles(db_path, timeframe, asset_key)
     if raw.empty:
-        return {"asset": asset_key, "deploy": False, "metric": None,
-                "deployed_value": None, "candidate_value": None,
-                "reason": "no_candles", "tolerance": float(dg.get("tolerance", 0.0)),
-                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
+        return {
+            "asset": asset_key,
+            "deploy": False,
+            "metric": None,
+            "deployed_value": None,
+            "candidate_value": None,
+            "reason": "no_candles",
+            "tolerance": float(dg.get("tolerance", 0.0)),
+            "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+        }
+
+    # R2 fix (2026-08-30): the deploy guard previously validated the freshly
+    # retrained candidate against the incumbent on the FULL backfilled history,
+    # which included the locked hold-out window (validation.locked_holdout.start)
+    # - i.e. it scored live-forward data RESEARCH is forbidden to look at. The
+    # incumbent is a static file and the candidate is trained per fold; neither
+    # side may be scored on data at/after the lock. Truncate the RAW frame
+    # (before feature building) to strictly-before the cutoff. `end_date` is
+    # normally validation.locked_holdout.start; an --end-date override (below)
+    # rewrites that in cfg so this stays the single truncation point.
+    end_date = locked_holdout_end_date(cfg)
+    if end_date is not None:
+        raw = truncate_raw_before(raw, end_date, asset_key)
 
     df = build_full_df(raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe)
     df["timestamp_utc"] = df["timestamp_utc"].astype("int64")
     windows = generate_windows(df, train_days, test_days, step_days)
     if not windows:
-        return {"deploy": not os.path.exists(deployed_path), "metric": None,
-                "deployed_value": None, "candidate_value": None,
-                "reason": "no_valid_windows", "tolerance": float(dg.get("tolerance", 0.0)),
-                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
+        return {
+            "deploy": not os.path.exists(deployed_path),
+            "metric": None,
+            "deployed_value": None,
+            "candidate_value": None,
+            "reason": "no_valid_windows",
+            "tolerance": float(dg.get("tolerance", 0.0)),
+            "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+        }
 
     deployed_m = evaluate_incumbent(cfg, asset_key, deployed_path, df, windows)
     candidate_m = evaluate_candidate(cfg, asset_key, df, windows)
     dec = decide_from_evaluations(
-        deployed_m, candidate_m, cfg,
-        has_incumbent=os.path.exists(deployed_path), windows_valid=True,
+        deployed_m,
+        candidate_m,
+        cfg,
+        has_incumbent=os.path.exists(deployed_path),
+        windows_valid=True,
     )
     dec["asset"] = asset_key
     return dec
 
 
 # --------------------------------------------------------------------------- #
-# --check orchestration + CLI
+# Model Registry pre-flight (ТЗ 8.4): never deploy an unregistered or
+# corrupted model. Deploying is a registry-visible event, so the candidate
+# must be cataloged and its file hash must still match the registered one.
 # --------------------------------------------------------------------------- #
-def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak"):
+def registry_preflight_check(cfg: dict, asset_key: str, model_path: str, registry: ModelRegistry | None = None) -> dict:
+    """Verify the deployable model is registered AND its file hash matches.
+
+    Returns {"ok": bool, "reason": str, "registry_id": str|None}.
+    Fail-closed: any mismatch blocks the deploy with a clear reason.
+
+    Matching strategy: prefer an exact registered model_path (the deploy
+    candidate path is stable across retrains), fall back to a hash match
+    (restored/renamed artifacts). Once matched, the CURRENT file content is
+    compared against the registered hash - so a file corrupted AFTER
+    registration is reported as model_corrupted, not unregistered.
+    """
+    if not os.path.exists(model_path):
+        return {"ok": True, "reason": "no_model_file", "registry_id": None}
+    reg = registry if registry is not None else ModelRegistry()
+    try:
+        sha = file_sha256(model_path)
+    except OSError as e:
+        return {"ok": False, "reason": f"hash_failed:{e}", "registry_id": None}
+
+    entries = reg.list_entries(asset=asset_key)
+    norm = os.path.normcase(os.path.abspath(model_path))
+    match = next(
+        (e for e in entries if os.path.normcase(os.path.abspath(e.model_path)) == norm),
+        None,
+    )
+    if match is None:
+        match = next((e for e in entries if e.file_sha256 == sha), None)
+    if match is None:
+        return {
+            "ok": False,
+            "reason": "model_not_registered: deploy candidate "
+            f"{model_path} (sha256 {sha[:12]}...) has no "
+            "registry entry; train via scripts/train_all_assets "
+            "or register it explicitly",
+            "registry_id": None,
+        }
+    if not reg.verify(match.registry_id):
+        return {
+            "ok": False,
+            "reason": f"model_corrupted: deploy candidate {model_path} "
+            f"no longer matches registered hash of "
+            f"{match.registry_id}",
+            "registry_id": match.registry_id,
+        }
+    return {"ok": True, "reason": "registered_and_verified", "registry_id": match.registry_id}
+
+
+def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak", registry: "ModelRegistry | None" = None):
     """Compare each asset's newly retrained model vs its nightly backup.
 
     On REJECT (or evaluation error), restore the backed-up (good) model over
@@ -455,17 +561,28 @@ def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak"):
         bak = (mp + backup_suffix) if mp else None
         if not mp or not bak or not os.path.exists(bak):
             # Nothing backed up -> nothing to roll back to; keep the new model.
-            decisions.append({
-                "asset": asset, "deploy": True, "metric": None,
-                "deployed_value": None, "candidate_value": None,
-                "reason": "no_backup_no_rollback",
-                "tolerance": float(dg.get("tolerance", 0.0)),
-                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
-            })
+            decisions.append(
+                {
+                    "asset": asset,
+                    "deploy": True,
+                    "metric": None,
+                    "deployed_value": None,
+                    "candidate_value": None,
+                    "reason": "no_backup_no_rollback",
+                    "tolerance": float(dg.get("tolerance", 0.0)),
+                    "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+                }
+            )
             continue
         rolled_back = False
         try:
+            # Registry pre-flight (ТЗ 8.4): the newly retrained candidate must
+            # be registered and hash-verified BEFORE any deploy decision.
+            pre = registry_preflight_check(cfg, asset, mp, registry=registry)
+            if not pre["ok"]:
+                raise RegistryPreflightError(pre["reason"], pre.get("registry_id"))
             dec = guard_asset(cfg, asset, bak)
+            dec["registry_id"] = pre["registry_id"]
             if not dec.get("deploy", True):
                 failed = True
                 if os.path.exists(bak):
@@ -473,18 +590,55 @@ def validate_and_deploy(cfg: dict, backup_suffix: str = ".deploy_guard.bak"):
                     rolled_back = True
                     logger.warning(
                         "[%s] model rejected (%s); restored %s from backup.",
-                        asset, dec.get("reason"), mp,
+                        asset,
+                        dec.get("reason"),
+                        mp,
                     )
             else:
                 logger.info("[%s] deploy OK (%s); keeping new model.", asset, dec.get("reason"))
+        except RegistryPreflightError as e:
+            # Registry pre-flight (ТЗ 8.4): unregistered or corrupted deploy
+            # candidate -> blocked with a verbatim, actionable reason.
+            failed = True
+            if os.path.exists(bak):
+                shutil.copy2(bak, mp)
+                rolled_back = True
+                logger.warning(
+                    "[%s] deploy BLOCKED by registry pre-flight (%s); restored %s from backup.",
+                    asset,
+                    e,
+                    mp,
+                )
+            else:
+                logger.warning(
+                    "[%s] deploy BLOCKED by registry pre-flight (%s); no backup to restore.",
+                    asset,
+                    e,
+                )
+            dec = {
+                "asset": asset,
+                "deploy": False,
+                "metric": None,
+                "deployed_value": None,
+                "candidate_value": None,
+                "reason": str(e),
+                "registry_id": e.registry_id,
+                "tolerance": float(dg.get("tolerance", 0.0)),
+                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+            }
         except Exception as e:  # noqa: BLE001 - an error must not deploy blindly
             logger.warning("[%s] deploy guard errored (%s); rolling back.", asset, e)
             failed = True
-            dec = {"asset": asset, "deploy": False, "metric": None,
-                   "deployed_value": None, "candidate_value": None,
-                   "reason": f"error:{e}",
-                   "tolerance": float(dg.get("tolerance", 0.0)),
-                   "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES))}
+            dec = {
+                "asset": asset,
+                "deploy": False,
+                "metric": None,
+                "deployed_value": None,
+                "candidate_value": None,
+                "reason": f"error:{e}",
+                "tolerance": float(dg.get("tolerance", 0.0)),
+                "min_trades": int(dg.get("min_trades", DEFAULT_MIN_TRADES)),
+            }
             if os.path.exists(bak):
                 shutil.copy2(bak, mp)
                 rolled_back = True
@@ -514,12 +668,20 @@ def print_decisions(decisions: list) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Nightly model deploy guard (#25).")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--backup", action="store_true",
-                       help="Back up current production models before nightly retrain.")
-    group.add_argument("--check", action="store_true",
-                       help="Validate newly retrained models and roll back regressions.")
-    group.add_argument("--status", action="store_true",
-                       help="Print the deploy-guard configuration.")
+    group.add_argument(
+        "--backup", action="store_true", help="Back up current production models before nightly retrain."
+    )
+    group.add_argument(
+        "--check", action="store_true", help="Validate newly retrained models and roll back regressions."
+    )
+    group.add_argument("--status", action="store_true", help="Print the deploy-guard configuration.")
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Override the evaluation cutoff (YYYY-MM-DD). Default: "
+        "validation.locked_holdout.start. Backwards compatible; used for ad-hoc "
+        "validation ranges without editing config. (R2 fix 2026-08-30)",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config()
@@ -545,6 +707,17 @@ def main(argv=None) -> int:
         return 0
 
     # --check
+    # R2 fix (2026-08-30): an explicit --end-date overrides the lock cutoff for
+    # this run only (rewritten into cfg in-memory; config on disk is untouched).
+    # guard_asset reads validation.locked_holdout.start as its truncation point,
+    # so this single edit is enough to keep it from scoring post-cutoff data.
+    if args.end_date:
+        cfg.setdefault("validation", {})["locked_holdout"] = {
+            "enabled": True,
+            "start": args.end_date,
+            "end": None,
+        }
+
     # Pre-flight: configuration consistency (2026-08-27)
     # execution.enabled_assets must be a strict subset of assets.*.enabled;
     # a phantom asset in the execution list silently produces trade proposals
@@ -559,6 +732,7 @@ def main(argv=None) -> int:
     # Pre-flight: weekend session-tag audit (2026-08-27)
     # FX trades at Sunday 21:00-24:00 UTC must not carry 'weekend' tag.
     from scripts.audit_weekend_tags import audit_weekend_tags
+
     weekend_violations = audit_weekend_tags()
     if weekend_violations:
         print(f"  WEEKEND TAG ERROR: {len(weekend_violations)} FX trade(s) tagged 'weekend' at Sunday 21-24 UTC")

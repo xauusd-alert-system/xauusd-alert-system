@@ -14,14 +14,14 @@ For each asset (production timeframe):
 Usage:
     python -m scripts.diag_regime_bar_quality
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 from config.loader import load_config, resolve_asset_timeframe
-from scripts.run_backtest import load_asset_history, build_full_df
-from regime.classifier import classify_regime_series, RegimeLabel
+from scripts.run_backtest import build_full_df, load_asset_history
 
 # production timeframe per asset (asset override -> market_data.timeframe)
 ASSET_TF = {
@@ -48,17 +48,19 @@ def regime_stats(df: pd.DataFrame) -> pd.DataFrame:
     for reg, g in df.groupby("regime", observed=True):
         if _regime_str(reg) in ("no_trade", ""):
             continue
-        rows.append({
-            "regime": _regime_str(reg),
-            "n": len(g),
-            "share_pct": 100 * len(g) / len(df),
-            "fwd1_mean": g["fwd1"].mean(),
-            "fwd1_wr": 100 * (g["fwd1"] > 0).mean(),
-            "fwd5_mean": g["fwd5"].mean(),
-            "fwd5_wr": 100 * (g["fwd5"] > 0).mean(),
-            "fwd10_mean": g["fwd10"].mean(),
-            "fwd10_wr": 100 * (g["fwd10"] > 0).mean(),
-        })
+        rows.append(
+            {
+                "regime": _regime_str(reg),
+                "n": len(g),
+                "share_pct": 100 * len(g) / len(df),
+                "fwd1_mean": g["fwd1"].mean(),
+                "fwd1_wr": 100 * (g["fwd1"] > 0).mean(),
+                "fwd5_mean": g["fwd5"].mean(),
+                "fwd5_wr": 100 * (g["fwd5"] > 0).mean(),
+                "fwd10_mean": g["fwd10"].mean(),
+                "fwd10_wr": 100 * (g["fwd10"] > 0).mean(),
+            }
+        )
     return pd.DataFrame(rows).sort_values("n", ascending=False)
 
 
@@ -81,8 +83,10 @@ def trend_strategy(df: pd.DataFrame) -> dict:
         "active_wr": float((ret[active] > 0).mean()) if active.any() else np.nan,
         "all_meanR": float(df["fwd1"].mean()),
         "all_wr": float((df["fwd1"] > 0).mean()),
-        "up_long_meanR": float(df.loc[reg == "trend_up", "fwd1"].mean()) if (reg == "trend_up").any() else np.nan,
-        "down_short_meanR": float(df.loc[reg == "trend_down", "fwd1"].mean()) if (reg == "trend_down").any() else np.nan,
+        "up_long_meanR": (float(df.loc[reg == "trend_up", "fwd1"].mean()) if (reg == "trend_up").any() else np.nan),
+        "down_short_meanR": (
+            float(df.loc[reg == "trend_down", "fwd1"].mean()) if (reg == "trend_down").any() else np.nan
+        ),
     }
 
 
@@ -136,14 +140,21 @@ def main() -> None:
         if len(rs):
             best = rs.loc[rs["fwd1_mean"].idxmax()]
             worst = rs.loc[rs["fwd1_mean"].idxmin()]
-            summary.append({
-                "asset": asset, "tf": use_tf, "bars": len(df),
-                "stickiness": st,
-                "best_regime": best["regime"], "best_fwd1": best["fwd1_mean"],
-                "worst_regime": worst["regime"], "worst_fwd1": worst["fwd1_mean"],
-                "active_share": ts["active_share"], "active_meanR": ts["active_meanR"],
-                "all_meanR": ts["all_meanR"],
-            })
+            summary.append(
+                {
+                    "asset": asset,
+                    "tf": use_tf,
+                    "bars": len(df),
+                    "stickiness": st,
+                    "best_regime": best["regime"],
+                    "best_fwd1": best["fwd1_mean"],
+                    "worst_regime": worst["regime"],
+                    "worst_fwd1": worst["fwd1_mean"],
+                    "active_share": ts["active_share"],
+                    "active_meanR": ts["active_meanR"],
+                    "all_meanR": ts["all_meanR"],
+                }
+            )
 
     if summary:
         print("\n" + "=" * 96)

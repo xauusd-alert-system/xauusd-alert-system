@@ -1,6 +1,7 @@
 """
 Tests for Macro News Sentiment Analyzer.
 """
+
 from data.sentiment_analyzer import MacroNewsSentimentAnalyzer
 
 

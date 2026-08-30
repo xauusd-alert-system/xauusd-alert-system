@@ -63,17 +63,34 @@ def main() -> int:
     horizon = int(cfg.get("labeling", {}).get("horizon_candles_n", 24))
 
     rows = []
-    print(f"{'asset':<8}{'tf':<5}{'calibrator':<26}{'std_p':>8}{'|p-.5|':>8}"
-          f"{'p5':>7}{'p95':>7}{'min':>7}{'max':>7}{'in[.5,.6]':>10}{'ECE':>8}{'Brier':>8}"
-          f"{'cov55':>7}{'cov60':>7}")
+    print(
+        f"{'asset':<8}{'tf':<5}{'calibrator':<26}{'std_p':>8}{'|p-.5|':>8}"
+        f"{'p5':>7}{'p95':>7}{'min':>7}{'max':>7}{'in[.5,.6]':>10}{'ECE':>8}{'Brier':>8}"
+        f"{'cov55':>7}{'cov60':>7}"
+    )
     for asset in ASSETS:
         acfg = cfg["assets"][asset]
         tf = resolve_asset_timeframe(cfg, asset)
         mp = Path(acfg["model_path"])
         if not mp.exists():
-            rows.append((asset, tf, "MISSING", float("nan"), float("nan"), float("nan"),
-                         float("nan"), float("nan"), float("nan"), float("nan"),
-                         float("nan"), float("nan"), float("nan"), float("nan")))
+            rows.append(
+                (
+                    asset,
+                    tf,
+                    "MISSING",
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                )
+            )
             continue
         bundle = joblib.load(mp)
         model = bundle["model"]
@@ -82,9 +99,23 @@ def main() -> int:
 
         raw = read_candles(db_path, tf, asset)
         if raw is None or raw.empty:
-            rows.append((asset, tf, f"{desc} NO-DATA", float("nan"), float("nan"),
-                         float("nan"), float("nan"), float("nan"), float("nan"),
-                         float("nan"), float("nan"), float("nan"), float("nan")))
+            rows.append(
+                (
+                    asset,
+                    tf,
+                    f"{desc} NO-DATA",
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                )
+            )
             continue
         full = build_full_df(raw, cfg, db_path, asset, tf)
         X_all, y_all, _av = build_training_matrix(full, cfg=cfg)
@@ -93,6 +124,7 @@ def main() -> int:
         missing = [c for c in model_cols if c not in X_all.columns]
         if missing and "regime" in full.columns:
             from regime.classifier import regime_onehot_df
+
             oh = regime_onehot_df(full)
             new_cols = [c for c in oh.columns if c in missing]
             X_all = X_all.join(oh[new_cols])
@@ -102,9 +134,23 @@ def main() -> int:
         n = len(X_all)
         oos_start = max(0, n - oos_bars)
         if oos_start <= 0:
-            rows.append((asset, tf, f"{desc} SHORT", float("nan"), float("nan"),
-                         float("nan"), float("nan"), float("nan"), float("nan"),
-                         float("nan"), float("nan"), float("nan"), float("nan")))
+            rows.append(
+                (
+                    asset,
+                    tf,
+                    f"{desc} SHORT",
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                    float("nan"),
+                )
+            )
             continue
         X_o = X_all.iloc[oos_start:]
         y_o = y_all.iloc[oos_start:]
@@ -112,12 +158,20 @@ def main() -> int:
         ece, _ = compute_ece(y_o, p)
         brier = compute_brier_score(y_o, p)
         row = (
-            asset, tf, desc,
-            float(np.std(p)), float(np.mean(np.abs(p - 0.5))),
-            float(np.percentile(p, 5)), float(np.percentile(p, 95)),
-            float(p.min()), float(p.max()),
-            _collapsed(p), ece, brier,
-            float((p >= 0.55).mean()), float((p >= 0.60).mean()),
+            asset,
+            tf,
+            desc,
+            float(np.std(p)),
+            float(np.mean(np.abs(p - 0.5))),
+            float(np.percentile(p, 5)),
+            float(np.percentile(p, 95)),
+            float(p.min()),
+            float(p.max()),
+            _collapsed(p),
+            ece,
+            brier,
+            float((p >= 0.55).mean()),
+            float((p >= 0.60).mean()),
         )
         rows.append(row)
 
@@ -127,8 +181,10 @@ def main() -> int:
             fmt += f"{v:>8.4f}" if isinstance(v, float) and not np.isnan(v) else f"{'—':>8}"
         print(fmt)
 
-    print("\nlegend: in[.5,.6] = доля прогнозов в схлопнутом диапазоне 0.50-0.60; "
-          "cov55/60 = coverage p>=0.55/0.60; ECE порог 0.05")
+    print(
+        "\nlegend: in[.5,.6] = доля прогнозов в схлопнутом диапазоне 0.50-0.60; "
+        "cov55/60 = coverage p>=0.55/0.60; ECE порог 0.05"
+    )
     return 0
 
 

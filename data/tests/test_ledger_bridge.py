@@ -1,20 +1,19 @@
 """Tests for data/ledger_bridge.py (durable outbox + signed delivery)."""
+
 from __future__ import annotations
 
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from contracts.execution_contracts import ExecutionEvent, execution_event_id
 from data.ledger_bridge import (
-    deliver_batch,
     build_envelope,
+    deliver_batch,
     deliver_outbox,
     enqueue_event,
-    init_outbox,
     mark_delivered,
     mark_failed,
     outbox_stats,
@@ -25,8 +24,9 @@ from data.ledger_bridge import (
 )
 
 
-def _event(deal: int, *, source: str = "mt5_observer", event_type: str = "deal_added",
-           received: int = 1_700_000_000_000) -> ExecutionEvent:
+def _event(
+    deal: int, *, source: str = "mt5_observer", event_type: str = "deal_added", received: int = 1_700_000_000_000
+) -> ExecutionEvent:
     return ExecutionEvent(
         event_id=execution_event_id(source, "demo:7", "deal", str(deal)),
         event_type=event_type,
@@ -78,8 +78,7 @@ def test_outbox_mark_failed_records_error(outbox_db):
 
 
 def test_sign_and_verify_envelope():
-    envelope = build_envelope([_event(1)], producer="mt5_python_sender",
-                              account_mode="demo", account_login=7)
+    envelope = build_envelope([_event(1)], producer="mt5_python_sender", account_mode="demo", account_login=7)
     signature = sign_envelope(envelope, "secret")
     body = envelope.model_dump_json().encode("utf-8")
     assert verify_signature(body, signature, "secret") is True
@@ -101,11 +100,11 @@ class _IngestHandler(BaseHTTPRequestHandler):
         if self.__class__.fail_with is not None:
             self.send_response(self.__class__.fail_with)
             self.end_headers()
-            self.wfile.write(b"{\"error\": \"boom\"}")
+            self.wfile.write(b'{"error": "boom"}')
             return
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"{\"accepted\": 1}")
+        self.wfile.write(b'{"accepted": 1}')
 
 
 @pytest.fixture
@@ -123,8 +122,9 @@ def ingest_server():
 
 def test_deliver_outbox_success_marks_delivered(outbox_db, ingest_server):
     enqueue_event(outbox_db, _event(1))
-    result = deliver_outbox(outbox_db, ingest_url=ingest_server, token="tok",
-                            secret="s3cret", account_mode="demo", account_login=7)
+    result = deliver_outbox(
+        outbox_db, ingest_url=ingest_server, token="tok", secret="s3cret", account_mode="demo", account_login=7
+    )
     assert result["ok"] is True and result["delivered"] == 1
     assert outbox_stats(outbox_db)["pending"] == 0
     path, headers, body = _IngestHandler.received[0]
@@ -141,23 +141,31 @@ def test_deliver_outbox_success_marks_delivered(outbox_db, ingest_server):
 def test_deliver_outbox_failure_keeps_events(outbox_db, ingest_server):
     enqueue_event(outbox_db, _event(1))
     _IngestHandler.fail_with = 500
-    result = deliver_outbox(outbox_db, ingest_url=ingest_server, token="tok",
-                            secret="s3cret", account_mode="demo", account_login=7)
+    result = deliver_outbox(
+        outbox_db, ingest_url=ingest_server, token="tok", secret="s3cret", account_mode="demo", account_login=7
+    )
     assert result["ok"] is False and result["failed"] == 1
     assert outbox_stats(outbox_db)["pending"] == 1
     # server recovers -> same event delivered; idempotent event_id
     _IngestHandler.fail_with = None
-    result = deliver_outbox(outbox_db, ingest_url=ingest_server, token="tok",
-                            secret="s3cret", account_mode="demo", account_login=7)
+    result = deliver_outbox(
+        outbox_db, ingest_url=ingest_server, token="tok", secret="s3cret", account_mode="demo", account_login=7
+    )
     assert result["ok"] is True and result["delivered"] == 1
     assert len(_IngestHandler.received) == 2
 
 
 def test_deliver_outbox_transport_error_keeps_events(outbox_db):
     enqueue_event(outbox_db, _event(1))
-    result = deliver_outbox(outbox_db, ingest_url="http://127.0.0.1:1/ingest",
-                            token="tok", secret="s3cret",
-                            account_mode="demo", account_login=7, timeout=0.5)
+    result = deliver_outbox(
+        outbox_db,
+        ingest_url="http://127.0.0.1:1/ingest",
+        token="tok",
+        secret="s3cret",
+        account_mode="demo",
+        account_login=7,
+        timeout=0.5,
+    )
     assert result["ok"] is False
     assert outbox_stats(outbox_db)["pending"] == 1
 
@@ -165,15 +173,18 @@ def test_deliver_outbox_transport_error_keeps_events(outbox_db):
 def test_deliver_batch_requires_secret():
     """Missing HMAC secret -> configuration failure BEFORE any POST attempt."""
     import pytest as _pytest
+
     with _pytest.raises(ValueError, match="LEDGER_INGEST_SECRET"):
-        deliver_batch([_event(1)], ingest_url="https://h", token="tok",
-                      secret=None, account_mode="demo", account_login=7)
+        deliver_batch(
+            [_event(1)], ingest_url="https://h", token="tok", secret=None, account_mode="demo", account_login=7
+        )
 
 
 def test_deliver_outbox_signature_always_present(outbox_db, ingest_server):
     enqueue_event(outbox_db, _event(1))
-    result = deliver_outbox(outbox_db, ingest_url=ingest_server, token="tok",
-                            secret="s3cret", account_mode="demo", account_login=7)
+    result = deliver_outbox(
+        outbox_db, ingest_url=ingest_server, token="tok", secret="s3cret", account_mode="demo", account_login=7
+    )
     assert result["ok"] is True
     _, headers, body = _IngestHandler.received[0]
     signature = headers.get("X-Ledger-Signature")
@@ -186,9 +197,12 @@ def test_deliver_outbox_signature_always_present(outbox_db, ingest_server):
     # the constructed headers must be usable by requests to prepare a real
     # HTTP request (catches header-construction bugs beyond the mocked dict)
     import requests
+
     prepared = requests.Request(
-        "POST", "https://example.invalid/api/ledger/ingest",
-        headers=headers, data=body,
+        "POST",
+        "https://example.invalid/api/ledger/ingest",
+        headers=headers,
+        data=body,
     ).prepare()
     assert prepared.headers.get("X-Ledger-Signature") == signature
     # signature verifies against the EXACT body the HTTP client received
@@ -201,9 +215,17 @@ def test_run_delivery_loop_drains_and_stops(outbox_db, ingest_server):
     for deal in range(1, 6):
         enqueue_event(outbox_db, _event(deal))
     calls = []
-    run_delivery_loop(outbox_db, ingest_url=ingest_server, token="tok",
-                      secret="s3cret", account_mode="demo", account_login=7,
-                      max_attempts=10, interval_seconds=0.05, on_result=calls.append)
+    run_delivery_loop(
+        outbox_db,
+        ingest_url=ingest_server,
+        token="tok",
+        secret="s3cret",
+        account_mode="demo",
+        account_login=7,
+        max_attempts=10,
+        interval_seconds=0.05,
+        on_result=calls.append,
+    )
     assert outbox_stats(outbox_db)["pending"] == 0
     assert len(calls) >= 1
     assert calls[-1]["ok"] is True
@@ -211,5 +233,4 @@ def test_run_delivery_loop_drains_and_stops(outbox_db, ingest_server):
 
 def test_envelope_rejects_empty_events():
     with pytest.raises(Exception):
-        build_envelope([], producer="mt5_observer", account_mode="demo",
-                       account_login=1).model_dump()
+        build_envelope([], producer="mt5_observer", account_mode="demo", account_login=1).model_dump()

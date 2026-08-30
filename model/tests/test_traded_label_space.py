@@ -21,6 +21,7 @@ So the tests below pin the contract itself rather than any number: the training
 path emits -1/+1, the diagnostics keep {0, 1}, and the failure mode of confusing
 the two is asserted explicitly so it cannot come back silently.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -41,8 +42,8 @@ from model.trainer import (
 
 ASSET = "TEST"
 ATR = 1.0
-STEP = 0.5      # price change per bar
-LEG = 10        # bars per sawtooth leg -> amplitude 5 ATR
+STEP = 0.5  # price change per bar
+LEG = 10  # bars per sawtooth leg -> amplitude 5 ATR
 N_BARS = 400
 HORIZON = 36
 
@@ -64,15 +65,17 @@ def _sawtooth_df(n: int = N_BARS) -> pd.DataFrame:
         if (i + 1) % LEG == 0:
             rising = not rising
     close = np.asarray(closes, dtype=float)
-    return pd.DataFrame({
-        "open": close,
-        "high": close + 0.05,
-        "low": close - 0.05,
-        "close": close,
-        "atr": np.full(n, ATR),
-        # A real feature column, so build_training_matrix has something to keep.
-        "rsi": np.linspace(30.0, 70.0, n),
-    })
+    return pd.DataFrame(
+        {
+            "open": close,
+            "high": close + 0.05,
+            "low": close - 0.05,
+            "close": close,
+            "atr": np.full(n, ATR),
+            # A real feature column, so build_training_matrix has something to keep.
+            "rsi": np.linspace(30.0, 70.0, n),
+        }
+    )
 
 
 def _cfg(event: str = None, include_zero_class: bool = False) -> dict:
@@ -110,6 +113,7 @@ def _traded_labels(df: pd.DataFrame, encoding: str) -> pd.Series:
 # The switch itself
 # ---------------------------------------------------------------------------
 
+
 def test_the_default_config_still_produces_the_old_barrier_label():
     """An absent labeling.event must change nothing at all."""
     df = _sawtooth_df()
@@ -146,30 +150,36 @@ def test_the_traded_event_refuses_the_three_class_space():
     """0 cannot mean no_trade and short in the same column."""
     df = _sawtooth_df(60)
     with pytest.raises(ValueError, match="include_zero_class"):
-        generate_labels_from_config(
-            df, _cfg(event="traded", include_zero_class=True), ASSET
-        )
+        generate_labels_from_config(df, _cfg(event="traded", include_zero_class=True), ASSET)
 
 
 # ---------------------------------------------------------------------------
 # The encoding contract
 # ---------------------------------------------------------------------------
 
+
 def test_traded_event_uses_signal_bar_atr_and_grid_clamp():
     from labeling.label_generator import generate_labels_traded_event
 
-    df = pd.DataFrame({
-        "open": [100.0] * 8,
-        "high": [100.0, 100.0, 101.1, 100.0, 100.0, 100.0, 100.0, 100.0],
-        "low": [100.0] * 8,
-        "close": [100.0] * 8,
-        "atr": [1.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    })
+    df = pd.DataFrame(
+        {
+            "open": [100.0] * 8,
+            "high": [100.0, 100.0, 101.1, 100.0, 100.0, 100.0, 100.0, 100.0],
+            "low": [100.0] * 8,
+            "close": [100.0] * 8,
+            "atr": [1.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    )
     cfg = _cfg()
     cfg["signal_grid"]["step_max_points"] = 1.0
     labels = generate_labels_traded_event(
-        df, cfg, ASSET, direction=1, horizon_n=4,
-        include_costs=False, require_net_positive=False,
+        df,
+        cfg,
+        ASSET,
+        direction=1,
+        horizon_n=4,
+        include_costs=False,
+        require_net_positive=False,
     )
     assert labels.iloc[0] == 1.0  # protect=101 from signal ATR; not entry ATR=10
 
@@ -218,6 +228,7 @@ def test_the_encoding_argument_is_validated():
 # ---------------------------------------------------------------------------
 # The contract with the trainer
 # ---------------------------------------------------------------------------
+
 
 def test_build_training_matrix_keeps_both_sides_of_the_wired_label():
     df = _sawtooth_df()
@@ -272,6 +283,5 @@ def test_flipping_the_switch_actually_changes_the_training_target():
     directional = both & barrier.isin([1.0, -1.0])
     disagreement = float((barrier[directional] != traded[directional]).mean())
     assert disagreement > 0.05, (
-        "the traded event and the triple barrier should not describe the same "
-        "outcome on the same bars"
+        "the traded event and the triple barrier should not describe the same outcome on the same bars"
     )

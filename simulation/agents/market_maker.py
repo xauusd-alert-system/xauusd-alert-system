@@ -5,6 +5,7 @@ Quotes both sides of the book around the current mid price with a configurable
 spread offset. When inventory grows beyond +/- mm_max_inventory it skews its
 quotes (or crosses) to mean-revert inventory toward zero.
 """
+
 from __future__ import annotations
 
 from typing import Optional

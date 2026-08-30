@@ -1,0 +1,50 @@
+# Парный статистический анализ (ТЗ §6): пары, таймфреймы, окна, пороги.
+# source: mt5 (данные брокера из data/market_data_mt5.sqlite) |
+#         binance (публичный REST, кэш data/pairs_cache.sqlite) |
+#         csv (офлайн, paths: {символ: путь})
+pairs:
+  - name: XAU/XAG
+    source: mt5
+    symbols: [XAUUSD, XAGUSD]
+    timeframes: [H1, D1]
+  - name: EURUSD/GBPUSD
+    source: mt5
+    symbols: [EURUSD, GBPUSD]
+    timeframes: [H1, D1]
+  - name: BTC/ETH
+    source: binance
+    symbols: [BTCUSDT, ETHUSDT]
+    timeframes: [H1, D1]
+  - name: BTC/SOL
+    source: binance
+    symbols: [BTCUSDT, SOLUSDT]
+    timeframes: [H1, D1]
+
+analysis:
+  default_timeframe: D1     # анализ (ТЗ §3: 1d по умолчанию)
+  monitoring_timeframe: H1  # мониторинг (ТЗ §3: 1h)
+  window: 90                # окно z-score / μ / σ (ТЗ §4.1: по умолчанию 90)
+  ols_window: 90            # fallback OLS β
+  kalman_q: 0.0001          # процессный шум β (адаптация ~30-40 баров)
+  kalman_r: 0.01            # шум наблюдения
+  adf_p_max: 0.05           # порог коинтеграции
+  half_life_range_days: [0.05, 60]   # валидный диапазон HL (ТЗ §4.1): 0.05д = 1.2 H1-бара для быстрых крипто-пар
+  hurst_meanrev_max: 0.5    # режимный порог Херста для mean-rev
+  bars_per_year:
+    M5: 72576
+    M15: 24192
+    H1: 6048
+    H4: 1512
+    D1: 252
+
+thresholds:                 # сигнальная логика (ТЗ §4.4, этап 2)
+  entry_z: 2.0
+  exit_z: 0.0
+  stop_z: 3.0
+
+ensemble:                   # веса движков (ТЗ §4.3, этап 3)
+  weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+backtest:                   # point-in-time walk-forward (ТЗ §7.2)
+  gate_window: 250          # окно гейтов ADF/HL/Hurst на момент входа
+  min_start_bars: 250       # не торгуем раньше этого числа баров

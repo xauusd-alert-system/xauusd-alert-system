@@ -1,17 +1,15 @@
-import math
 import numpy as np
 import pytest
+
+from backtest.deflated_sharpe import (
+    deflated_sharpe_ratio,
+    effective_number_trials,
+    n_eff_participation_ratio,
+)
+from model.cv import purged_kfold_indices
 from model.uniqueness import (
     average_uniqueness_weights,
     compute_event_uniqueness,
-    compute_trade_uniqueness,
-)
-from model.cv import purged_kfold_indices, embargo_train_indices
-from backtest.deflated_sharpe import (
-    deflated_sharpe_ratio,
-    probabilistic_sharpe_ratio,
-    n_eff_participation_ratio,
-    effective_number_trials,
 )
 
 

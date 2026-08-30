@@ -2,6 +2,7 @@
 Unit tests for realtime/pipeline.py.
 Run with: pytest realtime/tests/test_pipeline.py -v
 """
+
 import os
 import sys
 
@@ -9,9 +10,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from config.loader import load_config, get_signal_grid
+from config.loader import get_signal_grid, load_config
 from realtime.pipeline import RealtimePipeline, resolve_signal_step
-
 
 CFG = load_config()
 
@@ -57,6 +57,7 @@ def test_pipeline_uses_only_last_closed_candle():
     """The signal's timestamp must match the LAST row of the fetched series, never an earlier one."""
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     from data.ingestion import fetch_mock_candles
+
     df_check = fetch_mock_candles(CFG["market_data"]["timeframe"], n_candles=300, sessions_config=CFG["sessions"])
     result = pipeline.generate_signal(n_candles=300)
     # Timestamps are time-based (not seeded), so we just check the signal timestamp is recent/valid
@@ -65,6 +66,7 @@ def test_pipeline_uses_only_last_closed_candle():
 
 def test_pipeline_regime_field_is_valid_enum_value():
     from regime.classifier import RegimeLabel
+
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     result = pipeline.generate_signal(n_candles=300)
     assert result["regime"] in [r.value for r in RegimeLabel]
@@ -149,7 +151,17 @@ def test_get_signal_grid_breakeven_trigger():
 
 
 def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
-    """TP2 = exactly 2x the TP1 distance, TP3 and SL = exactly 3x the step."""
+    """TP2 = exactly 2x the TP1 distance, TP3 = 3x the step, SL per stop_mult.
+
+    XAUUSD stop_mult was moved 2.0 -> 1.5 by owner request (2026-08-20,
+    config/config.yaml assets.XAUUSD.signal_grid), so invalidation = 1.5x step.
+    """
+    from config.loader import get_signal_grid, load_config
+
+    cfg = load_config()
+    asset_cfg = (cfg.get("assets") or {}).get("XAUUSD", {})
+    grid = get_signal_grid(cfg, asset_cfg)
+    expected_stop_mult = float(grid["stop_mult"])
     from model.ensemble import EnsembleSignal
     from realtime import pipeline as pipeline_module
 
@@ -176,10 +188,11 @@ def test_pipeline_directional_grid_matches_equal_step_spec(monkeypatch):
     assert step > 0
     assert result["step"] > 0
     # rounding to 2 decimals gives ~0.01 tolerance per level
-    # Owner template (2026-08-18): TP1=1, TP2=2, TP3=3, Stop=2.
+    # Owner template: TP1=1, TP2=2, TP3=3; SL follows the configured stop_mult
+    # (1.5 for XAUUSD since the 2026-08-20 owner request).
     assert abs(abs(tp2 - entry) - 2.0 * step) < 0.05
     assert abs(abs(tp3 - entry) - 3.0 * step) < 0.05
-    assert abs(abs(result["invalidation"] - entry) - 2.0 * step) < 0.05
+    assert abs(abs(result["invalidation"] - entry) - expected_stop_mult * step) < 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +206,7 @@ def test_pipeline_builds_order_flow_features():
     pipeline = RealtimePipeline(cfg=CFG, model_path=None, data_mode="mock")
     df = pipeline._fetch_data_frame("M5", 300)
     featured = pipeline._build_features(df)
-    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
-                "order_flow_imbalance_50", "dist_vwap_atr"):
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50", "dist_vwap_atr"):
         assert col in featured.columns, f"missing {col}"
     assert featured["cvd"].notna().all()
 
@@ -203,8 +215,8 @@ def test_order_flow_columns_in_training_feature_set():
     """FEATURE_COLUMNS must include the order-flow columns so build_training_matrix
     feeds them to the model (training/inference consistency)."""
     from model.trainer import FEATURE_COLUMNS
-    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
-                "order_flow_imbalance_50", "dist_vwap_atr"):
+
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50", "dist_vwap_atr"):
         assert col in FEATURE_COLUMNS
 
 

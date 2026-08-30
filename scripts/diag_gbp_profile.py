@@ -9,7 +9,6 @@ Diagnostic for GBPUSD profile under current FX v4 config (trend-friendly, stop 3
 """
 
 import argparse
-import json
 import os
 import sys
 
@@ -18,10 +17,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_signal_grid
-from scripts.train_mt5 import build_full_df
+from config.loader import load_config
+from data.ingestion import to_epoch_seconds  # for smoke tests / no DB
 from model.ensemble_backtest import EnsembleBacktester
-from data.ingestion import fetch_mock_candles, to_epoch_seconds  # for smoke tests / no DB
+from scripts.train_mt5 import build_full_df
 
 
 def _make_synthetic_gbp_df(n=2000, price=1.30, atr=0.0015, seed=42):
@@ -33,18 +32,19 @@ def _make_synthetic_gbp_df(n=2000, price=1.30, atr=0.0015, seed=42):
     opens = closes + np.random.randn(n) * atr * 0.05
     highs = np.maximum(opens, closes) + np.abs(np.random.randn(n)) * 0.0008 + 0.0002
     lows = np.minimum(opens, closes) - np.abs(np.random.randn(n)) * 0.0008 - 0.0002
-    df = pd.DataFrame({
-        "timestamp_utc": to_epoch_seconds(idx),
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": 1000.0,
-        "session": np.random.choice(["london", "newyork", "asia"], n, p=[0.45, 0.35, 0.20]),
-        "regime": np.random.choice(["trend_up", "trend_down", "range", "compression"], n,
-                                   p=[0.3, 0.3, 0.3, 0.1]),
-        "atr": atr,
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": to_epoch_seconds(idx),
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": 1000.0,
+            "session": np.random.choice(["london", "newyork", "asia"], n, p=[0.45, 0.35, 0.20]),
+            "regime": np.random.choice(["trend_up", "trend_down", "range", "compression"], n, p=[0.3, 0.3, 0.3, 0.1]),
+            "atr": atr,
+        }
+    )
     return df
 
 
@@ -63,10 +63,10 @@ def main():
         try:
             raw = pd.read_sql_query(
                 "SELECT * FROM candles WHERE asset=? AND timeframe=? ORDER BY timestamp_utc",
-                __import__("sqlite3").connect(db_path), params=(asset_key, timeframe))
-            df = build_full_df(
-                raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe
+                __import__("sqlite3").connect(db_path),
+                params=(asset_key, timeframe),
             )
+            df = build_full_df(raw, cfg, db_path=db_path, asset_key=asset_key, timeframe=timeframe)
             # Score the frame with the PRODUCTION model so the diagnostics profile
             # the same entries the live trader would take. Without this the
             # backtester's ml_p defaults to 0.5 and every signal is declined
@@ -74,22 +74,33 @@ def main():
             model_path = asset_cfg.get("model_path")
             if model_path and os.path.exists(model_path):
                 from model.predictor import ModelPredictor
+
                 predictor = ModelPredictor(model_path)
                 preds = predictor.predict_proba(df.fillna(0.0))
                 df["ml_p_long"] = preds["p_long"].values
                 df["ml_p_short"] = preds["p_short"].values
             else:
-                print(f"[diag] WARNING: production model not found at {model_path}; "
-                      "no ML entries will be generated on the real-data slice.")
+                print(
+                    f"[diag] WARNING: production model not found at {model_path}; "
+                    "no ML entries will be generated on the real-data slice."
+                )
         except Exception as e:
             print(f"[diag] No usable DB or error ({e}); using synthetic mock for GBPUSD profile.")
             raw = _make_synthetic_gbp_df()
             df = raw.copy()
-            df["ml_p_long"] = np.clip(0.5 + (df["close"].diff().fillna(0) > 0).astype(float) * 0.35 + np.random.randn(len(df)) * 0.1, 0.1, 0.9)
+            df["ml_p_long"] = np.clip(
+                0.5 + (df["close"].diff().fillna(0) > 0).astype(float) * 0.35 + np.random.randn(len(df)) * 0.1,
+                0.1,
+                0.9,
+            )
             df["ml_p_short"] = 1.0 - df["ml_p_long"]
     else:
         df = _make_synthetic_gbp_df()
-        df["ml_p_long"] = np.clip(0.5 + (df["close"].diff().fillna(0) > 0).astype(float) * 0.35 + np.random.randn(len(df)) * 0.1, 0.1, 0.9)
+        df["ml_p_long"] = np.clip(
+            0.5 + (df["close"].diff().fillna(0) > 0).astype(float) * 0.35 + np.random.randn(len(df)) * 0.1,
+            0.1,
+            0.9,
+        )
         df["ml_p_short"] = 1.0 - df["ml_p_long"]
 
     # Use the current GBP config (v4) for diagnostics
@@ -129,19 +140,21 @@ def main():
         else:
             mfe = min(lo, float(t.entry_price))
             mae = max(hi, float(t.entry_price))
-        rows.append({
-            "entry_ts": entry_ts,
-            "exit_ts": exit_ts,
-            "direction": t.direction,
-            "entry_price": t.entry_price,
-            "exit_price": t.exit_price,
-            "exit_reason": t.exit_reason,
-            "pnl": t.pnl,
-            "mfe": mfe,
-            "mae": mae,
-            "tp1_hit": getattr(t, "tp1_hit", None),
-            "tp2_hit": getattr(t, "tp2_hit", None),
-        })
+        rows.append(
+            {
+                "entry_ts": entry_ts,
+                "exit_ts": exit_ts,
+                "direction": t.direction,
+                "entry_price": t.entry_price,
+                "exit_price": t.exit_price,
+                "exit_reason": t.exit_reason,
+                "pnl": t.pnl,
+                "mfe": mfe,
+                "mae": mae,
+                "tp1_hit": getattr(t, "tp1_hit", None),
+                "tp2_hit": getattr(t, "tp2_hit", None),
+            }
+        )
 
     tdf = pd.DataFrame(rows)
     os.makedirs("logs", exist_ok=True)

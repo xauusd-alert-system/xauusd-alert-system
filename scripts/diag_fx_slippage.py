@@ -19,13 +19,21 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import pandas as pd
 
 from config.loader import load_config
-from scripts.run_backtest import load_asset_history, build_full_df, merge_asset_cfg  # noqa: E402
-from model.trainer import build_training_matrix, train_model, calibrate_model, save_model  # noqa: E402
-from model.predictor import ModelPredictor  # noqa: E402
 from model.ensemble_backtest import EnsembleBacktester  # noqa: E402
+from model.predictor import ModelPredictor  # noqa: E402
+from model.trainer import (  # noqa: E402
+    build_training_matrix,
+    calibrate_model,
+    save_model,
+    train_model,
+)
+from scripts.run_backtest import (  # noqa: E402
+    build_full_df,
+    load_asset_history,
+    merge_asset_cfg,
+)
 
 
 def main():
@@ -43,9 +51,10 @@ def main():
     split = int(len(X_train) * 0.7)
     X_fit = X_train.iloc[:split]
     y_fit = y_train.iloc[:split]
-    df_eval = df.iloc[len(df) - len(X_train) + split:].copy().reset_index(drop=True)
+    df_eval = df.iloc[len(df) - len(X_train) + split :].copy().reset_index(drop=True)
 
     import tempfile
+
     base = train_model(X_fit, y_fit, cfg_inner)
     calib = calibrate_model(base, X_fit, y_fit, cfg_inner)
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="diag_model_", suffix=".joblib")
@@ -84,6 +93,7 @@ def main():
         return
 
     from collections import Counter
+
     wins = sum(1 for t in trades if t.pnl > 0)
     print(f"  win_rate = {wins / len(trades) * 100:.2f}%  (win/loss = {wins}/{len(trades) - wins})")
     print(f"  exit_reasons = {dict(Counter(t.exit_reason for t in trades))}")

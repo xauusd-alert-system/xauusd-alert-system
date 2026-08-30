@@ -18,6 +18,7 @@ is `horizon + embargo - 1`. Assert the invariant, then derive the count from it.
 Deliberately dependency-light: pandas + numpy only, no model stack, so this runs
 anywhere pytest runs.
 """
+
 import pandas as pd
 
 from backtest.walk_forward import (
@@ -41,13 +42,15 @@ def _df(n_days: int = 12) -> pd.DataFrame:
     """Gapless M15 grid: with no weekend holes the expected purge distance is an
     exact bar count, which is what makes the assertions below sharp."""
     n = n_days * 96
-    return pd.DataFrame({
-        "timestamp_utc": [START_TS + i * BAR_SECS for i in range(n)],
-        "open": 1.0,
-        "high": 1.0,
-        "low": 1.0,
-        "close": 1.0,
-    })
+    return pd.DataFrame(
+        {
+            "timestamp_utc": [START_TS + i * BAR_SECS for i in range(n)],
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 1.0,
+        }
+    )
 
 
 def _cfg(horizon: int = HORIZON, embargo: int = EMBARGO) -> dict:
@@ -65,8 +68,7 @@ def _cfg(horizon: int = HORIZON, embargo: int = EMBARGO) -> dict:
 
 
 def _raw_train(df: pd.DataFrame, w) -> pd.DataFrame:
-    return df[(df["timestamp_utc"] >= w.train_start_ts) &
-              (df["timestamp_utc"] < w.train_end_ts)]
+    return df[(df["timestamp_utc"] >= w.train_start_ts) & (df["timestamp_utc"] < w.train_end_ts)]
 
 
 def _dropped(horizon: int = HORIZON, embargo: int = EMBARGO) -> int:
@@ -155,13 +157,15 @@ def test_split_fold_frames_is_exactly_what_run_walk_forward_passes():
     seen = []
 
     def spy(train_df, test_df, cfg_inner):
-        seen.append((
-            len(train_df),
-            int(train_df["timestamp_utc"].max()),
-            len(test_df),
-            int(test_df["timestamp_utc"].min()),
-            int(test_df["timestamp_utc"].max()),
-        ))
+        seen.append(
+            (
+                len(train_df),
+                int(train_df["timestamp_utc"].max()),
+                len(test_df),
+                int(test_df["timestamp_utc"].min()),
+                int(test_df["timestamp_utc"].max()),
+            )
+        )
         return {}
 
     results = run_walk_forward(df, cfg, spy)

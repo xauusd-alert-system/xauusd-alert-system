@@ -9,10 +9,10 @@ in hindsight (see model/trainer.py docstring). This module enforces that by expl
 selecting only the trained feature_cols list saved alongside the model, ignoring any
 extra columns (including 'label' if accidentally present) in the input DataFrame.
 """
-import numpy as np
+
 import pandas as pd
 
-from model.trainer import load_model, FEATURE_COLUMNS
+from model.trainer import load_model
 
 
 class ModelPredictor:
@@ -63,6 +63,7 @@ class ModelPredictor:
                 # regime_onehot_df emits the full RegimeLabel set; select only the
                 # columns this model actually needs that are still missing.
                 from regime.classifier import regime_onehot_df
+
                 onehot = regime_onehot_df(df).reindex(columns=needed)
                 add_cols = [c for c in needed if c in onehot.columns and c not in df.columns]
                 df = pd.concat([df, onehot[add_cols]], axis=1)
@@ -92,9 +93,7 @@ class ModelPredictor:
                     index=df.index,
                 )
             # Binary encoding {0: short, 1: long} (default Phase-0+1 path).
-            return pd.DataFrame(
-                {"p_short": proba[:, order[0]], "p_long": proba[:, order[1]]}, index=df.index
-            )
+            return pd.DataFrame({"p_short": proba[:, order[0]], "p_long": proba[:, order[1]]}, index=df.index)
 
         # Fallback, no classes_ attribute: conventional sklearn binary ordering
         # [P(class=0), P(class=1)] = [P(short), P(long)].

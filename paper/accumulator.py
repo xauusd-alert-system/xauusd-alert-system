@@ -1,24 +1,25 @@
 """Frozen candidate manifest and candle-idempotent paper accumulator."""
+
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from config.loader import effective_asset_config, get_signal_grid
-from labeling.label_generator import resolve_label_event
 from data.paper_ledger import (
     append_paper_event,
     paper_accumulation_status,
     read_paper_events,
     register_paper_run,
 )
+from labeling.label_generator import resolve_label_event
 from model.trainer import load_model
 from scripts.deflated_sharpe import _apply_variant, _variants_for
 
@@ -60,8 +61,7 @@ def create_frozen_manifest(
     if lock.get("enabled") and lock.get("start"):
         expected_start = pd.Timestamp(lock["start"])
         expected_start = (
-            expected_start.tz_localize("UTC") if expected_start.tzinfo is None
-            else expected_start.tz_convert("UTC")
+            expected_start.tz_localize("UTC") if expected_start.tzinfo is None else expected_start.tz_convert("UTC")
         )
         if int(start_timestamp_utc) != int(expected_start.timestamp()):
             raise ValueError(
@@ -75,18 +75,12 @@ def create_frozen_manifest(
     model_metadata = bundle.get("metadata", {})
     feature_columns = list(bundle.get("feature_cols", []))
     if int(model_metadata.get("bundle_schema_version", 0)) < 2:
-        raise ValueError(
-            "frozen paper requires an auditable schema-v2 model bundle; retrain with train_mt5"
-        )
+        raise ValueError("frozen paper requires an auditable schema-v2 model bundle; retrain with train_mt5")
     if model_metadata.get("asset_key") != asset_key:
-        raise ValueError(
-            f"model asset metadata {model_metadata.get('asset_key')!r} != {asset_key!r}"
-        )
+        raise ValueError(f"model asset metadata {model_metadata.get('asset_key')!r} != {asset_key!r}")
     expected_event = resolve_label_event(effective_asset_config(frozen_cfg, asset_key))
     if model_metadata.get("label_event") != expected_event:
-        raise ValueError(
-            f"model label_event {model_metadata.get('label_event')!r} != frozen policy {expected_event!r}"
-        )
+        raise ValueError(f"model label_event {model_metadata.get('label_event')!r} != frozen policy {expected_event!r}")
     trained_end = (model_metadata.get("data_period") or {}).get("end_timestamp_utc")
     if trained_end is None:
         raise ValueError("frozen model metadata has no training data end timestamp")
@@ -99,12 +93,10 @@ def create_frozen_manifest(
         "timeframe", frozen_cfg.get("market_data", {}).get("timeframe", "M5")
     )
     if model_metadata.get("timeframe") != expected_timeframe:
-        raise ValueError(
-            f"model timeframe {model_metadata.get('timeframe')!r} != frozen policy {expected_timeframe!r}"
-        )
+        raise ValueError(f"model timeframe {model_metadata.get('timeframe')!r} != frozen policy {expected_timeframe!r}")
     if not feature_columns:
         raise ValueError("frozen model bundle has no feature manifest")
-    created = datetime.now(timezone.utc).isoformat()
+    created = datetime.now(UTC).isoformat()
     identity = {
         "asset_key": asset_key,
         "variant": variant,
@@ -117,9 +109,7 @@ def create_frozen_manifest(
     if path.exists():
         existing = load_frozen_manifest(str(path), verify_model=True)
         if any(existing.get(k) != v for k, v in identity.items()):
-            raise FileExistsError(
-                f"refusing to overwrite frozen manifest with different policy: {path}"
-            )
+            raise FileExistsError(f"refusing to overwrite frozen manifest with different policy: {path}")
         return existing
 
     manifest = {
@@ -220,10 +210,14 @@ class FrozenPaperAccumulator:
 
     def _append_state(self, trade_id: str, bar_ts: int, state: dict, event_type="mark") -> bool:
         return append_paper_event(
-            self.db_path, run_id=self.run_id, trade_id=trade_id,
+            self.db_path,
+            run_id=self.run_id,
+            trade_id=trade_id,
             event_type=event_type,
             idempotency_key=f"{self.run_id}:{trade_id}:{event_type}:{bar_ts}",
-            event_timestamp_utc=bar_ts, bar_timestamp_utc=bar_ts, payload=state,
+            event_timestamp_utc=bar_ts,
+            bar_timestamp_utc=bar_ts,
+            payload=state,
         )
 
     def _open_pending(self, pending, bar: pd.Series) -> bool:
@@ -236,9 +230,13 @@ class FrozenPaperAccumulator:
             return False
         if signal_ts < int(self.manifest["start_timestamp_utc"]):
             append_paper_event(
-                self.db_path, run_id=self.run_id, trade_id=trade_id,
-                event_type="cancel", idempotency_key=f"{self.run_id}:{trade_id}:prestart",
-                event_timestamp_utc=bar_ts, bar_timestamp_utc=bar_ts,
+                self.db_path,
+                run_id=self.run_id,
+                trade_id=trade_id,
+                event_type="cancel",
+                idempotency_key=f"{self.run_id}:{trade_id}:prestart",
+                event_timestamp_utc=bar_ts,
+                bar_timestamp_utc=bar_ts,
                 payload={"reason": "signal_before_manifest_start"},
             )
             return False
@@ -401,17 +399,23 @@ class FrozenPaperAccumulator:
                 payload["grid"] = grid
                 trade_id = _trade_id(self.run_id, signal_ts)
                 append_paper_event(
-                    self.db_path, run_id=self.run_id, trade_id=trade_id,
+                    self.db_path,
+                    run_id=self.run_id,
+                    trade_id=trade_id,
                     event_type="signal",
                     idempotency_key=f"{self.run_id}:signal:{signal_ts}",
-                    event_timestamp_utc=signal_ts, bar_timestamp_utc=signal_ts,
+                    event_timestamp_utc=signal_ts,
+                    bar_timestamp_utc=signal_ts,
                     payload=payload,
                 )
 
         append_paper_event(
-            self.db_path, run_id=self.run_id, event_type="heartbeat",
+            self.db_path,
+            run_id=self.run_id,
+            event_type="heartbeat",
             idempotency_key=f"{self.run_id}:heartbeat:{bar_ts}",
-            event_timestamp_utc=bar_ts, bar_timestamp_utc=bar_ts,
+            event_timestamp_utc=bar_ts,
+            bar_timestamp_utc=bar_ts,
             payload={"model_sha256": self.manifest["model_sha256"]},
         )
         return paper_accumulation_status(self.db_path, self.run_id)

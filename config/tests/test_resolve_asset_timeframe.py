@@ -18,7 +18,7 @@ def _cfg(**overrides) -> dict:
         "market_data": {"timeframe": "M5"},
         "assets": {
             "XAUUSD": {"timeframe": "M15"},
-            "BTCUSD": {"enabled": True},          # no per-asset TF -> global
+            "BTCUSD": {"enabled": True},  # no per-asset TF -> global
             "EURUSD": {"timeframe": "H1"},
         },
     }
@@ -56,7 +56,7 @@ def test_none_asset_returns_global_default():
 def test_missing_market_data_falls_back_to_constant():
     cfg = _cfg()
     del cfg["market_data"]
-    assert resolve_asset_timeframe(cfg, "XAUUSD") == "M15"   # per-asset still wins
+    assert resolve_asset_timeframe(cfg, "XAUUSD") == "M15"  # per-asset still wins
     assert resolve_asset_timeframe(cfg, "BTCUSD") == DEFAULT_TIMEFRAME
     assert DEFAULT_TIMEFRAME == "M5"
 
@@ -72,11 +72,14 @@ def test_asset_key_without_cfg_entry_tolerated():
     assert resolve_asset_timeframe(cfg, "SOLUSD") == "M5"
 
 
-@pytest.mark.parametrize("tf_in,expected", [
-    ("m5", "m5"),        # strings pass through, not coerced/validated
-    ("", ""),            # falsy empty string is treated as "no override"
-    ("  ", "  "),        # whitespace is truthy and passes through
-])
+@pytest.mark.parametrize(
+    "tf_in,expected",
+    [
+        ("m5", "m5"),  # strings pass through, not coerced/validated
+        ("", ""),  # falsy empty string is treated as "no override"
+        ("  ", "  "),  # whitespace is truthy and passes through
+    ],
+)
 def test_override_passthrough(tf_in, expected):
     cfg = _cfg()
     if tf_in == "":

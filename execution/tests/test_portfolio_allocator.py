@@ -1,15 +1,15 @@
 """
 Tests for Phase 11 Portfolio Allocator & Risk Parity.
 """
+
 import numpy as np
 import pandas as pd
-import pytest
 
 from execution.portfolio_allocator import (
     calculate_fractional_kelly,
-    inverse_volatility_allocation,
     calculate_lot_size,
     hierarchical_risk_parity,
+    inverse_volatility_allocation,
 )
 
 
@@ -45,11 +45,13 @@ def test_calculate_lot_size_scaling():
 
 def test_hierarchical_risk_parity():
     np.random.seed(42)
-    returns = pd.DataFrame({
-        "XAUUSD": np.random.randn(100) * 0.01,
-        "EURUSD": np.random.randn(100) * 0.005,
-        "BTCUSD": np.random.randn(100) * 0.03,
-    })
+    returns = pd.DataFrame(
+        {
+            "XAUUSD": np.random.randn(100) * 0.01,
+            "EURUSD": np.random.randn(100) * 0.005,
+            "BTCUSD": np.random.randn(100) * 0.03,
+        }
+    )
     weights = hierarchical_risk_parity(returns)
     assert np.isclose(weights.sum(), 1.0)
     assert weights["EURUSD"] > weights["BTCUSD"]
@@ -60,8 +62,8 @@ def test_calculate_lot_size_never_rounds_up_to_minimum():
     (that would exceed the intended per-trade risk). It returns 0 to signal
     'skip', matching risk_sizer.lots_for_risk's 'never round up' rule."""
     lots = calculate_lot_size(
-        account_equity=100.0,      # tiny account
-        risk_pct=0.25,             # 0.25% -> $0.25 risk
+        account_equity=100.0,  # tiny account
+        risk_pct=0.25,  # 0.25% -> $0.25 risk
         stop_loss_distance=5.0,
         point_value_lot=100.0,
         min_lot=0.01,

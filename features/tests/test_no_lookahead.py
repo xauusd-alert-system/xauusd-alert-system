@@ -8,8 +8,10 @@ future data at row i - this is exactly the bug class we must prevent.
 
 Run with: pytest features/tests/test_no_lookahead.py -v
 """
+
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -17,10 +19,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from config.loader import load_config
 from data.ingestion import fetch_mock_candles
-from features.indicators import ema, rsi, macd, atr, bollinger_width, build_all_indicators
 from features.candle_anatomy import candle_anatomy
-from features.structure import detect_structure
+from features.indicators import (
+    atr,
+    bollinger_width,
+    build_all_indicators,
+    ema,
+    macd,
+    rsi,
+)
 from features.mtf_confluence import merge_htf_feature
+from features.structure import detect_structure
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]
@@ -61,6 +70,7 @@ def _real_candles(timeframe: str):
     key = timeframe.upper()
     if key not in _REAL_CACHE:
         from data.storage import read_candles
+
         try:
             frame = read_candles(REAL_DB, key, REAL_SYMBOL)
         except Exception:
@@ -84,8 +94,7 @@ def _candles(timeframe: str, n: int, end_ts: int = None, seed: int = 42):
         if len(frame) < n:
             _skip(f"{REAL_SYMBOL} {timeframe}: need {n} candles, have {len(frame)}")
         return frame.tail(n).reset_index(drop=True).copy()
-    return fetch_mock_candles(timeframe, n_candles=n, sessions_config=SESSIONS,
-                              end_ts=end_ts, seed=seed)
+    return fetch_mock_candles(timeframe, n_candles=n, sessions_config=SESSIONS, end_ts=end_ts, seed=seed)
 
 
 def _sample_df(n=300):
@@ -96,7 +105,7 @@ def test_ema_no_lookahead():
     df = _sample_df()
     i = 150
     full = ema(df["close"], 21)
-    truncated = ema(df["close"].iloc[:i + 1], 21)
+    truncated = ema(df["close"].iloc[: i + 1], 21)
     assert np.isclose(full.iloc[i], truncated.iloc[i], rtol=1e-9)
 
 
@@ -104,7 +113,7 @@ def test_rsi_no_lookahead():
     df = _sample_df()
     i = 150
     full = rsi(df["close"], 14)
-    truncated = rsi(df["close"].iloc[:i + 1], 14)
+    truncated = rsi(df["close"].iloc[: i + 1], 14)
     assert np.isclose(full.iloc[i], truncated.iloc[i], rtol=1e-6)
 
 
@@ -112,7 +121,7 @@ def test_macd_no_lookahead():
     df = _sample_df()
     i = 150
     full = macd(df["close"], 12, 26, 9)
-    truncated = macd(df["close"].iloc[:i + 1], 12, 26, 9)
+    truncated = macd(df["close"].iloc[: i + 1], 12, 26, 9)
     assert np.isclose(full["macd_line"].iloc[i], truncated["macd_line"].iloc[i], rtol=1e-9)
 
 
@@ -120,7 +129,7 @@ def test_atr_no_lookahead():
     df = _sample_df()
     i = 150
     full = atr(df, 14)
-    truncated = atr(df.iloc[:i + 1], 14)
+    truncated = atr(df.iloc[: i + 1], 14)
     assert np.isclose(full.iloc[i], truncated.iloc[i], rtol=1e-6)
 
 
@@ -128,7 +137,7 @@ def test_bollinger_no_lookahead():
     df = _sample_df()
     i = 150
     full = bollinger_width(df["close"], 20, 2.0)
-    truncated = bollinger_width(df["close"].iloc[:i + 1], 20, 2.0)
+    truncated = bollinger_width(df["close"].iloc[: i + 1], 20, 2.0)
     assert np.isclose(full["bb_width"].iloc[i], truncated["bb_width"].iloc[i], rtol=1e-6)
 
 
@@ -137,7 +146,7 @@ def test_build_all_indicators_no_lookahead():
     df = _sample_df(n=400)
     i = 250
     full = build_all_indicators(df, CFG)
-    truncated = build_all_indicators(df.iloc[:i + 1].copy(), CFG)
+    truncated = build_all_indicators(df.iloc[: i + 1].copy(), CFG)
     check_cols = ["ema_9", "ema_21", "rsi", "macd_line", "atr", "bb_width"]
     for col in check_cols:
         assert np.isclose(full[col].iloc[i], truncated[col].iloc[i], rtol=1e-6, equal_nan=True), f"Leak in {col}"
@@ -148,7 +157,7 @@ def test_candle_anatomy_no_lookahead():
     df = _sample_df()
     i = 150
     full = candle_anatomy(df)
-    truncated = candle_anatomy(df.iloc[:i + 1].copy())
+    truncated = candle_anatomy(df.iloc[: i + 1].copy())
     assert np.isclose(full["body_ratio"].iloc[i], truncated["body_ratio"].iloc[i])
     assert full["candle_direction"].iloc[i] == truncated["candle_direction"].iloc[i]
 
@@ -163,7 +172,7 @@ def test_structure_swing_detection_no_lookahead():
     lookback = 20
     i = 200
     full = detect_structure(df, lookback=lookback)
-    truncated = detect_structure(df.iloc[:i + 1].copy(), lookback=lookback)
+    truncated = detect_structure(df.iloc[: i + 1].copy(), lookback=lookback)
     assert full["swing_high_confirmed"].iloc[i] == truncated["swing_high_confirmed"].iloc[i]
     assert full["swing_low_confirmed"].iloc[i] == truncated["swing_low_confirmed"].iloc[i]
     assert full["last_structure_high"].iloc[i] == truncated["last_structure_high"].iloc[i] or (
@@ -193,8 +202,9 @@ def test_mtf_merge_asof_never_uses_future_htf_candle():
             expected_ts = valid_ts["timestamp_utc"].max()
             actual_htf_row = htf_sorted[htf_sorted["close"] == row["htf_dummy"]]
             if len(actual_htf_row) > 0:
-                assert actual_htf_row["timestamp_utc"].iloc[0] <= row["timestamp_utc"], \
+                assert actual_htf_row["timestamp_utc"].iloc[0] <= row["timestamp_utc"], (
                     "Look-ahead detected: merge_asof pulled a future HTF candle!"
+                )
 
 
 def test_mtf_merge_does_not_see_incomplete_htf_bar():
@@ -204,22 +214,27 @@ def test_mtf_merge_does_not_see_incomplete_htf_bar():
     H1 bar (12:00) is allowed. The stamp-ordering test above cannot catch this
     (the leaked stamp IS <= the LTF timestamp)."""
     base = int(pd.Timestamp("2026-01-02 12:00", tz="UTC").timestamp())
-    ltf_df = pd.DataFrame([
-        {"timestamp_utc": base + m * 60, "close": 100.0 + m * 0.1}
-        for m in range(0, 120, 5)          # M5 rows 12:00 .. 13:55
-    ])
-    htf_df = pd.DataFrame([
-        {"timestamp_utc": base - 3600, "close": 50.0},   # 11:00 bar — closed
-        {"timestamp_utc": base,        "close": 99.0},   # 12:00 bar — closes 13:00
-    ])
+    ltf_df = pd.DataFrame(
+        [
+            {"timestamp_utc": base + m * 60, "close": 100.0 + m * 0.1}
+            for m in range(0, 120, 5)  # M5 rows 12:00 .. 13:55
+        ]
+    )
+    htf_df = pd.DataFrame(
+        [
+            {"timestamp_utc": base - 3600, "close": 50.0},  # 11:00 bar — closed
+            {"timestamp_utc": base, "close": 99.0},  # 12:00 bar — closes 13:00
+        ]
+    )
 
     merged = merge_htf_feature(ltf_df, htf_df, "close", "htf_close")
 
     pre_close = merged[merged["timestamp_utc"] < base + 3600]
     assert len(pre_close) > 0
     # Rows before 13:00 may only see the previous completed bar's value.
-    assert (pre_close["htf_close"] == 50.0).all(), \
+    assert (pre_close["htf_close"] == 50.0).all(), (
         f"intra-period leak: future H1 close seen pre-13:00: {pre_close['htf_close'].unique()}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -228,19 +243,21 @@ def test_mtf_merge_does_not_see_incomplete_htf_bar():
 # regime). Same truncation methodology.
 # ---------------------------------------------------------------------------
 
+
 def test_order_flow_features_no_lookahead():
     """order_flow features at row i must be identical whether computed on the
     full frame or a frame truncated at i (past the CVD anchoring window)."""
     from features.order_flow import add_order_flow_features
+
     df = _sample_df(n=300)
     df["atr"] = 0.5
     full = add_order_flow_features(df, cvd_window=100)
     i = 200
-    trunc = add_order_flow_features(df.iloc[:i + 1].copy(), cvd_window=100)
-    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14",
-                "order_flow_imbalance_50", "vwap", "dist_vwap_atr"):
-        assert np.isclose(full[col].iloc[i], trunc[col].iloc[i], rtol=1e-6,
-                          equal_nan=True), f"Look-ahead in order_flow column {col}"
+    trunc = add_order_flow_features(df.iloc[: i + 1].copy(), cvd_window=100)
+    for col in ("cvd", "cvd_slope_10", "order_flow_imbalance_14", "order_flow_imbalance_50", "vwap", "dist_vwap_atr"):
+        assert np.isclose(full[col].iloc[i], trunc[col].iloc[i], rtol=1e-6, equal_nan=True), (
+            f"Look-ahead in order_flow column {col}"
+        )
 
 
 # Widest trailing slice read by any helper in features/smart_money_metrics.py
@@ -271,6 +288,7 @@ def test_smart_money_metrics_no_lookahead():
     8%. It is a guard against the former, not a proof against the latter.
     """
     from features.smart_money_metrics import compute_institutional_metrics
+
     df = _sample_df(n=300)
     df["atr"] = 0.5
     short_len = SMC_WIDEST_WINDOW + 10
@@ -279,7 +297,7 @@ def test_smart_money_metrics_no_lookahead():
     checked = 0
     for end in range(short_len + 5, len(df) + 1, 30):
         long_frame = df.iloc[:end].copy().reset_index(drop=True)
-        short_frame = df.iloc[end - short_len:end].copy().reset_index(drop=True)
+        short_frame = df.iloc[end - short_len : end].copy().reset_index(drop=True)
         assert len(long_frame) > len(short_frame), "frames must differ in length"
         full = compute_institutional_metrics(long_frame)
         trunc = compute_institutional_metrics(short_frame)
@@ -297,24 +315,25 @@ def test_fractional_diff_no_lookahead():
     """frac_diff uses fixed weights (independent of data length), so truncation
     invariance holds by construction."""
     from features.fractional_diff import frac_diff
+
     df = _sample_df(n=300)
     full = frac_diff(df["close"], d=0.5)
     i = 150
-    trunc = frac_diff(df["close"].iloc[:i + 1], d=0.5)
+    trunc = frac_diff(df["close"].iloc[: i + 1], d=0.5)
     assert np.isclose(full.iloc[i], trunc.iloc[i], rtol=1e-6, equal_nan=True)
 
 
 def test_regime_classifier_no_lookahead():
     """classify_regime_series at row i must be identical to a truncated run."""
-    from regime.classifier import classify_regime_series
     from features.indicators import build_all_indicators
-    from regime.classifier import add_regime_indicators
+    from regime.classifier import add_regime_indicators, classify_regime_series
+
     df = _sample_df(n=300)
     df = build_all_indicators(df, CFG)
     df = add_regime_indicators(df, CFG)
     full = classify_regime_series(df, CFG)
     i = 250
-    trunc = classify_regime_series(df.iloc[:i + 1].copy(), CFG)
+    trunc = classify_regime_series(df.iloc[: i + 1].copy(), CFG)
     assert full.iloc[i] == trunc.iloc[i], "Look-ahead in regime classification"
 
 
@@ -342,8 +361,7 @@ def _sample_df_tf(timeframe: str, n: int, end_ts: int = None, seed: int = 42):
     """
     if REAL_DB:
         return _candles(timeframe, n, end_ts=end_ts)
-    return _candles(timeframe, n, end_ts=FIXED_END_TS if end_ts is None else end_ts,
-                    seed=seed)
+    return _candles(timeframe, n, end_ts=FIXED_END_TS if end_ts is None else end_ts, seed=seed)
 
 
 def test_asia_session_range_no_lookahead():
@@ -357,13 +375,14 @@ def test_asia_session_range_no_lookahead():
     day = df["timestamp_utc"] // 86400
     is_asia = df["session"].str.contains("asia", na=False)
     candidates = [
-        i for i in range(200, len(df) - 1)
-        if is_asia.iloc[i] and bool((is_asia & (day == day.iloc[i])).iloc[i + 1:].any())
+        i
+        for i in range(200, len(df) - 1)
+        if is_asia.iloc[i] and bool((is_asia & (day == day.iloc[i])).iloc[i + 1 :].any())
     ]
     assert candidates, "sample window contains no mid-Asian-session bar"
     i = candidates[len(candidates) // 2]
 
-    trunc = build_all_indicators(df.iloc[:i + 1].copy(), CFG)
+    trunc = build_all_indicators(df.iloc[: i + 1].copy(), CFG)
     for col in ("dist_asia_high_atr", "dist_asia_low_atr"):
         assert np.isclose(full[col].iloc[i], trunc[col].iloc[i], rtol=1e-9, equal_nan=True), (
             f"Look-ahead in {col} at row {i}: full={full[col].iloc[i]!r} vs "
@@ -428,11 +447,10 @@ def test_previous_day_levels_no_lookahead_on_m1():
     df = _sample_df_tf("M1", n=1500)
     full = build_all_indicators(df, CFG)
     i = 1200
-    trunc = build_all_indicators(df.iloc[:i + 1].copy(), CFG)
+    trunc = build_all_indicators(df.iloc[: i + 1].copy(), CFG)
     for col in ("dist_pdh_atr", "dist_pdl_atr"):
         assert np.isclose(full[col].iloc[i], trunc[col].iloc[i], rtol=1e-9, equal_nan=True), (
-            f"Look-ahead in {col} at row {i}: full={full[col].iloc[i]!r} vs "
-            f"truncated={trunc[col].iloc[i]!r}"
+            f"Look-ahead in {col} at row {i}: full={full[col].iloc[i]!r} vs truncated={trunc[col].iloc[i]!r}"
         )
 
 
@@ -449,9 +467,7 @@ def test_obv_is_frame_length_invariant():
 
     i_long, i_short = 599, 299
     assert df["timestamp_utc"].iloc[i_long] == short["timestamp_utc"].iloc[i_short]
-    assert np.isclose(
-        long_frame["obv"].iloc[i_long], short_frame["obv"].iloc[i_short], rtol=1e-9
-    ), (
+    assert np.isclose(long_frame["obv"].iloc[i_long], short_frame["obv"].iloc[i_short], rtol=1e-9), (
         "obv depends on the frame start (train/serve skew): "
         f"{long_frame['obv'].iloc[i_long]!r} vs {short_frame['obv'].iloc[i_short]!r}"
     )
@@ -467,8 +483,7 @@ def test_bb_width_percentile_has_a_single_owner():
     feat = build_all_indicators(df, CFG)
 
     assert "bb_width_percentile" not in feat.columns, (
-        "features/indicators.py must not publish bb_width_percentile: "
-        "regime/classifier.py owns that name (0..100 rank)"
+        "features/indicators.py must not publish bb_width_percentile: regime/classifier.py owns that name (0..100 rank)"
     )
     assert "bb_width_minmax_100" in feat.columns
     minmax = feat["bb_width_minmax_100"]
@@ -481,8 +496,7 @@ def test_bb_width_percentile_has_a_single_owner():
     rank = with_regime["bb_width_percentile"].dropna()
     assert float(rank.min()) >= 0.0 and float(rank.max()) <= 100.0
     assert float(rank.max()) > 1.0, (
-        "the regime compression threshold (regime.bb_width_compression_pctile=20) "
-        "is expressed on a 0..100 scale"
+        "the regime compression threshold (regime.bb_width_compression_pctile=20) is expressed on a 0..100 scale"
     )
 
 
@@ -501,24 +515,25 @@ def test_regime_module_rejects_stale_zero_to_one_column():
     except ValueError as exc:
         assert "bb_width_minmax_100" in str(exc)
     else:
-        raise AssertionError(
-            "add_regime_indicators silently overwrote a 0..1 bb_width_percentile"
-        )
+        raise AssertionError("add_regime_indicators silently overwrote a 0..1 bb_width_percentile")
 
 
 def test_compression_regime_share_is_sane():
     """A3 guard: if the compression branch ever reads a 0..1 column again, every
     value is below the threshold of 20 and every bar becomes COMPRESSION."""
-    from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
+    from regime.classifier import (
+        RegimeLabel,
+        add_regime_indicators,
+        classify_regime_series,
+    )
 
     df = _sample_df_tf("M15", n=600)
     df = build_all_indicators(df, CFG)
     df = add_regime_indicators(df, CFG)
     labels = classify_regime_series(df, CFG)
 
-    tail = labels.iloc[CFG["regime"]["min_candles_for_regime"]:]
+    tail = labels.iloc[CFG["regime"]["min_candles_for_regime"] :]
     share = float((tail == RegimeLabel.COMPRESSION).mean())
     assert share < 0.9, (
-        f"{share:.0%} of bars classified COMPRESSION - the threshold is being "
-        "compared against a 0..1 column"
+        f"{share:.0%} of bars classified COMPRESSION - the threshold is being compared against a 0..1 column"
     )

@@ -41,21 +41,28 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, effective_asset_config
+from backtest.metrics import block_bootstrap_t, trades_to_dataframe
+from backtest.walk_forward import generate_windows
+from config.loader import effective_asset_config, load_config
+from model.ensemble_backtest import EnsembleBacktester
+from model.predictor import ModelPredictor
+from model.trainer import (
+    FEATURE_COLUMNS,
+    build_training_matrix,
+    calibrate_model,
+    save_model,
+    train_model,
+)
 from scripts.deflated_sharpe import (
-    _make_synthetic_wf_df,
-    _inject_biased_probs,
     _SYNTH_DEFAULTS,
+    _inject_biased_probs,
+    _make_synthetic_wf_df,
 )
 from scripts.run_backtest import merge_asset_cfg
-from backtest.walk_forward import generate_windows
-from backtest.metrics import trades_to_dataframe, compute_r_metrics, block_bootstrap_t
-from model.trainer import build_training_matrix, train_model, calibrate_model, save_model, FEATURE_COLUMNS
-from model.predictor import ModelPredictor
-from model.ensemble_backtest import EnsembleBacktester
 
-ATR_SCALED_FEATURES = [f for f in FEATURE_COLUMNS if f.endswith("_atr") or f in (
-    "atr_pct", "return_1", "return_4", "volume_ratio")]
+ATR_SCALED_FEATURES = [
+    f for f in FEATURE_COLUMNS if f.endswith("_atr") or f in ("atr_pct", "return_1", "return_4", "volume_ratio")
+]
 
 
 def _asset_onehot(asset_key: str, assets: list[str]) -> pd.Series:
@@ -70,7 +77,8 @@ def _load_asset_frames(cfg, assets, max_folds):
         timeframe = a_cfg.get("timeframe") or "M5"
         db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
         try:
-            from scripts.run_backtest import load_asset_history, build_full_df
+            from scripts.run_backtest import build_full_df, load_asset_history
+
             raw = load_asset_history(db_path, timeframe, asset)
             df = build_full_df(cfg, raw, db_path=db_path, asset_key=asset)
             out[asset] = df
@@ -82,23 +90,22 @@ def _load_asset_frames(cfg, assets, max_folds):
             df = _make_synthetic_wf_df(n, spec["price"], spec["atr"], freq)
             df = _inject_biased_probs(df)
             from labeling.label_generator import generate_labels_from_config
+
             cfg_asset = effective_asset_config(cfg, asset)
-            df["label"] = generate_labels_from_config(
-                df, cfg_asset, asset_key=asset
-            )
+            df["label"] = generate_labels_from_config(df, cfg_asset, asset_key=asset)
             out[asset] = df
     return out
 
 
-def _pooled_matrix(frames_by_asset: dict, assets: list[str], cfg: dict,
-                   scale: str = "zscore", window: int = 200) -> tuple:
+def _pooled_matrix(
+    frames_by_asset: dict, assets: list[str], cfg: dict, scale: str = "zscore", window: int = 200
+) -> tuple:
     """Stack per-asset train frames into one pooled matrix with asset one-hot.
     Returns (X, y, cols)."""
     X_parts, y_parts = [], []
     for asset in assets:
         df = frames_by_asset[asset]
-        Xa, ya, cols = build_training_matrix(df, cfg={"model": merge_asset_cfg(
-            cfg, asset, "model")["model"]})
+        Xa, ya, cols = build_training_matrix(df, cfg={"model": merge_asset_cfg(cfg, asset, "model")["model"]})
         if len(ya) == 0:
             continue
         # dimensionless transform on the selected feature columns
@@ -126,10 +133,12 @@ def _pooled_matrix(frames_by_asset: dict, assets: list[str], cfg: dict,
     return X, y, cols
 
 
-def run_pooled_comparison(cfg: dict, assets: list[str], max_folds: int | None = None,
-                          scale: str = "zscore", window: int = 200) -> dict:
+def run_pooled_comparison(
+    cfg: dict, assets: list[str], max_folds: int | None = None, scale: str = "zscore", window: int = 200
+) -> dict:
     """Walk-forward comparison: per-asset models vs one pooled model."""
     import copy
+
     # Comparability: force the BINARY label space on BOTH arms (GBP's shipped
     # 3-class config would otherwise make the pooled matrix multi-class while
     # the per-asset arm stays 2-class). Regime features stay per-asset.
@@ -144,9 +153,12 @@ def run_pooled_comparison(cfg: dict, assets: list[str], max_folds: int | None = 
     # union calendar: use the longest available span among assets
     min_ts = max(int(f["timestamp_utc"].min()) for f in frames.values())
     max_ts = min(int(f["timestamp_utc"].max()) for f in frames.values())
-    windows = generate_windows(pd.DataFrame({"timestamp_utc": [min_ts, max_ts]}),
-                               wf["train_window_days"], wf["test_window_days"],
-                               wf["step_days"])
+    windows = generate_windows(
+        pd.DataFrame({"timestamp_utc": [min_ts, max_ts]}),
+        wf["train_window_days"],
+        wf["test_window_days"],
+        wf["step_days"],
+    )
     if not windows:
         raise ValueError("No walk-forward folds on the union calendar.")
     if max_folds is not None:
@@ -160,8 +172,9 @@ def run_pooled_comparison(cfg: dict, assets: list[str], max_folds: int | None = 
         # pooled training on all assets' train windows
         train_frames = {}
         for a in assets:
-            train_frames[a] = frames[a][(frames[a]["timestamp_utc"] >= w.train_start_ts) &
-                                        (frames[a]["timestamp_utc"] < w.train_end_ts)]
+            train_frames[a] = frames[a][
+                (frames[a]["timestamp_utc"] >= w.train_start_ts) & (frames[a]["timestamp_utc"] < w.train_end_ts)
+            ]
         try:
             Xp, yp, cols = _pooled_matrix(train_frames, assets, cfg, scale=scale, window=window)
             pooled_ok = len(yp) >= 60 and yp.nunique() >= 2
@@ -182,8 +195,9 @@ def run_pooled_comparison(cfg: dict, assets: list[str], max_folds: int | None = 
             predictor = None
 
         for a in assets:
-            test = frames[a][(frames[a]["timestamp_utc"] >= w.test_start_ts) &
-                             (frames[a]["timestamp_utc"] < w.test_end_ts)].copy()
+            test = frames[a][
+                (frames[a]["timestamp_utc"] >= w.test_start_ts) & (frames[a]["timestamp_utc"] < w.test_end_ts)
+            ].copy()
             if len(test) == 0:
                 continue
             # per-asset honest model (mirrors run_backtest.strategy_fn_factory)
@@ -215,10 +229,12 @@ def run_pooled_comparison(cfg: dict, assets: list[str], max_folds: int | None = 
                 test_p["ml_p_long"] = 0.5
                 test_p["ml_p_short"] = 0.5
             pooled_rows[a].append(_run_engine(cfg, a, test_p, volume_pl=1))
-            auc_rows[a].append({
-                "per_asset": _auc_from_frame(test_a),
-                "pooled": _auc_from_frame(test_p),
-            })
+            auc_rows[a].append(
+                {
+                    "per_asset": _auc_from_frame(test_a),
+                    "pooled": _auc_from_frame(test_p),
+                }
+            )
 
     return _summarize(assets, per_asset_rows, pooled_rows, auc_rows, scale, window)
 
@@ -240,8 +256,7 @@ def _score_frame(predictor, test_df: pd.DataFrame, assets: list[str], asset: str
             elif c.startswith("regime_") and "regime" in out.columns:
                 # RegimeLabel enum objects str() as 'RegimeLabel.TREND_UP', so
                 # normalize to the .value key ('trend_up') before matching.
-                reg_norm = out["regime"].map(
-                    lambda r: r.value if hasattr(r, "value") else str(r))
+                reg_norm = out["regime"].map(lambda r: r.value if hasattr(r, "value") else str(r))
                 build[c] = (reg_norm == c.replace("regime_", "")).astype(float)
             else:
                 build[c] = 0.0
@@ -253,6 +268,7 @@ def _score_frame(predictor, test_df: pd.DataFrame, assets: list[str], asset: str
         out["ml_p_long"] = 0.5
         out["ml_p_short"] = 0.5
     return out
+
 
 def _run_engine(cfg: dict, asset: str, test_df: pd.DataFrame, volume_pl: float):
     cfg_run = merge_asset_cfg(cfg, asset, "labeling")
@@ -266,6 +282,7 @@ def _run_engine(cfg: dict, asset: str, test_df: pd.DataFrame, volume_pl: float):
 def _auc_from_frame(df: pd.DataFrame) -> float | None:
     """Directional OOS AUC: p of the chosen side vs the actual label."""
     from sklearn.metrics import roc_auc_score
+
     if "label" not in df.columns:
         return None
     d = df.dropna(subset=["label", "ml_p_long", "ml_p_short"])
@@ -300,11 +317,13 @@ def _frame_summary(tdf: pd.DataFrame) -> dict:
     if len(tdf) == 0:
         return {"n_trades": 0, "mean_r": 0.0, "pf": 0.0, "t_block": None, "win_rate_pct": 0.0}
     wins, losses = tdf["pnl"].clip(lower=0).sum(), -tdf["pnl"].clip(upper=0).sum()
-    return {"n_trades": int(len(tdf)),
-            "mean_r": round(float(tdf["pnl"].mean()), 4),
-            "pf": round(float(wins / losses), 3) if losses > 0 else 999.0,
-            "t_block": round(block_bootstrap_t(tdf["pnl"].to_numpy(dtype=float)), 3),
-            "win_rate_pct": round(100.0 * float((tdf["pnl"] > 0).mean()), 1)}
+    return {
+        "n_trades": int(len(tdf)),
+        "mean_r": round(float(tdf["pnl"].mean()), 4),
+        "pf": round(float(wins / losses), 3) if losses > 0 else 999.0,
+        "t_block": round(block_bootstrap_t(tdf["pnl"].to_numpy(dtype=float)), 3),
+        "win_rate_pct": round(100.0 * float((tdf["pnl"] > 0).mean()), 1),
+    }
 
 
 def _mean_auc(vals: list) -> float | None:
@@ -318,10 +337,14 @@ def print_report(d: dict) -> None:
     for a, m in d["assets"].items():
         pa, po = m["per_asset"], m["pooled"]
         print(f"{a}:")
-        print(f"  per-asset: n={pa['n_trades']:<6} E[R]={pa['mean_r']:+.4f} "
-              f"PF={pa['pf']:<6} t={pa['t_block']}  AUC={m['auc']['per_asset']}")
-        print(f"  pooled   : n={po['n_trades']:<6} E[R]={po['mean_r']:+.4f} "
-              f"PF={po['pf']:<6} t={po['t_block']}  AUC={m['auc']['pooled']}")
+        print(
+            f"  per-asset: n={pa['n_trades']:<6} E[R]={pa['mean_r']:+.4f} "
+            f"PF={pa['pf']:<6} t={pa['t_block']}  AUC={m['auc']['per_asset']}"
+        )
+        print(
+            f"  pooled   : n={po['n_trades']:<6} E[R]={po['mean_r']:+.4f} "
+            f"PF={po['pf']:<6} t={po['t_block']}  AUC={m['auc']['pooled']}"
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -335,8 +358,7 @@ def main(argv: list[str] | None = None) -> None:
 
     cfg = load_config()
     assets = [a.strip() for a in args.assets.split(",") if a.strip()]
-    d = run_pooled_comparison(cfg, assets, max_folds=args.max_folds,
-                              scale=args.scale, window=args.zscore_window)
+    d = run_pooled_comparison(cfg, assets, max_folds=args.max_folds, scale=args.scale, window=args.zscore_window)
     print_report(d)
     os.makedirs("logs", exist_ok=True)
     out_json = args.out or "logs/pooled_comparison.json"

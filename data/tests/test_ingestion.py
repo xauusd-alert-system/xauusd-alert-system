@@ -2,17 +2,18 @@
 Unit tests for data/ ingestion, storage, and session tagging.
 Run with: pytest data/tests/test_ingestion.py -v
 """
+
 import os
 import sys
+
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.loader import load_config
-from data.ingestion import fetch_mock_candles, TIMEFRAME_TO_SECONDS
-from data.storage import init_schema, upsert_candles, read_candles
+from data.ingestion import TIMEFRAME_TO_SECONDS, fetch_mock_candles
 from data.session_tagger import tag_session
-
+from data.storage import init_schema, read_candles, upsert_candles
 
 CFG = load_config()
 SESSIONS = CFG["sessions"]

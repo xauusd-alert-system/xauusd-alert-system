@@ -7,6 +7,7 @@ Usage:
 
 Output: self-contained HTML with Chart.js (CDN), dark theme, monospace.
   --serve: starts a local HTTP server with auto-refresh (polls /api/data.json)."""
+
 import argparse
 import json
 import os
@@ -17,7 +18,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from pairs_analysis import load_config, PairAnalyzer, EnsembleEngine, SignalEngine
+from pairs_analysis import EnsembleEngine, PairAnalyzer, SignalEngine, load_config
 
 OUT_DEFAULT = os.path.join(ROOT, "data", "backtest", "pairs_dashboard.html")
 
@@ -46,40 +47,42 @@ def _collect_data(tf: str) -> dict:
             z_values = [round(float(v), 4) for v in z_tail.values]
             z_dates = [str(d.date()) for d in z_tail.index]
 
-            pairs_data.append({
-                "name": m.name,
-                "timeframe": m.timeframe,
-                "n_bars": m.n_bars,
-                "start": m.start,
-                "end": m.end,
-                "beta": round(m.beta, 4),
-                "beta_method": m.beta_method,
-                "half_life_days": round(m.half_life_days, 1) if np.isfinite(m.half_life_days) else None,
-                "theta": round(m.theta, 5),
-                "adf_p": round(m.adf_p, 4),
-                "z": round(float(z_hist.iloc[-1]), 3) if len(z_hist) else 0,
-                "mu": round(m.mu, 4),
-                "sigma": round(m.sigma, 4),
-                "sigma_annual": round(m.sigma_annual, 2),
-                "ratio": round(m.ratio, 2),
-                "p1_last": round(m.p1_last, 2),
-                "p2_last": round(m.p2_last, 2),
-                "formula": m.formula_str,
-                "hurst": round(m.hurst, 3),
-                "skew": round(m.skew, 3),
-                "ex_kurtosis": round(m.ex_kurtosis, 3),
-                "acf1": round(m.acf1, 3),
-                "realized_vol_pct": round(m.realized_vol_pct, 2),
-                "signal_direction": sig.direction,
-                "signal_valid": sig.valid,
-                "signal_reason": sig.reason,
-                "ensemble_direction": ens.direction,
-                "ensemble_confidence": round(ens.confidence, 1),
-                "ensemble_line": ens.summary_line(),
-                "ensemble_engines": [e.as_dict() for e in ens.engines],
-                "z_dates": z_dates,
-                "z_values": z_values,
-            })
+            pairs_data.append(
+                {
+                    "name": m.name,
+                    "timeframe": m.timeframe,
+                    "n_bars": m.n_bars,
+                    "start": m.start,
+                    "end": m.end,
+                    "beta": round(m.beta, 4),
+                    "beta_method": m.beta_method,
+                    "half_life_days": round(m.half_life_days, 1) if np.isfinite(m.half_life_days) else None,
+                    "theta": round(m.theta, 5),
+                    "adf_p": round(m.adf_p, 4),
+                    "z": round(float(z_hist.iloc[-1]), 3) if len(z_hist) else 0,
+                    "mu": round(m.mu, 4),
+                    "sigma": round(m.sigma, 4),
+                    "sigma_annual": round(m.sigma_annual, 2),
+                    "ratio": round(m.ratio, 2),
+                    "p1_last": round(m.p1_last, 2),
+                    "p2_last": round(m.p2_last, 2),
+                    "formula": m.formula_str,
+                    "hurst": round(m.hurst, 3),
+                    "skew": round(m.skew, 3),
+                    "ex_kurtosis": round(m.ex_kurtosis, 3),
+                    "acf1": round(m.acf1, 3),
+                    "realized_vol_pct": round(m.realized_vol_pct, 2),
+                    "signal_direction": sig.direction,
+                    "signal_valid": sig.valid,
+                    "signal_reason": sig.reason,
+                    "ensemble_direction": ens.direction,
+                    "ensemble_confidence": round(ens.confidence, 1),
+                    "ensemble_line": ens.summary_line(),
+                    "ensemble_engines": [e.as_dict() for e in ens.engines],
+                    "z_dates": z_dates,
+                    "z_values": z_values,
+                }
+            )
         except Exception as e:
             print(f"  {pair['name']}: ПРОПУЩЕНА — {e}", file=sys.stderr)
 
@@ -308,36 +311,37 @@ def _generate_html(data: dict, refresh_minutes: int = 0) -> str:
         # Inject auto-refresh: status bar + polling JS
         status_bar = (
             '<div id="refreshBar" style="position:fixed;top:0;right:0;padding:4px 12px;'
-            'background:var(--panel);border:1px solid var(--border);border-radius:0 0 0 4px;'
+            "background:var(--panel);border:1px solid var(--border);border-radius:0 0 0 4px;"
             'font-size:10px;color:var(--dim);z-index:999;">'
-            '<span id="refreshStatus">● auto-refresh: ${0}m</span></div>'.format(refresh_minutes))
+            f'<span id="refreshStatus">● auto-refresh: ${refresh_minutes}m</span></div>'
+        )
         inject = (
-            f'<script>\n'
-            f'const REFRESH_MS = {refresh_minutes} * 60 * 1000;\n'
+            f"<script>\n"
+            f"const REFRESH_MS = {refresh_minutes} * 60 * 1000;\n"
             f'const STATUS_EL = document.getElementById("refreshStatus");\n'
-            f'async function refreshData() {{\n'
-            f'  try {{\n'
+            f"async function refreshData() {{\n"
+            f"  try {{\n"
             f'    const r = await fetch("/api/data.json?t=" + Date.now());\n'
-            f'    if (!r.ok) return;\n'
-            f'    const newData = await r.json();\n'
-            f'    Object.assign(DATA, newData);\n'
-            f'    // Rebuild pair dropdown\n'
+            f"    if (!r.ok) return;\n"
+            f"    const newData = await r.json();\n"
+            f"    Object.assign(DATA, newData);\n"
+            f"    // Rebuild pair dropdown\n"
             f'    const sel = document.getElementById("pairSelect");\n'
-            f'    const prev = sel.value;\n'
+            f"    const prev = sel.value;\n"
             f'    sel.innerHTML = "";\n'
-            f'    DATA.pairs.forEach((p, i) => {{\n'
+            f"    DATA.pairs.forEach((p, i) => {{\n"
             f'      const opt = document.createElement("option");\n'
-            f'      opt.value = i; opt.text = p.name; sel.appendChild(opt);\n'
-            f'    }});\n'
-            f'    sel.value = prev < DATA.pairs.length ? prev : 0;\n'
-            f'    showPair();\n'
+            f"      opt.value = i; opt.text = p.name; sel.appendChild(opt);\n"
+            f"    }});\n"
+            f"    sel.value = prev < DATA.pairs.length ? prev : 0;\n"
+            f"    showPair();\n"
             f'    STATUS_EL.textContent = "● updated " + new Date().toLocaleTimeString();\n'
             f'    STATUS_EL.style.color = "var(--green)";\n'
             f'    setTimeout(() => {{ STATUS_EL.textContent = "● auto-refresh: {refresh_minutes}m"; STATUS_EL.style.color = "var(--dim)"; }}, 3000);\n'
             f'  }} catch(e) {{ STATUS_EL.textContent = "● refresh failed"; STATUS_EL.style.color = "var(--red)"; }}\n'
-            f'}}\n'
-            f'setInterval(refreshData, REFRESH_MS);\n'
-            f'</script>'
+            f"}}\n"
+            f"setInterval(refreshData, REFRESH_MS);\n"
+            f"</script>"
         )
         html = html.replace("</body>", status_bar + "\n" + inject + "\n</body>")
     return html
@@ -345,7 +349,7 @@ def _generate_html(data: dict, refresh_minutes: int = 0) -> str:
 
 def _serve(tf: str, refresh_minutes: int, port: int) -> None:
     """Tiny HTTP server: serves the dashboard HTML and /api/data.json."""
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class DashHandler(BaseHTTPRequestHandler):
         def do_GET(self):

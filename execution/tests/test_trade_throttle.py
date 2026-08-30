@@ -9,11 +9,12 @@ Covers:
   - Day reset at UTC midnight
   - State persistence across restarts
 """
+
 import json
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 
@@ -53,12 +54,17 @@ def throttle_short_cooldown(tmp_path):
 
 # ---- Daily trade limit ----
 
+
 def test_allows_up_to_max_trades(throttle):
     for i in range(5):
         ok, reason = throttle.can_trade(10000.0)
-        assert ok, f"trade {i+1} should be allowed: {reason}"
+        assert ok, f"trade {i + 1} should be allowed: {reason}"
         throttle.on_trade_closed(10.0)  # winning trade
-    ok, reason = throttle.on_trade_closed.__wrapped__(10.0) if hasattr(throttle.on_trade_closed, '__wrapped__') else throttle.can_trade(10000.0)
+    ok, reason = (
+        throttle.on_trade_closed.__wrapped__(10.0)
+        if hasattr(throttle.on_trade_closed, "__wrapped__")
+        else throttle.can_trade(10000.0)
+    )
     # After 5 trades + 1 more attempt
     ok, reason = throttle.can_trade(10000.0)
     assert not ok
@@ -75,6 +81,7 @@ def test_daily_limit_blocks_after_max(throttle):
 
 
 # ---- Cooldown after loss streak ----
+
 
 def test_cooldown_activates_after_threshold(throttle):
     throttle.on_trade_closed(-10.0)  # loss 1
@@ -114,6 +121,7 @@ def test_cooldown_expires(throttle):
 
 # ---- Hard stop streak ----
 
+
 def test_hard_stop_at_critical_streak(throttle):
     for _ in range(3):
         throttle.on_trade_closed(-10.0)
@@ -136,6 +144,7 @@ def test_hard_stop_persists_all_day(throttle):
 
 
 # ---- Risk step-down ----
+
 
 def test_risk_multiplier_no_losses(throttle):
     assert throttle.risk_multiplier() == 1.0
@@ -169,6 +178,7 @@ def test_risk_multiplier_resets_on_win(throttle):
 
 # ---- Daily loss limit ----
 
+
 def test_daily_loss_limit_blocks(throttle):
     # Start at 10000, lose 3% = $300
     ok, _ = throttle.can_trade(10000.0)
@@ -187,6 +197,7 @@ def test_daily_loss_limit_sets_hard_stop(throttle):
 
 # ---- Day reset ----
 
+
 def test_day_reset_clears_counters(throttle):
     throttle.can_trade(10000.0)
     for _ in range(3):
@@ -195,7 +206,7 @@ def test_day_reset_clears_counters(throttle):
     assert throttle.hard_stopped is True
 
     # Simulate new day by changing current_day
-    throttle.current_day = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=2)).date()
+    throttle.current_day = (datetime.now(UTC) - __import__("datetime").timedelta(days=2)).date()
     throttle.can_trade(10000.0)  # triggers reset
 
     assert throttle.trades_today == 0
@@ -207,6 +218,7 @@ def test_day_reset_clears_counters(throttle):
 
 
 # ---- State persistence ----
+
 
 def test_state_persists_across_instances(tmp_path):
     state_path = str(tmp_path / "state.json")
@@ -238,6 +250,7 @@ def test_state_file_is_valid_json(tmp_path):
 
 # ---- get_state() ----
 
+
 def test_get_state_snapshot(throttle):
     throttle.can_trade(10000.0)
     throttle.on_trade_closed(-10.0)
@@ -249,6 +262,7 @@ def test_get_state_snapshot(throttle):
 
 
 # ---- Edge cases ----
+
 
 def test_no_config_uses_defaults(tmp_path):
     state_path = str(tmp_path / "state.json")
@@ -279,3 +293,34 @@ def test_multiple_restarts_preserve_state(tmp_path):
     assert t_final.trades_today == 3
     assert t_final.consecutive_losses == 3
     assert t_final.risk_multiplier() == 0.25
+
+
+# ---- Stub mode (demo testing, 2026-08-28) ----
+
+
+def test_stub_disables_loss_gates(tmp_path):
+    """Stub: losses never trigger cooldown / hard stop / risk step-down."""
+    state_path = str(tmp_path / "throttle_state.json")
+    throttle = TradeThrottle(_cfg(stub=True), state_path=state_path)
+    for _ in range(4):
+        ok, reason = throttle.can_trade(10000.0)
+        assert ok, f"stub should keep allowing trades: {reason}"
+        throttle.on_trade_closed(-50.0)  # 4 consecutive losses
+    ok, reason = throttle.can_trade(10000.0)
+    assert ok, f"stub should not block after losses: {reason}"
+    assert throttle.risk_multiplier() == 1.0
+    snap = throttle.get_state()
+    assert not snap["cooldown_active"]
+    assert not snap["hard_stopped"]
+    assert snap["risk_multiplier"] == 1.0
+
+
+def test_stub_still_enforces_daily_cap(tmp_path):
+    """Stub keeps the daily trade-count cap (non-loss gate)."""
+    state_path = str(tmp_path / "throttle_state.json")
+    throttle = TradeThrottle(_cfg(stub=True), state_path=state_path)
+    for _ in range(5):
+        throttle.on_trade_closed(-50.0)
+    ok, reason = throttle.can_trade(10000.0)
+    assert not ok
+    assert "daily_limit_reached" in reason

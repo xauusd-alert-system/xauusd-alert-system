@@ -64,23 +64,29 @@ Environment knobs (all optional, every stage on by default):
     OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard, Part B Phase 6)
     OVERNIGHT_NO_REAL_TRADES=1     skip stage 4
     OVERNIGHT_NO_DEPLOY_GUARD=1    skip stages 3b/4b (deploy guard)
-    OVERNIGHT_NO_VERIFY=1          skip stage 4c (fingerprint + degeneracy audit)
-    OVERNIGHT_NO_SUMMARY=1         skip stage 5
-    OVERNIGHT_NO_TELEGRAM=1        skip stage 6
+    OVERNIGHT_NO_VERIFY=1        skip stage 4c (fingerprint + degeneracy audit)
+    OVERNIGHT_NO_SUMMARY=1       skip stage 5
+    OVERNIGHT_NO_TELEGRAM=1      skip stage 6
+
+Optional stages (P2-40 / TZ 5.3, config-gated):
+
+    monitoring.drift.enabled=true  enables the "drift_check" stage (PSI feature
+    drift between the train feature matrix and fresh live features). Default
+    false -> the stage is skipped entirely (backwards compatible).
 
 Run:
     python -m scripts.overnight
 """
-import os
-import sys
-import glob
-import subprocess
+
 import logging
-from datetime import datetime, timedelta, timezone
+import os
+import subprocess
+import sys
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config.loader import load_config, get_env
+from config.loader import get_env, load_config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,9 +126,7 @@ def _run(stage: str, cmd: list, timeout: int = None) -> bool:
             capture_output=True,
             text=True,
             timeout=timeout,
-            creationflags=(
-                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-            ),
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
         if result.stdout and result.stdout.strip():
             logger.info("  %s", result.stdout.strip().splitlines()[-1][-400:])
@@ -152,9 +156,7 @@ def _capture(cmd: list, timeout: int = None) -> str:
             timeout=timeout,
             capture_output=True,
             text=True,
-            creationflags=(
-                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-            ),
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
         return result.stdout.strip()
     except subprocess.TimeoutExpired as e:
@@ -195,7 +197,7 @@ def _kill_process_tree(expired: subprocess.TimeoutExpired) -> None:
 
 def _backfill_window() -> tuple[str, str]:
     days = int(get_env("OVERNIGHT_BACKFILL_DAYS", default="45"))
-    today = datetime.now(timezone.utc)
+    today = datetime.now(UTC)
     start = (today - timedelta(days=days)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
     return start, end
@@ -205,9 +207,7 @@ def main() -> int:
     cfg = load_config()
     db_path = cfg.get("general", {}).get("db_path", "data/market_data_mt5.sqlite")
     timeframe = cfg.get("market_data", {}).get("timeframe", "M5")
-    enabled_assets = [
-        k for k, v in cfg.get("assets", {}).items() if v.get("enabled", False)
-    ]
+    enabled_assets = [k for k, v in cfg.get("assets", {}).items() if v.get("enabled", False)]
     retraining_enabled = bool(cfg.get("retraining", {}).get("enabled", True))
     if not retraining_enabled:
         logger.warning(
@@ -231,34 +231,61 @@ def main() -> int:
         )
         ok = True
         for tf in trade_tfs:
-            ok = _run(
-                f"backfill_fresh_data:{tf}",
-                [
-                    sys.executable, "-m", "scripts.backfill_data",
-                    "--all", "--timeframe", tf,
-                    "--start", start, "--end", end,
-                    "--db-path", db_path,
-                ],
-                timeout=_BACKFILL_TIMEOUT,
-            ) and ok
+            ok = (
+                _run(
+                    f"backfill_fresh_data:{tf}",
+                    [
+                        sys.executable,
+                        "-m",
+                        "scripts.backfill_data",
+                        "--all",
+                        "--timeframe",
+                        tf,
+                        "--start",
+                        start,
+                        "--end",
+                        end,
+                        "--db-path",
+                        db_path,
+                    ],
+                    timeout=_BACKFILL_TIMEOUT,
+                )
+                and ok
+            )
         status.append(("backfill_data", ok))
     else:
         logger.info("Skipping backfill (OVERNIGHT_NO_BACKFILL set).")
 
     # ---- Stage 2: walk-forward backtest per asset --------------------------
     if _env_flag("OVERNIGHT_NO_BACKTEST"):
+        # Locked holdout = the single source of truth for the data cutoff.
+        # Passing --end-date keeps the nightly health-check's test windows
+        # strictly before the lock, so the stage stops failing on
+        # LOCKED HOLD-OUT VIOLATION every night. This does NOT weaken the
+        # guard: enforce_locked_holdout stays active for any other runner,
+        # and the nightly report simply never asks for locked data.
+        from scripts.train_mt5 import locked_holdout_end_date
+
+        holdout_end = locked_holdout_end_date(cfg)
+        if holdout_end:
+            logger.info("nightly backtest respects locked holdout, end-date=%s", holdout_end)
         all_ok = True
         for asset in enabled_assets:
             asset_tf = cfg["assets"][asset].get("timeframe") or timeframe
-            ok = _run(
-                f"walk_forward_backtest:{asset}",
-                [
-                    sys.executable, "-m", "scripts.run_backtest",
-                    "--asset", asset,
-                    "--timeframe", asset_tf,
-                    "--db-path", db_path,
-                ],
-            )
+            cmd = [
+                sys.executable,
+                "-m",
+                "scripts.run_backtest",
+                "--asset",
+                asset,
+                "--timeframe",
+                asset_tf,
+                "--db-path",
+                db_path,
+            ]
+            if holdout_end:
+                cmd.extend(["--end-date", holdout_end])
+            ok = _run(f"walk_forward_backtest:{asset}", cmd)
             all_ok = all_ok and ok
         status.append(("walk_forward_backtest", all_ok))
     else:
@@ -327,6 +354,93 @@ def main() -> int:
     else:
         logger.info("Skipping verify_model_fingerprints (OVERNIGHT_NO_VERIFY set).")
 
+    # ---- Stage 4d (optional): PSI feature-drift check (P2-40 / TZ 5.3) ------
+    # Off by default: enabled only when monitoring.drift.enabled=true in the
+    # config. Compares the train feature matrix (monitoring.drift.train_csv)
+    # against a fresh live feature matrix (monitoring.drift.live_csv) — both
+    # optional paths; when either is missing the stage is skipped with a
+    # warning (partial integration, documented). Drifted features produce a
+    # WARNING in the overnight log.
+    drift_cfg = cfg.get("monitoring", {}).get("drift", {})
+    if drift_cfg.get("enabled", False):
+        drift_ok = True
+        try:
+            from scripts.monitor_feature_drift import _load_table, check_drift
+
+            train_csv = drift_cfg.get("train_csv")
+            live_csv = drift_cfg.get("live_csv")
+            if not train_csv or not live_csv:
+                logger.warning(
+                    "drift_check enabled but monitoring.drift.train_csv/live_csv "
+                    "not configured -> skipping stage (partial integration)."
+                )
+            else:
+                threshold = float(drift_cfg.get("drifted_psi_threshold", 0.2))
+                report = check_drift(
+                    _load_table(train_csv),
+                    _load_table(live_csv),
+                    drifted_psi_threshold=threshold,
+                )
+                logger.info(
+                    "drift_check: %d feature(s), max_psi=%.4f",
+                    report["n_features_checked"],
+                    report["max_psi"],
+                )
+                if report["drifted_features"]:
+                    logger.warning(
+                        "FEATURE DRIFT: %d feature(s) above PSI %.2f: %s",
+                        len(report["drifted_features"]),
+                        threshold,
+                        ", ".join(report["drifted_features"]),
+                    )
+        except Exception as e:  # noqa: BLE001 - drift must never kill the night
+            logger.error("drift_check failed (non-fatal): %s", e)
+            drift_ok = False
+        status.append(("drift_check", drift_ok))
+    else:
+        logger.info("Skipping drift_check (monitoring.drift.enabled is false).")
+
+    # ---- Stage 4e (optional): calibration monitoring (P2-46 / TZ 5.3) -------
+    # Off by default: enabled only when monitoring.calibration.enabled=true.
+    # Computes Brier score + ECE on a jsonl/csv of model predictions vs binary
+    # outcomes (monitoring.calibration.input_path, columns pred,outcome).
+    # ECE > monitoring.calibration.ece_threshold (default 0.1) -> WARNING in
+    # the overnight log. Non-fatal by design.
+    calib_cfg = cfg.get("monitoring", {}).get("calibration", {})
+    if calib_cfg.get("enabled", False):
+        calib_path = calib_cfg.get("input_path")
+        if not calib_path:
+            logger.warning(
+                "calibration_check enabled but monitoring.calibration.input_path "
+                "not configured -> skipping stage (partial integration)."
+            )
+        else:
+            calib_ok = True
+            try:
+                from scripts.monitor_calibration import _load_records, check_calibration
+
+                ece_threshold = float(calib_cfg.get("ece_threshold", 0.1))
+                preds, outs = _load_records(calib_path)
+                report = check_calibration(preds, outs, ece_threshold=ece_threshold)
+                logger.info(
+                    "calibration_check: n=%d, brier=%.4f, ece=%.4f",
+                    report["n_predictions"],
+                    report["brier_score"],
+                    report["ece"],
+                )
+                if not report["is_calibrated"]:
+                    logger.warning(
+                        "CALIBRATION WARNING: ECE %.4f > threshold %.2f",
+                        report["ece"],
+                        ece_threshold,
+                    )
+            except Exception as e:  # noqa: BLE001 - must never kill the night
+                logger.error("calibration_check failed (non-fatal): %s", e)
+                calib_ok = False
+            status.append(("calibration_check", calib_ok))
+    else:
+        logger.info("Skipping calibration_check (monitoring.calibration.enabled is false).")
+
     # ---- Stage 5: summary report -------------------------------------------
     summary_text = ""
     if _env_flag("OVERNIGHT_NO_SUMMARY"):
@@ -372,9 +486,7 @@ def _notify_telegram(cfg: dict, summary_text: str, status: list) -> None:
     if bot.send_text_message("\n".join(lines)):
         logger.info("Telegram summary sent.")
     else:
-        logger.warning(
-            "Telegram summary not sent (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)."
-        )
+        logger.warning("Telegram summary not sent (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).")
 
 
 if __name__ == "__main__":

@@ -3,31 +3,34 @@ Realtime inference pipeline: wires MT5 live data -> features -> regime -> model 
 into a single callable that produces the structured signal JSON required by the
 FastAPI service, MT5 Auto-Trader, and Telegram bot.
 """
+
 import hashlib
 import json
 import logging
 import os
-import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import pandas as pd
 
 from config.loader import (
-    load_config,
-    get_signal_grid,
     effective_asset_config,
+    get_signal_grid,
+    load_config,
+)
+from config.loader import (
     resolve_signal_step as _resolve_signal_step,
 )
-from features.indicators import build_all_indicators
+from config.strategy_contract import strategy_identity
+from data.session_tagger import tag_dataframe
 from features.candle_anatomy import candle_anatomy
-from features.structure import detect_structure
+from features.indicators import build_all_indicators
 from features.mtf_confluence import compute_confluence_score
 from features.order_flow import add_order_flow_features
-from regime.classifier import add_regime_indicators, classify_regime_series, RegimeLabel
-from model.predictor import ModelPredictor
+from features.structure import detect_structure
 from model.ensemble import compute_ensemble_signal
-from data.session_tagger import tag_dataframe
-from config.strategy_contract import strategy_identity
+from model.predictor import ModelPredictor
+from regime.classifier import RegimeLabel, add_regime_indicators, classify_regime_series
 
 logger = logging.getLogger("realtime_pipeline")
 
@@ -56,6 +59,10 @@ class RealtimePipeline:
         self.cfg = cfg or load_config()
         self.data_mode = data_mode
         self.book_feed = book_feed
+        # Feature Store (ТЗ 8.3): lazily created on first write when
+        # `features.store.enabled` is true; disabled by default so the
+        # default behaviour is unchanged.
+        self._feature_store = None
 
         # asset_key may be passed explicitly or inferred from model_path.
         if asset_key is None:
@@ -77,10 +84,10 @@ class RealtimePipeline:
         # Explicit model_path (env/config) takes precedence over per-asset default.
         self.model_path = model_path or self.asset_cfg.get("model_path")
         # Per-asset timeframe override (assets.<key>.timeframe), else global.
-        self.timeframe = self.asset_cfg.get("timeframe") or self.cfg.get(
-            "market_data", {}
-        ).get("timeframe", "M5")
-        self._predictor = ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
+        self.timeframe = self.asset_cfg.get("timeframe") or self.cfg.get("market_data", {}).get("timeframe", "M5")
+        self._predictor = (
+            ModelPredictor(self.model_path) if self.model_path and os.path.exists(self.model_path) else None
+        )
 
         # One resolver for production training, research and live inference.
         self.effective_cfg = effective_asset_config(self.cfg, asset_key)
@@ -111,37 +118,70 @@ class RealtimePipeline:
         """Fetches and prepares DataFrame directly from MT5 (live) or Mock generator."""
         if self.data_mode == "live":
             from data.mt5_provider import fetch_closed_candles
+
             raw = fetch_closed_candles(symbol=self.mt5_symbol, timeframe=timeframe, count=n_candles)
-            
+
             # Приводим метку времени к единому формату UTC epoch seconds.
             # Resolution-independent (pandas 3.x stores datetimes at µs, so the
             # legacy `astype("int64") // 10**9` would return milliseconds).
             if "timestamp_utc" not in raw.columns:
                 from data.ingestion import to_epoch_seconds
+
                 raw["timestamp_utc"] = to_epoch_seconds(raw["timestamp"])
-                
+
             df = tag_dataframe(raw, self.cfg["sessions"])
             return df
         else:
             from data.ingestion import fetch_mock_candles
+
             return fetch_mock_candles(timeframe, n_candles, self.cfg["sessions"])
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = build_all_indicators(df, self.cfg)
+        # Задача 3.1 (Phase 4 parity): optional fractional-differentiated close
+        # (FFd, Lopez de Prado ch.5). Config-gated: when
+        # features.fractional_diff.enabled is false or absent (the default),
+        # NOTHING is added and the frame is byte-identical to the baseline
+        # pipeline. When true, a `close_fd` column is appended right here —
+        # the SAME position and semantics as scripts/train_mt5.build_full_df
+        # and scripts/run_backtest.build_full_df, so a model trained with the
+        # feature can actually serve (train/serve consistency). The flags
+        # reach this code through the frozen manifest's config_snapshot; the
+        # prod config keeps them OFF.
+        fd_cfg = self.cfg.get("features", {}).get("fractional_diff", {}) or {}
+        if fd_cfg.get("enabled", False):
+            from features.fractional_diff import frac_diff
+
+            df["close_fd"] = frac_diff(
+                df["close"],
+                d=float(fd_cfg.get("d", 0.4)),
+                thresh=float(fd_cfg.get("thres", 1e-5)),
+            )
+        # Задача 3.2 (Phase 4 parity): optional two-sided CUSUM change-point
+        # features on log returns (P2 regime/abstention feature — NOT
+        # direction alpha). Config-gated, default OFF -> no-op; identical to
+        # the train/backtest pipelines (h/k 96/3.0/0.5 preregistered).
+        cusum_cfg = self.cfg.get("features", {}).get("cusum", {}) or {}
+        if cusum_cfg.get("enabled", False):
+            from features.cusum import cusum_features
+
+            df = cusum_features(df, self.cfg)
         df = add_order_flow_features(df)
         df = candle_anatomy(df)
         df = detect_structure(df, lookback=self.cfg["features"]["structure_lookback"])
         df = add_regime_indicators(df, self.cfg)
         try:
             from features.bifurcation import add_bifurcation_features
+
             df = add_bifurcation_features(df)
         except Exception as e:
             import logging
+
             logging.getLogger("realtime.pipeline").warning("bifurcation features skipped: %s", e)
 
         htf_frames = {}
         ref_tfs = self.cfg.get("features", {}).get("mtf_reference_timeframes", ["M15", "H1"])
-        
+
         for htf in ref_tfs:
             try:
                 raw_htf = self._fetch_data_frame(timeframe=htf, n_candles=100)
@@ -153,17 +193,18 @@ class RealtimePipeline:
                 # for every signal with no trace. Keep the graceful degradation but
                 # make it observable so a broken HTF feed can be diagnosed.
                 logger.warning(
-                    "[%s] higher-timeframe (%s) confluence fetch failed; "
-                    "continuing without it: %s",
-                    self.asset_key, htf, e,
+                    "[%s] higher-timeframe (%s) confluence fetch failed; continuing without it: %s",
+                    self.asset_key,
+                    htf,
+                    e,
                 )
 
         if htf_frames:
             df = compute_confluence_score(df, htf_frames, self.cfg)
         else:
             logger.warning(
-                "[%s] no higher-timeframe frames available; "
-                "mtf_confluence_score defaulted to 0.0", self.asset_key,
+                "[%s] no higher-timeframe frames available; mtf_confluence_score defaulted to 0.0",
+                self.asset_key,
             )
             df["mtf_confluence_score"] = 0.0
 
@@ -179,6 +220,7 @@ class RealtimePipeline:
         session = str(latest["session"])
 
         feature_dict = {}
+        feature_snapshot_id = None
         if self._predictor is not None:
             # Phase 3: feature_cols may include regime_<label> one-hot columns that
             # the live row does not carry (it has only the raw causal `regime` column).
@@ -192,12 +234,16 @@ class RealtimePipeline:
                 return self._no_trade_response(latest, regime, "Insufficient feature data (warm-up period)")
             ml_p_long, ml_p_short = proba["p_long"], proba["p_short"]
             feature_dict = {
-                k: float(v)
-                for k, v in latest.items()
-                if k in self._predictor.feature_cols and not pd.isna(v)
+                k: float(v) for k, v in latest.items() if k in self._predictor.feature_cols and not pd.isna(v)
             }
         else:
             ml_p_long, ml_p_short = 0.5, 0.5
+
+        # Feature Store (ТЗ 8.3): optionally persist the computed feature
+        # snapshot for this signal bar. The store catalogs ready-made values
+        # (it never recomputes or alters them). Disabled by default via
+        # `features.store.enabled: false` — baseline behaviour is unchanged.
+        feature_snapshot_id = self._store_feature_snapshot(feature_dict, int(latest["timestamp_utc"]))
 
         signal = compute_ensemble_signal(
             regime,
@@ -218,9 +264,7 @@ class RealtimePipeline:
         book_gate = {"decision": "unavailable", "reason": "book feed not attached"}
         book_features = None
         if self.book_feed is not None and signal.bias in ("long", "short"):
-            feats = self.book_feed.bar_features(
-                self.asset_key, int(latest["timestamp_utc"])
-            )
+            feats = self.book_feed.bar_features(self.asset_key, int(latest["timestamp_utc"]))
             if feats is not None:
                 book_features = feats
                 book_gate = self._apply_book_gate(signal, feats)
@@ -260,13 +304,17 @@ class RealtimePipeline:
             entry_zone, invalidation, targets = None, None, None
 
         signal_ts = int(latest["timestamp_utc"])
-        signal_id = str(uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
-        ))
-        feature_hash = hashlib.sha256(
-            json.dumps(feature_dict, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest() if feature_dict else None
+        signal_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+            )
+        )
+        feature_hash = (
+            hashlib.sha256(json.dumps(feature_dict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if feature_dict
+            else None
+        )
         scaleout = grid_cfg.get("scaleout") or {}
         ratios = [float(scaleout.get("tp1_ratio", 1 / 3)), float(scaleout.get("tp2_ratio", 1 / 3))]
         ratios.append(max(0.0, 1.0 - sum(ratios)))
@@ -280,8 +328,13 @@ class RealtimePipeline:
             "feature_snapshot_hash": feature_hash,
             "setup_timeframe": self.timeframe,
             "context_timeframes": self.cfg.get("features", {}).get("mtf_reference_timeframes", []),
-            "expires_at_utc": signal_ts + 4 * {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400}.get(self.timeframe, 900),
-            "target_legs": ([{"price": p, "close_ratio": ratios[i], "label": f"TP{i+1}"} for i, p in enumerate(targets)] if targets else []),
+            "expires_at_utc": signal_ts
+            + 4 * {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400}.get(self.timeframe, 900),
+            "target_legs": (
+                [{"price": p, "close_ratio": ratios[i], "label": f"TP{i + 1}"} for i, p in enumerate(targets)]
+                if targets
+                else []
+            ),
             "confirmation_predicates": ["candle_closed", "regime_allowed", "session_allowed", "ensemble_gate_passed"],
             "confirmed_by": ("systematic:ensemble" if signal.bias != "no_trade" else None),
             "confirmation_time_utc": (signal_ts if signal.bias != "no_trade" else None),
@@ -296,10 +349,49 @@ class RealtimePipeline:
             "timestamp_utc": signal_ts,
             "session": session,
             "features": feature_dict,
+            "feature_snapshot_id": feature_snapshot_id,
             "book_gate": book_gate,
             "book_features": book_features,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
+
+    def _store_feature_snapshot(self, feature_dict: dict, bar_ts_utc_seconds: int) -> str | None:
+        """Persist the signal-bar feature snapshot via the Feature Store (ТЗ 8.3).
+
+        Gated by `features.store.enabled` (default false). Fail-open by
+        contract: any store error is logged and the signal path continues
+        unchanged (returns None). ``bar_ts`` is converted from the pipeline's
+        epoch-seconds to the store's UTC milliseconds.
+        """
+        if not feature_dict:
+            return None
+        store_cfg = (self.cfg.get("features") or {}).get("store") or {}
+        if not store_cfg.get("enabled", False):
+            return None
+        try:
+            if self._feature_store is None:
+                from features.feature_store import FeatureStore
+
+                db_path = str(
+                    os.environ.get("FEATURE_STORE_DB_PATH")
+                    or store_cfg.get("db_path")
+                    or (self.cfg.get("general") or {}).get("db_path", "data/market_data_mt5.sqlite")
+                )
+                self._feature_store = FeatureStore(db_path)
+            snapshot_id, _ = self._feature_store.compute_and_store(
+                symbol=self.asset_key,
+                timeframe=self.timeframe,
+                bar_ts=int(bar_ts_utc_seconds) * 1000,
+                features=feature_dict,
+            )
+            return snapshot_id
+        except Exception as exc:  # pragma: no cover - defensive fail-open
+            logger.warning(
+                "[%s] feature snapshot store failed (continuing): %s",
+                self.asset_key,
+                exc,
+            )
+            return None
 
     def _apply_book_gate(self, signal, feats: dict) -> dict:
         """Live book overlay: veto or confidence boost (mutates ``signal``).
@@ -315,9 +407,7 @@ class RealtimePipeline:
         boost = float(bg.get("boost_confidence", 0.05))
         imb = float(feats.get("imb5_last", 0.0))
         direction = signal.bias
-        opposed = (direction == "long" and imb > veto_imb) or (
-            direction == "short" and imb < -veto_imb
-        )
+        opposed = (direction == "long" and imb > veto_imb) or (direction == "short" and imb < -veto_imb)
         if opposed:
             old_confidence = signal.confidence
             signal.bias = "no_trade"
@@ -346,10 +436,12 @@ class RealtimePipeline:
 
     def _no_trade_response(self, latest, regime, reason: str) -> dict:
         signal_ts = int(latest["timestamp_utc"])
-        signal_id = str(uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
-        ))
+        signal_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+            )
+        )
         return {
             "signal_id": signal_id,
             "signal_state": "no_trade",
@@ -372,5 +464,5 @@ class RealtimePipeline:
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
             "timestamp_utc": signal_ts,
             "session": str(latest["session"]),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }

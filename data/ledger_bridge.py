@@ -12,11 +12,11 @@ trade callback). Properties required by the plan:
   (no HMAC primitive is available in MQL5);
 * bounded batch size and simple retry/backoff for the CLI loop.
 """
+
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import time
 from typing import Any, Iterable
@@ -45,8 +45,7 @@ def init_outbox(db_path: str) -> None:
             last_error TEXT,
             delivered_at_ms INTEGER
         )""")
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_pending "
-                     f"ON {TABLE}(delivered_at_ms, id)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{TABLE}_pending ON {TABLE}(delivered_at_ms, id)")
         conn.commit()
     finally:
         conn.close()
@@ -82,8 +81,7 @@ def pending_events(db_path: str, limit: int = 200) -> list[dict[str, Any]]:
             (int(limit),),
         ).fetchall()
         return [
-            {"id": row[0], "event_id": row[1], "source": row[2],
-             "event_type": row[3], "event_json": row[4]}
+            {"id": row[0], "event_id": row[1], "source": row[2], "event_type": row[3], "event_json": row[4]}
             for row in rows
         ]
     finally:
@@ -100,8 +98,7 @@ def outbox_stats(db_path: str) -> dict[str, int | None]:
                        SUM(CASE WHEN delivered_at_ms IS NOT NULL THEN 1 ELSE 0 END)
                 FROM {TABLE}"""
         ).fetchone()
-        return {"total": int(total or 0), "pending": int(pending or 0),
-                "delivered": int(delivered or 0)}
+        return {"total": int(total or 0), "pending": int(pending or 0), "delivered": int(delivered or 0)}
     finally:
         conn.close()
 
@@ -196,17 +193,14 @@ def deliver_batch(
     import requests
 
     if not secret:
-        raise ValueError(
-            "ledger delivery requires LEDGER_INGEST_SECRET (strict signed ingress)"
-        )
-    envelope = build_envelope(events, producer=producer, account_mode=account_mode,
-                              account_login=account_login)
+        raise ValueError("ledger delivery requires LEDGER_INGEST_SECRET (strict signed ingress)")
+    envelope = build_envelope(events, producer=producer, account_mode=account_mode, account_login=account_login)
     body = envelope.model_dump_json().encode("utf-8")
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "X-Ledger-Batch-Id": envelope.batch_id,
-        "X-Ledger-Signature": sign_envelope(envelope, secret)
+        "X-Ledger-Signature": sign_envelope(envelope, secret),
     }
     try:
         response = requests.post(ingest_url, data=body, headers=headers, timeout=timeout)
@@ -240,18 +234,35 @@ def deliver_outbox(
     if not events:
         return {"attempted": 0, "delivered": 0, "failed": 0, "ok": True, "error": None}
     ok, text, status = deliver_batch(
-        events, ingest_url=ingest_url, token=token, secret=secret,
-        producer=events[0].source, account_mode=account_mode,
-        account_login=account_login, timeout=timeout,
+        events,
+        ingest_url=ingest_url,
+        token=token,
+        secret=secret,
+        producer=events[0].source,
+        account_mode=account_mode,
+        account_login=account_login,
+        timeout=timeout,
     )
     event_ids = [e.event_id for e in events]
     if ok:
         mark_delivered(db_path, event_ids)
-        return {"attempted": len(events), "delivered": len(events), "failed": 0,
-                "ok": True, "error": None, "http_status": status}
+        return {
+            "attempted": len(events),
+            "delivered": len(events),
+            "failed": 0,
+            "ok": True,
+            "error": None,
+            "http_status": status,
+        }
     mark_failed(db_path, event_ids, text or f"http {status}")
-    return {"attempted": len(events), "delivered": 0, "failed": len(events),
-            "ok": False, "error": text or f"http {status}", "http_status": status}
+    return {
+        "attempted": len(events),
+        "delivered": 0,
+        "failed": len(events),
+        "ok": False,
+        "error": text or f"http {status}",
+        "http_status": status,
+    }
 
 
 def run_delivery_loop(
@@ -276,8 +287,12 @@ def run_delivery_loop(
     while max_attempts == 0 or attempts < max_attempts:
         attempts += 1
         result = deliver_outbox(
-            db_path, ingest_url=ingest_url, token=token, secret=secret,
-            account_mode=account_mode, account_login=account_login,
+            db_path,
+            ingest_url=ingest_url,
+            token=token,
+            secret=secret,
+            account_mode=account_mode,
+            account_login=account_login,
             batch_size=batch_size,
         )
         if on_result is not None:
@@ -303,10 +318,7 @@ def load_bridge_config(cfg: dict, env=None) -> dict[str, Any]:
     if not secret:
         missing.append("LEDGER_INGEST_SECRET")
     if missing:
-        raise RuntimeError(
-            "ledger bridge configuration incomplete (strict signed ingress): "
-            + ", ".join(missing)
-        )
+        raise RuntimeError("ledger bridge configuration incomplete (strict signed ingress): " + ", ".join(missing))
     return {
         "ingest_url": str(ingest_url),
         "token": str(token),

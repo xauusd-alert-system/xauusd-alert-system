@@ -12,13 +12,13 @@ Env vars:
     WATCHDOG_HEALTH_FILE    — touched every successful heartbeat (default logs/watchdog_heartbeat.json)
 """
 
+import logging
 import os
-import sys
-import time
 import signal
 import subprocess
-import logging
-from datetime import datetime, timezone
+import sys
+import time
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Config
@@ -66,13 +66,14 @@ shutdown_requested = False
 def _write_heartbeat(pid: int):
     """Touch a health file so external monitors can confirm the watchdog is alive."""
     import json
+
     os.makedirs(os.path.dirname(HEALTH_FILE), exist_ok=True)
     with open(HEALTH_FILE, "w") as f:
         json.dump(
             {
                 "watchdog_pid": os.getpid(),
                 "trader_pid": pid,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "consecutive_crashes": consecutive_crashes,
             },
             f,
@@ -98,7 +99,9 @@ def _pid_alive_as_python(pid: int) -> bool:
     try:
         out = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         ).stdout
         return ('"pythonw.exe"' in out) or ('"python.exe"' in out)
     except Exception:
@@ -115,7 +118,8 @@ def _acquire_single_instance_lock() -> bool:
                 log.warning(
                     "Another watchdog appears alive (pid=%s from %s). Exiting "
                     "to avoid a duplicate trader / Telegram 409 conflict.",
-                    old_pid, LOCK_FILE,
+                    old_pid,
+                    LOCK_FILE,
                 )
                 return False
         except (ValueError, OSError):
@@ -140,9 +144,11 @@ def _tg(text: str) -> None:
         return
     try:
         import requests  # local import: watchdog stays stdlib-only at startup
+
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat, "text": text}, timeout=10,
+            data={"chat_id": chat, "text": text},
+            timeout=10,
         )
     except Exception as exc:
         log.warning("Telegram notify failed: %s", exc)
@@ -186,8 +192,7 @@ def main():
     while not shutdown_requested:
         if consecutive_crashes >= MAX_RESTARTS:
             log.error(f"Hit max consecutive crashes ({MAX_RESTARTS}). Watchdog stopping.")
-            _tg(f"⛔ Watchdog сдался после {MAX_RESTARTS} рестартов подряд. "
-                f"Трейдер НЕ работает — нужен ручной запуск.")
+            _tg(f"⛔ Watchdog сдался после {MAX_RESTARTS} рестартов подряд. Трейдер НЕ работает — нужен ручной запуск.")
             break
 
         log.info(f"Launching trader (attempt #{consecutive_crashes + 1})...")
@@ -229,8 +234,10 @@ def main():
         else:
             consecutive_crashes += 1
             # Audit C: a fast crash is abnormal — make it visible in Telegram.
-            _tg(f"🔄 Trader упал (code={returncode}, uptime={uptime:.0f}s). "
-                f"Рестарт {consecutive_crashes}/{MAX_RESTARTS}...")
+            _tg(
+                f"🔄 Trader упал (code={returncode}, uptime={uptime:.0f}s). "
+                f"Рестарт {consecutive_crashes}/{MAX_RESTARTS}..."
+            )
 
         _write_heartbeat(proc.pid)
 

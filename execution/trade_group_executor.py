@@ -20,11 +20,13 @@ Semantics guaranteed here (ТЗ §16/§18/§25/§28):
 * Every lifecycle transition appends a hash-chained ledger event with groupId,
   legId, mode, source, requested vs actual values and reason.
 """
+
 from __future__ import annotations
 
 import os
 from typing import Any, Protocol
 
+from config.loader import load_config
 from data.trade_group_store import (
     load_group,
     save_group,
@@ -40,6 +42,7 @@ from execution.trade_group import (
     new_leg_id,
     require_transition,
 )
+from provenance.store import ProvenanceStore, resolve_store_db_path
 
 
 class LiveExecutionForbidden(RuntimeError):
@@ -62,11 +65,12 @@ class GroupStateError(RuntimeError):
 # Driver protocol (broker-facing abstraction; hedging vs netting, ТЗ §13)
 # --------------------------------------------------------------------------
 
+
 class GroupDriver(Protocol):
     """Minimal broker surface needed by the executor."""
 
-    mode: str                       # "paper" | "demo" | "live"
-    account_mode: str               # "hedging" | "netting"
+    mode: str  # "paper" | "demo" | "live"
+    account_mode: str  # "hedging" | "netting"
 
     def submit_leg(self, spec: TradeGroupSpec, leg: int, volume: float) -> dict[str, Any]:
         """Submit one leg; returns broker ids {order_id, position_id}."""
@@ -92,9 +96,9 @@ class PaperDriver:
             raise ValueError(f"unsupported account mode {account_mode!r}")
         self.mode = "paper"
         self.account_mode = account_mode
-        self.positions: dict[str, dict[str, Any]] = {}   # ref -> {volume, sl, tp}
+        self.positions: dict[str, dict[str, Any]] = {}  # ref -> {volume, sl, tp}
         self.order_seq = 0
-        self.reject_modify = False                        # injectable failure
+        self.reject_modify = False  # injectable failure
 
     def submit_leg(self, spec: TradeGroupSpec, leg: int, volume: float) -> dict[str, Any]:
         ref = new_leg_id(spec.group_id, leg)
@@ -111,8 +115,7 @@ class PaperDriver:
                 "sl": spec.geometry.sl,
                 "tp": spec.leg_price(leg),
             }
-        return {"order_id": f"PO-{spec.group_id}-{leg}-{self.order_seq}",
-                "position_id": position_id}
+        return {"order_id": f"PO-{spec.group_id}-{leg}-{self.order_seq}", "position_id": position_id}
 
     def _resolve_ref(self, reference: str) -> str:
         """Netting: virtual legs (2/3) share the aggregate position's SL, so a
@@ -144,6 +147,7 @@ class PaperDriver:
 # --------------------------------------------------------------------------
 # Executor
 # --------------------------------------------------------------------------
+
 
 class TradeGroupExecutor:
     def __init__(
@@ -179,16 +183,20 @@ class TradeGroupExecutor:
                 "explicit live approval (ТЗ §29/§32 P2 live promotion)"
             )
         if spec.mode == "demo" and not self.allow_demo:
-            raise DemoExecutionNotEnabled(
-                "demo trade-group execution requires TRADE_GROUP_ENABLE_DEMO=1"
-            )
+            raise DemoExecutionNotEnabled("demo trade-group execution requires TRADE_GROUP_ENABLE_DEMO=1")
 
     # --- ledger helper ------------------------------------------------------
 
-    def _append(self, spec: TradeGroupSpec, event_type: str, *,
-                leg: int | None = None, reason: str | None = None,
-                payload: dict[str, Any] | None = None,
-                actor: str = "trade_group_executor"):
+    def _append(
+        self,
+        spec: TradeGroupSpec,
+        event_type: str,
+        *,
+        leg: int | None = None,
+        reason: str | None = None,
+        payload: dict[str, Any] | None = None,
+        actor: str = "trade_group_executor",
+    ):
         append_trading_event(
             self.ledger_db_path,
             event_type=event_type,
@@ -225,18 +233,46 @@ class TradeGroupExecutor:
 
     # --- lifecycle ----------------------------------------------------------
 
+    def _record_provenance(self, spec: TradeGroupSpec) -> None:
+        """ТЗ 8.7: optional audit catalogization into ProvenanceStore.
+
+        Gated by ``provenance.store.enabled`` (default OFF -> zero behaviour
+        change) and fail-open: any store error is logged and swallowed —
+        the audit store must never break the execution path. The existing
+        provenance persistence inside trade_groups (data/trade_group_store)
+        is untouched; this is a parallel audit index only.
+        """
+        try:
+            cfg = load_config()
+            prov_cfg = (cfg.get("provenance") or {}).get("store") or {}
+            if not prov_cfg.get("enabled"):
+                return
+            db_path = resolve_store_db_path(cfg)
+            ProvenanceStore(str(db_path)).save_from_group_row(
+                {
+                    "spec": spec,
+                }
+            )
+        except Exception as exc:  # fail-open (audit never blocks execution)
+            print(f"provenance store record failed (ignored): {exc}")
+
     def create_group(self, spec: TradeGroupSpec) -> GroupState:
         """Register a validated spec: DRAFT -> VALIDATED."""
         self._gate_mode(spec)
         require_transition(GroupState.DRAFT, GroupState.VALIDATED)
         save_group(self.db_path, spec, state=GroupState.DRAFT)
         save_group(self.db_path, spec, state=GroupState.VALIDATED)
-        self._append(spec, "signal_validated",
-                     payload={"geometry": spec.as_geometry_payload(),
-                              "state": "VALIDATED", "mode": spec.mode})
-        self._append(spec, "trade_intent_created",
-                     payload={"intent_id": spec.intent_id, "group_id": spec.group_id,
-                              "mode": spec.mode})
+        self._record_provenance(spec)
+        self._append(
+            spec,
+            "signal_validated",
+            payload={"geometry": spec.as_geometry_payload(), "state": "VALIDATED", "mode": spec.mode},
+        )
+        self._append(
+            spec,
+            "trade_intent_created",
+            payload={"intent_id": spec.intent_id, "group_id": spec.group_id, "mode": spec.mode},
+        )
         return GroupState.VALIDATED
 
     def submit_group(self, group_id: str) -> GroupState:
@@ -245,8 +281,7 @@ class TradeGroupExecutor:
         spec = current["spec"]
         if not try_mark_submitted(self.db_path, group_id):
             raise DuplicateSubmissionError(
-                f"group {group_id} was already submitted; "
-                f"restart recovery must not resubmit (ТЗ §25)"
+                f"group {group_id} was already submitted; restart recovery must not resubmit (ТЗ §25)"
             )
         require_transition(current["state"], GroupState.SUBMITTED)
         legs = []
@@ -257,24 +292,41 @@ class TradeGroupExecutor:
             leg_state = "SKIPPED" if volume <= 0 else "SUBMITTED"
             result = self.driver.submit_leg(spec, leg, volume)
             broker_ids[new_leg_id(group_id, leg)] = result
-            legs.append({
-                "leg": leg, "price": spec.leg_price(leg),
-                "volume": volume, "state": leg_state,
-                "broker": result,
-            })
+            legs.append(
+                {
+                    "leg": leg,
+                    "price": spec.leg_price(leg),
+                    "volume": volume,
+                    "state": leg_state,
+                    "broker": result,
+                }
+            )
             if leg_state == "SUBMITTED":
-                self._append(spec, "leg_submitted", leg=leg,
-                             payload={"volume": volume, "price": spec.leg_price(leg),
-                                      "broker_ids": result, "mode": spec.mode})
+                self._append(
+                    spec,
+                    "leg_submitted",
+                    leg=leg,
+                    payload={"volume": volume, "price": spec.leg_price(leg), "broker_ids": result, "mode": spec.mode},
+                )
             else:
-                self._append(spec, "leg_rejected", leg=leg, reason="SKIPPED_ZERO_VOLUME",
-                             payload={"volume": volume, "mode": spec.mode})
-        update_group_state(self.db_path, group_id, GroupState.SUBMITTED,
-                           legs=legs, broker_ids=broker_ids)
-        self._append(spec, "group_submitted",
-                     payload={"account_mode": self.driver.account_mode,
-                              "legs": legs, "geometry": spec.as_geometry_payload(),
-                              "mode": spec.mode})
+                self._append(
+                    spec,
+                    "leg_rejected",
+                    leg=leg,
+                    reason="SKIPPED_ZERO_VOLUME",
+                    payload={"volume": volume, "mode": spec.mode},
+                )
+        update_group_state(self.db_path, group_id, GroupState.SUBMITTED, legs=legs, broker_ids=broker_ids)
+        self._append(
+            spec,
+            "group_submitted",
+            payload={
+                "account_mode": self.driver.account_mode,
+                "legs": legs,
+                "geometry": spec.as_geometry_payload(),
+                "mode": spec.mode,
+            },
+        )
         return GroupState.SUBMITTED
 
     def on_leg_filled(self, group_id: str, leg: int, fill_price: float) -> GroupState:
@@ -296,13 +348,21 @@ class TradeGroupExecutor:
                 if item["leg"] == 1:
                     item["state"] = "CLOSED"
                     item["fill_price"] = fill_price
-            save_group(self.db_path, spec, state=GroupState.TP1_FILLED,
-                       legs=legs, be_state=current["be_state"],
-                       broker_ids=current["broker_ids"], submitted=True)
-            self._append(spec, "tp1_filled", leg=1,
-                         payload={"fill_price": fill_price,
-                                  "entry_actual_fill": spec.entry.actual_fill,
-                                  "mode": spec.mode})
+            save_group(
+                self.db_path,
+                spec,
+                state=GroupState.TP1_FILLED,
+                legs=legs,
+                be_state=current["be_state"],
+                broker_ids=current["broker_ids"],
+                submitted=True,
+            )
+            self._append(
+                spec,
+                "tp1_filled",
+                leg=1,
+                payload={"fill_price": fill_price, "entry_actual_fill": spec.entry.actual_fill, "mode": spec.mode},
+            )
             return GroupState.TP1_FILLED
         return self._on_tp_leg_filled(group_id, leg, fill_price)
 
@@ -325,12 +385,10 @@ class TradeGroupExecutor:
                 item["state"] = "CLOSED"
                 item["fill_price"] = fill_price
         update_group_state(self.db_path, group_id, next_state, legs=legs)
-        self._append(spec, event, leg=leg, payload={"fill_price": fill_price,
-                                                    "mode": spec.mode})
+        self._append(spec, event, leg=leg, payload={"fill_price": fill_price, "mode": spec.mode})
         if leg == 3:
             update_group_state(self.db_path, group_id, GroupState.RECONCILED, legs=legs)
-            self._append(spec, "group_reconciled",
-                         payload={"mode": spec.mode, "geometry": spec.as_geometry_payload()})
+            self._append(spec, "group_reconciled", payload={"mode": spec.mode, "geometry": spec.as_geometry_payload()})
             return GroupState.RECONCILED
         return next_state
 
@@ -341,29 +399,35 @@ class TradeGroupExecutor:
         spec = current["spec"]
         require_transition(current["state"], GroupState.BE_REQUESTED)
         if spec.entry.actual_fill is None:
-            raise GroupStateError(
-                "break-even requires a confirmed actual fill (entry.actual_fill)"
-            )
+            raise GroupStateError("break-even requires a confirmed actual fill (entry.actual_fill)")
         be = compute_break_even(
-            side=spec.side, actual_fill=spec.entry.actual_fill,
-            cost=self.cost, broker=self.broker,
+            side=spec.side,
+            actual_fill=spec.entry.actual_fill,
+            cost=self.cost,
+            broker=self.broker,
         )
         be_state = dict(current["be_state"])
-        be_state.update({
-            "status": BeStatus.BE_REQUESTED.value,
-            "raw_price": be["raw_price"],
-            "protected_price": be["protected_price"],
-            "requested_price": be["protected_price"],
-            "retries": int(be_state.get("retries", 0)),
-        })
-        update_group_state(self.db_path, group_id, GroupState.BE_REQUESTED,
-                           be_state=be_state)
-        self._append(spec, "be_requested",
-                     payload={"raw_price": be["raw_price"],
-                              "protected_price": be["protected_price"],
-                              "requested_price": be["protected_price"],
-                              "apply_to": spec.break_even.apply_to,
-                              "mode": spec.mode})
+        be_state.update(
+            {
+                "status": BeStatus.BE_REQUESTED.value,
+                "raw_price": be["raw_price"],
+                "protected_price": be["protected_price"],
+                "requested_price": be["protected_price"],
+                "retries": int(be_state.get("retries", 0)),
+            }
+        )
+        update_group_state(self.db_path, group_id, GroupState.BE_REQUESTED, be_state=be_state)
+        self._append(
+            spec,
+            "be_requested",
+            payload={
+                "raw_price": be["raw_price"],
+                "protected_price": be["protected_price"],
+                "requested_price": be["protected_price"],
+                "apply_to": spec.break_even.apply_to,
+                "mode": spec.mode,
+            },
+        )
         return GroupState.BE_REQUESTED
 
     def confirm_break_even(self, group_id: str) -> GroupState:
@@ -373,9 +437,7 @@ class TradeGroupExecutor:
         spec = current["spec"]
         state = current["state"]
         if state not in (GroupState.BE_REQUESTED, GroupState.BE_RETRY):
-            raise GroupStateError(
-                f"confirm_break_even requires BE_REQUESTED/BE_RETRY, got {state.value}"
-            )
+            raise GroupStateError(f"confirm_break_even requires BE_REQUESTED/BE_RETRY, got {state.value}")
         be_state = dict(current["be_state"])
         requested = float(be_state.get("requested_price") or 0.0)
         if requested <= 0.0:
@@ -392,36 +454,37 @@ class TradeGroupExecutor:
             observed = self.driver.query_sl(ref)
             if observed is None or abs(observed - requested) > 1e-9:
                 return self._be_retry_or_fail(
-                    group_id, spec, be_state, requested,
+                    group_id,
+                    spec,
+                    be_state,
+                    requested,
                     f"SL query mismatch: observed={observed}",
                 )
 
-        be_state.update({"status": BeStatus.BE_CONFIRMED.value,
-                         "confirmed_price": requested, "last_error": None})
-        update_group_state(self.db_path, group_id, GroupState.BE_CONFIRMED,
-                           be_state=be_state)
-        self._append(spec, "be_confirmed",
-                     payload={"confirmed_price": requested,
-                              "raw_price": be_state.get("raw_price"),
-                              "mode": spec.mode})
+        be_state.update({"status": BeStatus.BE_CONFIRMED.value, "confirmed_price": requested, "last_error": None})
+        update_group_state(self.db_path, group_id, GroupState.BE_CONFIRMED, be_state=be_state)
+        self._append(
+            spec,
+            "be_confirmed",
+            payload={"confirmed_price": requested, "raw_price": be_state.get("raw_price"), "mode": spec.mode},
+        )
         return GroupState.BE_CONFIRMED
 
-    def _be_retry_or_fail(self, group_id: str, spec: TradeGroupSpec,
-                          be_state: dict[str, Any], requested: float,
-                          error: str) -> GroupState:
+    def _be_retry_or_fail(
+        self, group_id: str, spec: TradeGroupSpec, be_state: dict[str, Any], requested: float, error: str
+    ) -> GroupState:
         """Bounded BE retry: BE_RETRY until max_be_retries, then FAILED.
         BE_CONFIRMED is NEVER emitted on this path (ТЗ §18/§28.7)."""
         retries = int(be_state.get("retries", 0)) + 1
-        be_state.update({"status": BeStatus.BE_RETRY.value, "retries": retries,
-                         "last_error": error})
-        next_state = GroupState.BE_RETRY if retries < self.max_be_retries \
-            else GroupState.FAILED
+        be_state.update({"status": BeStatus.BE_RETRY.value, "retries": retries, "last_error": error})
+        next_state = GroupState.BE_RETRY if retries < self.max_be_retries else GroupState.FAILED
         update_group_state(self.db_path, group_id, next_state, be_state=be_state)
-        self._append(spec, "be_retry" if next_state == GroupState.BE_RETRY
-                     else "leg_rejected",
-                     reason=error,
-                     payload={"retries": retries, "requested_price": requested,
-                              "mode": spec.mode})
+        self._append(
+            spec,
+            "be_retry" if next_state == GroupState.BE_RETRY else "leg_rejected",
+            reason=error,
+            payload={"retries": retries, "requested_price": requested, "mode": spec.mode},
+        )
         return next_state
 
     def on_stopped(self, group_id: str, stop_price: float) -> GroupState:
@@ -431,8 +494,7 @@ class TradeGroupExecutor:
         spec = current["spec"]
         require_transition(current["state"], GroupState.STOPPED)
         update_group_state(self.db_path, group_id, GroupState.STOPPED)
-        self._append(spec, "stop_filled",
-                     payload={"stop_price": stop_price, "mode": spec.mode})
+        self._append(spec, "stop_filled", payload={"stop_price": stop_price, "mode": spec.mode})
         return GroupState.STOPPED
 
     # --- paper market simulation (mode=paper only) --------------------------
@@ -451,11 +513,15 @@ class TradeGroupExecutor:
         events: list[str] = []
         direction = 1.0 if spec.side == "long" else -1.0
 
-        stop_hit = state in {GroupState.SUBMITTED, GroupState.OPENED,
-                             GroupState.TP1_FILLED, GroupState.BE_REQUESTED,
-                             GroupState.BE_RETRY, GroupState.BE_CONFIRMED,
-                             GroupState.TP2_FILLED} and \
-            (direction * (price - spec.geometry.sl) <= 0.0)
+        stop_hit = state in {
+            GroupState.SUBMITTED,
+            GroupState.OPENED,
+            GroupState.TP1_FILLED,
+            GroupState.BE_REQUESTED,
+            GroupState.BE_RETRY,
+            GroupState.BE_CONFIRMED,
+            GroupState.TP2_FILLED,
+        } and (direction * (price - spec.geometry.sl) <= 0.0)
         if stop_hit:
             self.on_stopped(group_id, spec.geometry.sl)
             return ["stop_filled"]
@@ -495,7 +561,10 @@ class TradeGroupExecutor:
                 if sl is not None:
                     item["sl_after_restart"] = sl
             update_group_state(self.db_path, group_id, state, legs=current["legs"])
-        self._append(spec, "group_reconciled", reason="restart_recovery",
-                     payload={"state": state.value, "submitted": current["submitted"],
-                              "mode": spec.mode})
+        self._append(
+            spec,
+            "group_reconciled",
+            reason="restart_recovery",
+            payload={"state": state.value, "submitted": current["submitted"], "mode": spec.mode},
+        )
         return current

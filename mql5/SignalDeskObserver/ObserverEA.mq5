@@ -90,8 +90,11 @@ void FlushOutbox()
    if(count == 0)
       return;
 
-   //--- build the envelope JSON: {"schema_version":1,"producer":"mt5_observer",
-   //---  "account_fingerprint":...,"batch_id":...,"sent_at_utc_ms":...,"events":[...]}
+   //--- build the envelope JSON: {"schema_version":1,"protocol_version":1,
+   //---  "producer":"mt5_observer","account_fingerprint":...,"batch_id":...,
+   //---  "sent_at_utc_ms":...,"events":[...]}
+   //--- protocol_version (ТЗ 10.4 / P2-50): receivers reject unknown versions;
+   //--- a missing field is treated as v1 for backward compatibility.
    string events = "[";
    bool first = true;
    for(int i = 0; i < count; i++)
@@ -109,6 +112,7 @@ void FlushOutbox()
 
    string body = "{";
    JsonFieldInt(body, "schema_version", 1);
+   JsonFieldInt(body, "protocol_version", 1);
    JsonFieldString(body, "producer", SERIALIZER_SOURCE);
    JsonFieldString(body, "account_fingerprint", g_ctx.accountFingerprint);
    JsonFieldString(body, "batch_id",

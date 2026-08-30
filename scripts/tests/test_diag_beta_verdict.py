@@ -52,8 +52,7 @@ def test_the_verdict_bucket_depends_on_magnitude_only():
         positive = _text(value)
         negative = _text(-value)
         assert ("beta" in positive) == ("beta" in negative)
-        assert ("partial market dependence" in positive) == (
-            "partial market dependence" in negative)
+        assert ("partial market dependence" in positive) == ("partial market dependence" in negative)
         assert positive != negative, "the sign must still be visible in the wording"
 
 

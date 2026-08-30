@@ -6,8 +6,14 @@ use ``cfg``, ``pipeline``, ``signal``, ``position``, ``stub_predictor``,
 All fixtures are function-scoped (fresh per test) and accept optional
 overrides via indirect parametrize.
 """
-import sys
+
 import os
+import sys
+
+# logs/ws_live_test.py is a manual live-trading smoke script (needs MetaTrader5
+# + websockets + an open MT5 session), NOT a test. Exclude it from collection so
+# `pytest -q` at the repo root does not error on the optional websockets import.
+collect_ignore_glob = ["logs/ws_live_test.py"]
 
 import pytest
 
@@ -17,14 +23,14 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 from tests.builder import (
+    StubConnector,
+    StubMT5,
+    StubPredictor,
     build_cfg,
     build_pipeline,
-    build_signal,
     build_position,
     build_risk,
-    StubPredictor,
-    StubMT5,
-    StubConnector,
+    build_signal,
 )
 
 
@@ -58,8 +64,7 @@ def pipeline_with_model(cfg):
     model_path = cfg["assets"]["XAUUSD"]["model_path"]
     if not os.path.isfile(model_path):
         pytest.skip("production model not on disk")
-    return build_pipeline(cfg=cfg, asset="XAUUSD", data_mode="mock",
-                          model_path=model_path)
+    return build_pipeline(cfg=cfg, asset="XAUUSD", data_mode="mock", model_path=model_path)
 
 
 # ---------------------------------------------------------------------------

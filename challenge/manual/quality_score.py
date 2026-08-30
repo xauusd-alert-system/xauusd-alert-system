@@ -8,24 +8,23 @@ Combines three dimensions into a single 0-100 quality score:
 
 Used to rank signals and optionally filter low-quality setups.
 """
+
 from __future__ import annotations
 
 import datetime as dt
-import math
-
 
 # --- Time-of-day scoring ---
 
 # Session boundaries (UTC)
 SESSION_START_SEC = 13 * 3600 + 30 * 60  # 13:30 = 18:30 local
-SESSION_END_SEC = 19 * 3600 + 55 * 60    # 19:55 = 00:55 local
+SESSION_END_SEC = 19 * 3600 + 55 * 60  # 19:55 = 00:55 local
 
 # Prime window: first 30-90 min after open (strongest moves per ORB research)
-PRIME_START_SEC = SESSION_START_SEC + 30 * 60   # 14:00 = 19:00 local
-PRIME_END_SEC = SESSION_START_SEC + 90 * 60     # 15:00 = 20:00 local
+PRIME_START_SEC = SESSION_START_SEC + 30 * 60  # 14:00 = 19:00 local
+PRIME_END_SEC = SESSION_START_SEC + 90 * 60  # 15:00 = 20:00 local
 
 # Good window: 90-180 min (mid-morning, still decent activity)
-GOOD_END_SEC = SESSION_START_SEC + 180 * 60     # 16:30 = 21:30 local
+GOOD_END_SEC = SESSION_START_SEC + 180 * 60  # 16:30 = 21:30 local
 
 # Degraded: last 45 min (position squaring, weak trends)
 DEGRADED_START_SEC = SESSION_END_SEC - 45 * 60  # 19:10 = 00:10 local
@@ -40,7 +39,7 @@ def _time_of_day_score(signal_ts: int) -> float:
     Late (>180 min): 10 pts — fatigue setting in
     Degraded (last 45 min): 0 pts — avoid
     """
-    utc = dt.datetime.fromtimestamp(signal_ts, dt.timezone.utc)
+    utc = dt.datetime.fromtimestamp(signal_ts, dt.UTC)
     sec = utc.hour * 3600 + utc.minute * 60 + utc.second
 
     if sec < SESSION_START_SEC or sec > SESSION_END_SEC:
@@ -57,6 +56,7 @@ def _time_of_day_score(signal_ts: int) -> float:
 
 
 # --- Volume scoring ---
+
 
 def _volume_score(volume_ratio: float) -> float:
     """Score 0-40 based on breakout volume vs average.
@@ -84,6 +84,7 @@ def _volume_score(volume_ratio: float) -> float:
 
 # --- Regime scoring ---
 
+
 def _regime_score(regime: str, bias: str) -> float:
     """Score 0-30 based on market regime alignment.
 
@@ -98,11 +99,10 @@ def _regime_score(regime: str, bias: str) -> float:
 
     if regime in ("trend_up", "trend_down"):
         # Check alignment
-        if (regime == "trend_up" and bias == "long") or \
-           (regime == "trend_down" and bias == "short"):
+        if (regime == "trend_up" and bias == "long") or (regime == "trend_down" and bias == "short"):
             return 30  # aligned
         elif bias in ("long", "short"):
-            return 5   # opposed
+            return 5  # opposed
         return 15  # trend but no bias? shouldn't happen
     elif regime == "range":
         return 15
@@ -113,6 +113,7 @@ def _regime_score(regime: str, bias: str) -> float:
 
 
 # --- Composite score ---
+
 
 def compute_quality_score(
     signal_ts: int,
@@ -184,6 +185,8 @@ def compute_quality_score(
 
 def format_quality(score: dict) -> str:
     """Format quality score for display."""
-    return (f"Quality {score['total']}/100 [{score['grade']}] — "
-            f"vol={score['volume']}/40  tod={score['time_of_day']}/30  "
-            f"reg={score['regime']}/30 — {score['reasoning']}")
+    return (
+        f"Quality {score['total']}/100 [{score['grade']}] — "
+        f"vol={score['volume']}/40  tod={score['time_of_day']}/30  "
+        f"reg={score['regime']}/30 — {score['reasoning']}"
+    )

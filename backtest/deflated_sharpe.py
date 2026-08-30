@@ -25,6 +25,7 @@ computed on the raw (non-annualized) per-trade PnLs. The PSR/DSR formulas
 are frequency-consistent as long as the observed SR and the benchmark SR are
 in the same units, which this module guarantees by construction.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -43,6 +44,7 @@ DEFAULT_PERIODS_PER_YEAR = 250.0
 # ---------------------------------------------------------------------------
 # Sharpe estimation + moments
 # ---------------------------------------------------------------------------
+
 
 def annualized_sharpe(pnls, periods_per_year: float = DEFAULT_PERIODS_PER_YEAR) -> float:
     """Per-trade Sharpe annualized with sqrt(periods_per_year) (repo convention).
@@ -76,15 +78,14 @@ def _moments(pnls) -> tuple[float, float, int]:
     return skew, kurt_ex, n
 
 
-def sharpe_variance(sr: float, skew: float, kurt_ex: float, n: int | float,
-                    t_eff: float | None = None) -> float:
+def sharpe_variance(sr: float, skew: float, kurt_ex: float, n: int | float, t_eff: float | None = None) -> float:
     """Variance of the SR estimator (Bailey & Lopez de Prado 2014, Eq. 4-5).
     n or t_eff is the effective sample size."""
     eff_n = float(t_eff) if t_eff is not None else float(n)
     eff_n = max(eff_n, 2.0) if n >= 2 else eff_n
     if eff_n < 2:
         return 0.0
-    var = (1.0 - skew * sr + (kurt_ex + 2.0) / 4.0 * sr ** 2) / (eff_n - 1.0)
+    var = (1.0 - skew * sr + (kurt_ex + 2.0) / 4.0 * sr**2) / (eff_n - 1.0)
     return max(var, 1e-12)
 
 
@@ -92,10 +93,14 @@ def sharpe_variance(sr: float, skew: float, kurt_ex: float, n: int | float,
 # Probabilistic Sharpe Ratio (PSR) -- single strategy vs a benchmark
 # ---------------------------------------------------------------------------
 
-def probabilistic_sharpe_ratio(pnls, sr_benchmark: float = 0.0,
-                               periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
-                               t_eff: float | None = None,
-                               uniqueness: np.ndarray | None = None) -> float:
+
+def probabilistic_sharpe_ratio(
+    pnls,
+    sr_benchmark: float = 0.0,
+    periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
+    t_eff: float | None = None,
+    uniqueness: np.ndarray | None = None,
+) -> float:
     """PSR(SR*): probability that the TRUE Sharpe exceeds ``sr_benchmark``.
 
     ``sr_benchmark`` must be in the same units as the observed Sharpe (i.e.
@@ -121,9 +126,16 @@ def probabilistic_sharpe_ratio(pnls, sr_benchmark: float = 0.0,
 # Expected maximum Sharpe under N trials + Deflated Sharpe Ratio (DSR)
 # ---------------------------------------------------------------------------
 
-def expected_max_sharpe(n_trials: int, sr: float, skew: float, kurt_ex: float, n: int | float,
-                        periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
-                        t_eff: float | None = None) -> float:
+
+def expected_max_sharpe(
+    n_trials: int,
+    sr: float,
+    skew: float,
+    kurt_ex: float,
+    n: int | float,
+    periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
+    t_eff: float | None = None,
+) -> float:
     """E[max SR_N] -- expected maximum Sharpe among ``n_trials`` independent
     trials (Bailey & Lopez de Prado 2014, Eq. 9):
 
@@ -145,10 +157,13 @@ def expected_max_sharpe(n_trials: int, sr: float, skew: float, kurt_ex: float, n
     return float(sd_sr * (term1 + term2))
 
 
-def deflated_sharpe_ratio(pnls, n_trials: int,
-                          periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
-                          t_eff: float | None = None,
-                          uniqueness: np.ndarray | None = None) -> dict:
+def deflated_sharpe_ratio(
+    pnls,
+    n_trials: int,
+    periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
+    t_eff: float | None = None,
+    uniqueness: np.ndarray | None = None,
+) -> dict:
     """DSR = PSR(E[max SR_N]): probability that the observed strategy's true
     Sharpe is positive AFTER correcting for selection among ``n_trials``
     configs and for non-normality (skew/kurtosis) with effective sample size T_eff.
@@ -159,25 +174,40 @@ def deflated_sharpe_ratio(pnls, n_trials: int,
     arr = np.asarray(pnls, dtype=float)
     n = len(arr)
     if n < 2:
-        return {"n_trades": n, "t_eff": float(n), "sr": float("nan"), "skew": float("nan"),
-                "kurtosis_excess": float("nan"), "expected_max_sr": float("nan"),
-                "dsr": float("nan")}
+        return {
+            "n_trades": n,
+            "t_eff": float(n),
+            "sr": float("nan"),
+            "skew": float("nan"),
+            "kurtosis_excess": float("nan"),
+            "expected_max_sr": float("nan"),
+            "dsr": float("nan"),
+        }
     raw_eff = float(t_eff) if t_eff is not None else (float(np.sum(uniqueness)) if uniqueness is not None else float(n))
     eff_n = max(raw_eff, 2.0)
     sr = annualized_sharpe(arr, periods_per_year=periods_per_year)
     skew, kurt_ex, _ = _moments(arr)
-    emax = expected_max_sharpe(n_trials, sr, skew, kurt_ex, eff_n,
-                               periods_per_year=periods_per_year)
-    dsr = probabilistic_sharpe_ratio(arr, sr_benchmark=emax,
-                                     periods_per_year=periods_per_year, t_eff=eff_n)
-    return {"n_trades": n, "t_eff": raw_eff, "sr": sr, "skew": skew, "kurtosis_excess": kurt_ex,
-            "expected_max_sr": emax, "dsr": dsr}
+    emax = expected_max_sharpe(n_trials, sr, skew, kurt_ex, eff_n, periods_per_year=periods_per_year)
+    dsr = probabilistic_sharpe_ratio(arr, sr_benchmark=emax, periods_per_year=periods_per_year, t_eff=eff_n)
+    return {
+        "n_trades": n,
+        "t_eff": raw_eff,
+        "sr": sr,
+        "skew": skew,
+        "kurtosis_excess": kurt_ex,
+        "expected_max_sr": emax,
+        "dsr": dsr,
+    }
 
 
-def minimum_track_record_length(pnls, n_trials: int, prob: float = 0.95,
-                                periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
-                                t_eff: float | None = None,
-                                uniqueness: np.ndarray | None = None) -> dict:
+def minimum_track_record_length(
+    pnls,
+    n_trials: int,
+    prob: float = 0.95,
+    periods_per_year: float = DEFAULT_PERIODS_PER_YEAR,
+    t_eff: float | None = None,
+    uniqueness: np.ndarray | None = None,
+) -> dict:
     """MinTRL: minimum number of TRADES needed before the observed Sharpe can
     be distinguished from the best-of-N-trials null at confidence ``prob``:
 
@@ -195,11 +225,10 @@ def minimum_track_record_length(pnls, n_trials: int, prob: float = 0.95,
     eff_n = max(raw_eff, 2.0)
     sr = annualized_sharpe(arr, periods_per_year=periods_per_year)
     skew, kurt_ex, _ = _moments(arr)
-    emax = expected_max_sharpe(n_trials, sr, skew, kurt_ex, eff_n,
-                               periods_per_year=periods_per_year)
+    emax = expected_max_sharpe(n_trials, sr, skew, kurt_ex, eff_n, periods_per_year=periods_per_year)
     if sr - emax <= 0.0:
         return {"min_trl_trades": float("inf"), "min_trl_years": float("inf")}
-    var_scale = 1.0 - skew * sr + (kurt_ex + 2.0) / 4.0 * sr ** 2
+    var_scale = 1.0 - skew * sr + (kurt_ex + 2.0) / 4.0 * sr**2
     var_scale = max(var_scale, 1e-12)
     z = stats.norm.ppf(prob)
     min_trl_trades = 1.0 + var_scale * (z / (sr - emax)) ** 2
@@ -209,6 +238,7 @@ def minimum_track_record_length(pnls, n_trials: int, prob: float = 0.95,
 # ---------------------------------------------------------------------------
 # Effective number of trials (N_eff) -- dependent-trial correction
 # ---------------------------------------------------------------------------
+
 
 def n_eff_participation_ratio(pnl_matrix) -> float:
     """N_eff from the participation ratio of the OOS returns correlation matrix:
@@ -230,8 +260,8 @@ def n_eff_participation_ratio(pnl_matrix) -> float:
     eigvals = np.clip(eigvals, 0.0, None)
     total = float(eigvals.sum())
     if total > 0.0:
-        sum_sq = float(np.sum(eigvals ** 2))
-        return float(total ** 2 / sum_sq) if sum_sq > 0 else 1.0
+        sum_sq = float(np.sum(eigvals**2))
+        return float(total**2 / sum_sq) if sum_sq > 0 else 1.0
     return 1.0
 
 
@@ -253,11 +283,14 @@ def effective_number_trials(returns_matrix) -> dict:
     """
     M = np.asarray(returns_matrix, dtype=float)
     if M.ndim != 2 or M.shape[0] < 2 or M.shape[1] < 2:
-        return {"n_trials": int(M.shape[0]) if M.ndim == 2 else 1,
-                "mean_rho": float("nan"), "n_eff": float(M.shape[0]) if M.ndim == 2 else 1,
-                "n_eff_cluster": float(M.shape[0]) if M.ndim == 2 else 1,
-                "participation_ratio": float(M.shape[0]) if M.ndim == 2 else 1,
-                "n_eff_combined": float(M.shape[0]) if M.ndim == 2 else 1}
+        return {
+            "n_trials": int(M.shape[0]) if M.ndim == 2 else 1,
+            "mean_rho": float("nan"),
+            "n_eff": float(M.shape[0]) if M.ndim == 2 else 1,
+            "n_eff_cluster": float(M.shape[0]) if M.ndim == 2 else 1,
+            "participation_ratio": float(M.shape[0]) if M.ndim == 2 else 1,
+            "n_eff_combined": float(M.shape[0]) if M.ndim == 2 else 1,
+        }
     n_trials = int(M.shape[0])
     # Pairwise correlation across observations (rows = trials, cols = folds/days).
     with warnings.catch_warnings():
@@ -274,14 +307,20 @@ def effective_number_trials(returns_matrix) -> dict:
     # Participation ratio on the correlation matrix spectrum.
     pr = n_eff_participation_ratio(M)
     n_eff_combined = max(n_eff_cluster, pr)
-    return {"n_trials": n_trials, "mean_rho": mean_rho, "n_eff": n_eff_combined,
-            "n_eff_cluster": n_eff_cluster, "participation_ratio": pr,
-            "n_eff_combined": n_eff_combined}
+    return {
+        "n_trials": n_trials,
+        "mean_rho": mean_rho,
+        "n_eff": n_eff_combined,
+        "n_eff_cluster": n_eff_cluster,
+        "participation_ratio": pr,
+        "n_eff_combined": n_eff_combined,
+    }
 
 
 # ---------------------------------------------------------------------------
 # CSCV -- Probability of Backtest Overfitting (Bailey et al. 2015)
 # ---------------------------------------------------------------------------
+
 
 def _pick_n_splits(n_obs: int, max_splits: int = 16) -> int:
     """Pick an even number of splits in [4, max_splits] minimizing the number
@@ -296,8 +335,9 @@ def _pick_n_splits(n_obs: int, max_splits: int = 16) -> int:
     return best_s
 
 
-def cscv_pbo(returns_matrix, n_splits: int | None = None,
-             max_combinations: int = 50_000, random_seed: int = 42) -> dict:
+def cscv_pbo(
+    returns_matrix, n_splits: int | None = None, max_combinations: int = 50_000, random_seed: int = 42
+) -> dict:
     """Combinatorially Symmetric Cross-Validation (CSCV) PBO.
 
     Parameters
@@ -331,12 +371,14 @@ def cscv_pbo(returns_matrix, n_splits: int | None = None,
     if n_trials < 4:
         warnings.warn(
             f"CSCV with {n_trials} trials is uninformative (need >= 4).",
-            RuntimeWarning, stacklevel=2,
+            RuntimeWarning,
+            stacklevel=2,
         )
     if n_obs < 4:
         warnings.warn(
             f"CSCV with {n_obs} observations is uninformative (need >= 4).",
-            RuntimeWarning, stacklevel=2,
+            RuntimeWarning,
+            stacklevel=2,
         )
 
     if n_splits is None:
@@ -446,7 +488,7 @@ def decision_gate(res: dict, t_base: float | None = None, t_filtered: float | No
     """
     cur = next((t for t in res.get("trials", []) if t.get("variant") == "current"), None)
     cscv = res.get("cscv", {})
-    
+
     # 8th condition: t_filtered > t_base
     cond8 = None
     if t_filtered is not None and t_base is not None:
@@ -460,15 +502,17 @@ def decision_gate(res: dict, t_base: float | None = None, t_filtered: float | No
         "PBO < 0.30": bool(cscv.get("pbo", 1.0) < 0.30),
         "PF > 1.1 at 1.5x costs": bool(res.get("cost_stress") and res["cost_stress"].get("profit_factor", 0.0) > 1.1),
         "positive folds >= 55% valid": bool(
-            cur is not None and cur.get("valid_folds", 0) > 0
-            and cur.get("pos_folds", 0) / cur["valid_folds"] >= 0.55),
+            cur is not None and cur.get("valid_folds", 0) > 0 and cur.get("pos_folds", 0) / cur["valid_folds"] >= 0.55
+        ),
         "IS->OOS informativeness": bool(
             cscv.get("is_oos_slope") is None
             or (np.isfinite(cscv.get("is_oos_slope", float("nan"))) and cscv["is_oos_slope"] >= 0.5)
-            or (cscv.get("oos_prob_loss") is not None
+            or (
+                cscv.get("oos_prob_loss") is not None
                 and cscv.get("oos_prob_loss") <= 0.05
                 and cscv.get("median_lambda") is not None
-                and cscv.get("median_lambda") > 2.0)
+                and cscv.get("median_lambda") > 2.0
+            )
         ),
         "locked hold-out confirms": None,  # organizational, set by the user
         "t_filtered > t_base (bootstrap t increased)": cond8,

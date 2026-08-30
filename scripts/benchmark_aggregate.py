@@ -7,8 +7,10 @@ column, plus the net sum of total_pnl.
 Usage:
     python scripts/benchmark_aggregate.py [asset ...]  # default: all five assets
 """
-import sys
+
 import os
+import sys
+
 import pandas as pd
 
 METRIC_COLS = [
