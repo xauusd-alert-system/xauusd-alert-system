@@ -31,6 +31,25 @@ class TelegramAlertBot:
         self._alerts_sent_today = 0
         self._current_day = datetime.now(UTC).date()
 
+    def _post_with_retry(self, url: str, data: dict, timeout: float = 10, attempts: int = 3, base_delay: float = 1.5):
+        """POST with a few retries on transient network errors.
+
+        Observed live (2026-08-30): api.telegram.org connections get dropped
+        with ConnectionResetError(10054) behind the VPN; a single attempt then
+        silently lost the trade-close alert. Retry with exponential backoff and
+        re-raise on the final attempt so callers log (redacted) and fail soft.
+        """
+        delay = base_delay
+        for attempt in range(1, attempts + 1):
+            try:
+                return requests.post(url, data=data, timeout=timeout)
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                if attempt == attempts:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 8.0)
+        raise requests.exceptions.ConnectionError("unreachable")  # pragma: no cover
+
     def _redact(self, text: str) -> str:
         """Strip the bot token from a log/exception message.
 
@@ -50,7 +69,9 @@ class TelegramAlertBot:
             return False
 
         try:
-            response = requests.post(self.base_url, data={"chat_id": self.chat_id, "text": text}, timeout=10)
+            response = self._post_with_retry(
+                self.base_url, {"chat_id": self.chat_id, "text": text}, timeout=10
+            )
             response.raise_for_status()
             return True
         except Exception as e:

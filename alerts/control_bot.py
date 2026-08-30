@@ -38,7 +38,10 @@ Commands
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import shutil
 import threading
 import time
 from typing import TYPE_CHECKING, Optional
@@ -75,6 +78,95 @@ def parse_admin_ids(raw: str | None) -> frozenset[str]:
     return frozenset(ids)
 
 
+def redact_bot_token(text: str, token: str) -> str:
+    """Strip the bot token from a log/exception message (security).
+
+    requests exception strings embed the request URL, which contains the raw
+    bot token (https://api.telegram.org/bot<TOKEN>/getUpdates?offset=...).
+    Logging that raw would leak full control of the bot (incl. /closeall) to
+    anyone who can read the log file — this exact leak was observed live in
+    logs/mt5_trader.err on 2026-08-30. Same pattern as TelegramAlertBot._redact:
+    the URL form becomes bot***REDACTED***/method and any bare occurrence of
+    the token becomes <REDACTED>.
+    """
+    if not text or not token:
+        return text
+    return text.replace(f"bot{token}", "bot***REDACTED***").replace(token, "<REDACTED>")
+
+
+def _token_lock_path(token: str) -> str:
+    """Stable, non-secret lock path for a Telegram token: the raw token is
+    hashed (sha1) so it never appears in the lock filename/logs."""
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()[:12]
+    base = os.getenv("TG_POLL_LOCK_DIR", os.path.join("logs", "tg_poll_locks"))
+    return os.path.join(base, f"{digest}.lock")
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-process liveness check. Windows: OpenProcess + GetExitCodeProcess
+    (os.kill(pid, 0) is unsupported there -> WinError 87). POSIX: os.kill."""
+    if os.name == "nt":
+        import ctypes
+
+        try:
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            SYNCHRONIZE = 0x00100000
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, int(pid)
+            )
+            if not handle:
+                return False
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            if ok and code.value != 259:  # 259 = STILL_ACTIVE
+                return False
+            return True
+        except Exception:
+            return True  # conservative: assume alive if the probe fails
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def acquire_token_poll_lock(token: str) -> bool:
+    """Exclusively claim the getUpdates consumer for THIS token, cross-process.
+
+    Telegram allows only one getUpdates consumer per bot token; concurrent
+    pollers make Telegram answer 409 Conflict on every request (a log storm +
+    no live command channel). The control bot normally runs inside the trader
+    process, but a separate process can collide (scripts/telegram_admin.py uses
+    TELEGRAM_BOT_TOKEN as fallback, or a second trader). This lock means the
+    loser does NOT fight: it simply declines to poll and logs clearly. Lock is
+    an atomic os.mkdir directory keyed by token hash; a lock whose owner PID is
+    dead is treated as stale and reclaimed."""
+    lock_dir = _token_lock_path(token)
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
+    pidfile = os.path.join(lock_dir, "pid")
+    stale = False
+    if os.path.isdir(lock_dir):
+        try:
+            with open(pidfile, "r", encoding="utf-8") as fh:
+                pid = int(fh.read().strip())
+            if pid <= 0 or not _pid_alive(pid):
+                stale = True
+        except Exception:
+            stale = True
+        if stale:
+            shutil.rmtree(lock_dir, ignore_errors=True)
+    try:
+        os.mkdir(lock_dir)
+    except FileExistsError:
+        return False
+    with open(pidfile, "w", encoding="utf-8") as fh:
+        fh.write(str(os.getpid()))
+    return True
+
+
 class TelegramControlBot:
     """Long-polling Telegram bot that controls a running MultiAssetMT5Trader."""
 
@@ -101,11 +193,27 @@ class TelegramControlBot:
         # Pair monitor: background thread for pair-signal alerts (24/7)
         self._pair_monitor: Optional[PairMonitor] = None
 
+    def _redact(self, text: str) -> str:
+        """Redact the bot token from an exception/log string before logging."""
+        return redact_bot_token(text, self.token)
+
     # ------------------------------------------------------------------
     # Public lifecycle
     # ------------------------------------------------------------------
     def start(self) -> None:
         """Launch the polling loop in a daemon thread."""
+        # Exactly one getUpdates consumer per bot token, cross-process: if a
+        # separate process already owns the poll lock for this token, decline to
+        # poll here instead of causing a Telegram 409 Conflict storm.
+        if not acquire_token_poll_lock(self.token):
+            logger.warning(
+                "Another process already owns the getUpdates consumer for this bot "
+                "token (lock=%s). This control bot will NOT poll, so it will not "
+                "cause a 409 Conflict. Commands are served by the process that "
+                "holds the lock.",
+                _token_lock_path(self.token),
+            )
+            return
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -147,7 +255,9 @@ class TelegramControlBot:
                 for upd in updates:
                     self._handle_update(upd)
             except Exception as exc:
-                logger.warning("Poll error: %s (retrying in %ss)", exc, backoff)
+                # requests exceptions embed the URL with the raw bot token —
+                # redact before logging (leak seen in logs/mt5_trader.err).
+                logger.warning("Poll error: %s (retrying in %ss)", self._redact(str(exc)), backoff)
                 time.sleep(backoff)
                 backoff = min(backoff * 2, self.MAX_BACKOFF)
 
@@ -755,4 +865,4 @@ class TelegramControlBot:
             if not resp.ok:
                 logger.warning("sendMessage to %s failed: %s %s", chat_id, resp.status_code, resp.text[:200])
         except Exception as exc:
-            logger.warning("Send failed: %s", exc)
+            logger.warning("Send failed: %s", self._redact(str(exc)))
