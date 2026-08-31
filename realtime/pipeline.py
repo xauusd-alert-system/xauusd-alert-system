@@ -32,6 +32,11 @@ from model.ensemble import compute_ensemble_signal
 from model.predictor import ModelPredictor
 from regime.classifier import RegimeLabel, add_regime_indicators, classify_regime_series
 
+try:
+    from execution.denial_reasons import DenialReason
+except Exception:  # pragma: no cover
+    DenialReason = None  # type: ignore
+
 logger = logging.getLogger("realtime_pipeline")
 
 
@@ -211,6 +216,81 @@ class RealtimePipeline:
         df["regime"] = classify_regime_series(df, self.cfg)
         return df
 
+    def _feature_denial_reasons(self, latest, ensemble_signal) -> list:
+        """Supplementary market-state reasons (vol, impulse, spread, regime, session).
+
+        These are *informational* — they explain night vs strict thresholds even
+        when the gating ensemble already blocked for another reason. Kept light.
+        """
+        if DenialReason is None:
+            return []
+        reasons = []
+        try:
+            # vol_ratio vs 1.5
+            vol = latest.get("volume_ratio", latest.get("vol_ratio"))
+            if vol is not None and not pd.isna(vol):
+                thr = 1.5
+                try:
+                    v = float(vol)
+                    if v < thr:
+                        reasons.append(DenialReason("vol_ratio", f"{v:.1f}<{thr:.1f}", v / thr if thr else 0.0))
+                except Exception:
+                    pass
+            # impulse vs 0.8% — use atr_pct or return_1 magnitude
+            atr = latest.get("atr")
+            close = latest.get("close")
+            imp = None
+            if atr is not None and close and not pd.isna(atr) and not pd.isna(close) and float(close) != 0:
+                try:
+                    imp = float(atr) / float(close) * 100.0  # percent
+                    thr = 0.8
+                    if imp < thr:
+                        reasons.append(DenialReason("impulse", f"{imp:.1f}%<{thr:.1f}%", imp / thr if thr else 0.0))
+                except Exception:
+                    pass
+            # spread vs max — use spread_usd from config vs observed spread if available
+            if "spread" in latest and not pd.isna(latest["spread"]):
+                try:
+                    spr = float(latest["spread"])
+                    # rough threshold 50 for XAU, 0.001 for FX; use adaptive 1.5*median? Keep generic 1.5
+                    # Only add if spread looks elevated vs atr
+                    if atr is not None and not pd.isna(atr) and float(atr) > 0:
+                        norm_spread = spr / float(atr)
+                        if norm_spread > 0.5:  # arbitrary: spread > 50% of ATR
+                            reasons.append(DenialReason("spread", f"{spr:.1f}>{float(atr)*0.5:.1f}", (float(atr)*0.5 / spr) if spr else 0.0))
+                except Exception:
+                    pass
+            # session categorical — if suppressed
+            sess = str(latest.get("session", ""))
+            suppress = self.effective_cfg.get("ensemble", {}).get("suppress_sessions", [])
+            if sess in suppress:
+                reasons.append(DenialReason("session", f"{sess.upper()}(need LDN/NY)", 0.0))
+            # regime categorical
+            reg = latest.get("regime")
+            reg_val = reg.value if hasattr(reg, "value") else str(reg)
+            suppress_reg = self.effective_cfg.get("ensemble", {}).get("suppress_regimes", []) or self.effective_cfg.get("model", {}).get("meta_filter", {}).get("suppress_regimes", [])
+            if reg_val in suppress_reg:
+                # regime blocked — use blended vs threshold for margin if available
+                margin = 0.0
+                if ensemble_signal is not None:
+                    try:
+                        margin = float(ensemble_signal.confidence) / float(self.effective_cfg.get("ensemble", {}).get("min_confidence_to_alert", 0.65) or 0.65)
+                    except Exception:
+                        margin = 0.0
+                reasons.append(DenialReason("regime", f"{reg_val}(need TREND)", margin))
+            # quality_score secondary — if ensemble blended is low
+            if ensemble_signal is not None and hasattr(ensemble_signal, "confidence"):
+                try:
+                    thr = float(self.effective_cfg.get("ensemble", {}).get("min_confidence_to_alert", 0.65))
+                    if float(ensemble_signal.confidence) < thr and thr > 0:
+                        # already handled by ensemble but add as context if not present
+                        pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return reasons
+
     def generate_signal(self, n_candles: int = 300) -> dict:
         df = self._fetch_data_frame(timeframe=self.timeframe, n_candles=n_candles)
 
@@ -231,7 +311,17 @@ class RealtimePipeline:
             try:
                 proba = self._predictor.predict_single(latest)
             except (KeyError, ValueError):
-                return self._no_trade_response(latest, regime, "Insufficient feature data (warm-up period)")
+                # warm-up denial
+                reasons = []
+                if DenialReason is not None:
+                    try:
+                        reasons = [DenialReason("warmup", "insufficient_data", 0.0)]
+                        # enrich with feature context
+                        extra = self._feature_denial_reasons(latest, None)
+                        reasons.extend(extra)
+                    except Exception:
+                        pass
+                return self._no_trade_response(latest, regime, "Insufficient feature data (warm-up period)", denial_reasons=reasons)
             ml_p_long, ml_p_short = proba["p_long"], proba["p_short"]
             feature_dict = {
                 k: float(v) for k, v in latest.items() if k in self._predictor.feature_cols and not pd.isna(v)
@@ -254,6 +344,32 @@ class RealtimePipeline:
             timestamp_utc=int(latest["timestamp_utc"]),
             asset_key=self.asset_key,
         )
+        # Collect ensemble denial reasons (may be empty on success)
+        ensemble_denials = list(getattr(signal, "denial_reasons", []) or [])
+        # enrich with feature-based supplementary reasons if no_trade
+        # keep ensemble as primary (boost its margin so top-3 always includes it)
+        if signal.bias == "no_trade" and DenialReason is not None:
+            try:
+                extra = self._feature_denial_reasons(latest, signal)
+                # deduplicate: keep ensemble code if duplicate
+                existing_codes = {r.code for r in ensemble_denials}
+                extra_filtered = [r for r in extra if r.code not in existing_codes]
+                # boost ensemble margins by +10 so they outrank feature infos when sorted globally
+                boosted = []
+                for r in ensemble_denials:
+                    try:
+                        boosted.append(DenialReason(r.code, r.detail, float(r.margin) + 10.0))
+                    except Exception:
+                        boosted.append(r)
+                # sort each group by margin, then combine with ensemble priority
+                boosted_sorted = sorted(boosted, key=lambda x: -float(x.margin))
+                extra_sorted = sorted(extra_filtered, key=lambda x: -float(x.margin))
+                # final pool: ensemble first (boosted), then extra
+                ensemble_denials = boosted_sorted + extra_sorted
+                # remove boost for storage? keep boosted for sorting, but render will show same detail; margin is internal
+                # we keep boosted margins so mt5_trader's top_reasons keeps ensemble top
+            except Exception:
+                pass
 
         # BOOK GATE (live-only overlay, fail-open): when a BookFeed is attached
         # and the asset has DOM data, the just-closed bar's book features
@@ -268,6 +384,32 @@ class RealtimePipeline:
             if feats is not None:
                 book_features = feats
                 book_gate = self._apply_book_gate(signal, feats)
+                # if veto mutated to no_trade, capture book reason
+                if signal.bias == "no_trade" and book_gate.get("decision") == "veto" and DenialReason is not None:
+                    try:
+                        imb = float(book_gate.get("imbalance", 0.0))
+                        thr = float(book_gate.get("threshold", 0.35))
+                        # margin = thr / (abs(imb)+1e-9) inverse? closer when imb just over thr => margin high
+                        margin = (thr / abs(imb)) if abs(imb) > 1e-9 else 0.0
+                        margin = max(0.0, min(1.0, margin))
+                        r = DenialReason("spread", f"book_imb={imb:+.2f}>{thr:.2f}", margin)
+                        ensemble_denials.append(r)
+                    except Exception:
+                        pass
+        # if book gate veto made it no_trade but we already had ensemble_denials empty, ensure we have at least book reason
+        if signal.bias == "no_trade" and not ensemble_denials and book_gate.get("decision") == "veto" and DenialReason is not None:
+            try:
+                ensemble_denials.append(DenialReason("spread", "book_veto", 0.0))
+            except Exception:
+                pass
+        # if still no_trade but ensemble gave no reasons (e.g. warmup handled elsewhere), synthesize from features
+        if signal.bias == "no_trade" and not ensemble_denials and DenialReason is not None:
+            try:
+                ensemble_denials = self._feature_denial_reasons(latest, signal)
+                if not ensemble_denials:
+                    ensemble_denials = [DenialReason("quality_score", f"{signal.confidence:.2f}<{self.effective_cfg.get('ensemble',{}).get('min_confidence_to_alert',0.65):.2f}", 0.0)]
+            except Exception:
+                pass
 
         entry_price = float(latest["close"])
         atr_val = float(latest["atr"]) if not pd.isna(latest["atr"]) else 1.0
@@ -318,6 +460,8 @@ class RealtimePipeline:
         scaleout = grid_cfg.get("scaleout") or {}
         ratios = [float(scaleout.get("tp1_ratio", 1 / 3)), float(scaleout.get("tp2_ratio", 1 / 3))]
         ratios.append(max(0.0, 1.0 - sum(ratios)))
+        # denial reasons for no_trade (empty on confirmed signals)
+        denial_payload = ensemble_denials if signal.bias == "no_trade" else []
         return {
             "signal_id": signal_id,
             "signal_state": "confirmed" if signal.bias != "no_trade" else "no_trade",
@@ -340,6 +484,12 @@ class RealtimePipeline:
             "confirmation_time_utc": (signal_ts if signal.bias != "no_trade" else None),
             "bias": signal.bias,
             "confidence": signal.confidence,
+            # Diagnostic detail for no-trade logs: model probabilities, rule vote
+            # and regime/session (already in this dict) so a single log line shows
+            # the full decision context instead of only top-N denial reasons.
+            "p_long": float(ml_p_long),
+            "p_short": float(ml_p_short),
+            "rule_vote": int(getattr(signal, "rule_vote", 0) or 0),
             "entry_zone": entry_zone,
             "invalidation": invalidation,
             "targets": targets,
@@ -352,6 +502,7 @@ class RealtimePipeline:
             "feature_snapshot_id": feature_snapshot_id,
             "book_gate": book_gate,
             "book_features": book_features,
+            "denial_reasons": denial_payload,
             "generated_at": datetime.now(UTC).isoformat(),
         }
 
@@ -434,14 +585,17 @@ class RealtimePipeline:
             }
         return {"decision": "no_data"}
 
-    def _no_trade_response(self, latest, regime, reason: str) -> dict:
+    def _no_trade_response(self, latest, regime, reason: str, denial_reasons=None) -> dict:
         signal_ts = int(latest["timestamp_utc"])
-        signal_id = str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
-            )
-        )
+        signal_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{self.strategy_identity['strategy_version']}:{self.asset_key}:{signal_ts}",
+        ))
+        if denial_reasons is None and DenialReason is not None:
+            try:
+                denial_reasons = [DenialReason("warmup", "insufficient_data", 0.0)]
+            except Exception:
+                denial_reasons = []
         return {
             "signal_id": signal_id,
             "signal_state": "no_trade",
@@ -464,5 +618,6 @@ class RealtimePipeline:
             "regime": regime.value if isinstance(regime, RegimeLabel) else str(regime),
             "timestamp_utc": signal_ts,
             "session": str(latest["session"]),
+            "denial_reasons": denial_reasons or [],
             "generated_at": datetime.now(UTC).isoformat(),
         }

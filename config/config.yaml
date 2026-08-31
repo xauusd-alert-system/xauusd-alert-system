@@ -50,7 +50,12 @@ ensemble:
   use_news_guard: true
   news_buffer_before_min: 30
   news_buffer_after_min: 30
-  news_feed_failure_policy_live: fail_closed
+  # fail_closed used to block EVERY trade with a misleading ``red_zone`` reason
+  # whenever the calendar feed was down (flapping connections observed 2026-08-31).
+  # fail_open => feed outage no longer blocks; ensemble still tags real red-zone
+  # events as news_guard and, whenever fail_closed is re-enabled, tags an outage
+  # as its own news_unavailable code instead of a fake red_zone.
+  news_feed_failure_policy_live: fail_open
   news_feed_max_age_minutes: 360
   historical_news_calendar_path: null  # dated CSV: timestamp_utc,title,country,impact
   # W14 (audit 2026-08-10): the news guard is enforced in the live trading path,
@@ -139,6 +144,10 @@ market_data:
   server_time_offset_hours: 0
 
 
+logging:
+  denial_reasons: true
+  denial_top_n: 3
+
 general:
   db_path: data/market_data_mt5.sqlite
 
@@ -190,6 +199,15 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
+      # Phase 4 (#30) dynamic confidence: strong-edge signals (|p_long-p_short|
+      # large) get a lower alert bar via edge_factor = 1 - min(credit, edge*gain).
+      # Enabled for XAU/BTC (2026-08-31). NOTE: this scales min_confidence_to_alert
+      # only - it does NOT relax the ml_edge / min_ml_probability gates, which
+      # return before this step. Keep those floors where they are.
+      dynamic_min_confidence: true
+      dynamic_min_confidence_scale: 1.0
+      dynamic_edge_credit: 0.10
+      dynamic_edge_gain: 2.0
     labeling:
       event: traded
     # Owner template (2026-08-18): TP/SL step ~0.1% of price (reference card:
@@ -308,6 +326,13 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
+      # Phase 4 (#30) dynamic confidence for BTC (2026-08-31): strong-edge signals
+      # admit a lower confidence bar; weak-edge signals keep the full 0.66. Does
+      # NOT touch ml_edge / min_ml_probability (they gate before this step).
+      dynamic_min_confidence: true
+      dynamic_min_confidence_scale: 1.0
+      dynamic_edge_credit: 0.10
+      dynamic_edge_gain: 2.0
     signal_grid:
       # BTC step raised (2026-08-18): FxPro BITCOIN trade_stops_level = 20000 pts
       # ($200 min SL/TP distance) > old step clamp [20,50] -> TP1/TP2 were
@@ -354,6 +379,10 @@ assets:
       suppress_regimes: [compression, reversal_watch]
       rule_weight: 0.10
       ml_weight: 0.90
+      # 2026-08-31: EURUSD |p_long-p_short| rarely exceeds ~0.12, so the global
+      # min_edge=0.15 is unreachable and functions as a hard off-switch for EUR
+      # (denied every bar). Lowered to 0.10 so the gate reflects real conviction.
+      min_edge: 0.10
     labeling:
       horizon_candles_n: 48
       target_atr_multiplier: 1.2

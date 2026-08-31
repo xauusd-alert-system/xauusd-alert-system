@@ -11,6 +11,7 @@ import time
 import math
 import logging
 from datetime import datetime, timedelta, UTC
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from mt5_adapter.lazy import get_mt5_module
 
@@ -33,6 +34,52 @@ from alerts.telegram_bot import TelegramAlertBot
 from execution.risk_manager import InstitutionalRiskManager
 from execution.trade_throttle import TradeThrottle
 
+try:
+    from execution.denial_reasons import DenialReason, render_line
+except Exception:  # pragma: no cover
+    DenialReason = None  # type: ignore
+    render_line = None  # type: ignore
+
+
+def _signal_context_suffix(signal: dict) -> str:
+    """Compact per-bar diagnostic context for no-trade log lines.
+
+    Emits `` | ctx: regime=.. session=.. p_long=.. p_short=.. rule=.. conf=..``
+    so a single line shows the full decision context (model probabilities,
+    rule vote, blended confidence) instead of only the top-N denial reasons.
+    Pure logging sugar - never affects the trading path. Missing keys (e.g.
+    warm-up responses without p_long/p_short) are skipped; never raises.
+    """
+    try:
+        parts = []
+        for key, label in (("regime", "regime"), ("session", "session"),
+                           ("p_long", "p_long"), ("p_short", "p_short"),
+                           ("rule_vote", "rule"), ("confidence", "conf")):
+            val = signal.get(key)
+            if val is None:
+                continue
+            if isinstance(val, float):
+                parts.append(f"{label}={val:.3f}")
+            else:
+                parts.append(f"{label}={val}")
+        return " | ctx: " + " ".join(parts) if parts else ""
+    except Exception:
+        return ""
+
+
+def _denial_suffix(cfg: dict, code: str, detail: str) -> str:
+    """Helper for execute_signal risk/blackout denials — respects logging.denial_reasons flag."""
+    try:
+        log_cfg = (cfg.get("logging") or {}) if isinstance(cfg, dict) else {}
+        if not log_cfg.get("denial_reasons", True):
+            return ""
+        top_n = int(log_cfg.get("denial_top_n", 3))
+        if DenialReason is None or render_line is None:
+            return f" | reasons: {code}={detail}"
+        r = DenialReason(code, detail, 0.0)
+        return f" | {render_line([r], top_n)}"
+    except Exception:
+        return f" | reasons: {code}={detail}"
 # Wave-0 contracts (MQL5 observer plan): SignalIntent is persisted BEFORE
 # order_send; ExecutionEvent facts are enqueued into the durable outbox for
 # delivery to the server ledger. Both are best-effort: a failure here must
@@ -110,6 +157,37 @@ def purge_closed_position_context(ticket: int, path: str = LIVE_POSITIONS_PATH) 
     if not isinstance(data, dict):
         return
     data.pop(str(ticket), None)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, default=str)
+    os.replace(tmp_path, path)
+
+
+def reconcile_position_context(open_tickets, path: str = LIVE_POSITIONS_PATH) -> None:
+    """Drop every journal entry whose MT5 ticket is no longer open.
+
+    The per-ticket purge fires only for tickets the close detector still tracks
+    in active_trades. Positions opened by an older process (before management-
+    state persistence existed, or wiped by a restart edge) leave ORPHAN entries
+    in live_positions.json that nothing ever removes. Reconcile the whole
+    journal against the current open-ticket set so those stale entries are
+    swept too. live_positions.json should mirror exactly the open positions.
+    """
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(data, dict):
+        return
+    open_keys = {str(t) for t in (open_tickets or [])}
+    stale = [k for k in data if k not in open_keys]
+    if not stale:
+        return
+    for k in stale:
+        data.pop(k, None)
     tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
@@ -324,11 +402,16 @@ class MultiAssetMT5Trader:
     # ------------------------------------------------------------------ W10
     def _save_management_state(self):
         """Persist per-position management state so a restart keeps managing
-        open positions (TP targets, partial-hit flags, BE/trailing flags)."""
-        if not self.active_trades:
-            # Nothing open -> leave any stale file; the close-detector purges
-            # entries when positions close.
-            return
+        open positions (TP targets, partial-hit flags, BE/trailing flags).
+
+        ALWAYS writes the current state, including an empty map. The old early
+        return when active_trades was empty left long-closed tickets in
+        logs/live_management_state.json; the close detector then re-reported
+        them as fresh "TRADE CLOSED" ghost notifications with $0.00 PnL on
+        every restart. check_and_move_breakeven registers every managed
+        position before saving, so a non-empty file never reflects an empty
+        active_trades while real positions are open.
+        """
         directory = os.path.dirname(self.management_state_path)
         if directory:
             os.makedirs(directory, exist_ok=True)
@@ -980,6 +1063,11 @@ class MultiAssetMT5Trader:
         # W10: reflect closed-ticket removal in the persisted management state.
         self._save_management_state()
 
+        # live_positions.json journal: sweep orphaned entries whose ticket is no
+        # longer open (e.g. left by older processes that active_trades no longer
+        # tracks), so it stops accumulating stale positions across restarts.
+        reconcile_position_context(current_tickets)
+
     def _get_profit_trail_config(self, symbol: str) -> dict | None:
         """Read profit_trail config for a symbol from signal_grid.
         Returns dict with activation_atr, lock_pct, min_profit_price or None.
@@ -1496,7 +1584,9 @@ class MultiAssetMT5Trader:
         now_utc = datetime.fromtimestamp(time.time(), tz=UTC)
         halted, halt_reason, _ = self._blackout_status(now_utc)
         if halted or self._in_daily_break(now_utc):
-            logger.info(f"[{asset_key}] Signal skipped: market {halt_reason or 'in daily break'}")
+            _suffix = _denial_suffix(self.cfg, "blackout", halt_reason or "daily_break")
+            logger.info(f"[{asset_key}] Signal skipped: market "
+                        f"{halt_reason or 'in daily break'}{_suffix}")
             return
         signal_id = str(signal.get("signal_id") or f"legacy:{asset_key}:{signal.get('timestamp_utc', 0)}")
         allowed, deployment_reason = order_routing_allowed(self.cfg, confirmed_by=signal.get("confirmed_by"))
@@ -1515,14 +1605,14 @@ class MultiAssetMT5Trader:
 
         min_conf = self._get_dynamic_min_confidence(asset_key)
         if signal["confidence"] < min_conf:
-            logger.info(
-                f"[{asset_key}] Signal suppressed by dynamic threshold: conf={signal['confidence']:.3f} < {min_conf:.3f}"
-            )
+            _suffix = _denial_suffix(self.cfg, "quality_score", f"{signal['confidence']:.2f}<{min_conf:.2f}")
+            logger.info(f"[{asset_key}] Signal suppressed by dynamic threshold: conf={signal['confidence']:.3f} < {min_conf:.3f}{_suffix}")
             return
 
         # Корреляционный фильтр
         if self._has_correlated_position(asset_key, bias):
-            logger.info(f"[{asset_key}] Blocked by correlation filter.")
+            _suffix = _denial_suffix(self.cfg, "risk_gate", "correlation")
+            logger.info(f"[{asset_key}] Blocked by correlation filter.{_suffix}")
             return
 
         # Risk budget counted per GROUP (audit 2026-08-19, owner request): a
@@ -1536,7 +1626,8 @@ class MultiAssetMT5Trader:
         groups_by_asset, singles_by_asset = self._group_position_counts(positions_now)
         can_trade, reason = self.risk_manager.can_trade(asset_key, groups_by_asset, singles_by_asset)
         if not can_trade:
-            logger.warning(f"Trade suppressed for {asset_key} by Risk Manager: {reason}")
+            _suffix = _denial_suffix(self.cfg, "risk_gate", str(reason)[:40] if reason else "risk_limit")
+            logger.warning(f"Trade suppressed for {asset_key} by Risk Manager: {reason}{_suffix}")
             return
 
         # TradeThrottle: daily limit, cooldown, hard stop, daily loss
@@ -1547,7 +1638,8 @@ class MultiAssetMT5Trader:
             equity = 0.0
         throttle_ok, throttle_reason = self.trade_throttle.can_trade(equity)
         if not throttle_ok:
-            logger.warning(f"TradeThrottle blocked {asset_key}: {throttle_reason}")
+            _suffix = _denial_suffix(self.cfg, "risk_gate", str(throttle_reason)[:40] if throttle_reason else "throttle")
+            logger.warning(f"TradeThrottle blocked {asset_key}: {throttle_reason}{_suffix}")
             return
 
         mt5_symbol = self.cfg["assets"][asset_key]["mt5_symbol"]
@@ -2023,20 +2115,55 @@ class MultiAssetMT5Trader:
                 logger.info(f"New bar detected: {current_bar_time} (last: {last_bar_time})")
                 last_bar_time = current_bar_time
                 logger.info("--- Analyzing newly closed candle across all assets ---")
-                for asset_key, pipeline in self.pipelines.items():
-                    start = time.time()
-                    try:
-                        signal = pipeline.generate_signal(n_candles=300)
-                        elapsed = time.time() - start
-                        if signal["bias"] != "no_trade":
-                            logger.info(
-                                f"[{asset_key}] SIGNAL DETECTED: {signal['bias'].upper()} (Conf: {signal['confidence']}%)"
-                            )
-                            self.execute_signal(asset_key, signal)
-                        else:
-                            logger.info(f"[{asset_key}] no trade ({elapsed:.2f}s)")
-                    except Exception as e:
-                        logger.error(f"Error processing {asset_key}: {e} ({time.time() - start:.2f}s)")
+                # Owner request 2026-08-25: signals are generated in PARALLEL so
+                # every asset's order fires as close to the bar close as possible.
+                # Sequential generation made later assets (e.g. EURUSD after a
+                # slow BTCUSD feature build) enter 20-30s after the bar closed,
+                # so their market entries drifted far from the signal-bar price.
+                # Execution stays serialized in this thread: execute_signal
+                # mutates shared state (risk manager, throttle, active_trades)
+                # and sends MT5 orders, so it must never run concurrently.
+                with ThreadPoolExecutor(
+                    max_workers=max(2, len(self.pipelines))
+                ) as _pool:
+                    futures = {
+                        _pool.submit(pipeline.generate_signal, 300): asset_key
+                        for asset_key, pipeline in self.pipelines.items()
+                    }
+                    for future in as_completed(futures):
+                        asset_key = futures[future]
+                        start = time.time()
+                        try:
+                            signal = future.result()
+                            elapsed = time.time() - start
+                            if signal["bias"] != "no_trade":
+                                logger.info(f"[{asset_key}] SIGNAL DETECTED: {signal['bias'].upper()} (Conf: {signal['confidence']}%)")
+                                self.execute_signal(asset_key, signal)
+                            else:
+                                # TЗ 2.1/2.4: one-line denial reasons (top-N by margin)
+                                try:
+                                    _log_cfg = (self.cfg.get("logging") or {}) if isinstance(self.cfg, dict) else {}
+                                    _enabled = _log_cfg.get("denial_reasons", True)
+                                    _top_n = int(_log_cfg.get("denial_top_n", 3))
+                                except Exception:
+                                    _enabled = True
+                                    _top_n = 3
+                                _ctx = _signal_context_suffix(signal)
+                                if _enabled and render_line is not None:
+                                    _reasons = signal.get("denial_reasons") or []
+                                    # fallback: synthesize from reasoning_summary if empty
+                                    if not _reasons and signal.get("reasoning_summary"):
+                                        try:
+                                            from execution.denial_reasons import DenialReason as _DR
+                                            _reasons = [_DR("quality_score", signal["reasoning_summary"][:50], 0.0)]
+                                        except Exception:
+                                            pass
+                                    _suffix = f" | {render_line(_reasons, _top_n)}" if _reasons else " | reasons: none"
+                                    logger.info(f"[{asset_key}] no trade ({elapsed:.2f}s){_ctx}{_suffix}")
+                                else:
+                                    logger.info(f"[{asset_key}] no trade ({elapsed:.2f}s){_ctx}")
+                        except Exception as e:
+                            logger.error(f"Error processing {asset_key}: {e} ({time.time()-start:.2f}s)")
 
             if now - heartbeat >= 60:
                 heartbeat = now
